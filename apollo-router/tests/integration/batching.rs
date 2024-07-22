@@ -4,7 +4,7 @@ use itertools::Itertools;
 use tower::BoxError;
 use wiremock::ResponseTemplate;
 
-use crate::integration::common::ValueExt as _;
+use crate::integration::ValueExt as _;
 
 const CONFIG: &str = include_str!("../fixtures/batching/all_enabled.router.yaml");
 const SHORT_TIMEOUTS_CONFIG: &str = include_str!("../fixtures/batching/short_timeouts.router.yaml");
@@ -244,28 +244,22 @@ async fn it_handles_short_timeouts() -> Result<(), BoxError> {
 
     if test_is_enabled() {
         assert_yaml_snapshot!(responses, @r###"
-    ---
-    - data:
-        entryA:
-          index: 0
-    - errors:
-        - message: "HTTP fetch failed from 'b': request timed out"
-          path: []
-          extensions:
-            code: SUBREQUEST_HTTP_ERROR
-            service: b
-            reason: request timed out
-    - data:
-        entryA:
-          index: 1
-    - errors:
-        - message: "HTTP fetch failed from 'b': request timed out"
-          path: []
-          extensions:
-            code: SUBREQUEST_HTTP_ERROR
-            service: b
-            reason: request timed out
-    "###);
+        ---
+        - data:
+            entryA:
+              index: 0
+        - errors:
+            - message: Request timed out
+              extensions:
+                code: REQUEST_TIMEOUT
+        - data:
+            entryA:
+              index: 1
+        - errors:
+            - message: Request timed out
+              extensions:
+                code: REQUEST_TIMEOUT
+        "###);
     }
 
     Ok(())
@@ -317,38 +311,29 @@ async fn it_handles_indefinite_timeouts() -> Result<(), BoxError> {
     let responses = [results_a, results_b].concat();
     if test_is_enabled() {
         assert_yaml_snapshot!(responses, @r###"
-    ---
-    - data:
-        entryA:
-          index: 0
-    - data:
-        entryA:
-          index: 1
-    - data:
-        entryA:
-          index: 2
-    - errors:
-        - message: "HTTP fetch failed from 'b': request timed out"
-          path: []
-          extensions:
-            code: SUBREQUEST_HTTP_ERROR
-            service: b
-            reason: request timed out
-    - errors:
-        - message: "HTTP fetch failed from 'b': request timed out"
-          path: []
-          extensions:
-            code: SUBREQUEST_HTTP_ERROR
-            service: b
-            reason: request timed out
-    - errors:
-        - message: "HTTP fetch failed from 'b': request timed out"
-          path: []
-          extensions:
-            code: SUBREQUEST_HTTP_ERROR
-            service: b
-            reason: request timed out
-    "###);
+        ---
+        - data:
+            entryA:
+              index: 0
+        - data:
+            entryA:
+              index: 1
+        - data:
+            entryA:
+              index: 2
+        - errors:
+            - message: Request timed out
+              extensions:
+                code: REQUEST_TIMEOUT
+        - errors:
+            - message: Request timed out
+              extensions:
+                code: REQUEST_TIMEOUT
+        - errors:
+            - message: Request timed out
+              extensions:
+                code: REQUEST_TIMEOUT
+        "###);
     }
 
     Ok(())
@@ -392,12 +377,12 @@ async fn it_handles_cancelled_by_rhai() -> Result<(), BoxError> {
         entryA:
           index: 0
     - errors:
-        - message: "rhai execution error: 'Runtime error: cancelled expected failure (line 5, position 13)\nin closure call'"
+        - message: "rhai execution error: 'Runtime error: cancelled expected failure (line 5, position 13)'"
     - data:
         entryA:
           index: 1
     - errors:
-        - message: "rhai execution error: 'Runtime error: cancelled expected failure (line 5, position 13)\nin closure call'"
+        - message: "rhai execution error: 'Runtime error: cancelled expected failure (line 5, position 13)'"
     "###);
     }
 
@@ -486,7 +471,7 @@ async fn it_handles_single_request_cancelled_by_rhai() -> Result<(), BoxError> {
         entryA:
           index: 1
     - errors:
-        - message: "rhai execution error: 'Runtime error: cancelled expected failure (line 5, position 13)\nin closure call'"
+        - message: "rhai execution error: 'Runtime error: cancelled expected failure (line 5, position 13)'"
     "###);
     }
 

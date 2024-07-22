@@ -272,6 +272,18 @@ resourceSpans:
               - key: apollo_private.operation_signature
                 value:
                   stringValue: "# -\nquery($if:Boolean!){topProducts{name...@defer(if:$if,label:\"\"){reviews{author{name}}reviews{author{name}}}}}"
+              - key: apollo_private.query.aliases
+                value:
+                  intValue: 0
+              - key: apollo_private.query.depth
+                value:
+                  intValue: 4
+              - key: apollo_private.query.height
+                value:
+                  intValue: 7
+              - key: apollo_private.query.root_fields
+                value:
+                  intValue: 1
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0

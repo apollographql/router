@@ -439,7 +439,7 @@ pub(crate) async fn create_subgraph_services(
         .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
         .expect("traffic shaping should always be part of the plugin list");
 
-    let mut subgraph_services = IndexMap::new();
+    let mut subgraph_services = IndexMap::default();
     for (name, _) in schema.subgraphs() {
         let http_service = crate::services::http::HttpClientService::from_config(
             name,
@@ -570,7 +570,7 @@ pub(crate) async fn create_plugins(
         .map(|factory| (factory.name.as_str(), &**factory))
         .collect();
     let mut errors = Vec::new();
-    let mut plugin_instances = Plugins::new();
+    let mut plugin_instances = Plugins::default();
 
     // Use function-like macros to avoid borrow conflicts of captures
     macro_rules! add_plugin {
@@ -858,8 +858,6 @@ fn can_use_with_experimental_query_planner(
 }
 #[cfg(test)]
 mod test {
-    use std::error::Error;
-    use std::fmt;
     use std::sync::Arc;
 
     use schemars::JsonSchema;
@@ -877,17 +875,6 @@ mod test {
     use crate::router_factory::RouterSuperServiceFactory;
     use crate::router_factory::YamlRouterFactory;
     use crate::spec::Schema;
-
-    #[derive(Debug)]
-    struct PluginError;
-
-    impl fmt::Display for PluginError {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(f, "PluginError")
-        }
-    }
-
-    impl Error for PluginError {}
 
     // Always starts and stops plugin
 
@@ -1023,7 +1010,7 @@ mod test {
             ..Default::default()
         };
         let schema = include_str!("testdata/supergraph_with_context.graphql");
-        let schema = Arc::new(Schema::parse_test(schema, &config).unwrap());
+        let schema = Arc::new(Schema::parse(schema, &config).unwrap());
         assert!(
             can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_err(),
             "experimental_query_planner_mode: both cannot be used with @context"
@@ -1054,7 +1041,7 @@ mod test {
             ..Default::default()
         };
         let schema = include_str!("testdata/supergraph_with_override_label.graphql");
-        let schema = Arc::new(Schema::parse_test(schema, &config).unwrap());
+        let schema = Arc::new(Schema::parse(schema, &config).unwrap());
         assert!(
             can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_err(),
             "experimental_query_planner_mode: both cannot be used with progressive overrides"
@@ -1084,7 +1071,7 @@ mod test {
             ..Default::default()
         };
         let schema = include_str!("testdata/supergraph.graphql");
-        let schema = Arc::new(Schema::parse_test(schema, &config).unwrap());
+        let schema = Arc::new(Schema::parse(schema, &config).unwrap());
         assert!(
             can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_err(),
             "experimental_query_planner_mode: both cannot be used with fed1 supergraph"
@@ -1114,7 +1101,7 @@ mod test {
             ..Default::default()
         };
         let schema = include_str!("testdata/minimal_fed2_supergraph.graphql");
-        let schema = Arc::new(Schema::parse_test(schema, &config).unwrap());
+        let schema = Arc::new(Schema::parse(schema, &config).unwrap());
         assert!(
             can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_ok(),
             "experimental_query_planner_mode: both can be used"

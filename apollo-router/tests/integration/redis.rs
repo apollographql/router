@@ -1,5 +1,4 @@
 use apollo_router::plugin::test::MockSubgraph;
-use apollo_router::services::execution::QueryPlan;
 use apollo_router::services::router;
 use apollo_router::services::supergraph;
 use apollo_router::Context;
@@ -12,8 +11,6 @@ use futures::StreamExt;
 use http::header::CACHE_CONTROL;
 use http::HeaderValue;
 use http::Method;
-use serde::Deserialize;
-use serde::Serialize;
 use serde_json::json;
 use serde_json::Value;
 use tower::BoxError;
@@ -158,12 +155,6 @@ async fn query_planner_cache() -> Result<(), BoxError> {
     Ok(())
 }
 
-#[derive(Deserialize, Serialize)]
-
-struct QueryPlannerContent {
-    plan: QueryPlan,
-}
-
 #[tokio::test(flavor = "multi_thread")]
 async fn apq() -> Result<(), BoxError> {
     let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
@@ -233,7 +224,7 @@ async fn apq() -> Result<(), BoxError> {
         res.errors.first().unwrap().message,
         "PersistedQueryNotFound"
     );
-    let r: Option<String> = client.get(&format!("apq:{query_hash}")).await.unwrap();
+    let r: Option<String> = client.get(format!("apq:{query_hash}")).await.unwrap();
     assert!(r.is_none());
 
     // Now we register the query
@@ -261,7 +252,7 @@ async fn apq() -> Result<(), BoxError> {
     assert!(res.data.is_some());
     assert!(res.errors.is_empty());
 
-    let s: Option<String> = client.get(&format!("apq:{query_hash}")).await.unwrap();
+    let s: Option<String> = client.get(format!("apq:{query_hash}")).await.unwrap();
     insta::assert_snapshot!(s.unwrap());
 
     // we start a new router with the same config
@@ -368,19 +359,24 @@ async fn entity_cache() -> Result<(), BoxError> {
         .with_subgraph_network_requests()
         .configuration_json(json!({
             "preview_entity_cache": {
+                "enabled": true,
                 "redis": {
                     "urls": ["redis://127.0.0.1:6379"],
                     "ttl": "2s"
                 },
-                "enabled": false,
-                "subgraphs": {
-                    "products": {
-                        "enabled": true,
-                        "ttl": "60s"
+                "subgraph": {
+                    "all": {
+                        "enabled": false
                     },
-                    "reviews": {
-                        "enabled": true,
-                        "ttl": "10s"
+                    "subgraphs": {
+                        "products": {
+                            "enabled": true,
+                            "ttl": "60s"
+                        },
+                        "reviews": {
+                            "enabled": true,
+                            "ttl": "10s"
+                        }
                     }
                 }
             },
@@ -411,7 +407,7 @@ async fn entity_cache() -> Result<(), BoxError> {
     insta::assert_json_snapshot!(response);
 
     let s:String = client
-          .get("subgraph:products:Query:0df945dc1bc08f7fc02e8905b4c72aa9112f29bb7a214e4a38d199f0aa635b48:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .get("subgraph:products:type:Query:hash:0df945dc1bc08f7fc02e8905b4c72aa9112f29bb7a214e4a38d199f0aa635b48:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
@@ -473,19 +469,24 @@ async fn entity_cache() -> Result<(), BoxError> {
         .with_subgraph_network_requests()
         .configuration_json(json!({
             "preview_entity_cache": {
+                "enabled": true,
                 "redis": {
                     "urls": ["redis://127.0.0.1:6379"],
                     "ttl": "2s"
                 },
-                "enabled": false,
-                "subgraphs": {
-                    "products": {
-                        "enabled": true,
-                        "ttl": "60s"
+                "subgraph": {
+                    "all": {
+                        "enabled": false,
                     },
-                    "reviews": {
-                        "enabled": true,
-                        "ttl": "10s"
+                    "subgraphs": {
+                        "products": {
+                            "enabled": true,
+                            "ttl": "60s"
+                        },
+                        "reviews": {
+                            "enabled": true,
+                            "ttl": "10s"
+                        }
                     }
                 }
             },
@@ -671,19 +672,24 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
         .with_subgraph_network_requests()
         .configuration_json(json!({
             "preview_entity_cache": {
+                "enabled": true,
                 "redis": {
                     "urls": ["redis://127.0.0.1:6379"],
                     "ttl": "2s"
                 },
-                "enabled": false,
-                "subgraphs": {
-                    "products": {
-                        "enabled": true,
-                        "ttl": "60s"
+                "subgraph": {
+                    "all": {
+                        "enabled": false,
                     },
-                    "reviews": {
-                        "enabled": true,
-                        "ttl": "10s"
+                    "subgraphs": {
+                        "products": {
+                            "enabled": true,
+                            "ttl": "60s"
+                        },
+                        "reviews": {
+                            "enabled": true,
+                            "ttl": "10s"
+                        }
                     }
                 }
             },
@@ -728,7 +734,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
     insta::assert_json_snapshot!(response);
 
     let s:String = client
-          .get("subgraph:products:Query:0df945dc1bc08f7fc02e8905b4c72aa9112f29bb7a214e4a38d199f0aa635b48:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .get("subgraph:products:type:Query:hash:0df945dc1bc08f7fc02e8905b4c72aa9112f29bb7a214e4a38d199f0aa635b48:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();

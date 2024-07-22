@@ -31,12 +31,13 @@ To configure the router, enable the [OTLP exporter](./otlp) and set `endpoint: <
 ```yaml title="router.yaml"
 telemetry:
   exporters:
-     tracing:
-       otlp:
-         enabled: true
+    tracing:
+      otlp:
+        enabled: true
    
-         # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317)
-         endpoint: "${env.DATADOG_AGENT_HOST}:4317"
+        # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317)
+        endpoint: "${env.DATADOG_AGENT_HOST}:4317"
+
 ```
 
 For more details about Datadog configuration, see [Datadog Agent configuration](https://docs.datadoghq.com/opentelemetry/otlp_ingest_in_the_agent/?tab=host).
@@ -70,18 +71,26 @@ The Apollo Router can be configured to connect to either the native, default Dat
 ```yaml title="router.yaml"
 telemetry:
   exporters:
-     tracing:
-       datadog:
-         enabled: true
-         # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:8126)
-         endpoint: "http://${env.DATADOG_AGENT_HOST}:8126"
+    tracing:
+     datadog:
+       enabled: true
+       # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:8126)
+       endpoint: "http://${env.DATADOG_AGENT_HOST}:8126"
+
+  # Enable graphql.operation.name attribute on supergraph spans.
+  instrumentation:
+    spans:
+      mode: spec_compliant
+      supergraph:
+        attributes:
+          graphql.operation.name: true
 ```
 
 ### `enabled`
 
 Set to true to enable the Datadog exporter. Defaults to false.
 
-### `enable_span_mapping`
+### `enable_span_mapping` (default: `true`)
 
 [There are some incompatibilities](https://docs.rs/opentelemetry-datadog/latest/opentelemetry_datadog/#quirks) between Datadog and OpenTelemetry, the Datadog exporter might not provide meaningful contextual information in the exported spans. To fix this, you can configure the Apollo Router to perform a mapping for the span name and the span resource name.
 
@@ -119,13 +128,96 @@ Instead, when `enable_span_mapping` is set to `true` the following trace will be
 
 ```
     | request /graphql                                                                                   |
-        | router                                                                                         |
+        | router /graphql                                                                                         |
             | supergraph MyQuery                                                                         |
                 | query_planning MyQuery  | execution                                                    |
                                               | fetch fetch                                              |
                                                   | subgraph my-subgraph-name                            |
                                                       | subgraph_request MyQuery__my-subgraph-name__0    |
 ```
+
+
+### `fixed_span_names` (default: `true`)
+
+When `fixed_span_names: true`, the apollo router to use the original span names instead of the dynamic ones as described by OTel semantic conventions.
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+     tracing:
+       datadog:
+         enabled: true
+         fixed_span_names: true
+```
+
+This will allow you to have a finite list of operation names in Datadog on the APM view.
+
+### `resource_mapping`
+When set, `resource_mapping` allows you to specify which attribute to use in the Datadog APM and Trace view.
+The default resource mappings are:
+
+| OpenTelemetry Span Name | Datadog Span Operation Name |
+|-------------------------|-----------------------------|
+| `request`               | `http.route`                |
+| `router`                | `http.route`                |
+| `supergraph`            | `graphql.operation.name`    |
+| `query_planning`        | `graphql.operation.name`    |
+| `subgraph`              | `subgraph.name`             |
+| `subgraph_request`      | `graphql.operation.name`    |
+| `http_request`          | `http.route`                |
+
+You may override these mappings by specifying the `resource_mapping` configuration:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+     tracing:
+       datadog:
+         enabled: true
+         resource_mapping:
+           # Use `my.span.attribute` as the resource name for the `router` span
+           router: "my.span.attribute"
+  instrumentation:
+    spans:
+      router:
+        attributes:
+          # Add a custom attribute to the `router` span
+          my.span.attribute:
+            request_header: x-custom-header
+```
+If you have introduced a new span in a custom build of the Router you can enable resource mapping for it by adding it to the `resource_mapping` configuration.
+
+### `span_metrics`
+When set, `span_metrics` allows you to specify which spans will show span metrics in the Datadog APM and Trace view.
+By default, span metrics are enabled for:
+
+* `request`
+* `router`
+* `supergraph`
+* `subgraph`
+* `subgraph_request`
+* `http_request`
+* `query_planning`
+* `execution`
+* `query_parsing`
+
+You may override these defaults by specifying `span_metrics` configuration:
+
+The following will disable span metrics for the supergraph span.
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    tracing:
+      datadog:
+        enabled: true
+        span_metrics:
+          # Disable span metrics for supergraph
+          supergraph: false
+          # Enable span metrics for my_custom_span
+          my_custom_span: true
+```
+
+If you have introduced a new span in a custom build of the Router you can enable span metrics for it by adding it to the `span_metrics` configuration.
 
 ### `batch_processor`
 
@@ -150,10 +242,12 @@ telemetry:
 
 ## Datadog native configuration reference
 
-| Attribute             | Default                               | Description                     |
-|-----------------------|---------------------------------------|---------------------------------|
-| `enabled`             | `false`                               | Enable the OTLP exporter.       |
-| `enable_span_mapping` | `false`                               | If span mapping should be used. |
-| `endpoint`            | `http://localhost:8126/v0.4/traces`   | The endpoint to send spans to.  |
-| `batch_processor`     |                                       | The batch processor settings.   |
+| Attribute             | Default                             | Description                             |
+|-----------------------|-------------------------------------|-----------------------------------------|
+| `enabled`             | `false`                             | Enable the OTLP exporter.               |
+| `enable_span_mapping` | `false`                             | If span mapping should be used.         |
+| `endpoint`            | `http://localhost:8126/v0.4/traces` | The endpoint to send spans to.          |
+| `batch_processor`     |                                     | The batch processor settings.           |
+| `resource_mapping`    | See [config](#resource_mapping)     | A map of span names to attribute names. |
+| `span_metrics`        | See [config](#span_metrics)         | A map of span names to boolean.         |
 

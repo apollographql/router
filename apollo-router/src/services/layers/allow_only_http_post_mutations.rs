@@ -72,7 +72,8 @@ where
 
                     let op = doc
                         .executable
-                        .get_operation(req.supergraph_request.body().operation_name.as_deref());
+                        .operations
+                        .get(req.supergraph_request.body().operation_name.as_deref());
 
                     match op {
                         Err(_) => {

@@ -11,7 +11,7 @@ header:
   uname: "[uname]"
   executable_schema_id: "[executable_schema_id]"
 traces_per_query:
-  "# -\n{topProducts{name reviews{author{name}}reviews{author{name}}}}":
+  "# one\nquery one{topProducts{name reviews{author{name}}reviews{author{name}}}}":
     trace:
       - start_time:
           seconds: "[seconds]"
@@ -27,7 +27,7 @@ traces_per_query:
         unexecuted_operation_name: ""
         details:
           variables_json: {}
-          operation_name: ""
+          operation_name: one
         client_name: ""
         client_version: ""
         operation_type: query
@@ -604,10 +604,15 @@ traces_per_query:
           strategy: static_estimated
           cost_estimated: 230
           cost_actual: 20
-          depth: 0
-          height: 0
+          depth: 4
+          height: 7
           alias_count: 0
-          root_field_count: 0
+          root_field_count: 1
+    stats_with_context: []
+    referenced_fields_by_type: {}
+    query_metadata: ~
+  "# two\nquery two{topProducts{name reviews{author{name}}reviews{author{name}}}}":
+    trace:
       - start_time:
           seconds: "[seconds]"
           nanos: "[nanos]"
@@ -622,7 +627,7 @@ traces_per_query:
         unexecuted_operation_name: ""
         details:
           variables_json: {}
-          operation_name: ""
+          operation_name: two
         client_name: ""
         client_version: ""
         operation_type: query
@@ -1199,10 +1204,10 @@ traces_per_query:
           strategy: static_estimated
           cost_estimated: 230
           cost_actual: 20
-          depth: 0
-          height: 0
+          depth: 4
+          height: 7
           alias_count: 0
-          root_field_count: 0
+          root_field_count: 1
     stats_with_context: []
     referenced_fields_by_type: {}
     query_metadata: ~

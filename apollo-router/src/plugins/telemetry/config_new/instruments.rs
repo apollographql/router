@@ -21,6 +21,8 @@ use tokio::time::Instant;
 use tower::BoxError;
 
 use super::attributes::HttpServerAttributes;
+use super::cache::attributes::CacheAttributes;
+use super::cache::CacheInstrumentsConfig;
 use super::DefaultForLevel;
 use super::Selector;
 use crate::metrics;
@@ -76,6 +78,11 @@ pub(crate) struct InstrumentsConfig {
     pub(crate) graphql: Extendable<
         GraphQLInstrumentsConfig,
         Instrument<GraphQLAttributes, GraphQLSelector, GraphQLValue>,
+    >,
+    /// Cache instruments
+    pub(crate) cache: Extendable<
+        CacheInstrumentsConfig,
+        Instrument<CacheAttributes, SubgraphSelector, SubgraphValue>,
     >,
 }
 
@@ -1194,7 +1201,7 @@ pub(crate) type SubgraphCustomInstruments = CustomInstruments<
 >;
 
 // ---------------- Counter -----------------------
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum Increment {
     Unit,
     EventUnit,
@@ -1224,6 +1231,18 @@ where
     pub(crate) inner: Mutex<CustomCounterInner<Request, Response, A, T>>,
 }
 
+impl<Request, Response, A, T> Clone for CustomCounter<Request, Response, A, T>
+where
+    A: Selectors<Request = Request, Response = Response> + Default,
+    T: Selector<Request = Request, Response = Response> + Debug + Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            inner: Mutex::new(self.inner.lock().clone()),
+        }
+    }
+}
+
 pub(crate) struct CustomCounterInner<Request, Response, A, T>
 where
     A: Selectors<Request = Request, Response = Response> + Default,
@@ -1237,6 +1256,24 @@ where
     pub(crate) attributes: Vec<opentelemetry_api::KeyValue>,
     // Useful when it's a counter on events to know if we have to count for an event or not
     pub(crate) incremented: bool,
+}
+
+impl<Request, Response, A, T> Clone for CustomCounterInner<Request, Response, A, T>
+where
+    A: Selectors<Request = Request, Response = Response> + Default,
+    T: Selector<Request = Request, Response = Response> + Debug + Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            increment: self.increment.clone(),
+            selector: self.selector.clone(),
+            selectors: self.selectors.clone(),
+            counter: self.counter.clone(),
+            condition: self.condition.clone(),
+            attributes: self.attributes.clone(),
+            incremented: self.incremented,
+        }
+    }
 }
 
 impl<A, T, Request, Response, EventResponse> Instrumented for CustomCounter<Request, Response, A, T>
@@ -1934,9 +1971,9 @@ mod tests {
     use std::path::PathBuf;
     use std::str::FromStr;
 
-    use apollo_compiler::ast::Name;
     use apollo_compiler::ast::NamedType;
     use apollo_compiler::executable::SelectionSet;
+    use apollo_compiler::Name;
     use http::HeaderMap;
     use http::HeaderName;
     use http::Method;
@@ -1959,12 +1996,18 @@ mod tests {
     use crate::http_ext::TryIntoHeaderValue;
     use crate::json_ext::Path;
     use crate::metrics::FutureMetricsExt;
+    use crate::plugins::telemetry::config_new::cache::CacheInstruments;
     use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
     use crate::plugins::telemetry::config_new::instruments::Instrumented;
     use crate::plugins::telemetry::config_new::instruments::InstrumentsConfig;
+    use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ALIASES;
+    use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_DEPTH;
+    use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_HEIGHT;
+    use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ROOT_FIELDS;
     use crate::services::OperationKind;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
+    use crate::spec::operation_limits::OperationLimits;
     use crate::Context;
 
     type JsonMap = serde_json_bytes::Map<ByteString, Value>;
@@ -1976,6 +2019,9 @@ mod tests {
     #[derive(Deserialize, JsonSchema)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
     enum Event {
+        Extension {
+            map: serde_json::Map<String, serde_json::Value>,
+        },
         Context {
             map: serde_json::Map<String, serde_json::Value>,
         },
@@ -2038,6 +2084,7 @@ mod tests {
         },
         SubgraphResponse {
             status: u16,
+            subgraph_name: Option<String>,
             data: Option<serde_json::Value>,
             #[serde(default)]
             #[schemars(with = "Option<serde_json::Map<String, serde_json::Value>>")]
@@ -2186,26 +2233,26 @@ mod tests {
             apollo_compiler::executable::Field {
                 definition: apollo_compiler::schema::FieldDefinition {
                     description: None,
-                    name: NamedType::new(field_name.clone()).expect("valid field name"),
+                    name: NamedType::new(&field_name).expect("valid field name"),
                     arguments: vec![],
                     ty: apollo_compiler::schema::Type::Named(
-                        NamedType::new(field_type.clone()).expect("valid type name"),
+                        NamedType::new(&field_type).expect("valid type name"),
                     ),
                     directives: Default::default(),
                 }
                 .into(),
                 alias: None,
-                name: NamedType::new(field_name.clone()).expect("valid field name"),
+                name: NamedType::new(&field_name).expect("valid field name"),
                 arguments: vec![],
                 directives: Default::default(),
                 selection_set: SelectionSet::new(
-                    NamedType::new(field_name).expect("valid field name"),
+                    NamedType::new(&field_name).expect("valid field name"),
                 ),
             }
         }
 
         fn create_type_name(type_name: String) -> Name {
-            NamedType::new(type_name).expect("valid type name")
+            NamedType::new(&type_name).expect("valid type name")
         }
     }
 
@@ -2250,6 +2297,7 @@ mod tests {
                         let mut router_instruments = None;
                         let mut supergraph_instruments = None;
                         let mut subgraph_instruments = None;
+                        let mut cache_instruments: Option<CacheInstruments> = None;
                         let graphql_instruments: GraphQLInstruments = (&config).into();
                         let context = Context::new();
                         for event in request {
@@ -2357,6 +2405,7 @@ mod tests {
                                     headers,
                                 } => {
                                     subgraph_instruments = Some(config.new_subgraph_instruments());
+                                    cache_instruments = Some((&config).into());
                                     let graphql_request = graphql::Request::fake_builder()
                                         .query(query)
                                         .and_operation_name(operation_name)
@@ -2374,8 +2423,10 @@ mod tests {
                                         .build();
 
                                     subgraph_instruments.as_mut().unwrap().on_request(&request);
+                                    cache_instruments.as_mut().unwrap().on_request(&request);
                                 }
                                 Event::SubgraphResponse {
+                                    subgraph_name,
                                     status,
                                     data,
                                     extensions,
@@ -2384,6 +2435,7 @@ mod tests {
                                 } => {
                                     let response = subgraph::Response::fake2_builder()
                                         .context(context.clone())
+                                        .and_subgraph_name(subgraph_name)
                                         .status_code(StatusCode::from_u16(status).expect("status"))
                                         .and_data(data)
                                         .errors(errors)
@@ -2392,6 +2444,10 @@ mod tests {
                                         .build()
                                         .unwrap();
                                     subgraph_instruments
+                                        .take()
+                                        .expect("subgraph request must have been made first")
+                                        .on_response(&response);
+                                    cache_instruments
                                         .take()
                                         .expect("subgraph request must have been made first")
                                         .on_response(&response);
@@ -2432,6 +2488,42 @@ mod tests {
                                 Event::Context { map } => {
                                     for (key, value) in map {
                                         context.insert(key, value).expect("insert context");
+                                    }
+                                }
+                                Event::Extension { map } => {
+                                    for (key, value) in map {
+                                        if key == APOLLO_PRIVATE_QUERY_ALIASES.to_string() {
+                                            context.extensions().with_lock(|mut lock| {
+                                                let limits = lock
+                                                    .get_or_default_mut::<OperationLimits<u32>>();
+                                                let value_as_u32 = value.as_u64().unwrap() as u32;
+                                                limits.aliases = value_as_u32;
+                                            });
+                                        }
+                                        if key == APOLLO_PRIVATE_QUERY_DEPTH.to_string() {
+                                            context.extensions().with_lock(|mut lock| {
+                                                let limits = lock
+                                                    .get_or_default_mut::<OperationLimits<u32>>();
+                                                let value_as_u32 = value.as_u64().unwrap() as u32;
+                                                limits.depth = value_as_u32;
+                                            });
+                                        }
+                                        if key == APOLLO_PRIVATE_QUERY_HEIGHT.to_string() {
+                                            context.extensions().with_lock(|mut lock| {
+                                                let limits = lock
+                                                    .get_or_default_mut::<OperationLimits<u32>>();
+                                                let value_as_u32 = value.as_u64().unwrap() as u32;
+                                                limits.height = value_as_u32;
+                                            });
+                                        }
+                                        if key == APOLLO_PRIVATE_QUERY_ROOT_FIELDS.to_string() {
+                                            context.extensions().with_lock(|mut lock| {
+                                                let limits = lock
+                                                    .get_or_default_mut::<OperationLimits<u32>>();
+                                                let value_as_u32 = value.as_u64().unwrap() as u32;
+                                                limits.root_fields = value_as_u32;
+                                            });
+                                        }
                                     }
                                 }
                             }

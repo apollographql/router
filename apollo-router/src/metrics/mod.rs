@@ -60,7 +60,7 @@ pub(crate) mod test_utils {
         pub(crate) static AGGREGATE_METER_PROVIDER_ASYNC: OnceLock<(AggregateMeterProvider, ClonableManualReader)>;
     }
     thread_local! {
-        pub(crate) static AGGREGATE_METER_PROVIDER: OnceLock<(AggregateMeterProvider, ClonableManualReader)> = OnceLock::new();
+        pub(crate) static AGGREGATE_METER_PROVIDER: OnceLock<(AggregateMeterProvider, ClonableManualReader)> = const { OnceLock::new() };
     }
 
     #[derive(Debug, Clone, Default)]
@@ -120,17 +120,11 @@ pub(crate) mod test_utils {
     }
     pub(crate) fn meter_provider_and_readers() -> (AggregateMeterProvider, ClonableManualReader) {
         if tokio::runtime::Handle::try_current().is_ok() {
-            if let Ok(task_local) = AGGREGATE_METER_PROVIDER_ASYNC
+            AGGREGATE_METER_PROVIDER_ASYNC
                 .try_with(|cell| cell.get_or_init(create_test_meter_provider).clone())
-            {
-                task_local
-            } else {
-                // We need to silently fail here. Otherwise we fail every multi-threaded test that touches metrics
-                (
-                    AggregateMeterProvider::default(),
-                    ClonableManualReader::default(),
-                )
-            }
+                // We need to silently fail here.
+                // Otherwise we fail every multi-threaded test that touches metrics
+                .unwrap_or_default()
         } else {
             AGGREGATE_METER_PROVIDER
                 .with(|cell| cell.get_or_init(create_test_meter_provider).clone())
@@ -506,9 +500,11 @@ pub(crate) fn meter_provider() -> AggregateMeterProvider {
 ///
 /// This macro is a replacement for the telemetry crate's MetricsLayer. We will eventually convert all metrics to use these macros and deprecate the MetricsLayer.
 /// The reason for this is that the MetricsLayer has:
+///
 /// * No support for dynamic attributes
 /// * No support dynamic metrics.
 /// * Imperfect mapping to metrics API that can only be checked at runtime.
+///
 /// New metrics should be added using these macros.
 #[allow(unused_macros)]
 macro_rules! u64_counter {
@@ -545,9 +541,11 @@ macro_rules! u64_counter {
 ///
 /// This macro is a replacement for the telemetry crate's MetricsLayer. We will eventually convert all metrics to use these macros and deprecate the MetricsLayer.
 /// The reason for this is that the MetricsLayer has:
+///
 /// * No support for dynamic attributes
 /// * No support dynamic metrics.
 /// * Imperfect mapping to metrics API that can only be checked at runtime.
+///
 /// New metrics should be added using these macros.
 #[allow(unused_macros)]
 macro_rules! f64_counter {
@@ -583,9 +581,11 @@ macro_rules! f64_counter {
 ///
 /// This macro is a replacement for the telemetry crate's MetricsLayer. We will eventually convert all metrics to use these macros and deprecate the MetricsLayer.
 /// The reason for this is that the MetricsLayer has:
+///
 /// * No support for dynamic attributes
 /// * No support dynamic metrics.
 /// * Imperfect mapping to metrics API that can only be checked at runtime.
+///
 /// New metrics should be added using these macros.
 
 #[allow(unused_macros)]
@@ -623,9 +623,11 @@ macro_rules! i64_up_down_counter {
 ///
 /// This macro is a replacement for the telemetry crate's MetricsLayer. We will eventually convert all metrics to use these macros and deprecate the MetricsLayer.
 /// The reason for this is that the MetricsLayer has:
+///
 /// * No support for dynamic attributes
 /// * No support dynamic metrics.
 /// * Imperfect mapping to metrics API that can only be checked at runtime.
+///
 /// New metrics should be added using these macros.
 #[allow(unused_macros)]
 macro_rules! f64_up_down_counter {
@@ -662,9 +664,11 @@ macro_rules! f64_up_down_counter {
 ///
 /// This macro is a replacement for the telemetry crate's MetricsLayer. We will eventually convert all metrics to use these macros and deprecate the MetricsLayer.
 /// The reason for this is that the MetricsLayer has:
+///
 /// * No support for dynamic attributes
 /// * No support dynamic metrics.
 /// * Imperfect mapping to metrics API that can only be checked at runtime.
+///
 /// New metrics should be added using these macros.
 #[allow(unused_macros)]
 macro_rules! f64_histogram {
@@ -701,9 +705,11 @@ macro_rules! f64_histogram {
 ///
 /// This macro is a replacement for the telemetry crate's MetricsLayer. We will eventually convert all metrics to use these macros and deprecate the MetricsLayer.
 /// The reason for this is that the MetricsLayer has:
+///
 /// * No support for dynamic attributes
 /// * No support dynamic metrics.
 /// * Imperfect mapping to metrics API that can only be checked at runtime.
+///
 /// New metrics should be added using these macros.
 #[allow(unused_macros)]
 macro_rules! u64_histogram {
@@ -740,9 +746,11 @@ macro_rules! u64_histogram {
 ///
 /// This macro is a replacement for the telemetry crate's MetricsLayer. We will eventually convert all metrics to use these macros and deprecate the MetricsLayer.
 /// The reason for this is that the MetricsLayer has:
+///
 /// * No support for dynamic attributes
 /// * No support dynamic metrics.
 /// * Imperfect mapping to metrics API that can only be checked at runtime.
+///
 /// New metrics should be added using these macros.
 #[allow(unused_macros)]
 macro_rules! i64_histogram {

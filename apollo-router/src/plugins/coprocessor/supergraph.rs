@@ -16,12 +16,17 @@ use crate::graphql;
 use crate::layers::async_checkpoint::OneShotAsyncCheckpointLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugins::coprocessor::EXTERNAL_SPAN_NAME;
+use crate::plugins::telemetry::config_new::conditions::Condition;
+use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
 use crate::services::supergraph;
 
 /// What information is passed to a router request/response stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct SupergraphRequestConf {
+    /// Condition to trigger this stage
+    #[serde(skip_serializing)]
+    pub(super) condition: Option<Condition<SupergraphSelector>>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
@@ -38,6 +43,9 @@ pub(super) struct SupergraphRequestConf {
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct SupergraphResponseConf {
+    /// Condition to trigger this stage
+    #[serde(skip_serializing)]
+    pub(super) condition: Option<Condition<SupergraphSelector>>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
@@ -183,7 +191,7 @@ async fn process_supergraph_request_stage<C>(
     coprocessor_url: String,
     sdl: Arc<String>,
     mut request: supergraph::Request,
-    request_config: SupergraphRequestConf,
+    mut request_config: SupergraphRequestConf,
 ) -> Result<ControlFlow<supergraph::Response, supergraph::Request>, BoxError>
 where
     C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
@@ -193,6 +201,14 @@ where
         + 'static,
     <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
+    let should_be_executed = request_config
+        .condition
+        .as_mut()
+        .map(|c| c.evaluate_request(&request) == Some(true))
+        .unwrap_or(true);
+    if !should_be_executed {
+        return Ok(ControlFlow::Continue(request));
+    }
     // Call into our out of process processor with a body of our body
     // First, extract the data we need from our request and prepare our
     // external call. Use our configuration to figure out which data to send.
@@ -331,6 +347,14 @@ where
         + 'static,
     <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
+    let should_be_executed = response_config
+        .condition
+        .as_ref()
+        .map(|c| c.evaluate_response(&response))
+        .unwrap_or(true);
+    if !should_be_executed {
+        return Ok(response);
+    }
     // split the response into parts + body
     let (mut parts, body) = response.response.into_parts();
 
@@ -389,10 +413,7 @@ where
     // that we replace "bits" of our incoming response with the updated bits if they
     // are present in our co_processor_output. If they aren't present, just use the
     // bits that we sent to the co_processor.
-    let new_body: graphql::Response = match co_processor_output.body {
-        Some(value) => serde_json::from_value(value)?,
-        None => first,
-    };
+    let new_body: graphql::Response = handle_graphql_response(first, co_processor_output.body)?;
 
     if let Some(control) = co_processor_output.control {
         parts.status = control.get_http_status()?
@@ -422,8 +443,16 @@ where
             let generator_map_context = map_context.clone();
             let generator_sdl_to_send = sdl_to_send.clone();
             let generator_id = map_context.id.clone();
+            let should_be_executed = response_config
+                .condition
+                .as_ref()
+                .map(|c| c.evaluate_event_response(&deferred_response, &map_context))
+                .unwrap_or(true);
 
             async move {
+                if !should_be_executed {
+                    return Ok(deferred_response);
+                }
                 let body_to_send = response_config.body.then(|| {
                     serde_json::to_value(&deferred_response).expect("serialization will not fail")
                 });
@@ -462,10 +491,8 @@ where
                 // that we replace "bits" of our incoming response with the updated bits if they
                 // are present in our co_processor_output. If they aren't present, just use the
                 // bits that we sent to the co_processor.
-                let new_deferred_response: graphql::Response = match co_processor_output.body {
-                    Some(value) => serde_json::from_value(value)?,
-                    None => deferred_response,
-                };
+                let new_deferred_response: graphql::Response =
+                    handle_graphql_response(deferred_response, co_processor_output.body)?;
 
                 if let Some(context) = co_processor_output.context {
                     for (key, value) in context.try_into_iter()? {
@@ -517,6 +544,7 @@ mod tests {
     use super::*;
     use crate::plugin::test::MockInternalHttpClientService;
     use crate::plugin::test::MockSupergraphService;
+    use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
     use crate::services::router::body::get_body_bytes;
     use crate::services::supergraph;
 
@@ -569,6 +597,7 @@ mod tests {
     async fn external_plugin_supergraph_request() {
         let supergraph_stage = SupergraphStage {
             request: SupergraphRequestConf {
+                condition: Default::default(),
                 headers: false,
                 context: false,
                 body: true,
@@ -702,6 +731,15 @@ mod tests {
     async fn external_plugin_supergraph_request_controlflow_break() {
         let supergraph_stage = SupergraphStage {
             request: SupergraphRequestConf {
+                condition: Condition::Eq([
+                    SelectorOrValue::Selector(SupergraphSelector::RequestHeader {
+                        request_header: String::from("another_header"),
+                        redact: None,
+                        default: None,
+                    }),
+                    SelectorOrValue::Value("value".to_string().into()),
+                ])
+                .into(),
                 headers: false,
                 context: false,
                 body: true,
@@ -733,6 +771,84 @@ mod tests {
                                     }
                                 },
                                 "headers": {
+                                    "another_header": ["another value"],
+                                    "aheader": ["a value"]
+                                }
+                            }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = supergraph_stage.clone().as_service(
+            mock_http_client,
+            mock_supergraph_service.boxed(),
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+        );
+
+        let request = supergraph::Request::fake_builder()
+            .header("another_header", "value")
+            .build()
+            .unwrap();
+
+        let crate::services::supergraph::Response {
+            mut response,
+            context,
+        } = service.oneshot(request).await.unwrap();
+
+        assert!(context.get::<_, bool>("testKey").unwrap().unwrap());
+
+        let value = response.headers().get("aheader").unwrap();
+        assert_eq!(value, "a value");
+
+        let value = response.headers().get("another_header").unwrap();
+        assert_eq!(value, "another value");
+
+        assert_eq!(
+            response.body_mut().next().await.unwrap().errors[0]
+                .message
+                .as_str(),
+            "my error message"
+        );
+
+        let mut mock_supergraph_service = MockSupergraphService::new();
+        mock_supergraph_service
+            .expect_call()
+            .returning(|req: supergraph::Request| {
+                Ok(supergraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .errors(Vec::new())
+                    .extensions(crate::json_ext::Object::new())
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            });
+
+        // This should not trigger the supergraph response stage because of the condition
+        let request = supergraph::Request::fake_builder().build().unwrap();
+        // let mut mock_http_client = MockInternalHttpClientService::new();
+        // mock_http_client.expect_clone().;
+        let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
+            Box::pin(async {
+                Ok(http::Response::builder()
+                    .body(RouterBody::from(
+                        r#"{
+                                "version": 1,
+                                "stage": "SupergraphRequest",
+                                "control": {
+                                    "break": 200
+                                },
+                                "body": {
+                                    "errors": [{ "message": "my error message" }]
+                                },
+                                "context": {
+                                    "entries": {
+                                        "testKey": true
+                                    }
+                                },
+                                "headers": {
+                                    "another_header": ["another value"],
                                     "aheader": ["a value"]
                                 }
                             }"#,
@@ -748,31 +864,17 @@ mod tests {
             Arc::new("".to_string()),
         );
 
-        let request = supergraph::Request::fake_builder().build().unwrap();
+        let crate::services::supergraph::Response { context, .. } =
+            service.oneshot(request).await.unwrap();
 
-        let crate::services::supergraph::Response {
-            mut response,
-            context,
-        } = service.oneshot(request).await.unwrap();
-
-        assert!(context.get::<_, bool>("testKey").unwrap().unwrap());
-
-        let value = response.headers().get("aheader").unwrap();
-
-        assert_eq!(value, "a value");
-
-        assert_eq!(
-            response.body_mut().next().await.unwrap().errors[0]
-                .message
-                .as_str(),
-            "my error message"
-        );
+        assert!(context.get::<_, bool>("testKey").ok().flatten().is_none());
     }
 
     #[tokio::test]
     async fn external_plugin_supergraph_response() {
         let supergraph_stage = SupergraphStage {
             response: SupergraphResponseConf {
+                condition: Default::default(),
                 headers: true,
                 context: true,
                 body: true,
@@ -904,6 +1006,7 @@ mod tests {
     async fn multi_part() {
         let supergraph_stage = SupergraphStage {
             response: SupergraphResponseConf {
+                condition: Default::default(),
                 headers: true,
                 context: true,
                 body: true,
@@ -1008,6 +1111,124 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&body).unwrap(),
             json!({ "data": { "test": 3, "has_next": false }, "hasNext": false }),
+        );
+    }
+
+    #[tokio::test]
+    async fn multi_part_only_primary() {
+        let supergraph_stage = SupergraphStage {
+            response: SupergraphResponseConf {
+                condition: Condition::Eq([
+                    SelectorOrValue::Selector(SupergraphSelector::IsPrimaryResponse {
+                        is_primary_response: true,
+                    }),
+                    SelectorOrValue::Value(true.into()),
+                ])
+                .into(),
+                headers: true,
+                context: true,
+                body: true,
+                sdl: true,
+                status_code: false,
+            },
+            request: Default::default(),
+        };
+
+        let mut mock_supergraph_service = MockSupergraphService::new();
+
+        mock_supergraph_service
+            .expect_call()
+            .returning(|req: supergraph::Request| {
+                Ok(supergraph::Response::fake_stream_builder()
+                    .response(
+                        graphql::Response::builder()
+                            .data(json!({ "test": 1 }))
+                            .has_next(true)
+                            .build(),
+                    )
+                    .response(
+                        graphql::Response::builder()
+                            .data(json!({ "test": 2 }))
+                            .has_next(true)
+                            .build(),
+                    )
+                    .response(
+                        graphql::Response::builder()
+                            .data(json!({ "test": 3 }))
+                            .has_next(false)
+                            .build(),
+                    )
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            });
+
+        let mock_http_client =
+            mock_with_deferred_callback(move |res: http::Request<RouterBody>| {
+                Box::pin(async {
+                    let mut deserialized_response: Externalizable<serde_json::Value> =
+                        serde_json::from_slice(&get_body_bytes(res.into_body()).await.unwrap())
+                            .unwrap();
+                    assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
+                    assert_eq!(
+                        PipelineStep::SupergraphResponse.to_string(),
+                        deserialized_response.stage
+                    );
+
+                    // Copy the has_next from the body into the data for checking later
+                    deserialized_response
+                        .body
+                        .as_mut()
+                        .unwrap()
+                        .as_object_mut()
+                        .unwrap()
+                        .get_mut("data")
+                        .unwrap()
+                        .as_object_mut()
+                        .unwrap()
+                        .insert(
+                            "has_next".to_string(),
+                            serde_json::Value::from(
+                                deserialized_response.has_next.unwrap_or_default(),
+                            ),
+                        );
+
+                    Ok(http::Response::builder()
+                        .body(RouterBody::from(
+                            serde_json::to_string(&deserialized_response).unwrap_or_default(),
+                        ))
+                        .unwrap())
+                })
+            });
+
+        let service = supergraph_stage.as_service(
+            mock_http_client,
+            mock_supergraph_service.boxed(),
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+        );
+
+        let request = supergraph::Request::canned_builder()
+            .query("foo")
+            .build()
+            .unwrap();
+
+        let mut res = service.oneshot(request).await.unwrap();
+
+        let body = res.response.body_mut().next().await.unwrap();
+        assert_eq!(
+            serde_json::to_value(&body).unwrap(),
+            json!({ "data": { "test": 1, "has_next": true }, "hasNext": true }),
+        );
+        let body = res.response.body_mut().next().await.unwrap();
+        assert_eq!(
+            serde_json::to_value(&body).unwrap(),
+            json!({ "data": { "test": 2 }, "hasNext": true }),
+        );
+        let body = res.response.body_mut().next().await.unwrap();
+        assert_eq!(
+            serde_json::to_value(&body).unwrap(),
+            json!({ "data": { "test": 3 }, "hasNext": false }),
         );
     }
 }

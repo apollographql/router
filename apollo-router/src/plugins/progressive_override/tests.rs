@@ -133,7 +133,7 @@ async fn assert_expected_and_absent_labels_for_supergraph_service(
     .unwrap()
     .supergraph_service(mock_service.boxed());
 
-    let schema = crate::spec::Schema::parse_test(
+    let schema = crate::spec::Schema::parse(
         include_str!("./testdata/supergraph.graphql"),
         &Default::default(),
     )
@@ -205,7 +205,7 @@ async fn plugin_supergraph_service_trims_0pc_label() {
 }
 
 async fn get_json_query_plan(query: &str) -> serde_json::Value {
-    let schema = crate::spec::Schema::parse_test(
+    let schema = crate::spec::Schema::parse(
         include_str!("./testdata/supergraph.graphql"),
         &Default::default(),
     )
@@ -279,7 +279,7 @@ async fn query_with_labels(query: &str, labels_from_coprocessors: Vec<&str>) {
     .unwrap()
     .supergraph_service(mock_service.boxed());
 
-    let schema = crate::spec::Schema::parse_test(
+    let schema = crate::spec::Schema::parse(
         include_str!("./testdata/supergraph.graphql"),
         &Default::default(),
     )

@@ -11,11 +11,11 @@ use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
 
-use crate::axum_factory::utils::REQUEST_SPAN_NAME;
-use crate::plugins::telemetry::EXECUTION_SPAN_NAME;
-use crate::plugins::telemetry::SUBGRAPH_SPAN_NAME;
-use crate::plugins::telemetry::SUPERGRAPH_SPAN_NAME;
-use crate::services::QUERY_PLANNING_SPAN_NAME;
+use crate::plugins::telemetry::consts::EXECUTION_SPAN_NAME;
+use crate::plugins::telemetry::consts::QUERY_PLANNING_SPAN_NAME;
+use crate::plugins::telemetry::consts::REQUEST_SPAN_NAME;
+use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
+use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
 
 const SUBGRAPH_ATTRIBUTE_NAME: &str = "apollo.subgraph.name";
 
