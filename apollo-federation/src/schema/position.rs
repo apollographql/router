@@ -4,6 +4,7 @@ use std::fmt::Formatter;
 use std::ops::Deref;
 
 use apollo_compiler::ast;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
@@ -23,8 +24,8 @@ use apollo_compiler::schema::UnionType;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
-use indexmap::IndexSet;
 use lazy_static::lazy_static;
+use serde::Serialize;
 use strum::IntoEnumIterator;
 
 use crate::error::FederationError;
@@ -178,6 +179,15 @@ impl Debug for TypeDefinitionPosition {
 }
 
 impl TypeDefinitionPosition {
+    pub(crate) fn is_composite_type(&self) -> bool {
+        matches!(
+            self,
+            TypeDefinitionPosition::Object(_)
+                | TypeDefinitionPosition::Interface(_)
+                | TypeDefinitionPosition::Union(_)
+        )
+    }
+
     pub(crate) fn type_name(&self) -> &Name {
         match self {
             TypeDefinitionPosition::Scalar(type_) => &type_.type_name,
@@ -328,7 +338,7 @@ infallible_conversions!(CompositeTypeDefinitionPosition::{Object, Interface, Uni
 infallible_conversions!(AbstractTypeDefinitionPosition::{Interface, Union} -> OutputTypeDefinitionPosition);
 infallible_conversions!(ObjectOrInterfaceTypeDefinitionPosition::{Object, Interface} -> OutputTypeDefinitionPosition);
 
-#[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
+#[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display, Serialize)]
 pub(crate) enum CompositeTypeDefinitionPosition {
     Object(ObjectTypeDefinitionPosition),
     Interface(InterfaceTypeDefinitionPosition),
@@ -666,7 +676,7 @@ fallible_conversions!(OutputTypeDefinitionPosition::{Object, Interface} -> Objec
 fallible_conversions!(CompositeTypeDefinitionPosition::{Object, Interface} -> ObjectOrInterfaceTypeDefinitionPosition);
 fallible_conversions!(AbstractTypeDefinitionPosition::{Interface} -> ObjectOrInterfaceTypeDefinitionPosition);
 
-#[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
+#[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display, Serialize)]
 pub(crate) enum FieldDefinitionPosition {
     Object(ObjectFieldDefinitionPosition),
     Interface(InterfaceFieldDefinitionPosition),
@@ -983,7 +993,15 @@ impl SchemaDefinitionPosition {
 }
 
 #[derive(
-    Debug, Copy, Clone, PartialEq, Eq, Hash, strum_macros::Display, strum_macros::EnumIter,
+    Debug,
+    Copy,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    strum_macros::Display,
+    strum_macros::EnumIter,
+    Serialize,
 )]
 pub(crate) enum SchemaRootDefinitionKind {
     #[strum(to_string = "query")]
@@ -1523,7 +1541,7 @@ impl Display for ScalarTypeDefinitionPosition {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash, Serialize)]
 pub(crate) struct ObjectTypeDefinitionPosition {
     pub(crate) type_name: Name,
 }
@@ -2026,7 +2044,7 @@ impl Debug for ObjectTypeDefinitionPosition {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash, Serialize)]
 pub(crate) struct ObjectFieldDefinitionPosition {
     pub(crate) type_name: Name,
     pub(crate) field_name: Name,
@@ -2704,7 +2722,7 @@ impl Debug for ObjectFieldArgumentDefinitionPosition {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub(crate) struct InterfaceTypeDefinitionPosition {
     pub(crate) type_name: Name,
 }
@@ -3129,7 +3147,7 @@ impl Display for InterfaceTypeDefinitionPosition {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub(crate) struct InterfaceFieldDefinitionPosition {
     pub(crate) type_name: Name,
     pub(crate) field_name: Name,
@@ -3810,7 +3828,7 @@ impl Display for InterfaceFieldArgumentDefinitionPosition {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub(crate) struct UnionTypeDefinitionPosition {
     pub(crate) type_name: Name,
 }
@@ -4173,7 +4191,7 @@ impl Display for UnionTypeDefinitionPosition {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub(crate) struct UnionTypenameFieldDefinitionPosition {
     pub(crate) type_name: Name,
 }
@@ -5972,7 +5990,7 @@ pub(crate) fn is_graphql_reserved_name(name: &str) -> bool {
 
 lazy_static! {
     static ref GRAPHQL_BUILTIN_SCALAR_NAMES: IndexSet<Name> = {
-        IndexSet::from([
+        IndexSet::from_iter([
             name!("Int"),
             name!("Float"),
             name!("String"),
@@ -5981,7 +5999,7 @@ lazy_static! {
         ])
     };
     static ref GRAPHQL_BUILTIN_DIRECTIVE_NAMES: IndexSet<Name> = {
-        IndexSet::from([
+        IndexSet::from_iter([
             name!("include"),
             name!("skip"),
             name!("deprecated"),
@@ -6058,10 +6076,12 @@ fn validate_arguments(arguments: &[Node<InputValueDefinition>]) -> Result<(), Fe
 
 impl FederationSchema {
     /// Note that the input schema must be partially valid, in that:
+    ///
     /// 1. All schema element references must point to an existing schema element of the appropriate
     ///    kind (e.g. object type fields must return an existing output type).
     /// 2. If the schema uses the core/link spec, then usages of the @core/@link directive must be
     ///    valid.
+    ///
     /// The input schema may be otherwise invalid GraphQL (e.g. it may not contain a Query type). If
     /// you want a ValidFederationSchema, use ValidFederationSchema::new() instead.
     pub(crate) fn new(schema: Schema) -> Result<FederationSchema, FederationError> {

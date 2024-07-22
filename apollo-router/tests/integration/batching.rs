@@ -4,7 +4,7 @@ use itertools::Itertools;
 use tower::BoxError;
 use wiremock::ResponseTemplate;
 
-use crate::integration::common::ValueExt as _;
+use crate::integration::ValueExt as _;
 
 const CONFIG: &str = include_str!("../fixtures/batching/all_enabled.router.yaml");
 const SHORT_TIMEOUTS_CONFIG: &str = include_str!("../fixtures/batching/short_timeouts.router.yaml");
@@ -377,12 +377,12 @@ async fn it_handles_cancelled_by_rhai() -> Result<(), BoxError> {
         entryA:
           index: 0
     - errors:
-        - message: "rhai execution error: 'Runtime error: cancelled expected failure (line 5, position 13)\nin closure call'"
+        - message: "rhai execution error: 'Runtime error: cancelled expected failure (line 5, position 13)'"
     - data:
         entryA:
           index: 1
     - errors:
-        - message: "rhai execution error: 'Runtime error: cancelled expected failure (line 5, position 13)\nin closure call'"
+        - message: "rhai execution error: 'Runtime error: cancelled expected failure (line 5, position 13)'"
     "###);
     }
 
@@ -471,7 +471,7 @@ async fn it_handles_single_request_cancelled_by_rhai() -> Result<(), BoxError> {
         entryA:
           index: 1
     - errors:
-        - message: "rhai execution error: 'Runtime error: cancelled expected failure (line 5, position 13)\nin closure call'"
+        - message: "rhai execution error: 'Runtime error: cancelled expected failure (line 5, position 13)'"
     "###);
     }
 

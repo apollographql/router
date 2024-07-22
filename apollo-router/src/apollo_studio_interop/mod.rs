@@ -420,7 +420,8 @@ impl UsageGenerator<'_> {
 
         match self
             .signature_doc
-            .get_operation(self.operation_name.as_deref())
+            .operations
+            .get(self.operation_name.as_deref())
             .ok()
         {
             None => "".to_string(),
@@ -494,7 +495,8 @@ impl UsageGenerator<'_> {
 
         match self
             .references_doc
-            .get_operation(self.operation_name.as_deref())
+            .operations
+            .get(self.operation_name.as_deref())
             .ok()
         {
             None => HashMap::new(),
@@ -583,7 +585,8 @@ impl UsageGenerator<'_> {
 
         if let Ok(operation) = self
             .references_doc
-            .get_operation(self.operation_name.as_deref())
+            .operations
+            .get(self.operation_name.as_deref())
         {
             self.process_extended_refs_for_selection_set(&operation.selection_set);
         }
