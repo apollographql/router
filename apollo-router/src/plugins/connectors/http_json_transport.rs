@@ -297,6 +297,73 @@ mod tests {
     use crate::plugins::connectors::http_json_transport::add_headers;
 
     #[test]
+    fn append_path_test() {
+        assert_eq!(
+            super::append_path("https://localhost:8080/v1".parse().unwrap(), "/hello/42")
+                .unwrap()
+                .as_str(),
+            "https://localhost:8080/v1/hello/42"
+        );
+    }
+
+    #[test]
+    fn append_path_test_with_trailing_slash() {
+        assert_eq!(
+            super::append_path("https://localhost:8080/".parse().unwrap(), "/hello/42")
+                .unwrap()
+                .as_str(),
+            "https://localhost:8080/hello/42"
+        );
+    }
+
+    #[test]
+    fn append_path_test_with_trailing_slash_and_base_path() {
+        assert_eq!(
+            super::append_path("https://localhost:8080/v1/".parse().unwrap(), "/hello/42")
+                .unwrap()
+                .as_str(),
+            "https://localhost:8080/v1/hello/42"
+        );
+    }
+    #[test]
+    fn append_path_test_with_and_base_path_and_params() {
+        assert_eq!(
+            super::append_path(
+                "https://localhost:8080/v1?foo=bar".parse().unwrap(),
+                "/hello/42"
+            )
+            .unwrap()
+            .as_str(),
+            "https://localhost:8080/v1/hello/42?foo=bar"
+        );
+    }
+    #[test]
+    fn append_path_test_with_and_base_path_and_trailing_slash_and_params() {
+        assert_eq!(
+            super::append_path(
+                "https://localhost:8080/v1/?foo=bar".parse().unwrap(),
+                "/hello/42"
+            )
+            .unwrap()
+            .as_str(),
+            "https://localhost:8080/v1/hello/42?foo=bar"
+        );
+    }
+
+    #[test]
+    fn append_path_test_with_encoded_characters() {
+        assert_eq!(
+            super::append_path(
+                "https://localhost:8080/v1".parse().unwrap(),
+                "/users/user%3A1" // must be authored encoded
+            )
+            .unwrap()
+            .as_str(),
+            "https://localhost:8080/v1/users/user:1"
+        );
+    }
+
+    #[test]
     fn test_headers_to_add_no_directives() {
         let incoming_supergraph_headers: HeaderMap<HeaderValue> = vec![
             ("x-rename".parse().unwrap(), "renamed".parse().unwrap()),
