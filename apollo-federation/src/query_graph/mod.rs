@@ -630,7 +630,7 @@ impl QueryGraph {
                 composite_type_position.type_name().clone(),
                 key_value.fields,
             )?;
-            if !external_metadata.selects_any_external_field(&selection)? {
+            if !external_metadata.selects_any_external_field(&selection) {
                 return Ok(Some(selection));
             }
         }
@@ -857,7 +857,7 @@ impl QueryGraph {
             let selection = parse_field_set(schema, ty.name().clone(), value)?;
             let has_external = metadata
                 .external_metadata()
-                .selects_any_external_field(&selection)?;
+                .selects_any_external_field(&selection);
             if !has_external {
                 return Ok(Some(selection));
             }
