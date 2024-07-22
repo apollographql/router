@@ -285,11 +285,10 @@ mod tests {
                     method: Get,
                     headers: {
                         "authtoken": From(
-                             "X-Auth-Token",
-                            ),
-                            "user-agent": Value(
-                             "Firefox",
-
+                            "X-Auth-Token",
+                        ),
+                        "user-agent": Value(
+                            "Firefox",
                         ),
                     },
                     body: None,
@@ -356,11 +355,10 @@ mod tests {
                     method: Get,
                     headers: {
                         "authtoken": From(
-                             "X-Auth-Token",
-                            ),
-                            "user-agent": Value(
-                             "Firefox",
-
+                            "X-Auth-Token",
+                        ),
+                        "user-agent": Value(
+                            "Firefox",
                         ),
                     },
                     body: None,
