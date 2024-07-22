@@ -215,16 +215,16 @@ pub(crate) fn build_operation_with_aliasing(
 
     // for every operation in the document, go ahead and transform even though it's likely that only one exists
     if let Ok(document) = parsed_document {
-        if let Some(anonymous_op) = &document.anonymous_operation {
+        if let Some(anonymous_op) = &document.operations.anonymous {
             let mut cloned = anonymous_op.clone();
             transform_operation(&mut cloned, arguments, count)?;
-            ed.insert_operation(cloned);
+            ed.operations.insert(cloned);
         }
 
-        for (_, op) in &document.named_operations {
+        for (_, op) in &document.operations.named {
             let mut cloned = op.clone();
             transform_operation(&mut cloned, arguments, count)?;
-            ed.insert_operation(cloned);
+            ed.operations.insert(cloned);
         }
 
         return ed
@@ -347,7 +347,8 @@ fn transform_field_arguments(
 #[derive(Debug)]
 pub(crate) enum ContextBatchingError {
     NoSelectionSet,
-    InvalidDocumentGenerated(WithErrors<ExecutableDocument>),
+    // The only use of the field is in `Debug`, on purpose.
+    InvalidDocumentGenerated(#[allow(unused)] WithErrors<ExecutableDocument>),
     InvalidRelativePath,
     UnexpectedSelection,
 }

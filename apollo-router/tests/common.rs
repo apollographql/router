@@ -19,7 +19,6 @@ use futures::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use http::HeaderValue;
-use jsonpath_lib::Selector;
 use mediatype::names::BOUNDARY;
 use mediatype::names::FORM_DATA;
 use mediatype::names::MULTIPART;
@@ -54,7 +53,6 @@ use tokio::process::Child;
 use tokio::process::Command;
 use tokio::task;
 use tokio::time::Instant;
-use tower::BoxError;
 use tracing::info_span;
 use tracing_core::Dispatch;
 use tracing_core::LevelFilter;
@@ -1031,20 +1029,6 @@ impl Drop for IntegrationTest {
         if let Some(child) = &mut self.router {
             let _ = child.start_kill();
         }
-    }
-}
-
-pub trait ValueExt {
-    fn select_path<'a>(&'a self, path: &str) -> Result<Vec<&'a Value>, BoxError>;
-    fn as_string(&self) -> Option<String>;
-}
-
-impl ValueExt for Value {
-    fn select_path<'a>(&'a self, path: &str) -> Result<Vec<&'a Value>, BoxError> {
-        Ok(Selector::new().str_path(path)?.value(self).select()?)
-    }
-    fn as_string(&self) -> Option<String> {
-        self.as_str().map(|s| s.to_string())
     }
 }
 

@@ -5,6 +5,7 @@ use apollo_compiler::executable::Directive;
 use apollo_compiler::name;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use serde::Serialize;
 
 use crate::error::FederationError;
 use crate::link::argument::directive_optional_string_argument;
@@ -31,7 +32,7 @@ pub(crate) fn defer_directive_arguments(
 /// a `Vec`, and superfluous struct instances aren't elided; `Conditions` is the more appropriate
 /// struct when trying to evaluate `@skip`/`@include` conditions (e.g. merging and short-circuiting
 /// logic).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub(crate) struct OperationConditional {
     pub(crate) kind: OperationConditionalKind,
     pub(crate) value: BooleanOrVariable,
@@ -46,6 +47,7 @@ pub(crate) struct OperationConditional {
     strum_macros::Display,
     strum_macros::EnumIter,
     strum_macros::IntoStaticStr,
+    Serialize,
 )]
 pub(crate) enum OperationConditionalKind {
     #[strum(to_string = "include")]
@@ -63,7 +65,7 @@ impl OperationConditionalKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub(crate) enum BooleanOrVariable {
     Boolean(bool),
     Variable(Name),

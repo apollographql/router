@@ -1010,6 +1010,7 @@ where
         .transpose()?;
     let context_to_send = request_config.context.then(|| request.context.clone());
     let uri = request_config.uri.then(|| parts.uri.to_string());
+    let subgraph_name = service_name.clone();
     let service_name = request_config.service_name.then_some(service_name);
 
     let payload = Externalizable::subgraph_builder()
@@ -1079,6 +1080,7 @@ where
             let subgraph_response = subgraph::Response {
                 response: http_response,
                 context: request.context,
+                subgraph_name: Some(subgraph_name),
             };
 
             if let Some(context) = co_processor_output.context {

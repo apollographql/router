@@ -376,7 +376,7 @@ async fn it_displays_sandbox() {
 
     // Regular studio redirect
     let response = client
-        .get(&format!(
+        .get(format!(
             "{}/",
             server.graphql_listen_address().as_ref().unwrap()
         ))
@@ -422,7 +422,7 @@ async fn it_displays_sandbox_with_different_supergraph_path() {
 
     // Regular studio redirect
     let response = client
-        .get(&format!(
+        .get(format!(
             "{}/custom",
             server.graphql_listen_address().as_ref().unwrap()
         ))
@@ -739,7 +739,7 @@ async fn response_with_root_wildcard() -> Result<(), ApolloRouterError> {
     // Post query without path
     let response = client
         .post(
-            &server
+            server
                 .graphql_listen_address()
                 .as_ref()
                 .unwrap()
@@ -1046,7 +1046,7 @@ async fn cors_preflight() -> Result<(), ApolloRouterError> {
     let response = client
         .request(
             Method::OPTIONS,
-            &format!(
+            format!(
                 "{}/graphql",
                 server.graphql_listen_address().as_ref().unwrap()
             ),
@@ -1197,7 +1197,7 @@ async fn it_displays_homepage() {
         .await
         .unwrap();
     let response = client
-        .get(&format!(
+        .get(format!(
             "{}/",
             server.graphql_listen_address().as_ref().unwrap()
         ))
@@ -1244,7 +1244,7 @@ async fn it_doesnt_display_disabled_homepage() {
         .await
         .unwrap();
     let response = client
-        .get(&format!(
+        .get(format!(
             "{}/",
             server.graphql_listen_address().as_ref().unwrap()
         ))
@@ -1303,7 +1303,7 @@ async fn it_answers_to_custom_endpoint() -> Result<(), ApolloRouterError> {
 
     for path in &["/a-custom-path", "/an-other-custom-path"] {
         let response = client
-            .get(&format!(
+            .get(format!(
                 "{}{}",
                 server.graphql_listen_address().as_ref().unwrap(),
                 path
@@ -1318,7 +1318,7 @@ async fn it_answers_to_custom_endpoint() -> Result<(), ApolloRouterError> {
 
     for path in &["/a-custom-path", "/an-other-custom-path"] {
         let response = client
-            .post(&format!(
+            .post(format!(
                 "{}{}",
                 server.graphql_listen_address().as_ref().unwrap(),
                 path
