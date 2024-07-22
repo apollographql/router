@@ -198,3 +198,116 @@ fn valid_shared_key(
             .map(|i| i.shared_key == shared_key)
             .unwrap_or_default()
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use tokio::sync::broadcast::Sender;
+    use tokio_stream::StreamExt;
+    use tower::ServiceExt;
+
+    use super::*;
+    use crate::plugins::cache::invalidation::InvalidationError;
+    use crate::plugins::cache::invalidation::InvalidationTopic;
+    use crate::Notify;
+
+    #[tokio::test]
+    async fn test_invalidation_service() {
+        let mut notify: Notify<
+            InvalidationTopic,
+            (
+                Vec<InvalidationRequest>,
+                InvalidationOrigin,
+                Sender<Result<u64, InvalidationError>>,
+            ),
+        > = Notify::new(None, None, None);
+        let (handle, _b) = notify
+            .create_or_subscribe(InvalidationTopic, false)
+            .await
+            .unwrap();
+        let h = handle.clone();
+
+        tokio::task::spawn(async move {
+            let mut handle = h.into_stream();
+            let mut called = false;
+            while let Some((requests, origin, response_tx)) = handle.next().await {
+                called = true;
+                if requests
+                    != [
+                        InvalidationRequest::Subgraph {
+                            subgraph: String::from("test"),
+                        },
+                        InvalidationRequest::Type {
+                            subgraph: String::from("test"),
+                            r#type: String::from("Test"),
+                        },
+                    ]
+                {
+                    response_tx
+                        .send(Err(InvalidationError::Custom(format!(
+                            "it's not the right invalidation requests : {requests:?}"
+                        ))))
+                        .unwrap();
+                    return;
+                }
+                if origin != InvalidationOrigin::Endpoint {
+                    response_tx
+                        .send(Err(InvalidationError::Custom(format!(
+                            "it's not the right invalidation origin : {origin:?}"
+                        ))))
+                        .unwrap();
+                    return;
+                }
+                response_tx.send(Ok(2)).unwrap();
+            }
+            assert!(called);
+        });
+
+        let invalidation = Invalidation {
+            enabled: true,
+            handle,
+        };
+        let config = Arc::new(SubgraphConfiguration {
+            all: Subgraph {
+                ttl: None,
+                enabled: true,
+                private_id: None,
+                invalidation: Some(SubgraphInvalidationConfig {
+                    enabled: true,
+                    shared_key: String::from("test"),
+                }),
+            },
+            subgraphs: HashMap::new(),
+        });
+        let service = InvalidationService::new(config, invalidation);
+        let req = router::Request::fake_builder()
+            .method(http::Method::POST)
+            .header(AUTHORIZATION, "test")
+            .body(
+                serde_json::to_vec(&[
+                    InvalidationRequest::Subgraph {
+                        subgraph: String::from("test"),
+                    },
+                    InvalidationRequest::Type {
+                        subgraph: String::from("test"),
+                        r#type: String::from("Test"),
+                    },
+                ])
+                .unwrap(),
+            )
+            .build()
+            .unwrap();
+        let res = service.oneshot(req).await.unwrap();
+        assert_eq!(res.response.status(), StatusCode::ACCEPTED);
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(
+                &hyper::body::to_bytes(res.response.into_body())
+                    .await
+                    .unwrap()
+            )
+            .unwrap(),
+            serde_json::json!({"count": 2})
+        )
+    }
+}

@@ -21,9 +21,9 @@ use crate::Notify;
 
 #[derive(Clone)]
 pub(crate) struct Invalidation {
-    enabled: bool,
+    pub(super) enabled: bool,
     #[allow(clippy::type_complexity)]
-    handle: Handle<
+    pub(super) handle: Handle<
         InvalidationTopic,
         (
             Vec<InvalidationRequest>,
@@ -39,6 +39,8 @@ pub(crate) enum InvalidationError {
     RedisError(#[from] RedisError),
     #[error("several errors")]
     Errors(#[from] InvalidationErrors),
+    #[error("custom error: {0}")]
+    Custom(String),
 }
 
 #[derive(Debug, Clone)]
@@ -59,8 +61,7 @@ impl std::error::Error for InvalidationErrors {}
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub(crate) struct InvalidationTopic;
 
-#[derive(Clone, Debug)]
-#[allow(dead_code)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum InvalidationOrigin {
     Endpoint,
     Extensions,
@@ -238,7 +239,7 @@ async fn handle_request_batch(
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub(crate) enum InvalidationRequest {
     Subgraph {
