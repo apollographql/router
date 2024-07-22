@@ -57,30 +57,30 @@ fn routing_url_in_schema() {
           REVIEWS @join__graph(name: "reviews" url: "http://localhost:4004/graphql")
         }
         "#;
-    let schema = crate::spec::Schema::parse_test(schema, &Default::default()).unwrap();
+    let schema = crate::spec::Schema::parse(schema, &Default::default()).unwrap();
 
-    let subgraphs: HashMap<&String, &Uri> = schema.subgraphs().collect();
+    let subgraphs: HashMap<&str, &Uri> = schema.subgraphs().map(|(k, v)| (k.as_str(), v)).collect();
 
     // if no configuration override, use the URL from the supergraph
     assert_eq!(
-        subgraphs.get(&"accounts".to_string()).unwrap().to_string(),
+        subgraphs.get("accounts").unwrap().to_string(),
         "http://localhost:4001/graphql"
     );
     // if both configuration and schema specify a non empty URL, the configuration wins
     // this should show a warning in logs
     assert_eq!(
-        subgraphs.get(&"inventory".to_string()).unwrap().to_string(),
+        subgraphs.get("inventory").unwrap().to_string(),
         "http://localhost:4002/graphql"
     );
     // if the configuration has a non empty routing URL, and the supergraph
     // has an empty one, the configuration wins
     assert_eq!(
-        subgraphs.get(&"products".to_string()).unwrap().to_string(),
+        subgraphs.get("products").unwrap().to_string(),
         "http://localhost:4003/graphql"
     );
 
     assert_eq!(
-        subgraphs.get(&"reviews".to_string()).unwrap().to_string(),
+        subgraphs.get("reviews").unwrap().to_string(),
         "http://localhost:4004/graphql"
     );
 }
@@ -109,7 +109,7 @@ fn missing_subgraph_url() {
           PRODUCTS @join__graph(name: "products" url: "http://localhost:4003/graphql")
           REVIEWS @join__graph(name: "reviews" url: "")
         }"#;
-    let schema_error = crate::spec::Schema::parse_test(schema_error, &Default::default())
+    let schema_error = crate::spec::Schema::parse(schema_error, &Default::default())
         .expect_err("Must have an error because we have one missing subgraph routing url");
 
     if let SchemaError::MissingSubgraphUrl(subgraph) = schema_error {
@@ -431,7 +431,7 @@ fn validate_project_config_files() {
         {
             continue;
         }
-        #[cfg(not(telemetry_next))]
+        #[cfg(not(feature = "telemetry_next"))]
         if entry.path().to_string_lossy().contains("telemetry_next") {
             continue;
         }
@@ -657,7 +657,7 @@ fn upgrade_old_configuration() {
 
 #[test]
 fn all_properties_are_documented() {
-    let schema = serde_json::to_value(&generate_config_schema())
+    let schema = serde_json::to_value(generate_config_schema())
         .expect("must be able to convert the schema to json");
 
     let mut errors = Vec::new();

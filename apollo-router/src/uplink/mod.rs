@@ -118,9 +118,8 @@ impl Endpoints {
                     urls.iter()
                         .cycle()
                         .skip(*current)
-                        .map(|url| {
+                        .inspect(|_| {
                             *current += 1;
-                            url
                         })
                         .take(urls.len()),
                 )
@@ -467,7 +466,7 @@ where
         .json(request_body)
         .send()
         .await
-        .map_err(|e| {
+        .inspect_err(|e| {
             if let Some(hyper_err) = e.source() {
                 if let Some(os_err) = hyper_err.source() {
                     if os_err.to_string().contains("tcp connect error: Cannot assign requested address (os error 99)") {
@@ -475,7 +474,6 @@ where
                     }
                 }
             }
-            e
         })?;
     tracing::debug!("uplink response {:?}", res);
     let response_body: graphql_client::Response<Query::ResponseData> = res.json().await?;

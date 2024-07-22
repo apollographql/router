@@ -13,20 +13,23 @@
 //! See [Router documentation](https://www.apollographql.com/docs/router/federation-version-support/)
 //! for which Federation versions are supported by which Router versions.
 
-#![allow(dead_code)] // TODO: This is fine while we're iterating, but should be removed later.
+// TODO: This is fine while we're iterating, but should be removed later.
+#![allow(dead_code)]
+// TODO: silence false positives (apollo_compiler::Name) and investigate the rest
+#![allow(clippy::mutable_key_type)]
 
 mod api_schema;
 mod compat;
+mod display_helpers;
 pub mod error;
-mod indented_display;
 pub mod link;
 pub mod merge;
 pub(crate) mod operation;
 pub mod query_graph;
 pub mod query_plan;
 pub mod schema;
-pub mod sources;
 pub mod subgraph;
+pub(crate) mod utils;
 
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::validation::Valid;

@@ -211,17 +211,6 @@ struct TelemetryActivation {
     is_active: bool,
 }
 
-#[derive(Debug)]
-struct ReportingError;
-
-impl fmt::Display for ReportingError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "ReportingError")
-    }
-}
-
-impl std::error::Error for ReportingError {}
-
 fn setup_tracing<T: TracingConfigurator>(
     mut builder: Builder,
     configurator: &T,
@@ -881,7 +870,7 @@ impl Telemetry {
             propagators.push(Box::<opentelemetry_zipkin::Propagator>::default());
         }
         if propagation.datadog || tracing.datadog.enabled() {
-            propagators.push(Box::<opentelemetry_datadog::DatadogPropagator>::default());
+            propagators.push(Box::<tracing::datadog_exporter::DatadogPropagator>::default());
         }
         if propagation.aws_xray {
             propagators.push(Box::<opentelemetry_aws::XrayPropagator>::default());
@@ -2162,7 +2151,6 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let body = get_body_bytes(resp.body_mut()).await.unwrap();
         String::from_utf8_lossy(&body)
-            .to_string()
             .split('\n')
             .filter(|l| l.contains("bucket") && !l.contains("apollo_router_span_count"))
             .sorted()
