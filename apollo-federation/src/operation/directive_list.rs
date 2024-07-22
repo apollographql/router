@@ -14,6 +14,8 @@ use apollo_compiler::Node;
 use super::compare_sorted_arguments;
 use super::sort_arguments;
 
+/// An empty apollo-compiler directive list that we can return a reference to when a
+/// [`DirectiveList`] is in the empty state.
 static EMPTY_DIRECTIVE_LIST: executable::DirectiveList = executable::DirectiveList(vec![]);
 
 /// Contents for a non-empty directive list.
@@ -73,8 +75,12 @@ impl DirectiveListInner {
 
 /// A list of directives, with order-independent hashing and equality.
 ///
-/// Original order is stored but is not part of hashing, so it may not be maintained exactly when
-/// round-tripping several directive lists through a HashSet for example.
+/// Original order of directive applications is stored but is not part of hashing,
+/// so it may not be maintained exactly when round-tripping several directive lists
+/// through a HashSet for example.
+///
+/// Arguments and input object values provided to directives are all sorted and the
+/// original order is not tracked.
 ///
 /// This list is cheaply cloneable, but not intended for frequent mutations.
 /// When the list is empty, it does not require an allocation.
@@ -294,7 +300,7 @@ mod tests {
                 directive("b", Default::default()),
                 directive("a", Default::default()),
             ]),
-            "should be order independent"
+            "equality should be order independent"
         );
 
         assert_eq!(
