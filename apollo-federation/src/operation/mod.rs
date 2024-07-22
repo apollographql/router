@@ -3797,7 +3797,7 @@ impl TryFrom<&Operation> for executable::Operation {
             variables: normalized_operation.variables.deref().clone(),
             directives: normalized_operation
                 .directives
-                .iter_original_order()
+                .iter()
                 .cloned()
                 .collect(),
             selection_set: (&normalized_operation.selection_set).try_into()?,
@@ -3813,7 +3813,7 @@ impl TryFrom<&Fragment> for executable::Fragment {
             name: normalized_fragment.name.clone(),
             directives: normalized_fragment
                 .directives
-                .iter_original_order()
+                .iter()
                 .cloned()
                 .collect(),
             selection_set: (&normalized_fragment.selection_set).try_into()?,
@@ -3888,7 +3888,7 @@ impl TryFrom<&Field> for executable::Field {
             arguments: normalized_field.arguments.deref().to_owned(),
             directives: normalized_field
                 .directives
-                .iter_original_order()
+                .iter()
                 .cloned()
                 .collect(),
             selection_set,
@@ -3926,7 +3926,7 @@ impl TryFrom<&InlineFragment> for executable::InlineFragment {
             type_condition,
             directives: normalized_inline_fragment
                 .directives
-                .iter_original_order()
+                .iter()
                 .cloned()
                 .collect(),
             selection_set: executable::SelectionSet {
@@ -3955,7 +3955,7 @@ impl From<&FragmentSpreadSelection> for executable::FragmentSpread {
             fragment_name: normalized_fragment_spread.fragment_name.to_owned(),
             directives: normalized_fragment_spread
                 .directives
-                .iter_original_order()
+                .iter()
                 .cloned()
                 .collect(),
         }

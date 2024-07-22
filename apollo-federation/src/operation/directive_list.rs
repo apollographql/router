@@ -14,11 +14,11 @@ use super::sort_arguments;
 
 static EMPTY_DIRECTIVE_LIST: executable::DirectiveList = executable::DirectiveList(vec![]);
 
+/// Contents for a non-empty directive list.
 #[derive(Debug, Clone)]
 struct DirectiveListInner {
     // The hash is eagerly precomputed because we expect to, most of the time, hash a DirectiveList
     // at least once.
-    // hash is 0 if the list is empty.
     hash: u64,
     // Mutable access should not be handed out because `sort_order` may get out of sync.
     directives: executable::DirectiveList,
@@ -28,7 +28,7 @@ struct DirectiveListInner {
 impl PartialEq for DirectiveListInner {
     fn eq(&self, other: &Self) -> bool {
         self.hash == other.hash
-            && self.iter().zip(other.iter()).all(|(left, right)| {
+            && self.iter_sorted().zip(other.iter_sorted()).all(|(left, right)| {
                 left.name == right.name
                     && compare_sorted_arguments(&left.arguments, &right.arguments)
                         == Ordering::Equal
@@ -45,7 +45,7 @@ impl DirectiveListInner {
         let mut state = SHARED_RANDOM.get_or_init(Default::default).build_hasher();
         self.len().hash(&mut state);
         // Hash in sorted order
-        for d in self.iter() {
+        for d in self.iter_sorted() {
             d.hash(&mut state);
         }
         self.hash = state.finish();
@@ -55,8 +55,8 @@ impl DirectiveListInner {
         self.directives.len()
     }
 
-    fn iter(&self) -> DirectiveIter<'_> {
-        DirectiveIter {
+    fn iter_sorted(&self) -> DirectiveIterSorted<'_> {
+        DirectiveIterSorted {
             directives: &self.directives.0,
             inner: self.sort_order.iter(),
         }
@@ -65,7 +65,8 @@ impl DirectiveListInner {
 
 /// A list of directives, with order-independent hashing and equality.
 ///
-/// Original order is stored but is not part of hashing, so it may be lost by certain operations.
+/// Original order is stored but is not part of hashing, so it may not be maintained exactly when
+/// round-tripping several directive lists through a HashSet for example.
 ///
 /// This list is cheaply cloneable, but not intended for frequent mutations.
 /// When the list is empty, it does not require an allocation.
@@ -90,8 +91,12 @@ impl Hash for DirectiveList {
 impl From<executable::DirectiveList> for DirectiveList {
     fn from(mut directives: executable::DirectiveList) -> Self {
         if directives.is_empty() {
-            return Self::default();
+            return Self::new();
         }
+
+        // Sort directives, which means specifically sorting their arguments, sorting the directives by
+        // name, and then breaking directive-name ties by comparing sorted arguments. This is used for
+        // hashing arguments in a way consistent with [same_directives()].
 
         for directive in directives.iter_mut() {
             sort_arguments(&mut directive.make_mut().arguments);
@@ -105,12 +110,6 @@ impl From<executable::DirectiveList> for DirectiveList {
                 .cmp(&right.name)
                 .then_with(|| compare_sorted_arguments(&left.arguments, &right.arguments))
         });
-
-        if directives.is_empty() {
-            EMPTY_DIRECTIVE_LISTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        } else {
-            NONEMPTY_DIRECTIVE_LISTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        }
 
         let mut partially_initialized = DirectiveListInner {
             hash: 0,
@@ -135,27 +134,21 @@ impl FromIterator<executable::Directive> for DirectiveList {
 }
 
 impl DirectiveList {
-    fn rehash(&mut self) {
-        if let Some(inner) = self.inner.as_mut().map(Arc::make_mut) {
-            inner.rehash();
-        }
+    /// Create an empty directive list.
+    pub(crate) const fn new() -> Self {
+        Self { inner: None }
     }
 
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
-
-    pub(crate) fn iter(&self) -> DirectiveIter<'_> {
-        self.inner.as_ref().map_or_else(DirectiveIter::empty, |inner| DirectiveIter {
-            directives: &inner.directives,
-            inner: inner.sort_order.iter(),
-        })
-    }
-
-    pub(crate) fn iter_original_order(
+    /// Iterate the directives in their original order.
+    pub(crate) fn iter(
         &self,
     ) -> impl ExactSizeIterator<Item = &Node<executable::Directive>> {
         self.inner.as_ref().map_or(&EMPTY_DIRECTIVE_LIST, |inner| &inner.directives).iter()
+    }
+
+    /// Iterate the directives in a consistent sort order.
+    pub(crate) fn iter_sorted(&self) -> DirectiveIterSorted<'_> {
+        self.inner.as_ref().map_or_else(DirectiveIterSorted::empty, |inner| inner.iter_sorted())
     }
 
     /// Remove one directive application by name.
@@ -170,7 +163,15 @@ impl DirectiveList {
             return None;
         };
 
-        // The directive exists: clone if necessary.
+        // The directive exists and is the only directive: switch to the empty representation
+        if inner.len() == 1 {
+            // The index is guaranteed to exist so we can safely use the panicky [] syntax.
+            let item = inner.directives[index].clone();
+            self.inner = None;
+            return Some(item);
+        }
+
+        // The directive exists: clone the inner structure if necessary.
         let inner = Arc::make_mut(inner);
         let sort_index = inner
             .sort_order
@@ -179,6 +180,7 @@ impl DirectiveList {
             .expect("index must exist in sort order");
         let item = inner.directives.remove(index);
         inner.sort_order.remove(sort_index);
+
         for order in &mut inner.sort_order {
             if *order > index {
                 *order -= 1;
@@ -189,11 +191,12 @@ impl DirectiveList {
     }
 }
 
-pub(crate) struct DirectiveIter<'a> {
+/// Iterate over a [`DirectiveList`] in a consistent sort order.
+pub(crate) struct DirectiveIterSorted<'a> {
     directives: &'a [Node<executable::Directive>],
     inner: std::slice::Iter<'a, usize>,
 }
-impl<'a> Iterator for DirectiveIter<'a> {
+impl<'a> Iterator for DirectiveIterSorted<'a> {
     type Item = &'a Node<executable::Directive>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -201,22 +204,13 @@ impl<'a> Iterator for DirectiveIter<'a> {
     }
 }
 
-impl ExactSizeIterator for DirectiveIter<'_> {
+impl ExactSizeIterator for DirectiveIterSorted<'_> {
     fn len(&self) -> usize {
         self.inner.len()
     }
 }
 
-impl<'a> IntoIterator for &'a DirectiveList {
-    type Item = &'a Node<executable::Directive>;
-    type IntoIter = DirectiveIter<'a>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter()
-    }
-}
-
-impl DirectiveIter<'_> {
+impl DirectiveIterSorted<'_> {
     fn empty() -> Self {
         Self { directives: &[], inner: [].iter() }
     }

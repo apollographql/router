@@ -93,7 +93,7 @@ impl Conditions {
 
     pub(crate) fn from_directives(directives: &DirectiveList) -> Result<Self, FederationError> {
         let mut variables = IndexMap::default();
-        for directive in directives {
+        for directive in directives.iter_sorted() {
             let negated = match directive.name.as_str() {
                 "include" => false,
                 "skip" => true,
