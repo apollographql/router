@@ -1103,10 +1103,7 @@ mod field_selection {
             }
         }
 
-        pub(crate) fn with_updated_directives(
-            &self,
-            directives: impl Into<DirectiveList>,
-        ) -> Self {
+        pub(crate) fn with_updated_directives(&self, directives: impl Into<DirectiveList>) -> Self {
             Self {
                 field: self.field.with_updated_directives(directives),
                 selection_set: self.selection_set.clone(),
@@ -1609,9 +1606,7 @@ mod inline_fragment_selection {
     use std::hash::Hasher;
     use std::ops::Deref;
 
-    use apollo_compiler::executable;
     use serde::Serialize;
-    use apollo_compiler::Name;
 
     use super::DirectiveList;
     use crate::error::FederationError;
@@ -1648,10 +1643,7 @@ mod inline_fragment_selection {
             }
         }
 
-        pub(crate) fn with_updated_directives(
-            &self,
-            directives: impl Into<DirectiveList>,
-        ) -> Self {
+        pub(crate) fn with_updated_directives(&self, directives: impl Into<DirectiveList>) -> Self {
             Self {
                 inline_fragment: self.inline_fragment.with_updated_directives(directives),
                 selection_set: self.selection_set.clone(),
@@ -3790,11 +3782,7 @@ impl TryFrom<&Operation> for executable::Operation {
             operation_type,
             name: normalized_operation.name.clone(),
             variables: normalized_operation.variables.deref().clone(),
-            directives: normalized_operation
-                .directives
-                .iter()
-                .cloned()
-                .collect(),
+            directives: normalized_operation.directives.iter().cloned().collect(),
             selection_set: (&normalized_operation.selection_set).try_into()?,
         })
     }
@@ -3806,11 +3794,7 @@ impl TryFrom<&Fragment> for executable::Fragment {
     fn try_from(normalized_fragment: &Fragment) -> Result<Self, Self::Error> {
         Ok(Self {
             name: normalized_fragment.name.clone(),
-            directives: normalized_fragment
-                .directives
-                .iter()
-                .cloned()
-                .collect(),
+            directives: normalized_fragment.directives.iter().cloned().collect(),
             selection_set: (&normalized_fragment.selection_set).try_into()?,
         })
     }
@@ -3881,11 +3865,7 @@ impl TryFrom<&Field> for executable::Field {
             alias: normalized_field.alias.to_owned(),
             name: normalized_field.name().to_owned(),
             arguments: normalized_field.arguments.deref().to_owned(),
-            directives: normalized_field
-                .directives
-                .iter()
-                .cloned()
-                .collect(),
+            directives: normalized_field.directives.iter().cloned().collect(),
             selection_set,
         })
     }

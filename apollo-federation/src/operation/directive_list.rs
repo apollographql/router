@@ -1,4 +1,6 @@
 use std::cmp::Ordering;
+use std::fmt;
+use std::fmt::Display;
 use std::hash::BuildHasher;
 use std::hash::Hash;
 use std::hash::Hasher;
@@ -31,11 +33,14 @@ struct DirectiveListInner {
 impl PartialEq for DirectiveListInner {
     fn eq(&self, other: &Self) -> bool {
         self.hash == other.hash
-            && self.iter_sorted().zip(other.iter_sorted()).all(|(left, right)| {
-                left.name == right.name
-                    && compare_sorted_arguments(&left.arguments, &right.arguments)
-                        == Ordering::Equal
-            })
+            && self
+                .iter_sorted()
+                .zip(other.iter_sorted())
+                .all(|(left, right)| {
+                    left.name == right.name
+                        && compare_sorted_arguments(&left.arguments, &right.arguments)
+                            == Ordering::Equal
+                })
     }
 }
 
@@ -81,13 +86,25 @@ pub(crate) struct DirectiveList {
 impl Deref for DirectiveList {
     type Target = executable::DirectiveList;
     fn deref(&self) -> &Self::Target {
-        self.inner.as_ref().map_or(&EMPTY_DIRECTIVE_LIST, |inner| &inner.directives)
+        self.inner
+            .as_ref()
+            .map_or(&EMPTY_DIRECTIVE_LIST, |inner| &inner.directives)
     }
 }
 
 impl Hash for DirectiveList {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         state.write_u64(self.inner.as_ref().map_or(0, |inner| inner.hash))
+    }
+}
+
+impl Display for DirectiveList {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(inner) = &self.inner {
+            inner.directives.fmt(f)
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -120,7 +137,9 @@ impl From<executable::DirectiveList> for DirectiveList {
             sort_order,
         };
         partially_initialized.rehash();
-        Self { inner: Some(Arc::new(partially_initialized)) }
+        Self {
+            inner: Some(Arc::new(partially_initialized)),
+        }
     }
 }
 
@@ -143,15 +162,18 @@ impl DirectiveList {
     }
 
     /// Iterate the directives in their original order.
-    pub(crate) fn iter(
-        &self,
-    ) -> impl ExactSizeIterator<Item = &Node<executable::Directive>> {
-        self.inner.as_ref().map_or(&EMPTY_DIRECTIVE_LIST, |inner| &inner.directives).iter()
+    pub(crate) fn iter(&self) -> impl ExactSizeIterator<Item = &Node<executable::Directive>> {
+        self.inner
+            .as_ref()
+            .map_or(&EMPTY_DIRECTIVE_LIST, |inner| &inner.directives)
+            .iter()
     }
 
     /// Iterate the directives in a consistent sort order.
     pub(crate) fn iter_sorted(&self) -> DirectiveIterSorted<'_> {
-        self.inner.as_ref().map_or_else(DirectiveIterSorted::empty, |inner| inner.iter_sorted())
+        self.inner
+            .as_ref()
+            .map_or_else(DirectiveIterSorted::empty, |inner| inner.iter_sorted())
     }
 
     /// Remove one directive application by name.
@@ -215,7 +237,10 @@ impl ExactSizeIterator for DirectiveIterSorted<'_> {
 
 impl DirectiveIterSorted<'_> {
     fn empty() -> Self {
-        Self { directives: &[], inner: [].iter() }
+        Self {
+            directives: &[],
+            inner: [].iter(),
+        }
     }
 }
 

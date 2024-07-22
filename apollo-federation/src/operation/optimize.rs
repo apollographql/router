@@ -3286,8 +3286,8 @@ mod tests {
     mod test_empty_branch_removal {
         use apollo_compiler::name;
 
-        use crate::operation::SelectionKey;
         use super::*;
+        use crate::operation::SelectionKey;
 
         const TEST_SCHEMA_FOR_EMPTY_BRANCH_REMOVAL: &str = r#"
             type Query {
