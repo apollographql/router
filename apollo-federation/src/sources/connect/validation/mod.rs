@@ -56,13 +56,13 @@ use std::ops::Range;
 
 use apollo_compiler::ast::Value;
 use apollo_compiler::name;
+use apollo_compiler::parser::SourceMap;
+use apollo_compiler::parser::SourceSpan as NodeLocation;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::NodeLocation;
 use apollo_compiler::Schema;
-use apollo_compiler::SourceMap;
 use coordinates::source_base_url_argument_coordinate;
 use coordinates::source_http_argument_coordinate;
 use extended_type::validate_extended_type;
@@ -72,15 +72,14 @@ use itertools::Itertools;
 use source_name::SourceName;
 use url::Url;
 
+use crate::link::spec::Identity;
 use crate::link::Import;
 use crate::link::Link;
+use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
-use crate::sources::connect::spec::schema::SOURCE_HEADERS_ARGUMENT_NAME;
-use crate::sources::connect::spec::schema::SOURCE_HTTP_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_NAME_ARGUMENT_NAME;
 use crate::sources::connect::ConnectSpecDefinition;
-use crate::subgraph::database::federation_link_identity;
 use crate::subgraph::spec::CONTEXT_DIRECTIVE_NAME;
 use crate::subgraph::spec::FROM_CONTEXT_DIRECTIVE_NAME;
 use crate::subgraph::spec::INTF_OBJECT_DIRECTIVE_NAME;
@@ -166,7 +165,7 @@ pub fn validate(schema: Schema) -> Vec<Message> {
 
 fn check_conflicting_directives(schema: &Schema) -> Vec<Message> {
     let Some((fed_link, fed_link_directive)) =
-        Link::for_identity(schema, &federation_link_identity())
+        Link::for_identity(schema, &Identity::federation_identity())
     else {
         return Vec::new();
     };
@@ -219,7 +218,7 @@ fn validate_source(directive: &Component<Directive>, sources: &SourceMap) -> Sou
     let mut errors = Vec::new();
 
     if let Some(http_arg) = directive
-        .argument_by_name(&SOURCE_HTTP_ARGUMENT_NAME)
+        .argument_by_name(&HTTP_ARGUMENT_NAME)
         .and_then(|arg| arg.as_object())
     {
         // Validate URL argument
@@ -239,28 +238,15 @@ fn validate_source(directive: &Component<Directive>, sources: &SourceMap) -> Sou
         }
 
         // Validate headers argument
-        if let Some(headers) = get_http_headers_arg(http_arg, &SOURCE_HEADERS_ARGUMENT_NAME) {
-            let header_errors = validate_headers_arg(
-                &directive.name,
-                &format!(
-                    "{}.{}",
-                    SOURCE_HTTP_ARGUMENT_NAME, SOURCE_HEADERS_ARGUMENT_NAME
-                ),
-                headers,
-                sources,
-                None,
-                None,
-            );
-
-            if !header_errors.is_empty() {
-                errors.extend(header_errors);
-            }
+        if let Some(headers) = get_http_headers_arg(http_arg) {
+            let header_errors = validate_headers_arg(&directive.name, headers, sources, None, None);
+            errors.extend(header_errors);
         }
     } else {
         errors.push(Message {
             code: Code::GraphQLError,
             message: format!(
-                "{coordinate} must have a `{SOURCE_HTTP_ARGUMENT_NAME}` argument.",
+                "{coordinate} must have a `{HTTP_ARGUMENT_NAME}` argument.",
                 coordinate = source_http_argument_coordinate(&directive.name),
             ),
             locations: Location::from_node(directive.location(), sources)
@@ -353,15 +339,16 @@ pub struct Location {
 impl Location {
     // TODO: This is a ripoff of GraphQLLocation::from_node in apollo_compiler, contribute it back
     fn from_node(node: Option<NodeLocation>, sources: &SourceMap) -> Option<Range<Self>> {
-        let node = node?;
-        let source = sources.get(&node.file_id())?;
-        let start = source
-            .get_line_column(node.offset())
-            .map(|(line, column)| Location { line, column })?;
-        let end = source
-            .get_line_column(node.end_offset())
-            .map(|(line, column)| Location { line, column })?;
-        Some(Range { start, end })
+        node?.line_column_range(sources).map(|range| Range {
+            start: Self {
+                line: range.start.line - 1,
+                column: range.start.column - 1,
+            },
+            end: Self {
+                line: range.end.line - 1,
+                column: range.end.column - 1,
+            },
+        })
     }
 }
 
@@ -377,7 +364,10 @@ pub enum Code {
     SourceScheme,
     SourceNameMismatch,
     SubscriptionInConnectors,
+    /// Query field is missing the `@connect` directive
     QueryFieldMissingConnect,
+    /// Mutation field is missing the `@connect` directive
+    MutationFieldMissingConnect,
     /// The `@connect` is using a `source`, but the URL is absolute. This is trouble because
     /// the `@source` URL will be joined with the `@connect` URL, so the `@connect` URL should
     /// actually be a path only.
@@ -420,6 +410,8 @@ pub enum Code {
     UnsupportedFederationDirective,
     /// Abstract types are not allowed when using connectors
     UnsupportedAbstractType,
+    /// Header does not define `from` or `value`
+    MissingHeaderSource,
 }
 
 impl Code {

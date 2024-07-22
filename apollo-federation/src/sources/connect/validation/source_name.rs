@@ -2,11 +2,11 @@ use std::fmt::Display;
 
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Value;
+use apollo_compiler::parser::SourceMap;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::SourceMap;
 
 use super::coordinates::connect_directive_name_coordinate;
 use super::coordinates::source_name_argument_coordinate;

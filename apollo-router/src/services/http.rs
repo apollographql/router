@@ -60,7 +60,7 @@ impl HttpClientServiceFactory {
 
         HttpClientServiceFactory {
             service: Arc::new(service),
-            plugins: Arc::new(IndexMap::new()),
+            plugins: Arc::new(IndexMap::default()),
         }
     }
 

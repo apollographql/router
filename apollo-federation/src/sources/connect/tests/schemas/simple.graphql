@@ -17,9 +17,8 @@ schema
       http: {
         baseURL: "https://jsonplaceholder.typicode.com/"
         headers: [
-          { name: "X-Auth-Token", as: "AuthToken" }
+          { name: "AuthToken", from: "X-Auth-Token" }
           { name: "user-agent", value: "Firefox" }
-          { name: "X-From-Env" }
         ]
       }
     }

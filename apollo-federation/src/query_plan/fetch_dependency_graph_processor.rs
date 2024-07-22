@@ -30,7 +30,7 @@ use crate::query_plan::SequenceNode;
 /// (see `selectionCost` method),
 /// this can be though of as saying that resolving a single field is in general
 /// a tiny fraction of the actual cost of doing a subgraph fetch.
-pub(crate) const FETCH_COST: QueryPlanCost = 1000.0;
+const FETCH_COST: QueryPlanCost = 1000.0;
 
 /// Constant used during query plan cost computation
 /// as a multiplier to the cost of fetches made in sequences.
@@ -57,14 +57,14 @@ pub(crate) struct FetchDependencyGraphToQueryPlanProcessor {
 /// A plan is essentially some mix of sequences and parallels of fetches. And the plan cost
 /// is about minimizing both:
 ///  1. The expected total latency of executing the plan. Typically, doing 2 fetches in
-///    parallel will most likely have much better latency then executing those exact same
-///    fetches in sequence, and so the cost of the latter must be greater than that of
-///    the former.
+///     parallel will most likely have much better latency then executing those exact same
+///     fetches in sequence, and so the cost of the latter must be greater than that of
+///     the former.
 ///  2. The underlying use of resources. For instance, if we query 2 fields and we have
-///    the choice between getting those 2 fields from a single subgraph in 1 fetch, or
-///    get each from a different subgraph with 2 fetches in parallel, then we want to
-///    favor the former as just doing a fetch in and of itself has a cost in terms of
-///    resources consumed.
+///     the choice between getting those 2 fields from a single subgraph in 1 fetch, or
+///     get each from a different subgraph with 2 fetches in parallel, then we want to
+///     favor the former as just doing a fetch in and of itself has a cost in terms of
+///     resources consumed.
 ///
 /// Do note that at the moment, this cost is solely based on the "shape" of the plan and has
 /// to make some conservative assumption regarding concrete runtime behaviour. In particular,

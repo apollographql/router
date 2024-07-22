@@ -1,7 +1,7 @@
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable::Selection;
 use apollo_federation::sources::connect::Connector;
 use apollo_federation::sources::connect::EntityResolver;
-use indexmap::IndexMap;
 use itertools::Itertools;
 use serde_json_bytes::json;
 use serde_json_bytes::ByteString;
@@ -213,7 +213,8 @@ fn root_fields(
 
     let op = request
         .operation
-        .get_operation(None)
+        .operations
+        .get(None)
         .map_err(|_| InvalidOperation("no operation document".into()))?;
 
     op.selection_set
@@ -292,7 +293,8 @@ fn entities_from_request(
 
     let op = request
         .operation
-        .get_operation(None)
+        .operations
+        .get(None)
         .map_err(|_| InvalidOperation("no operation document".into()))?;
 
     let (entities_field, typename_requested) = graphql_utils::get_entity_fields(op)?;
@@ -374,7 +376,8 @@ fn entities_with_fields_from_request(
 
     let op = request
         .operation
-        .get_operation(None)
+        .operations
+        .get(None)
         .map_err(|_| InvalidOperation("no operation document".into()))?;
 
     let (entities_field, typename_requested) = graphql_utils::get_entity_fields(op)?;

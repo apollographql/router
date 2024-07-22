@@ -209,13 +209,13 @@ mod helpers {
     use crate::link::spec::Identity;
     use crate::link::Link;
     use crate::query_graph::extract_subgraphs_from_supergraph::new_empty_fed_2_subgraph_schema;
+    use crate::schema::position::ObjectFieldDefinitionPosition;
+    use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
     use crate::schema::position::ObjectTypeDefinitionPosition;
     use crate::schema::position::SchemaRootDefinitionKind;
     use crate::schema::position::SchemaRootDefinitionPosition;
     use crate::schema::position::TypeDefinitionPosition;
     use crate::schema::FederationSchema;
-    use crate::schema::ObjectFieldDefinitionPosition;
-    use crate::schema::ObjectOrInterfaceFieldDefinitionPosition;
     use crate::schema::ValidFederationSchema;
     use crate::sources::connect::json_selection::JSONSelectionVisitor;
     use crate::sources::connect::url_template::Parameter;
@@ -387,7 +387,7 @@ mod helpers {
                 name: parent_type.name.clone(),
                 implements_interfaces: parent_type.implements_interfaces.clone(),
                 directives: filter_directives(&self.directive_deny_list, &parent_type.directives),
-                fields: IndexMap::from([(
+                fields: IndexMap::from_iter([(
                     field_type.ty.inner_named_type().clone(),
                     Component::new(field_type),
                 )]),
@@ -701,9 +701,9 @@ mod helpers {
                 Node::new(ObjectType {
                     description: None,
                     name,
-                    implements_interfaces: IndexSet::new(),
+                    implements_interfaces: IndexSet::with_hasher(Default::default()),
                     directives: DirectiveList::new(),
-                    fields: IndexMap::from([(field_name, dummy_field)]),
+                    fields: IndexMap::from_iter([(field_name, dummy_field)]),
                 }),
             )?;
 

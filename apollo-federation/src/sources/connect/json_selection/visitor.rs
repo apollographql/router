@@ -75,7 +75,9 @@ pub trait JSONSelectionVisitor: Sized {
         let mut current_depth = 0;
         while let Some((depth, next)) = to_visit.pop_front() {
             if depth < current_depth {
-                self.exit_group()?;
+                for _ in depth..current_depth {
+                    self.exit_group()?;
+                }
                 current_depth = depth;
             }
 
@@ -216,7 +218,7 @@ mod tests {
     fn it_iterates_over_nested_selection() {
         let mut visited = Vec::new();
         let visitor = TestVisitor::new(&mut visited);
-        let (unmatched, selection) = JSONSelection::parse("a { b { c { d { e } } } }").unwrap();
+        let (unmatched, selection) = JSONSelection::parse("a { b { c { d { e } } } f }").unwrap();
         assert!(unmatched.is_empty());
 
         visitor.walk(&selection).unwrap();
@@ -226,6 +228,7 @@ mod tests {
         |  |  c
         |  |  |  d
         |  |  |  |  e
+        |  f
         "###);
     }
 

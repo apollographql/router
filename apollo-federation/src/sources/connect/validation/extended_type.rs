@@ -1,17 +1,17 @@
 use std::sync::Arc;
 
 use apollo_compiler::ast::FieldDefinition;
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::parser::FileId;
+use apollo_compiler::parser::SourceFile;
+use apollo_compiler::parser::SourceMap;
+use apollo_compiler::parser::SourceSpan as NodeLocation;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
-use apollo_compiler::FileId;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::NodeLocation;
 use apollo_compiler::Schema;
-use apollo_compiler::SourceFile;
-use apollo_compiler::SourceMap;
-use indexmap::IndexMap;
 
 use super::coordinates::connect_directive_coordinate;
 use super::coordinates::connect_directive_http_coordinate;
@@ -28,9 +28,8 @@ use super::source_name::SourceName;
 use super::Code;
 use super::Location;
 use super::Message;
-use crate::sources::connect::spec::schema::CONNECT_HEADERS_ARGUMENT_NAME;
-use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
 
 pub(super) fn validate_extended_type(
     extended_type: &ExtendedType,
@@ -65,6 +64,7 @@ pub(super) fn validate_extended_type(
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ObjectCategory {
     Query,
+    Mutation,
     Other,
 }
 
@@ -102,6 +102,13 @@ fn validate_object_fields(
         .is_some_and(|query| query.name == object.name)
     {
         ObjectCategory::Query
+    } else if schema
+        .schema_definition
+        .mutation
+        .as_ref()
+        .is_some_and(|mutation| mutation.name == object.name)
+    {
+        ObjectCategory::Mutation
     } else {
         ObjectCategory::Other
     };
@@ -138,19 +145,24 @@ fn validate_field(
         .iter()
         .find(|directive| directive.name == *connect_directive_name)
     else {
-        if category == ObjectCategory::Query {
-            errors.push(Message {
-                code: Code::QueryFieldMissingConnect,
-                message: format!(
-                    "The field `{object_name}.{field}` has no `@{connect_directive_name}` directive.",
-                    field = field.name,
-                    object_name = object.name,
-                ),
-                locations: Location::from_node(field.location(), source_map)
-                    .into_iter()
-                    .collect(),
-            });
+        match category {
+            ObjectCategory::Query => errors.push(get_missing_connect_directive_message(
+                Code::QueryFieldMissingConnect,
+                field,
+                object,
+                source_map,
+                connect_directive_name,
+            )),
+            ObjectCategory::Mutation => errors.push(get_missing_connect_directive_message(
+                Code::MutationFieldMissingConnect,
+                field,
+                object,
+                source_map,
+                connect_directive_name,
+            )),
+            _ => (),
         }
+
         return errors;
     };
 
@@ -166,13 +178,13 @@ fn validate_field(
     ));
 
     let Some((http_arg, http_arg_location)) = connect_directive
-        .argument_by_name(&CONNECT_HTTP_ARGUMENT_NAME)
+        .argument_by_name(&HTTP_ARGUMENT_NAME)
         .and_then(|arg| Some((arg.as_object()?, arg.location())))
     else {
         errors.push(Message {
             code: Code::GraphQLError,
             message: format!(
-                "{coordinate} must have a `{CONNECT_HTTP_ARGUMENT_NAME}` argument.",
+                "{coordinate} must have a `{HTTP_ARGUMENT_NAME}` argument.",
                 coordinate =
                     connect_directive_coordinate(connect_directive_name, object, &field.name),
             ),
@@ -251,10 +263,9 @@ fn validate_field(
         }
     }
 
-    if let Some(headers) = get_http_headers_arg(http_arg, &CONNECT_HEADERS_ARGUMENT_NAME) {
+    if let Some(headers) = get_http_headers_arg(http_arg) {
         errors.extend(validate_headers_arg(
             connect_directive_name,
-            &format!("{CONNECT_HTTP_ARGUMENT_NAME}.{CONNECT_HEADERS_ARGUMENT_NAME}"),
             headers,
             source_map,
             Some(&object.name),
@@ -274,6 +285,26 @@ fn validate_abstract_type(
         code: Code::UnsupportedAbstractType,
         message: format!("Abstract schema types, such as `{keyword}`, are not supported when using connectors. You can check out our documentation at https://go.apollo.dev/connectors/best-practices#abstract-schema-types-are-unsupported."),
         locations: Location::from_node(node, source_map)
+            .into_iter()
+            .collect(),
+    }
+}
+
+fn get_missing_connect_directive_message(
+    code: Code,
+    field: &Component<FieldDefinition>,
+    object: &Node<ObjectType>,
+    source_map: &SourceMap,
+    connect_directive_name: &Name,
+) -> Message {
+    Message {
+        code,
+        message: format!(
+            "The field `{object_name}.{field}` has no `@{connect_directive_name}` directive.",
+            field = field.name,
+            object_name = object.name,
+        ),
+        locations: Location::from_node(field.location(), source_map)
             .into_iter()
             .collect(),
     }

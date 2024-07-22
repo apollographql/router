@@ -84,6 +84,8 @@ use crate::Configuration;
 use crate::Context;
 use crate::Notify;
 
+pub(crate) const FIRST_EVENT_CONTEXT_KEY: &str = "apollo_router::supergraph::first_event";
+
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
 
@@ -359,6 +361,20 @@ async fn service_call(
                 let supergraph_response_event = context
                     .extensions()
                     .with_lock(|lock| lock.get::<SupergraphEventResponse>().cloned());
+                let mut first_event = true;
+                let mut inserted = false;
+                let ctx = context.clone();
+                let response_stream = response_stream.inspect(move |_| {
+                    if first_event {
+                        first_event = false;
+                    } else if !inserted {
+                        ctx.insert_json_value(
+                            FIRST_EVENT_CONTEXT_KEY,
+                            serde_json_bytes::Value::Bool(false),
+                        );
+                        inserted = true;
+                    }
+                });
                 match supergraph_response_event {
                     Some(supergraph_response_event) => {
                         let mut attrs = Vec::with_capacity(4);
@@ -844,7 +860,7 @@ impl PluggableSupergraphServiceBuilder {
             schema.clone(),
             subgraph_schemas.clone(),
             &configuration,
-            IndexMap::new(),
+            IndexMap::default(),
         )
         .await?;
 

@@ -311,6 +311,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                             );
                             // Dedup happens here
                             return Ok(SubgraphResponse::builder()
+                                .subgraph_name(service_name.clone())
                                 .context(context)
                                 .extensions(Object::default())
                                 .build());
@@ -521,6 +522,7 @@ async fn call_websocket(
         // Dedup happens here
         return Ok(SubgraphResponse::builder()
             .context(context)
+            .subgraph_name(service_name.clone())
             .extensions(Object::default())
             .build());
     }
@@ -669,7 +671,7 @@ async fn call_websocket(
         .into_subscription(body, subgraph_cfg.heartbeat_interval.into_option())
         .await
         .map_err(|err| FetchError::SubrequestWsError {
-            service: service_name,
+            service: service_name.clone(),
             reason: format!("cannot send the subgraph request to websocket stream: {err:?}"),
         })?;
 
@@ -703,6 +705,7 @@ async fn call_websocket(
     Ok(SubgraphResponse::new_from_response(
         resp.map(|_| graphql::Response::default()),
         context,
+        service_name,
     ))
 }
 
@@ -972,10 +975,12 @@ pub(crate) async fn process_batch(
 
     // We are going to pop contexts from the back, so let's reverse our contexts
     contexts.reverse();
+    let subgraph_name = service.clone();
     // Build an http Response for each graphql response
     let subgraph_responses: Result<Vec<_>, _> = graphql_responses
         .into_iter()
         .map(|res| {
+            let subgraph_name = subgraph_name.clone();
             http::Response::builder()
                 .status(parts.status)
                 .version(parts.version)
@@ -984,7 +989,8 @@ pub(crate) async fn process_batch(
                     *http_res.headers_mut() = parts.headers.clone();
                     // Use the original context for the request to create the response
                     let context = contexts.pop().expect("we have a context for each response");
-                    let resp = SubgraphResponse::new_from_response(http_res, context);
+                    let resp =
+                        SubgraphResponse::new_from_response(http_res, context, subgraph_name);
 
                     tracing::debug!("we have a resp: {resp:?}");
                     resp
@@ -1308,6 +1314,7 @@ pub(crate) async fn call_single_http(
                     .body(graphql::Response::default())
                     .expect("it won't fail everything is coming from an existing response"),
                 context.clone(),
+                service_name.to_owned(),
             );
             should_log = condition.lock().evaluate_response(&subgraph_response);
         }
@@ -1348,7 +1355,11 @@ pub(crate) async fn call_single_http(
         http_response_to_graphql_response(service_name, content_type, body, &parts);
 
     let resp = http::Response::from_parts(parts, graphql_response);
-    Ok(SubgraphResponse::new_from_response(resp, context))
+    Ok(SubgraphResponse::new_from_response(
+        resp,
+        context,
+        service_name.to_owned(),
+    ))
 }
 
 #[derive(Clone, Debug)]

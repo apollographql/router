@@ -23,12 +23,12 @@ pub use url_template::URLTemplate;
 
 pub use self::models::Connector;
 pub use self::models::EntityResolver;
-pub use self::models::HTTPHeader;
 pub use self::models::HTTPMethod;
+pub use self::models::HeaderSource;
 pub use self::models::HttpJsonTransport;
+use crate::schema::position::ObjectFieldDefinitionPosition;
+use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
-use crate::schema::ObjectFieldDefinitionPosition;
-use crate::schema::ObjectOrInterfaceFieldDefinitionPosition;
 
 #[derive(Debug, Clone)]
 pub struct ConnectId {

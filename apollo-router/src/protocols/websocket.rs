@@ -686,11 +686,6 @@ where
     }
 }
 
-#[derive(Deserialize, Serialize)]
-struct WithId {
-    id: String,
-}
-
 #[cfg(test)]
 mod tests {
     use std::convert::Infallible;

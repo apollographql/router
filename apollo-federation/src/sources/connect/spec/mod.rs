@@ -26,7 +26,6 @@ pub(crate) use directives::extract_connect_directive_arguments;
 pub(crate) use directives::extract_source_directive_arguments;
 use lazy_static::lazy_static;
 pub(crate) use schema::ConnectHTTPArguments;
-pub(crate) use schema::HTTPHeaderOption;
 pub(crate) use schema::SourceHTTPArguments;
 
 use self::schema::CONNECT_DIRECTIVE_NAME_IN_SPEC;

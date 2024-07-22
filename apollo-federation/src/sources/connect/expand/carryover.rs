@@ -20,13 +20,13 @@ use crate::schema::position::InterfaceFieldArgumentDefinitionPosition;
 use crate::schema::position::InterfaceFieldDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
+use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::ScalarTypeDefinitionPosition;
 use crate::schema::position::SchemaDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
 use crate::schema::referencer::DirectiveReferencers;
 use crate::schema::FederationSchema;
-use crate::schema::ObjectFieldDefinitionPosition;
 
 const TAG_DIRECTIVE_NAME_IN_SPEC: Name = name!("tag");
 const AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC: Name = name!("authenticated");
@@ -112,10 +112,13 @@ pub(super) fn carryover_directives(
                     let scalar_type_pos = ScalarTypeDefinitionPosition {
                         type_name: link.type_name_in_schema(&name!(Scope)),
                     };
-                    scalar_type_pos.get(from.schema()).and_then(|def| {
-                        scalar_type_pos.pre_insert(to)?;
-                        scalar_type_pos.insert(to, def.clone())
-                    })?;
+                    scalar_type_pos
+                        .get(from.schema())
+                        .map_err(From::from)
+                        .and_then(|def| {
+                            scalar_type_pos.pre_insert(to)?;
+                            scalar_type_pos.insert(to, def.clone())
+                        })?;
 
                     copy_directive_definition(from, to, directive_name.clone())?;
                 }
@@ -140,10 +143,13 @@ pub(super) fn carryover_directives(
                     let scalar_type_pos = ScalarTypeDefinitionPosition {
                         type_name: link.type_name_in_schema(&name!(Policy)),
                     };
-                    scalar_type_pos.get(from.schema()).and_then(|def| {
-                        scalar_type_pos.pre_insert(to)?;
-                        scalar_type_pos.insert(to, def.clone())
-                    })?;
+                    scalar_type_pos
+                        .get(from.schema())
+                        .map_err(From::from)
+                        .and_then(|def| {
+                            scalar_type_pos.pre_insert(to)?;
+                            scalar_type_pos.insert(to, def.clone())
+                        })?;
 
                     copy_directive_definition(from, to, directive_name.clone())?;
                 }
@@ -196,10 +202,13 @@ fn copy_directive_definition(
 ) -> Result<(), FederationError> {
     let def_pos = DirectiveDefinitionPosition { directive_name };
 
-    def_pos.get(from.schema()).and_then(|def| {
-        def_pos.pre_insert(to)?;
-        def_pos.insert(to, def.clone())
-    })
+    def_pos
+        .get(from.schema())
+        .map_err(From::from)
+        .and_then(|def| {
+            def_pos.pre_insert(to)?;
+            def_pos.insert(to, def.clone())
+        })
 }
 
 impl Link {
@@ -214,7 +223,7 @@ impl Link {
         if let Some(purpose) = &self.purpose {
             arguments.push(
                 Argument {
-                    name: name!(purpose),
+                    name: name!(for),
                     value: Value::Enum(purpose.into()).into(),
                 }
                 .into(),

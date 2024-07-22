@@ -1,189 +1,149 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 use apollo_compiler::ast::Value;
-use apollo_compiler::name;
+use apollo_compiler::parser::SourceMap;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::SourceMap;
 use http::HeaderName;
-use itertools::Itertools;
 
 use super::coordinates::http_header_argument_coordinate;
+use super::require_value_is_str;
 use super::Code;
 use super::Location;
 use super::Message;
+use crate::sources::connect::spec::schema::HEADERS_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME as FROM_ARG;
+use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME as NAME_ARG;
+use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME as VALUE_ARG;
 
-pub(super) fn validate_headers_arg(
-    directive_name: &Name,
-    argument_name: &str,
-    headers: &Node<Value>,
-    source_map: &SourceMap,
-    object: Option<&Name>,
-    field: Option<&Name>,
-) -> Vec<Message> {
-    let mut messages = Vec::new();
-    let mut unique_header_set = HashSet::new();
-
+pub(super) fn validate_headers_arg<'a>(
+    directive_name: &'a Name,
+    headers: &'a Node<Value>,
+    source_map: &'a SourceMap,
+    object: Option<&'a Name>,
+    field: Option<&'a Name>,
+) -> impl Iterator<Item = Message> + 'a {
+    #[allow(clippy::mutable_key_type)]
+    let mut names = HashMap::new();
     headers
         .as_list()
-        .map(|l| l.iter().filter_map(|o| o.as_object()).collect_vec())
-        .unwrap_or_else(|| headers.as_object().map(|o| vec![o]).unwrap_or_default())
         .into_iter()
-        .for_each(|arg_pairs| {
-            let pair_coordinate = &http_header_argument_coordinate(
+        .flat_map(|l| l.iter().filter_map(|o| o.as_object()))
+        .chain(headers.as_object())
+        .flat_map(move |arg_pairs| {
+            let headers_coordinate = &http_header_argument_coordinate(
                 directive_name,
-                argument_name,
                 object,
                 field,
             );
+            let mut messages = Vec::new();
 
-            let name_arg = arg_pairs.iter().find_map(|(key, value)| (key == &name!("name")).then_some(value));
-            let as_arg = arg_pairs.iter().find_map(|(key, value)| (key == &name!("as")).then_some(value));
-            let value_arg = arg_pairs.iter().find_map(|(key, value)| (key == &name!("value")).then_some(value));
-            let from_arg = arg_pairs.iter().find_map(|(key, value)| (key == &name!("from")).then_some(value));
+            let name_arg = arg_pairs.iter().find_map(|(key, value)| (key == &NAME_ARG).then_some(value));
+            let value_arg = arg_pairs.iter().find_map(|(key, value)| (key == &VALUE_ARG).then_some(value));
+            let from_arg = arg_pairs.iter().find_map(|(key, value)| (key == &FROM_ARG).then_some(value));
 
             // validate `name`
-            if let Some(name_value) = name_arg {
-                if let Some(err) = validate_header_name(&name!("name"), name_value, pair_coordinate, source_map).err() {
-                    messages.push(err);
-                } else if let Some(s) = name_value.as_str() {
-                    if !unique_header_set.insert(s) {
-                        messages.push(Message {
-                            code: Code::HttpHeaderNameCollision,
-                            message: format!("{pair_coordinate} must have a unique value for `name`."),
-                            locations: Location::from_node(name_value.location(), source_map)
-                                .into_iter()
-                                .collect(),
-                        });
-                    }
-                }
-            } else {
+            let Some(name_value) = name_arg else {
                 // `name` must be provided
                 messages.push(Message {
-                    code: Code::HttpHeaderNameCollision,
-                    message: format!("{pair_coordinate} must include a `name` value."),
+                    code: Code::GraphQLError,
+                    message: format!("{headers_coordinate} must include a `name` value."),
                     // TODO: get this closer to the pair
                     locations: Location::from_node(headers.location(), source_map)
                         .into_iter()
                         .collect(),
                 });
-            }
+                return messages;
+            };
 
-            // validate `from`
-            if let Some(from_value) = from_arg {
-                if let Some(err) = validate_header_name(&name!("from"), from_value, pair_coordinate, source_map).err() {
+            let header_name = match validate_header_name(&NAME_ARG, name_value, headers_coordinate, source_map) {
+                Err(err) => {
                     messages.push(err);
+                    None
+                },
+                Ok(value) => Some(value),
+            };
+
+            if let Some(header_name) = header_name {
+                if let Some(duplicate) = names.insert(header_name.clone(), name_value.location()) {
+                    messages.push(Message {
+                        code: Code::HttpHeaderNameCollision,
+                        message: format!(
+                            "Duplicate header names are not allowed. The header name '{}' at {} is already defined.",
+                            header_name,
+                            headers_coordinate
+                        ),
+                        locations: Location::from_node(name_value.location(), source_map)
+                            .into_iter()
+                            .chain(
+                                Location::from_node(duplicate, source_map)
+                            )
+                            .collect(),
+                    });
                 }
             }
 
-            if let (Some(from_arg), Some(name_arg)) = (from_arg, name_arg) {
-                if let (Some(from_value), Some(name_value)) = (from_arg.as_str(), name_arg.as_str()) {
-                    if from_value == name_value {
-                        messages.push(Message {
-                            code: Code::HttpHeaderNameCollision,
-                            message: format!("{pair_coordinate} must have unique values for `name` and `from` keys."),
-                            locations: Location::from_node(from_arg.location(), source_map)
-                                .into_iter()
-                                .collect(),
-                        });
+            messages.extend(match (from_arg, value_arg)  {
+                (Some(from_value), None) => {
+                    validate_header_name(&FROM_ARG, from_value, headers_coordinate, source_map).err()
+                },
+                (None, Some(value_arg)) => {
+                    validate_header_value(value_arg, headers_coordinate, source_map)
+                },
+                (Some(from_arg), Some(value_arg)) => Some(
+                    Message {
+                        code: Code::InvalidHttpHeaderMapping,
+                        message: format!("{headers_coordinate} uses both `from` and `value` keys together. Please choose only one."),
+                        locations: Location::from_node(from_arg.location(), source_map)
+                            .into_iter()
+                            .chain(
+                                Location::from_node(value_arg.location(), source_map)
+                            )
+                            .collect(),
                     }
-                }
-            }
-
-            // validate `as`
-            if let Some(as_value) = as_arg {
-                if let Some(err) = validate_header_name(&name!("as"), as_value, pair_coordinate, source_map).err() {
-                    messages.push(err);
-                }
-            }
-
-            if let (Some(as_arg), Some(name_arg)) = (as_arg, name_arg) {
-                if let (Some(as_value), Some(name_value)) = (as_arg.as_str(), name_arg.as_str()) {
-                    if as_value == name_value {
-                        messages.push(Message {
-                            code: Code::HttpHeaderNameCollision,
-                            message: format!("{pair_coordinate} must have unique values for `name` and `as` keys."),
-                            locations: Location::from_node(as_arg.location(), source_map)
-                                .into_iter()
-                                .collect(),
-                        });
+                ),
+                (None, None) => Some(
+                    Message {
+                        code: Code::MissingHeaderSource,
+                        message: format!("{headers_coordinate} must include either a `from` or `value` argument."),
+                        locations: Location::from_node(headers.location(), source_map)
+                            .into_iter()
+                            .collect(),
                     }
-                }
-            }
+                )
+            });
 
-            // validate `value`
-            if let Some(value_arg) = value_arg {
-                let header_value_errors = validate_header_value(value_arg, pair_coordinate, source_map);
-                if !header_value_errors.is_empty() {
-                    messages.extend(header_value_errors);
-                }
-            }
-
-            // `as` and `value` cannot be used together
-            if let (Some(as_arg), Some(_value_arg)) = (as_arg, value_arg) {
-                messages.push(Message {
-                    code: Code::InvalidHttpHeaderMapping,
-                    message: format!("{pair_coordinate} uses both `as` and `value` keys together. Please choose only one."),
-                    locations: Location::from_node(as_arg.location(), source_map)
-                        .into_iter()
-                        .collect(),
-                });
-            }
-
-            // `from`` and `value` cannot be used together
-            if let (Some(from_arg), Some(_value_arg)) = (from_arg, value_arg) {
-                messages.push(Message {
-                    code: Code::InvalidHttpHeaderMapping,
-                    message: format!("{pair_coordinate} uses both `from` and `value` keys together. Please choose only one."),
-                    locations: Location::from_node(from_arg.location(), source_map)
-                        .into_iter()
-                        .collect(),
-                });
-            }
-        });
-
-    messages
+            messages
+        })
 }
 
 pub(super) fn validate_header_value(
     value: &Node<Value>,
     coordinate: &String,
     source_map: &SourceMap,
-) -> Vec<Message> {
-    let mut messages = Vec::new();
-
-    // Extract values from the node
-    let values: Vec<&str> = if let Some(list) = value.as_list() {
-        list.iter().filter_map(|v| v.as_str()).collect_vec()
-    } else {
-        value.as_str().map(|s| vec![s]).unwrap_or_default()
+) -> Option<Message> {
+    let str_value = match require_value_is_str(value, coordinate, source_map) {
+        Ok(str_value) => str_value,
+        Err(err) => return Some(err),
     };
 
-    // Validate each value
-    for v in &values {
-        if http::HeaderValue::try_from(*v).is_err() {
-            messages.push(Message {
-                code: Code::InvalidHttpHeaderValue,
-                message: format!(
-                    "The value '{}' at '{}' must be a valid HTTP header value.",
-                    v, coordinate
-                ),
-                locations: Location::from_node(value.location(), source_map)
-                    .into_iter()
-                    .collect(),
-            });
-        }
-    }
-
-    messages
+    http::HeaderValue::try_from(str_value)
+        .map_err(|_| Message {
+            code: Code::InvalidHttpHeaderValue,
+            message: format!("The value `{value}` at {coordinate} is an invalid HTTP header",),
+            locations: Location::from_node(value.location(), source_map)
+                .into_iter()
+                .collect(),
+        })
+        .err()
 }
 
-fn validate_header_name<'a>(
+fn validate_header_name(
     key: &Name,
-    value: &'a Node<Value>,
+    value: &Node<Value>,
     coordinate: &String,
     source_map: &SourceMap,
-) -> Result<&'a str, Message> {
+) -> Result<HeaderName, Message> {
     let s = value.as_str().ok_or_else(|| Message {
         code: Code::GraphQLError,
         message: format!("{coordinate} contains an invalid header name type."),
@@ -195,22 +155,17 @@ fn validate_header_name<'a>(
     HeaderName::try_from(s).map_err(|_| Message {
         code: Code::InvalidHttpHeaderName,
         message: format!(
-            "The value '{}' for '{}' at '{}' must be a valid HTTP header name.",
+            "The value `{}` for `{}` at {} must be a valid HTTP header name.",
             s, key, coordinate
         ),
         locations: Location::from_node(value.location(), source_map)
             .into_iter()
             .collect(),
-    })?;
-
-    Ok(s)
+    })
 }
 
-pub(super) fn get_http_headers_arg<'a>(
-    http_arg: &'a [(Name, Node<Value>)],
-    arg_name: &Name,
-) -> Option<&'a Node<Value>> {
+pub(super) fn get_http_headers_arg(http_arg: &[(Name, Node<Value>)]) -> Option<&Node<Value>> {
     http_arg
         .iter()
-        .find_map(|(key, value)| (key == arg_name).then_some(value))
+        .find_map(|(key, value)| (*key == HEADERS_ARGUMENT_NAME).then_some(value))
 }

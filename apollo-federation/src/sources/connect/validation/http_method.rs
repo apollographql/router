@@ -1,6 +1,6 @@
+use apollo_compiler::parser::SourceMap;
+use apollo_compiler::parser::SourceSpan as NodeLocation;
 use apollo_compiler::Node;
-use apollo_compiler::NodeLocation;
-use apollo_compiler::SourceMap;
 
 use super::Code;
 use super::Location;
