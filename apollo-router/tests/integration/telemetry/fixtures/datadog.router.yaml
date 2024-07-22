@@ -7,6 +7,9 @@ telemetry:
         format: datadog
       common:
         service_name: router
+        resource:
+          env: local1
+          service.version: router_version_override
       datadog:
         enabled: true
         batch_processor:
