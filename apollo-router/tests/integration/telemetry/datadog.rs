@@ -427,6 +427,7 @@ impl TraceSpec {
         tracing::debug!("{}", serde_json::to_string_pretty(&trace)?);
         self.verify_trace_participants(&trace)?;
         self.verify_operation_name(&trace)?;
+        self.verify_priority_sampled(&trace)?;
         self.verify_version(&trace)?;
         self.verify_spans_present(&trace)?;
         self.validate_span_kinds(&trace)?;
@@ -574,6 +575,19 @@ impl TraceSpec {
                 expected_operation_name
             );
         }
+        Ok(())
+    }
+
+    fn verify_priority_sampled(&self, trace: &Value) -> Result<(), BoxError> {
+        let binding = trace.select_path("$.._sampling_priority_v1")?;
+        let sampling_priority = binding.first();
+        assert_eq!(
+            sampling_priority
+                .expect("sampling priority expected")
+                .as_f64()
+                .expect("sampling priority must be a number"),
+            1.0
+        );
         Ok(())
     }
 }
