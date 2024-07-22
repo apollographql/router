@@ -21,7 +21,6 @@ use std::hash::Hash;
 use std::ops::Deref;
 use std::sync::atomic;
 use std::sync::Arc;
-use std::sync::OnceLock;
 
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
@@ -2532,16 +2531,12 @@ impl SelectionSet {
     }
 
     fn has_top_level_typename_field(&self) -> bool {
-        // This needs to be behind a OnceLock because `Arc::new` is non-const.
-        // XXX(@goto-bus-stop): Note this does *not* count `__typename @include(if: true)`.
-        // This seems wrong? But it's what JS does, too.
-        static TYPENAME_KEY: OnceLock<SelectionKey> = OnceLock::new();
-        let key = TYPENAME_KEY.get_or_init(|| SelectionKey::Field {
+        const TYPENAME_KEY: SelectionKey = SelectionKey::Field {
             response_name: TYPENAME_FIELD,
-            directives: Default::default(),
-        });
+            directives: DirectiveList::new(),
+        };
 
-        self.selections.contains_key(key)
+        self.selections.contains_key(&TYPENAME_KEY)
     }
 
     /// Adds a path, and optional some selections following that path, to this selection map.

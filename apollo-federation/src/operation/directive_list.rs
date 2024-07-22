@@ -17,10 +17,13 @@ static EMPTY_DIRECTIVE_LIST: executable::DirectiveList = executable::DirectiveLi
 /// Contents for a non-empty directive list.
 #[derive(Debug, Clone)]
 struct DirectiveListInner {
+    // Cached hash: hashing may be expensive with deeply nested values or very many directives,
+    // so we only want to do it once.
     // The hash is eagerly precomputed because we expect to, most of the time, hash a DirectiveList
-    // at least once.
+    // at least once (when inserting its selection into a selection map).
     hash: u64,
-    // Mutable access should not be handed out because `sort_order` may get out of sync.
+    // Mutable access to the underlying directive list should not be handed out because `sort_order`
+    // may get out of sync.
     directives: executable::DirectiveList,
     sort_order: Vec<usize>,
 }
