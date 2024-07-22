@@ -128,12 +128,8 @@ fn write_unified_tag<'a>(
     Ok(())
 }
 
-fn get_sampling_priority(span: &SpanData) -> f64 {
-    if span.span_context.trace_state().priority_sampling_enabled() {
-        1.0
-    } else {
-        0.0
-    }
+fn get_sampling_priority(_span: &SpanData) -> f64 {
+    1.0
 }
 
 fn get_measuring(span: &SpanData) -> f64 {
