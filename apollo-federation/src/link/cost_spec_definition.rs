@@ -20,15 +20,9 @@ use crate::schema::FederationSchema;
 
 pub(crate) const COST_DIRECTIVE_NAME_IN_SPEC: Name = name!("cost");
 pub(crate) const COST_DIRECTIVE_NAME_DEFAULT: Name = name!("federation__cost");
-pub(crate) const COST_WEIGHT_ARGUMENT_NAME: Name = name!("weight");
 
 pub(crate) const LIST_SIZE_DIRECTIVE_NAME_IN_SPEC: Name = name!("listSize");
 pub(crate) const LIST_SIZE_DIRECTIVE_NAME_DEFAULT: Name = name!("federation__listSize");
-pub(crate) const LIST_SIZE_ASSUMED_SIZE_ARGUMENT_NAME: Name = name!("assumedSize");
-pub(crate) const LIST_SIZE_SLICING_ARGUMENTS_ARGUMENT_NAME: Name = name!("slicingArguments");
-pub(crate) const LIST_SIZE_SIZED_FIELDS_ARGUMENT_NAME: Name = name!("sizedFields");
-pub(crate) const LIST_SIZE_REQUIRE_ONE_SLICING_ARGUMENT_ARGUMENT_NAME: Name =
-    name!("requireOneSlicingArgument");
 
 #[derive(Clone)]
 pub(crate) struct CostSpecDefinition {
