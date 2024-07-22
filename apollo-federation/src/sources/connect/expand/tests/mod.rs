@@ -65,6 +65,7 @@ test_expands! {
     simple,
     steelthread,
     types_used_twice,
+    carryover
 }
 
 test_ignores! {
