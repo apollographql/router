@@ -141,8 +141,13 @@ scalar federation__FieldSet
 
 scalar federation__Scope
 
+type HasInts {
+  ints: [Int!]
+}
+
 type Query {
   fieldWithListSize: [String!] @federation__listSize(assumedSize: 2000, requireOneSlicingArgument: false)
+  fieldWithDynamicListSize(first: Int!): HasInts @federation__listSize(slicingArguments: ["first"], sizedFields: ["ints"], requireOneSlicingArgument: true)
   _service: _Service!
 }
 
