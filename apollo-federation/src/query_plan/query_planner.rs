@@ -2,11 +2,11 @@ use std::cell::Cell;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
-use indexmap::IndexMap;
-use indexmap::IndexSet;
 use itertools::Itertools;
 use serde::Serialize;
 
@@ -325,7 +325,8 @@ impl QueryPlanner {
         operation_name: Option<Name>,
     ) -> Result<QueryPlan, FederationError> {
         let operation = document
-            .get_operation(operation_name.as_ref().map(|name| name.as_str()))
+            .operations
+            .get(operation_name.as_ref().map(|name| name.as_str()))
             // TODO(@goto-bus-stop) this is not an internal error, but a user error
             .map_err(|_| FederationError::internal("requested operation does not exist"))?;
 
@@ -445,7 +446,7 @@ impl QueryPlanner {
         } else {
             None
         };
-        let processor = FetchDependencyGraphToQueryPlanProcessor::new(
+        let mut processor = FetchDependencyGraphToQueryPlanProcessor::new(
             operation.variables.clone(),
             rebased_fragments,
             operation.name.clone(),
@@ -455,7 +456,6 @@ impl QueryPlanner {
             supergraph_schema: self.supergraph_schema.clone(),
             federated_query_graph: self.federated_query_graph.clone(),
             operation: Arc::new(normalized_operation),
-            processor,
             head: *root,
             // PORT_NOTE(@goto-bus-stop): In JS, `root` is a `RootVertex`, which is dynamically
             // checked at various points in query planning. This is our Rust equivalent of that.
@@ -473,7 +473,7 @@ impl QueryPlanner {
             Some(defer_conditions) if !defer_conditions.is_empty() => {
                 compute_plan_for_defer_conditionals(&mut parameters, defer_conditions)?
             }
-            _ => compute_plan_internal(&mut parameters, has_defers)?,
+            _ => compute_plan_internal(&mut parameters, &mut processor, has_defers)?,
         };
 
         let root_node = match root_node {
@@ -707,6 +707,7 @@ fn compute_root_parallel_best_plan(
 
 fn compute_plan_internal(
     parameters: &mut QueryPlanningParameters,
+    processor: &mut FetchDependencyGraphToQueryPlanProcessor,
     has_defers: bool,
 ) -> Result<Option<PlanNode>, FederationError> {
     let root_kind = parameters.operation.root_kind;
@@ -718,11 +719,9 @@ fn compute_plan_internal(
         let mut primary_selection = None::<SelectionSet>;
         for mut dependency_graph in dependency_graphs {
             let (local_main, local_deferred) =
-                dependency_graph.process(&mut parameters.processor, root_kind)?;
+                dependency_graph.process(&mut *processor, root_kind)?;
             main = match main {
-                Some(unlocal_main) => parameters
-                    .processor
-                    .reduce_sequence([Some(unlocal_main), local_main]),
+                Some(unlocal_main) => processor.reduce_sequence([Some(unlocal_main), local_main]),
                 None => local_main,
             };
             deferred.extend(local_deferred);
@@ -740,7 +739,7 @@ fn compute_plan_internal(
     } else {
         let mut dependency_graph = compute_root_parallel_dependency_graph(parameters, has_defers)?;
 
-        let (main, deferred) = dependency_graph.process(&mut parameters.processor, root_kind)?;
+        let (main, deferred) = dependency_graph.process(&mut *processor, root_kind)?;
         snapshot!(
             dependency_graph,
             "Plan after calling FetchDependencyGraph::process"
@@ -757,9 +756,7 @@ fn compute_plan_internal(
         let Some(primary_selection) = primary_selection else {
             unreachable!("Should have had a primary selection created");
         };
-        parameters
-            .processor
-            .reduce_defer(main, &primary_selection, deferred)
+        processor.reduce_defer(main, &primary_selection, deferred)
     }
 }
 

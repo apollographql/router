@@ -439,7 +439,7 @@ pub(crate) async fn create_subgraph_services(
         .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
         .expect("traffic shaping should always be part of the plugin list");
 
-    let mut subgraph_services = IndexMap::new();
+    let mut subgraph_services = IndexMap::default();
     for (name, _) in schema.subgraphs() {
         let http_service = crate::services::http::HttpClientService::from_config(
             name,
@@ -570,7 +570,7 @@ pub(crate) async fn create_plugins(
         .map(|factory| (factory.name.as_str(), &**factory))
         .collect();
     let mut errors = Vec::new();
-    let mut plugin_instances = Plugins::new();
+    let mut plugin_instances = Plugins::default();
 
     // Use function-like macros to avoid borrow conflicts of captures
     macro_rules! add_plugin {

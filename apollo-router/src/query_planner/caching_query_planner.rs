@@ -760,7 +760,7 @@ mod tests {
             schema.clone(),
             Default::default(),
             &configuration,
-            IndexMap::new(),
+            IndexMap::default(),
         )
         .await
         .unwrap();
@@ -866,7 +866,7 @@ mod tests {
             Arc::new(schema),
             Default::default(),
             &configuration,
-            IndexMap::new(),
+            IndexMap::default(),
         )
         .await
         .unwrap();
@@ -944,7 +944,7 @@ mod tests {
             schema.clone(),
             Default::default(),
             &configuration,
-            IndexMap::new(),
+            IndexMap::default(),
         )
         .await
         .unwrap();

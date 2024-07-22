@@ -23,13 +23,13 @@ use std::sync::atomic;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
 use apollo_compiler::name;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use indexmap::IndexMap;
-use indexmap::IndexSet;
 use serde::Serialize;
 
 use crate::error::FederationError;
@@ -123,7 +123,7 @@ impl Operation {
         document: &Valid<apollo_compiler::ExecutableDocument>,
         operation_name: Option<&str>,
     ) -> Result<Self, FederationError> {
-        let operation = document.get_operation(operation_name).map_err(|_| {
+        let operation = document.operations.get(operation_name).map_err(|_| {
             FederationError::internal(format!("No operation named {operation_name:?}"))
         })?;
         let named_fragments = NamedFragments::new(&document.fragments, &schema);
@@ -147,7 +147,7 @@ impl Operation {
             operation: self,
             has_defers: false,
             assigned_defer_labels: HashSet::new(),
-            defer_conditions: IndexMap::new(),
+            defer_conditions: IndexMap::default(),
         }
         // TODO(@TylerBloom): Once defer is implement, the above statement needs to be replaced
         // with the commented-out one below. This is part of FED-95
@@ -159,7 +159,7 @@ impl Operation {
                 operation: self,
                 has_defers: false,
                 assigned_defer_labels: HashSet::new(),
-                defer_conditions: IndexMap::new(),
+                defer_conditions: IndexMap::default(),
             }
         }
         */
@@ -210,8 +210,8 @@ mod selection_map {
     use std::ops::Deref;
     use std::sync::Arc;
 
+    use apollo_compiler::collections::IndexMap;
     use apollo_compiler::executable;
-    use indexmap::IndexMap;
     use serde::Serialize;
 
     use crate::error::FederationError;
@@ -248,7 +248,7 @@ mod selection_map {
 
     impl SelectionMap {
         pub(crate) fn new() -> Self {
-            SelectionMap(IndexMap::new())
+            SelectionMap(IndexMap::default())
         }
 
         pub(crate) fn clear(&mut self) {
@@ -640,6 +640,18 @@ impl SelectionKey {
     pub(crate) fn is_typename_field(&self) -> bool {
         matches!(self, SelectionKey::Field { response_name, directives } if *response_name == TYPENAME_FIELD && directives.is_empty())
     }
+
+    /// Create a selection key for a specific field name.
+    ///
+    /// This is available for tests only as selection keys should not normally be created outside of
+    /// `HasSelectionKey::key`.
+    #[cfg(test)]
+    pub(crate) fn field_name(name: &str) -> Self {
+        SelectionKey::Field {
+            response_name: Name::new(name).unwrap(),
+            directives: Default::default(),
+        }
+    }
 }
 
 pub(crate) trait HasSelectionKey {
@@ -771,17 +783,7 @@ impl Selection {
     }
 
     // Note: Fragment spreads can be present in optimized operations.
-    pub(crate) fn selection_set(&self) -> Result<Option<&SelectionSet>, FederationError> {
-        match self {
-            Selection::Field(field_selection) => Ok(field_selection.selection_set.as_ref()),
-            Selection::FragmentSpread(_) => Ok(None),
-            Selection::InlineFragment(inline_fragment_selection) => {
-                Ok(Some(&inline_fragment_selection.selection_set))
-            }
-        }
-    }
-
-    pub(crate) fn try_selection_set(&self) -> Option<&SelectionSet> {
+    pub(crate) fn selection_set(&self) -> Option<&SelectionSet> {
         match self {
             Selection::Field(field_selection) => field_selection.selection_set.as_ref(),
             Selection::FragmentSpread(_) => None,
@@ -792,7 +794,7 @@ impl Selection {
     }
 
     fn sub_selection_type_position(&self) -> Option<CompositeTypeDefinitionPosition> {
-        Some(self.try_selection_set()?.type_position.clone())
+        Some(self.selection_set()?.type_position.clone())
     }
 
     pub(crate) fn conditions(&self) -> Result<Conditions, FederationError> {
@@ -911,7 +913,7 @@ impl Selection {
         &self,
         mapper: impl FnOnce(&SelectionSet) -> Result<Option<SelectionSet>, FederationError>,
     ) -> Result<Self, FederationError> {
-        if let Some(selection_set) = self.selection_set()? {
+        if let Some(selection_set) = self.selection_set() {
             self.with_updated_selection_set(mapper(selection_set)?)
         } else {
             // selection has no (sub-)selection set.
@@ -1822,7 +1824,7 @@ where
     K: Eq + Hash,
 {
     fn new() -> Self {
-        Self(IndexMap::new())
+        Self(IndexMap::default())
     }
 
     fn insert(&mut self, key: K, value: V) {
@@ -1884,8 +1886,6 @@ impl SelectionSet {
                 };
                 Box::new(
                     sel.selection_set()
-                        .ok()
-                        .flatten()
                         .cloned()
                         .into_iter()
                         .flat_map(SelectionSet::split_top_level_fields)
@@ -1955,7 +1955,7 @@ impl SelectionSet {
             type_position.type_name().clone(),
             source_text,
         )?;
-        let named_fragments = NamedFragments::new(&IndexMap::new(), &schema);
+        let named_fragments = NamedFragments::new(&IndexMap::default(), &schema);
         SelectionSet::from_selection_set(&selection_set, &named_fragments, &schema)
     }
 
@@ -2134,9 +2134,9 @@ impl SelectionSet {
         &mut self,
         others: impl Iterator<Item = &'op Selection>,
     ) -> Result<(), FederationError> {
-        let mut fields = IndexMap::new();
-        let mut fragment_spreads = IndexMap::new();
-        let mut inline_fragments = IndexMap::new();
+        let mut fields = IndexMap::default();
+        let mut fragment_spreads = IndexMap::default();
+        let mut inline_fragments = IndexMap::default();
         let target = Arc::make_mut(&mut self.selections);
         for other_selection in others {
             let other_key = other_selection.key();
@@ -2499,7 +2499,7 @@ impl SelectionSet {
         let mut sub_selection_updates: MultiIndexMap<SelectionKey, Selection> =
             MultiIndexMap::new();
         for selection in [first, second].into_iter().chain(iter) {
-            if let Some(sub_selection_set) = selection.selection_set()? {
+            if let Some(sub_selection_set) = selection.selection_set() {
                 sub_selection_updates.extend(
                     sub_selection_set
                         .selections
@@ -2641,7 +2641,7 @@ impl SelectionSet {
             }
         }
         for selection in self.selections.values() {
-            selection_map.insert(if let Some(selection_set) = selection.selection_set()? {
+            selection_map.insert(if let Some(selection_set) = selection.selection_set() {
                 let type_if_abstract = selection
                     .sub_selection_type_position()
                     .and_then(|ty| ty.try_into().ok());
@@ -2949,7 +2949,7 @@ impl SelectionSet {
                     }
                 })
                 .collect::<Vec<_>>();
-            let selection_set = selection.selection_set()?;
+            let selection_set = selection.selection_set();
             let updated_selection_set = selection_set
                 .map(|selection_set| selection_set.with_field_aliased(&subselection_aliases))
                 .transpose()?;
@@ -3050,7 +3050,7 @@ impl SelectionSet {
             Err(FederationError::internal("Invalid empty selection set"))
         } else {
             for selection in self.selections.values() {
-                if let Some(s) = selection.selection_set()? {
+                if let Some(s) = selection.selection_set() {
                     s.validate(_variable_definitions)?;
                 }
             }
@@ -3858,7 +3858,7 @@ impl NamedFragments {
 
         // Note: We use IndexMap to stabilize the ordering of the result, which influences
         //       the outcome of `map_to_expanded_selection_sets`.
-        let mut fragments_map: IndexMap<Name, FragmentDependencies> = IndexMap::new();
+        let mut fragments_map: IndexMap<Name, FragmentDependencies> = IndexMap::default();
         for fragment in fragments.values() {
             let mut fragment_usages: HashMap<Name, i32> = HashMap::new();
             NamedFragments::collect_fragment_usages(&fragment.selection_set, &mut fragment_usages);
@@ -4001,12 +4001,25 @@ impl RebasedFragments {
 
 // Collect used variables from operation types.
 
-fn collect_variables_from_argument<'selection>(
-    argument: &'selection executable::Argument,
+fn collect_variables_from_value<'selection>(
+    value: &'selection executable::Value,
     variables: &mut HashSet<&'selection Name>,
 ) {
-    if let Some(v) = argument.value.as_variable() {
-        variables.insert(v);
+    match value {
+        executable::Value::Variable(v) => {
+            variables.insert(v);
+        }
+        executable::Value::List(list) => {
+            for value in list {
+                collect_variables_from_value(value, variables);
+            }
+        }
+        executable::Value::Object(object) => {
+            for (_key, value) in object {
+                collect_variables_from_value(value, variables);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -4015,14 +4028,14 @@ fn collect_variables_from_directive<'selection>(
     variables: &mut HashSet<&'selection Name>,
 ) {
     for arg in directive.arguments.iter() {
-        collect_variables_from_argument(arg, variables)
+        collect_variables_from_value(&arg.value, variables)
     }
 }
 
 impl Field {
     fn collect_variables<'selection>(&'selection self, variables: &mut HashSet<&'selection Name>) {
         for arg in self.arguments.iter() {
-            collect_variables_from_argument(arg, variables)
+            collect_variables_from_value(&arg.value, variables)
         }
         for dir in self.directives.iter() {
             collect_variables_from_directive(dir, variables)
@@ -4285,7 +4298,7 @@ impl TryFrom<Operation> for Valid<executable::ExecutableDocument> {
 
         let mut document = executable::ExecutableDocument::new();
         document.fragments = fragments;
-        document.insert_operation(operation);
+        document.operations.insert(operation);
         Ok(document.validate(value.schema.schema())?)
     }
 }

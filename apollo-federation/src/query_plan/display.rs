@@ -314,7 +314,8 @@ fn write_operation(
     operation_document: &ExecutableDocument,
 ) -> fmt::Result {
     let operation = operation_document
-        .get_operation(None)
+        .operations
+        .get(None)
         .expect("expected a single-operation document");
     write_selections(state, &operation.selection_set.selections)?;
     for fragment in operation_document.fragments.values() {

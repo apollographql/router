@@ -108,7 +108,7 @@ impl BothModeComparisonJob {
         });
 
         let name = self.operation_name.as_deref();
-        let operation_desc = if let Ok(operation) = self.document.get_operation(name) {
+        let operation_desc = if let Ok(operation) = self.document.operations.get(name) {
             if let Some(parsed_name) = &operation.name {
                 format!(" in {} `{parsed_name}`", operation.operation_type)
             } else {

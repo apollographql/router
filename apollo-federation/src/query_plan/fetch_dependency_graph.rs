@@ -11,14 +11,14 @@ use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::OperationType;
 use apollo_compiler::ast::Type;
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
 use apollo_compiler::executable::VariableDefinition;
 use apollo_compiler::name;
 use apollo_compiler::schema;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use indexmap::IndexMap;
-use indexmap::IndexSet;
 use itertools::Itertools;
 use multimap::MultiMap;
 use petgraph::stable_graph::EdgeIndex;
@@ -1296,7 +1296,7 @@ impl FetchDependencyGraph {
                     }
                 }
 
-                let Some(sub_selection_set) = selection.selection_set()? else {
+                let Some(sub_selection_set) = selection.selection_set() else {
                     // we're only here if `conditionInSupergraphIfInterfaceObject` returned something,
                     // we imply that selection is a fragment selection and so has a sub-selectionSet.
                     return Err(FederationError::internal(format!(
@@ -1311,14 +1311,14 @@ impl FetchDependencyGraph {
                 // case as a "safe" default).
                 if !interface_input_selections.is_empty() {
                     Ok(interface_input_selections.iter().any(|input| {
-                        let Ok(Some(input_selection_set)) = input.selection_set() else {
+                        let Some(input_selection_set) = input.selection_set() else {
                             return false;
                         };
                         input_selection_set.contains(sub_selection_set)
                     }))
                 } else if !implementation_input_selections.is_empty() {
                     Ok(interface_input_selections.iter().all(|input| {
-                        let Ok(Some(input_selection_set)) = input.selection_set() else {
+                        let Some(input_selection_set) = input.selection_set() else {
                             return false;
                         };
                         input_selection_set.contains(sub_selection_set)
@@ -2993,7 +2993,7 @@ pub(crate) fn compute_nodes_for_tree(
         context: initial_conditions,
         defer_context: initial_defer_context,
     }];
-    let mut created_nodes = IndexSet::new();
+    let mut created_nodes = IndexSet::default();
     while let Some(stack_item) = stack.pop() {
         let node =
             FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, stack_item.node_id)?;

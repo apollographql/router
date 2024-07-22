@@ -194,7 +194,7 @@ impl Selection {
     /// empty). Otherwise, we have no diff.
     fn minus(&self, other: &Selection) -> Result<Option<Selection>, FederationError> {
         if let (Some(self_sub_selection), Some(other_sub_selection)) =
-            (self.selection_set()?, other.selection_set()?)
+            (self.selection_set(), other.selection_set())
         {
             let diff = self_sub_selection.minus(other_sub_selection)?;
             if !diff.is_empty() {
@@ -215,7 +215,7 @@ impl Selection {
     /// - Otherwise, the intersection is same as `self`.
     fn intersection(&self, other: &Selection) -> Result<Option<Selection>, FederationError> {
         if let (Some(self_sub_selection), Some(other_sub_selection)) =
-            (self.selection_set()?, other.selection_set()?)
+            (self.selection_set(), other.selection_set())
         {
             let common = self_sub_selection.intersection(other_sub_selection)?;
             if !common.is_empty() {
@@ -1394,7 +1394,7 @@ impl SelectionSet {
         self.iter().any(|selection| {
             matches!(selection, Selection::FragmentSpread(_))
                 || selection
-                    .try_selection_set()
+                    .selection_set()
                     .map(|subselection| subselection.contains_fragment_spread())
                     .unwrap_or(false)
         })

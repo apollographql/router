@@ -3,8 +3,8 @@
 use std::hash::Hash;
 use std::hash::Hasher;
 
-use indexmap::IndexMap;
-use indexmap::IndexSet;
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use itertools::Itertools;
 use serde_json_bytes::json;
 use serde_json_bytes::Map;
@@ -20,7 +20,7 @@ pub trait ApplyTo {
     // explicitly support), which are distinct from null values (which it does
     // support).
     fn apply_to(&self, data: &JSON) -> (Option<JSON>, Vec<ApplyToError>) {
-        self.apply_with_vars(data, &IndexMap::new())
+        self.apply_with_vars(data, &IndexMap::default())
     }
 
     fn apply_with_vars(
@@ -30,7 +30,7 @@ pub trait ApplyTo {
     ) -> (Option<JSON>, Vec<ApplyToError>) {
         let mut input_path = vec![];
         // Using IndexSet over HashSet to preserve the order of the errors.
-        let mut errors = IndexSet::new();
+        let mut errors = IndexSet::default();
         let value = self.apply_to_path(data, vars, &mut input_path, &mut errors);
         (value, errors.into_iter().collect())
     }
@@ -343,7 +343,7 @@ impl ApplyTo for SubSelection {
         };
 
         let mut output = Map::new();
-        let mut input_names = IndexSet::new();
+        let mut input_names = IndexSet::default();
 
         for named_selection in &self.selections {
             let value = named_selection.apply_to_path(data, vars, input_path, errors);
@@ -1184,7 +1184,7 @@ mod tests {
             ),
         );
 
-        let mut vars = IndexMap::new();
+        let mut vars = IndexMap::default();
         vars.insert("$args".to_string(), json!({ "id": "id from args" }));
         assert_eq!(
             selection!("id: $args.id name").apply_with_vars(&data, &vars),
@@ -1208,7 +1208,7 @@ mod tests {
                 }))],
             ),
         );
-        let mut vars_without_args_id = IndexMap::new();
+        let mut vars_without_args_id = IndexMap::default();
         vars_without_args_id.insert("$args".to_string(), json!({ "unused": "ignored" }));
         assert_eq!(
             selection!("id: $args.id name").apply_with_vars(&data, &vars_without_args_id),
