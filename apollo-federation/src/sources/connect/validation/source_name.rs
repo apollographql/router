@@ -13,7 +13,6 @@ use super::coordinates::source_name_argument_coordinate;
 use super::coordinates::source_name_value_coordinate;
 use super::Code;
 use super::DirectiveName;
-use super::Location;
 use super::Message;
 use crate::sources::connect::spec::schema::SOURCE_NAME_ARGUMENT_NAME;
 
@@ -42,7 +41,7 @@ pub(super) fn validate_source_name_arg(
                     message: format!(
                         "{qualified_directive} does not match any defined sources. Did you mean {first_source_name}?",
                     ),
-                    locations: Location::from_node(source_name.location(), source_map)
+                    locations: source_name.line_column_range(source_map)
                         .into_iter()
                         .collect(),
                 });
@@ -53,7 +52,7 @@ pub(super) fn validate_source_name_arg(
                         "{qualified_directive} specifies a source, but none are defined. Try adding {coordinate} to the schema.",
                         coordinate = source_name_value_coordinate(source_directive_name, &source_name.value),
                     ),
-                    locations: Location::from_node(source_name.location(), source_map)
+                    locations: source_name.line_column_range(source_map)
                         .into_iter()
                         .collect(),
                 });
@@ -136,19 +135,19 @@ impl SourceName {
             } => Err(Message {
                 message: format!("There are invalid characters in {coordinate}. Only alphanumeric and underscores are allowed.", coordinate = source_name_value_coordinate(&directive_name, &value)),
                 code: Code::InvalidSourceName,
-                locations: Location::from_node(value.location(), sources).into_iter().collect(),
+                locations: value.line_column_range(sources).into_iter().collect(),
             }),
             Self::Empty { directive_name, value } => {
                 Err(Message {
                     code: Code::EmptySourceName,
                     message: format!("The value for {coordinate} can't be empty.", coordinate = source_name_argument_coordinate(&directive_name))   ,
-                    locations: Location::from_node(value.location(), sources).into_iter().collect(),
+                    locations: value.line_column_range(sources).into_iter().collect(),
                 })
             }
             Self::Missing { directive_name, ast_node } => Err(Message {
                 code: Code::GraphQLError,
                 message: format!("The {coordinate} argument is required.", coordinate = source_name_argument_coordinate(&directive_name)),
-                locations: Location::from_node(ast_node.location(), sources).into_iter().collect()
+                locations: ast_node.line_column_range(sources).into_iter().collect()
             }),
         }
     }

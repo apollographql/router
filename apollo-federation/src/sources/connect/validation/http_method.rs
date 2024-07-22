@@ -1,9 +1,7 @@
 use apollo_compiler::parser::SourceMap;
-use apollo_compiler::parser::SourceSpan as NodeLocation;
 use apollo_compiler::Node;
 
 use super::Code;
-use super::Location;
 use super::Message;
 use super::Name;
 use super::Value;
@@ -16,7 +14,7 @@ use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_PUT_METHOD_NAME
 pub(super) fn validate_http_method_arg(
     http_methods: &[&(Name, Node<Value>)],
     connect_directive_http_coordinate: String,
-    http_arg_location: Option<NodeLocation>,
+    http_arg_node: &Node<Value>,
     source_map: &SourceMap,
 ) -> Vec<Message> {
     let mut messages = vec![];
@@ -29,14 +27,15 @@ pub(super) fn validate_http_method_arg(
             ),
             locations: http_methods
                 .iter()
-                .flat_map(|(_, node)| Location::from_node(node.location(), source_map).into_iter())
+                .flat_map(|(_, node)| node.line_column_range(source_map).into_iter())
                 .collect(),
         });
     } else if http_methods.is_empty() {
         messages.push(Message {
             code: Code::MissingHttpMethod,
             message: format!("{connect_directive_http_coordinate} must specify an HTTP method.",),
-            locations: Location::from_node(http_arg_location, source_map)
+            locations: http_arg_node
+                .line_column_range(source_map)
                 .into_iter()
                 .collect(),
         });

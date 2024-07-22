@@ -9,7 +9,6 @@ use apollo_compiler::Schema;
 use super::coordinates::connect_directive_entity_argument_coordinate;
 use super::extended_type::ObjectCategory;
 use super::Code;
-use super::Location;
 use super::Message;
 use crate::sources::connect::spec::schema::CONNECT_ENTITY_ARGUMENT_NAME;
 
@@ -41,7 +40,7 @@ pub(super) fn validate_entity_arg(
                         "{coordinate} is invalid. Entity resolvers can only be declared on root `Query` fields.",
                         coordinate = connect_directive_entity_argument_coordinate(connect_directive_name, entity_arg_value.as_ref(), object, &field.name)
                     ),
-                    locations: Location::from_node(entity_arg.location(), source_map)
+                    locations: entity_arg.line_column_range(source_map)
                         .into_iter()
                         .collect(),
                 })
@@ -59,7 +58,8 @@ pub(super) fn validate_entity_arg(
                             &field.name
                         )
                     ),
-                    locations: Location::from_node(entity_arg.location(), source_map)
+                    locations: entity_arg
+                        .line_column_range(source_map)
                         .into_iter()
                         .collect(),
                 })
