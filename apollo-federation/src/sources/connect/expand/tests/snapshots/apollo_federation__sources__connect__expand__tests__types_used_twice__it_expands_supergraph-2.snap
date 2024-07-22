@@ -78,6 +78,7 @@ expression: connectors.by_service_name
                 star: None,
             },
         ),
+        config: {},
         entity_resolver: None,
     },
 }
