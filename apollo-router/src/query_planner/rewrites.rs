@@ -165,7 +165,7 @@ mod tests {
         });
 
         dr.maybe_apply(
-            &Schema::parse_test(SCHEMA, &Default::default()).unwrap(),
+            &Schema::parse(SCHEMA, &Default::default()).unwrap(),
             &mut data,
         );
 
@@ -203,7 +203,7 @@ mod tests {
         });
 
         dr.maybe_apply(
-            &Schema::parse_test(SCHEMA, &Default::default()).unwrap(),
+            &Schema::parse(SCHEMA, &Default::default()).unwrap(),
             &mut data,
         );
 

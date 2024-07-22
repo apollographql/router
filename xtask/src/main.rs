@@ -37,6 +37,10 @@ pub enum Command {
     /// Locally run all the checks required before a PR is merged.
     Dev(commands::Dev),
 
+    /// Run the apollo-federation CLI and generate a flame graph.
+    #[command(name = "fed-flame")]
+    Flame(commands::Flame),
+
     /// Run linters for Router.
     Lint(commands::Lint),
 
@@ -62,6 +66,7 @@ impl Xtask {
             Command::CheckCompliance(command) => command.run(),
             Command::Dist(command) => command.run(),
             Command::Dev(command) => command.run(),
+            Command::Flame(command) => command.run(),
             Command::Lint(command) => command.run(),
             Command::Licenses(command) => command.run(),
             Command::Test(command) => command.run(),

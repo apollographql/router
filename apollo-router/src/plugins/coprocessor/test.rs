@@ -603,8 +603,9 @@ mod tests {
 
         let request = subgraph::Request::fake_builder().build();
 
-        let crate::services::subgraph::Response { response, context } =
-            service.oneshot(request).await.unwrap();
+        let crate::services::subgraph::Response {
+            response, context, ..
+        } = service.oneshot(request).await.unwrap();
 
         assert!(context.get::<_, bool>("testKey").unwrap().unwrap());
 
