@@ -44,7 +44,6 @@ use opentelemetry::KeyValue;
 use opentelemetry_api::trace::TraceId;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
-use parking_lot::RwLock;
 use rand::Rng;
 use router_bridge::planner::UsageReporting;
 use serde_json_bytes::json;
@@ -200,11 +199,11 @@ pub(crate) struct Telemetry {
     apollo_metrics_sender: apollo_exporter::Sender,
     field_level_instrumentation_ratio: f64,
     sampling_filter_ratio: SamplerOption,
-    pub(crate) graphql_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
-    router_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
-    supergraph_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
+    pub(crate) graphql_custom_instruments: OnceCell<Arc<HashMap<String, StaticInstrument>>>,
+    router_custom_instruments: OnceCell<Arc<HashMap<String, StaticInstrument>>>,
+    supergraph_custom_instruments: OnceCell<Arc<HashMap<String, StaticInstrument>>>,
     subgraph_custom_instruments: OnceCell<Arc<HashMap<String, StaticInstrument>>>,
-    cache_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
+    cache_custom_instruments: OnceCell<Arc<HashMap<String, StaticInstrument>>>,
     activation: Mutex<TelemetryActivation>,
 }
 
@@ -282,34 +281,34 @@ impl Plugin for Telemetry {
         }
 
         let graphql_custom_instruments = if cfg!(test) {
-            RwLock::new(Arc::new(
+            OnceCell::with_value(Arc::new(
                 config
                     .instrumentation
                     .instruments
                     .new_static_graphql_instruments(),
             ))
         } else {
-            RwLock::default()
+            OnceCell::new()
         };
         let router_custom_instruments = if cfg!(test) {
-            RwLock::new(Arc::new(
+            OnceCell::with_value(Arc::new(
                 config
                     .instrumentation
                     .instruments
                     .new_static_router_instruments(),
             ))
         } else {
-            RwLock::default()
+            OnceCell::new()
         };
         let supergraph_custom_instruments = if cfg!(test) {
-            RwLock::new(Arc::new(
+            OnceCell::with_value(Arc::new(
                 config
                     .instrumentation
                     .instruments
                     .new_static_supergraph_instruments(),
             ))
         } else {
-            RwLock::default()
+            OnceCell::new()
         };
         let subgraph_custom_instruments = if cfg!(test) {
             OnceCell::with_value(Arc::new(
@@ -322,14 +321,14 @@ impl Plugin for Telemetry {
             OnceCell::new()
         };
         let cache_custom_instruments = if cfg!(test) {
-            RwLock::new(Arc::new(
+            OnceCell::with_value(Arc::new(
                 config
                     .instrumentation
                     .instruments
                     .new_static_cache_instruments(),
             ))
         } else {
-            RwLock::default()
+            OnceCell::new()
         };
 
         Ok(Telemetry {
@@ -368,7 +367,11 @@ impl Plugin for Telemetry {
             matches!(config.instrumentation.spans.mode, SpanMode::Deprecated);
         let field_level_instrumentation_ratio = self.field_level_instrumentation_ratio;
         let metrics_sender = self.apollo_metrics_sender.clone();
-        let static_router_instruments = self.router_custom_instruments.read().clone();
+        let static_router_instruments = self
+            .router_custom_instruments
+            .get()
+            .expect("must be set in validate method")
+            .clone();
 
         ServiceBuilder::new()
             .map_response(move |response: router::Response| {
@@ -590,8 +593,16 @@ impl Plugin for Telemetry {
         let config_map_res_first = config.clone();
         let config_map_res = config.clone();
         let field_level_instrumentation_ratio = self.field_level_instrumentation_ratio;
-        let static_supergraph_instruments = self.supergraph_custom_instruments.read().clone();
-        let static_graphql_instruments = self.graphql_custom_instruments.read().clone();
+        let static_supergraph_instruments = self
+            .supergraph_custom_instruments
+            .get()
+            .expect("must be set in validate method")
+            .clone();
+        let static_graphql_instruments = self
+            .graphql_custom_instruments
+            .get()
+            .expect("must be set in validate method")
+            .clone();
         ServiceBuilder::new()
             .instrument(move |supergraph_req: &SupergraphRequest| span_mode.create_supergraph(
                 &config_instrument.apollo,
@@ -760,7 +771,11 @@ impl Plugin for Telemetry {
             .get()
             .expect("must be set in validate method")
             .clone();
-        let static_cache_instruments = self.cache_custom_instruments.read().clone();
+        let static_cache_instruments = self
+            .cache_custom_instruments
+            .get()
+            .expect("must be set in validate method")
+            .clone();
         ServiceBuilder::new()
             .instrument(move |req: &SubgraphRequest| span_mode.create_subgraph(name.as_str(), req))
             .map_request(move |req: SubgraphRequest| request_ftv1(req))
@@ -916,36 +931,36 @@ impl Telemetry {
 
         activation.reload_metrics();
 
-        *self.graphql_custom_instruments.write() = Arc::new(
+        let _ = self.graphql_custom_instruments.set(Arc::new(
             self.config
                 .instrumentation
                 .instruments
                 .new_static_graphql_instruments(),
-        );
-        *self.router_custom_instruments.write() = Arc::new(
+        ));
+        let _ = self.router_custom_instruments.set(Arc::new(
             self.config
                 .instrumentation
                 .instruments
                 .new_static_router_instruments(),
-        );
-        *self.supergraph_custom_instruments.write() = Arc::new(
+        ));
+        let _ = self.supergraph_custom_instruments.set(Arc::new(
             self.config
                 .instrumentation
                 .instruments
                 .new_static_supergraph_instruments(),
-        );
+        ));
         let _ = self.subgraph_custom_instruments.set(Arc::new(
             self.config
                 .instrumentation
                 .instruments
                 .new_static_subgraph_instruments(),
         ));
-        *self.cache_custom_instruments.write() = Arc::new(
+        let _ = self.cache_custom_instruments.set(Arc::new(
             self.config
                 .instrumentation
                 .instruments
                 .new_static_cache_instruments(),
-        );
+        ));
 
         reload_fmt(create_fmt_layer(&self.config));
         activation.is_active = true;
