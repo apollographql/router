@@ -2,6 +2,7 @@ use std::iter::once;
 use std::ops::Range;
 
 use apollo_compiler::ast::FieldDefinition;
+use apollo_compiler::parser::LineColumn;
 use apollo_compiler::parser::SourceMap;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
@@ -13,7 +14,6 @@ use itertools::Itertools;
 use super::coordinates::connect_directive_selection_coordinate;
 use super::require_value_is_str;
 use super::Code;
-use super::Location;
 use super::Message;
 use super::Name;
 use super::Value;
@@ -50,7 +50,7 @@ pub(super) fn validate_selection(
             parent_type,
             &field.name,
         ),
-        selection_location: Location::from_node(selection_value.location(), &schema.sources),
+        selection_location: selection_value.line_column_range(&schema.sources),
     }
     .walk(&json_selection)
     .err()
@@ -76,7 +76,8 @@ fn get_json_selection<'a>(
                     field_name
                 ),
             ),
-            locations: Location::from_node(connect_directive.location(), source_map)
+            locations: connect_directive
+                .line_column_range(source_map)
                 .into_iter()
                 .collect(),
         })?;
@@ -93,7 +94,9 @@ fn get_json_selection<'a>(
             coordinate =
                 connect_directive_selection_coordinate(&connect_directive.name, object, field_name),
         ),
-        locations: Location::from_node(selection_arg.value.location(), source_map)
+        locations: selection_arg
+            .value
+            .line_column_range(source_map)
             .into_iter()
             .collect(),
     })?;
@@ -104,7 +107,7 @@ struct SelectionValidator<'schema> {
     schema: &'schema Schema,
     root: Field<'schema>,
     path: Vec<Field<'schema>>,
-    selection_location: Option<Range<Location>>,
+    selection_location: Option<Range<LineColumn>>,
     selection_coordinate: String,
 }
 
@@ -145,7 +148,7 @@ impl<'schema> JSONSelectionVisitor for SelectionValidator<'schema> {
                     coordinate = &self.selection_coordinate,
                     parent_type = parent.ty.name,
                 ),
-                locations: self.selection_location.iter().cloned().chain(Location::from_node(definition.location(), &self.schema.sources)).collect(),
+                locations: self.selection_location.iter().cloned().chain(definition.line_column_range(&self.schema.sources)).collect(),
             }})?;
 
         for parent_field in self.path_with_root() {
@@ -162,9 +165,9 @@ impl<'schema> JSONSelectionVisitor for SelectionValidator<'schema> {
                         self.selection_location.iter().cloned()
                             .chain((parent_field.definition != self.root.definition).then(|| {
                                 // Root field includes the selection location, which duplicates the diagnostic
-                                Location::from_node(parent_field.definition.location(), &self.schema.sources)
+                                parent_field.definition.line_column_range(&self.schema.sources)
                             }).flatten())
-                            .chain(Location::from_node(definition.location(), &self.schema.sources))
+                            .chain(definition.line_column_range(&self.schema.sources))
                             .collect(),
                 });
             }

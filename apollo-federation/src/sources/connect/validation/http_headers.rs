@@ -9,7 +9,6 @@ use http::HeaderName;
 use super::coordinates::http_header_argument_coordinate;
 use super::require_value_is_str;
 use super::Code;
-use super::Location;
 use super::Message;
 use crate::sources::connect::spec::schema::HEADERS_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME as FROM_ARG;
@@ -49,7 +48,7 @@ pub(super) fn validate_headers_arg<'a>(
                     code: Code::GraphQLError,
                     message: format!("{headers_coordinate} must include a `name` value."),
                     // TODO: get this closer to the pair
-                    locations: Location::from_node(headers.location(), source_map)
+                    locations: headers.line_column_range(source_map)
                         .into_iter()
                         .collect(),
                 });
@@ -73,10 +72,10 @@ pub(super) fn validate_headers_arg<'a>(
                             header_name,
                             headers_coordinate
                         ),
-                        locations: Location::from_node(name_value.location(), source_map)
+                        locations: name_value.line_column_range(source_map)
                             .into_iter()
                             .chain(
-                                Location::from_node(duplicate, source_map)
+                                duplicate.and_then(|span| span.line_column_range(source_map))
                             )
                             .collect(),
                     });
@@ -94,10 +93,10 @@ pub(super) fn validate_headers_arg<'a>(
                     Message {
                         code: Code::InvalidHttpHeaderMapping,
                         message: format!("{headers_coordinate} uses both `from` and `value` keys together. Please choose only one."),
-                        locations: Location::from_node(from_arg.location(), source_map)
+                        locations: from_arg.line_column_range(source_map)
                             .into_iter()
                             .chain(
-                                Location::from_node(value_arg.location(), source_map)
+                                value_arg.line_column_range(source_map)
                             )
                             .collect(),
                     }
@@ -106,7 +105,7 @@ pub(super) fn validate_headers_arg<'a>(
                     Message {
                         code: Code::MissingHeaderSource,
                         message: format!("{headers_coordinate} must include either a `from` or `value` argument."),
-                        locations: Location::from_node(headers.location(), source_map)
+                        locations: headers.line_column_range(source_map)
                             .into_iter()
                             .collect(),
                     }
@@ -131,9 +130,7 @@ pub(super) fn validate_header_value(
         .map_err(|_| Message {
             code: Code::InvalidHttpHeaderValue,
             message: format!("The value `{value}` at {coordinate} is an invalid HTTP header",),
-            locations: Location::from_node(value.location(), source_map)
-                .into_iter()
-                .collect(),
+            locations: value.line_column_range(source_map).into_iter().collect(),
         })
         .err()
 }
@@ -147,9 +144,7 @@ fn validate_header_name(
     let s = value.as_str().ok_or_else(|| Message {
         code: Code::GraphQLError,
         message: format!("{coordinate} contains an invalid header name type."),
-        locations: Location::from_node(value.location(), source_map)
-            .into_iter()
-            .collect(),
+        locations: value.line_column_range(source_map).into_iter().collect(),
     })?;
 
     HeaderName::try_from(s).map_err(|_| Message {
@@ -158,9 +153,7 @@ fn validate_header_name(
             "The value `{}` for `{}` at {} must be a valid HTTP header name.",
             s, key, coordinate
         ),
-        locations: Location::from_node(value.location(), source_map)
-            .into_iter()
-            .collect(),
+        locations: value.line_column_range(source_map).into_iter().collect(),
     })
 }
 

@@ -1,6 +1,6 @@
 ---
-source: apollo-federation/src/sources/connect/models/validation.rs
+source: apollo-federation/src/sources/connect/validation/mod.rs
 expression: "format!(\"{:?}\", errors)"
-input_file: apollo-federation/src/sources/connect/models/test_data/validation/invalid_selection_syntax.graphql
+input_file: apollo-federation/src/sources/connect/validation/test_data/validation/invalid_selection_syntax.graphql
 ---
-[Message { code: InvalidJsonSelection, message: "`@connect(selection:)` on `Query.something` is not a valid JSONSelection: Parsing Error: Error { input: \"&how\", code: IsNot }", locations: [Location { line: 7, column: 85 }..Location { line: 7, column: 91 }] }]
+[Message { code: InvalidJsonSelection, message: "`@connect(selection:)` on `Query.something` is not a valid JSONSelection: Parsing Error: Error { input: \"&how\", code: IsNot }", locations: [LineColumn { line: 8, column: 86 }..LineColumn { line: 8, column: 92 }] }]
