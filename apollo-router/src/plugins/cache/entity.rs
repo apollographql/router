@@ -50,6 +50,8 @@ use crate::services::supergraph;
 use crate::spec::TYPENAME;
 use crate::Context;
 
+/// Change this key if you introduce a breaking change in entity caching algorithm to make sure it won't take the previous entries
+pub(crate) const ENTITY_CACHE_VERSION: &str = "0.1";
 pub(crate) const ENTITIES: &str = "_entities";
 pub(crate) const REPRESENTATIONS: &str = "representations";
 pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_entity_cache::key";
@@ -917,7 +919,7 @@ fn extract_cache_key_root(
     let mut key = String::new();
     let _ = write!(
         &mut key,
-        "subgraph:{subgraph_name}:type:{entity_type}:hash:{query_hash}:data:{additional_data_hash}"
+        "version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}:hash:{query_hash}:data:{additional_data_hash}"
     );
 
     if is_known_private {
@@ -972,7 +974,7 @@ fn extract_cache_keys(
         // - query hash: invalidate the entry for a specific query and operation name
         // - additional data: separate cache entries depending on info like authorization status
         let mut key = String::new();
-        let _ = write!(&mut key,  "subgraph:{subgraph_name}:{typename}:{hashed_entity_key}:{query_hash}:{additional_data_hash}");
+        let _ = write!(&mut key,  "version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph_name}:{typename}:{hashed_entity_key}:{query_hash}:{additional_data_hash}");
         if is_known_private {
             if let Some(id) = private_id {
                 let _ = write!(&mut key, ":{id}");
