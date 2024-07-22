@@ -76,7 +76,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ template "router.managedFederation.apiSecretName" . }}
-                  key: managedFederationApiKey
+                  key: {{ (.Values.managedFederation.existingSecretKeyRefKey | default "managedFederationApiKey") }}
                   optional: true
             {{- end }}
             {{- if not (empty .Values.managedFederation.graphRef) }}
