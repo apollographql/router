@@ -249,18 +249,18 @@ pub fn diff_plan(js_plan: &QueryPlanResult, rust_plan: &QueryPlan) -> String {
     match (js_root_node, rust_root_node) {
         (None, None) => String::from(""),
         (None, Some(rust)) => {
-            let rust = &format!("{rust:?}");
+            let rust = &format!("{rust:#?}");
             let differences = diff::lines("", rust);
             render_diff(&differences)
         }
         (Some(js), None) => {
-            let js = &format!("{js:?}");
+            let js = &format!("{js:#?}");
             let differences = diff::lines(js, "");
             render_diff(&differences)
         }
         (Some(js), Some(rust)) => {
-            let rust = &format!("{rust:?}");
-            let js = &format!("{js:?}");
+            let rust = &format!("{rust:#?}");
+            let js = &format!("{js:#?}");
             let differences = diff::lines(js, rust);
             render_diff(&differences)
         }
