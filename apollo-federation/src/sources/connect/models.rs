@@ -127,7 +127,8 @@ fn make_label(
 // --- HTTP JSON ---------------------------------------------------------------
 #[derive(Clone, Debug)]
 pub struct HttpJsonTransport {
-    pub template: URLTemplate,
+    pub source_url: Option<String>,
+    pub connect_template: URLTemplate,
     pub method: HTTPMethod,
     pub headers: IndexMap<HeaderName, HeaderSource>,
     pub body: Option<JSONSelection>,
@@ -163,18 +164,9 @@ impl HttpJsonTransport {
             }
         }
 
-        let template_string = if let Some(base_url) = source.map(|s| &s.base_url) {
-            if connect_url.starts_with('/') {
-                format!("{}{}", base_url, connect_url)
-            } else {
-                format!("{}/{}", base_url, connect_url)
-            }
-        } else {
-            connect_url.clone()
-        };
-
         Ok(Self {
-            template: URLTemplate::parse(&template_string).map_err(|e| {
+            source_url: source.map(|s| s.base_url.clone()),
+            connect_template: URLTemplate::parse(connect_url).map_err(|e| {
                 FederationError::internal(format!("could not parse URL template: {e}"))
             })?,
             method,
@@ -184,7 +176,7 @@ impl HttpJsonTransport {
     }
 
     fn label(&self) -> String {
-        format!("http: {} {}", self.method.as_str(), self.template)
+        format!("http: {} {}", self.method.as_str(), self.connect_template)
     }
 }
 
@@ -243,7 +235,7 @@ mod tests {
         assert_debug_snapshot!(&connectors, @r###"
         {
             ConnectId {
-                label: "connectors.json http: GET https://jsonplaceholder.typicode.com/users",
+                label: "connectors.json http: GET /users",
                 subgraph_name: "connectors",
                 source_name: Some(
                     "json",
@@ -255,7 +247,7 @@ mod tests {
                 },
             }: Connector {
                 id: ConnectId {
-                    label: "connectors.json http: GET https://jsonplaceholder.typicode.com/users",
+                    label: "connectors.json http: GET /users",
                     subgraph_name: "connectors",
                     source_name: Some(
                         "json",
@@ -267,10 +259,11 @@ mod tests {
                     },
                 },
                 transport: HttpJsonTransport {
-                    template: URLTemplate {
-                        base: Some(
-                            "https://jsonplaceholder.typicode.com",
-                        ),
+                    source_url: Some(
+                        "https://jsonplaceholder.typicode.com/",
+                    ),
+                    connect_template: URLTemplate {
+                        base: None,
                         path: [
                             ParameterValue {
                                 parts: [
@@ -313,7 +306,7 @@ mod tests {
                 entity_resolver: None,
             },
             ConnectId {
-                label: "connectors.json http: GET https://jsonplaceholder.typicode.com/posts",
+                label: "connectors.json http: GET /posts",
                 subgraph_name: "connectors",
                 source_name: Some(
                     "json",
@@ -325,7 +318,7 @@ mod tests {
                 },
             }: Connector {
                 id: ConnectId {
-                    label: "connectors.json http: GET https://jsonplaceholder.typicode.com/posts",
+                    label: "connectors.json http: GET /posts",
                     subgraph_name: "connectors",
                     source_name: Some(
                         "json",
@@ -337,10 +330,11 @@ mod tests {
                     },
                 },
                 transport: HttpJsonTransport {
-                    template: URLTemplate {
-                        base: Some(
-                            "https://jsonplaceholder.typicode.com",
-                        ),
+                    source_url: Some(
+                        "https://jsonplaceholder.typicode.com/",
+                    ),
+                    connect_template: URLTemplate {
+                        base: None,
                         path: [
                             ParameterValue {
                                 parts: [

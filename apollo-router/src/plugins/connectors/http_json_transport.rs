@@ -24,6 +24,7 @@ use http::HeaderName;
 use http::HeaderValue;
 use indexmap::IndexMap;
 use lazy_static::lazy_static;
+use percent_encoding::percent_decode_str;
 use serde_json_bytes::json;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
@@ -126,10 +127,79 @@ pub(crate) fn make_request(
 fn make_uri(transport: &HttpJsonTransport, inputs: &Value) -> Result<Url, ConnectorDirectiveError> {
     let flat_inputs = flatten_keys(inputs);
     let generated = transport
-        .template
+        .connect_template
         .generate(&flat_inputs)
         .map_err(ConnectorDirectiveError::PathGenerationError)?;
-    Url::parse(&generated).map_err(ConnectorDirectiveError::InvalidBaseUri)
+    if let Some(source_url) = transport.source_url.as_ref() {
+        append_path(
+            Url::parse(source_url).map_err(ConnectorDirectiveError::Url)?,
+            &generated,
+        )
+    } else {
+        Url::parse(&generated).map_err(ConnectorDirectiveError::Url)
+    }
+}
+
+/// Append a path and query to a URI. Uses the path from base URI (but will discard the query).
+/// Expects the path to start with "/".
+fn append_path(base_uri: Url, path: &str) -> Result<Url, ConnectorDirectiveError> {
+    // we will need to work on path segments, and on query parameters.
+    // the first thing we need to do is parse the path so we have APIs to reason with both:
+    let path_uri: Url = Url::options()
+        .base_url(Some(&base_uri))
+        .parse(path)
+        .map_err(ConnectorDirectiveError::InvalidPath)?;
+    // get query parameters from both base_uri and path
+    let base_uri_query_pairs =
+        (!base_uri.query().unwrap_or_default().is_empty()).then(|| base_uri.query_pairs());
+    let path_uri_query_pairs =
+        (!path_uri.query().unwrap_or_default().is_empty()).then(|| path_uri.query_pairs());
+
+    let mut res = base_uri.clone();
+
+    // append segments
+    {
+        // Path segments being none indicates the base_uri cannot be a base URL.
+        // This means the schema is invalid.
+        let base_segments = base_uri
+            .path_segments()
+            .ok_or(ConnectorDirectiveError::Url(
+                url::ParseError::RelativeUrlWithCannotBeABaseBase,
+            ))?
+            .filter(|segment| !segment.is_empty());
+
+        let path_segments = path_uri
+            .path_segments()
+            .ok_or(ConnectorDirectiveError::InvalidPath(
+                url::ParseError::RelativeUrlWithCannotBeABaseBase,
+            ))?
+            .filter(|segment| !segment.is_empty())
+            // parsing encodes the segments, so we need to decode them before adding them
+            .map(|segment| percent_decode_str(segment).decode_utf8().unwrap());
+
+        // Ok this one is a bit tricky.
+        // Here we're trying to only append segments that are not empty, to avoid `//`
+        res.path_segments_mut()
+            .map_err(|_| {
+                ConnectorDirectiveError::Url(url::ParseError::RelativeUrlWithCannotBeABaseBase)
+            })?
+            .clear()
+            .extend(base_segments)
+            .extend(path_segments);
+    }
+    // Calling clear on query_pairs will cause a `?` to be appended.
+    // We only want to do it if necessary
+    if base_uri_query_pairs.is_some() || path_uri_query_pairs.is_some() {
+        res.query_pairs_mut().clear();
+    }
+    if let Some(pairs) = base_uri_query_pairs {
+        res.query_pairs_mut().extend_pairs(pairs);
+    }
+    if let Some(pairs) = path_uri_query_pairs {
+        res.query_pairs_mut().extend_pairs(pairs);
+    }
+
+    Ok(res)
 }
 
 // URLTemplate expects a map with flat dot-delimited keys.

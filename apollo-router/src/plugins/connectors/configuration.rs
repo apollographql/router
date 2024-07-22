@@ -45,7 +45,7 @@ where
             .and_then(|map| map.get(&connector.id.source_name.clone()?.to_string()))
             .and_then(|api_config| api_config.override_url.as_ref())
         {
-            connector.transport.template.base = Some(url.to_string());
+            connector.transport.source_url = Some(url.to_string());
         }
     }
 }

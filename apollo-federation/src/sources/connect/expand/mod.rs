@@ -413,11 +413,15 @@ mod helpers {
             connector: &Connector,
             arguments: &[Node<InputValueDefinition>],
         ) -> Result<(), FederationError> {
-            let parameters = connector.transport.template.parameters().map_err(|e| {
-                FederationError::internal(format!(
-                    "could not extract path template parameters: {e}"
-                ))
-            })?;
+            let parameters = connector
+                .transport
+                .connect_template
+                .parameters()
+                .map_err(|e| {
+                    FederationError::internal(format!(
+                        "could not extract path template parameters: {e}"
+                    ))
+                })?;
             for parameter in parameters {
                 match parameter {
                     // Ensure that input arguments are carried over to the new schema, including
@@ -499,11 +503,15 @@ mod helpers {
             let parent_type = self.original_schema.get_type(parent_type_name)?;
             let output_type = to_schema.get_type(output_type_name)?;
 
-            let parameters = connector.transport.template.parameters().map_err(|e| {
-                FederationError::internal(format!(
-                    "could not extract path template parameters: {e}"
-                ))
-            })?;
+            let parameters = connector
+                .transport
+                .connect_template
+                .parameters()
+                .map_err(|e| {
+                    FederationError::internal(format!(
+                        "could not extract path template parameters: {e}"
+                    ))
+                })?;
             // We'll need to collect all synthesized keys for the output type, adding a federation
             // `@key` directive once completed.
             let mut keys = Vec::new();

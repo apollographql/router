@@ -260,7 +260,8 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                template: URLTemplate::parse("http://localhost/api/path").unwrap(),
+                source_url: Some("http://localhost/api".into()),
+                connect_template: URLTemplate::parse("/path").unwrap(),
                 method: HTTPMethod::Get,
                 headers: Default::default(),
                 body: Default::default(),
@@ -345,7 +346,8 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                template: URLTemplate::parse("http://localhost/api/path").unwrap(),
+                source_url: Some("http://localhost/api".into()),
+                connect_template: URLTemplate::parse("/path").unwrap(),
                 method: HTTPMethod::Get,
                 headers: Default::default(),
                 body: Default::default(),
@@ -455,7 +457,8 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                template: URLTemplate::parse("http://localhost/api/path").unwrap(),
+                source_url: Some("http://localhost/api".into()),
+                connect_template: URLTemplate::parse("/path").unwrap(),
                 method: HTTPMethod::Get,
                 headers: Default::default(),
                 body: Default::default(),
@@ -559,7 +562,8 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                template: URLTemplate::parse("http://localhost/api/path").unwrap(),
+                source_url: Some("http://localhost/api".into()),
+                connect_template: URLTemplate::parse("/path").unwrap(),
                 method: HTTPMethod::Get,
                 headers: Default::default(),
                 body: Default::default(),

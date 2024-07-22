@@ -5,7 +5,7 @@ expression: connectors.by_service_name
 {
     "connectors_Query_users_0": Connector {
         id: ConnectId {
-            label: "connectors.json http: GET https://jsonplaceholder.typicode.com/users",
+            label: "connectors.json http: GET /users",
             subgraph_name: "connectors",
             source_name: Some(
                 "json",
@@ -17,10 +17,11 @@ expression: connectors.by_service_name
             },
         },
         transport: HttpJsonTransport {
-            template: URLTemplate {
-                base: Some(
-                    "https://jsonplaceholder.typicode.com",
-                ),
+            source_url: Some(
+                "https://jsonplaceholder.typicode.com/",
+            ),
+            connect_template: URLTemplate {
+                base: None,
                 path: [
                     ParameterValue {
                         parts: [
@@ -57,7 +58,7 @@ expression: connectors.by_service_name
     },
     "connectors_Query_user_0": Connector {
         id: ConnectId {
-            label: "connectors.json http: GET https://jsonplaceholder.typicode.com/users/{$args.id!}",
+            label: "connectors.json http: GET /users/{$args.id!}",
             subgraph_name: "connectors",
             source_name: Some(
                 "json",
@@ -69,10 +70,11 @@ expression: connectors.by_service_name
             },
         },
         transport: HttpJsonTransport {
-            template: URLTemplate {
-                base: Some(
-                    "https://jsonplaceholder.typicode.com",
-                ),
+            source_url: Some(
+                "https://jsonplaceholder.typicode.com/",
+            ),
+            connect_template: URLTemplate {
+                base: None,
                 path: [
                     ParameterValue {
                         parts: [
@@ -127,7 +129,7 @@ expression: connectors.by_service_name
     },
     "connectors_User_d_1": Connector {
         id: ConnectId {
-            label: "connectors.json http: GET https://jsonplaceholder.typicode.com/users/{$this.c!}",
+            label: "connectors.json http: GET /users/{$this.c!}",
             subgraph_name: "connectors",
             source_name: Some(
                 "json",
@@ -139,10 +141,11 @@ expression: connectors.by_service_name
             },
         },
         transport: HttpJsonTransport {
-            template: URLTemplate {
-                base: Some(
-                    "https://jsonplaceholder.typicode.com",
-                ),
+            source_url: Some(
+                "https://jsonplaceholder.typicode.com/",
+            ),
+            connect_template: URLTemplate {
+                base: None,
                 path: [
                     ParameterValue {
                         parts: [

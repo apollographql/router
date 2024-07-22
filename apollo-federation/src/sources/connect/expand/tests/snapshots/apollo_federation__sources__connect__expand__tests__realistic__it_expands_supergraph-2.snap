@@ -5,7 +5,7 @@ expression: connectors.by_service_name
 {
     "connectors_Query_usersByCompany_0": Connector {
         id: ConnectId {
-            label: "connectors.example http: GET http://example/by-company/{$args.company.name!}",
+            label: "connectors.example http: GET /by-company/{$args.company.name!}",
             subgraph_name: "connectors",
             source_name: Some(
                 "example",
@@ -17,10 +17,11 @@ expression: connectors.by_service_name
             },
         },
         transport: HttpJsonTransport {
-            template: URLTemplate {
-                base: Some(
-                    "http://example",
-                ),
+            source_url: Some(
+                "http://example",
+            ),
+            connect_template: URLTemplate {
+                base: None,
                 path: [
                     ParameterValue {
                         parts: [
@@ -94,7 +95,7 @@ expression: connectors.by_service_name
     },
     "connectors_Query_user_0": Connector {
         id: ConnectId {
-            label: "connectors.example http: GET http://example/{$args.id!}",
+            label: "connectors.example http: GET /{$args.id!}",
             subgraph_name: "connectors",
             source_name: Some(
                 "example",
@@ -106,10 +107,11 @@ expression: connectors.by_service_name
             },
         },
         transport: HttpJsonTransport {
-            template: URLTemplate {
-                base: Some(
-                    "http://example",
-                ),
+            source_url: Some(
+                "http://example",
+            ),
+            connect_template: URLTemplate {
+                base: None,
                 path: [
                     ParameterValue {
                         parts: [
