@@ -356,7 +356,7 @@ async fn basic_errors() {
 }
 
 #[tokio::test]
-async fn test_header_propagation() {
+async fn test_headers() {
     let mock_server = MockServer::start().await;
     mock_api::users().mount(&mock_server).await;
 
@@ -368,8 +368,10 @@ async fn test_header_propagation() {
         None,
         |request| {
             let headers = request.router_request.headers_mut();
-            headers.insert("x-propagate", "propagated".parse().unwrap());
-            headers.insert("x-rename", "renamed".parse().unwrap());
+            headers.insert("x-rename-source", "renamed-by-source".parse().unwrap());
+            headers.insert("x-rename-connect", "renamed-by-connect".parse().unwrap());
+            headers.insert("x-forward", "forwarded".parse().unwrap());
+            headers.append("x-forward", "forwarded-again".parse().unwrap());
         },
     )
     .await;
@@ -379,16 +381,28 @@ async fn test_header_propagation() {
         vec![Matcher::new()
             .method("GET")
             .header(
-                HeaderName::from_str("x-propagate").unwrap(),
-                HeaderValue::from_str("propagated").unwrap(),
+                HeaderName::from_str("x-forward").unwrap(),
+                HeaderValue::from_str("forwarded").unwrap(),
+            )
+            .header(
+                HeaderName::from_str("x-forward").unwrap(),
+                HeaderValue::from_str("forwarded-again").unwrap(),
             )
             .header(
                 HeaderName::from_str("x-new-name").unwrap(),
-                HeaderValue::from_str("renamed").unwrap(),
+                HeaderValue::from_str("renamed-by-connect").unwrap(),
             )
             .header(
                 HeaderName::from_str("x-insert").unwrap(),
                 HeaderValue::from_str("inserted").unwrap(),
+            )
+            .header(
+                HeaderName::from_str("x-insert-multi-value").unwrap(),
+                HeaderValue::from_str("first").unwrap(),
+            )
+            .header(
+                HeaderName::from_str("x-insert-multi-value").unwrap(),
+                HeaderValue::from_str("second").unwrap(),
             )
             .path("/users")
             .build()],

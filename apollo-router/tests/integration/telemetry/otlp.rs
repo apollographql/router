@@ -19,8 +19,8 @@ use wiremock::MockServer;
 use wiremock::ResponseTemplate;
 
 use crate::integration::common::Telemetry;
-use crate::integration::common::ValueExt;
 use crate::integration::IntegrationTest;
+use crate::integration::ValueExt;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_basic() -> Result<(), BoxError> {

@@ -1,8 +1,8 @@
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable::Selection;
 use apollo_federation::sources::connect::Connector;
 use apollo_federation::sources::connect::CustomConfiguration;
 use apollo_federation::sources::connect::EntityResolver;
-use indexmap::IndexMap;
 use itertools::Itertools;
 use serde_json_bytes::json;
 use serde_json_bytes::ByteString;
@@ -27,7 +27,7 @@ pub(crate) struct RequestInputs {
 
 impl RequestInputs {
     pub(crate) fn merge(&self, config: &CustomConfiguration) -> IndexMap<String, Value> {
-        let mut map = IndexMap::with_capacity(3);
+        let mut map = IndexMap::with_capacity_and_hasher(3, Default::default());
         map.insert("$args".to_string(), Value::Object(self.args.clone()));
         map.insert("$this".to_string(), Value::Object(self.this.clone()));
         map.insert("$config".to_string(), json!(config));
@@ -212,7 +212,8 @@ fn root_fields(request: &connect::Request) -> Result<Vec<ResponseKey>, MakeReque
 
     let op = request
         .operation
-        .get_operation(None)
+        .operations
+        .get(None)
         .map_err(|_| InvalidOperation("no operation document".into()))?;
 
     op.selection_set
@@ -287,7 +288,8 @@ fn entities_from_request(request: &connect::Request) -> Result<Vec<ResponseKey>,
 
     let op = request
         .operation
-        .get_operation(None)
+        .operations
+        .get(None)
         .map_err(|_| InvalidOperation("no operation document".into()))?;
 
     let (entities_field, typename_requested) = graphql_utils::get_entity_fields(op)?;
@@ -366,7 +368,8 @@ fn entities_with_fields_from_request(
 
     let op = request
         .operation
-        .get_operation(None)
+        .operations
+        .get(None)
         .map_err(|_| InvalidOperation("no operation document".into()))?;
 
     let (entities_field, typename_requested) = graphql_utils::get_entity_fields(op)?;

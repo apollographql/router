@@ -2,12 +2,12 @@ use std::iter::once;
 use std::ops::Range;
 
 use apollo_compiler::ast::FieldDefinition;
+use apollo_compiler::parser::SourceMap;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
-use apollo_compiler::SourceMap;
 use itertools::Itertools;
 
 use super::coordinates::connect_directive_selection_coordinate;
@@ -24,11 +24,11 @@ use crate::sources::connect::JSONSelection;
 pub(super) fn validate_selection(
     field: &Component<FieldDefinition>,
     connect_directive: &Node<Directive>,
-    object: &Node<ObjectType>,
+    parent_type: &Node<ObjectType>,
     schema: &Schema,
 ) -> Option<Message> {
     let (selection_value, json_selection) =
-        match get_json_selection(connect_directive, object, &field.name, &schema.sources) {
+        match get_json_selection(connect_directive, parent_type, &field.name, &schema.sources) {
             Ok(selection) => selection,
             Err(err) => return Some(err),
         };
@@ -47,7 +47,7 @@ pub(super) fn validate_selection(
         path: vec![],
         selection_coordinate: connect_directive_selection_coordinate(
             &connect_directive.name,
-            object,
+            parent_type,
             &field.name,
         ),
         selection_location: Location::from_node(selection_value.location(), &schema.sources),

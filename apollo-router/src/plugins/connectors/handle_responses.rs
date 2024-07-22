@@ -168,11 +168,14 @@ pub(crate) async fn handle_responses(
             };
 
             if let Some(ref mut debug) = debug {
-                let json_data: Value = serde_json::from_slice(body).map_err(|_| {
-                    InvalidResponseBody("couldn't deserialize response body".into())
-                })?;
-
-                debug.push_response(&parts, &json_data, None);
+                match serde_json::from_slice(body) {
+                    Ok(json_data) => {
+                        debug.push_response(&parts, &json_data, None);
+                    }
+                    Err(_) => {
+                        debug.push_invalid_response(&parts, body);
+                    }
+                }
             }
 
             errors.push(

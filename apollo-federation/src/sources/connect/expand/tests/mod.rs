@@ -64,6 +64,7 @@ test_expands! {
     realistic,
     simple,
     steelthread,
+    types_used_twice,
 }
 
 test_ignores! {

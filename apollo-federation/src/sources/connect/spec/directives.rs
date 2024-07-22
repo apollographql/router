@@ -1,37 +1,35 @@
+use std::iter::once;
+
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::schema::Component;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use indexmap::map::Entry::Occupied;
-use indexmap::map::Entry::Vacant;
-use indexmap::IndexMap;
+use http::HeaderName;
 use itertools::Itertools;
 
 use super::schema::ConnectDirectiveArguments;
 use super::schema::ConnectHTTPArguments;
-use super::schema::HTTPHeaderMappings;
-use super::schema::HTTPHeaderOption;
 use super::schema::SourceDirectiveArguments;
 use super::schema::SourceHTTPArguments;
 use super::schema::CONNECT_BODY_ARGUMENT_NAME;
 use super::schema::CONNECT_ENTITY_ARGUMENT_NAME;
-use super::schema::CONNECT_HEADERS_ARGUMENT_NAME;
 use super::schema::CONNECT_SELECTION_ARGUMENT_NAME;
-use super::schema::HTTP_HEADER_MAPPING_AS_ARGUMENT_NAME;
+use super::schema::HEADERS_ARGUMENT_NAME;
+use super::schema::HTTP_ARGUMENT_NAME;
+use super::schema::HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME;
 use super::schema::HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME;
 use super::schema::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME;
 use super::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
-use super::schema::SOURCE_HEADERS_ARGUMENT_NAME;
-use super::schema::SOURCE_HTTP_ARGUMENT_NAME;
 use super::schema::SOURCE_NAME_ARGUMENT_NAME;
 use crate::error::FederationError;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
 use crate::schema::FederationSchema;
 use crate::sources::connect::json_selection::JSONSelection;
-use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
+use crate::sources::connect::HeaderSource;
 
 macro_rules! internal {
     ($s:expr) => {
@@ -122,7 +120,7 @@ impl TryFrom<&Component<Directive>> for SourceDirectiveArguments {
                 name = Some(arg.value.as_str().ok_or(internal!(
                     "`name` field in `@source` directive is not a string"
                 ))?);
-            } else if arg_name == SOURCE_HTTP_ARGUMENT_NAME.as_str() {
+            } else if arg_name == HTTP_ARGUMENT_NAME.as_str() {
                 let http_value = arg.value.as_object().ok_or(internal!(
                     "`http` field in `@source` directive is not an object"
                 ))?;
@@ -160,12 +158,11 @@ impl TryFrom<&ObjectNode> for SourceHTTPArguments {
                 ))?;
 
                 base_url = Some(base_url_value);
-            } else if name == SOURCE_HEADERS_ARGUMENT_NAME.as_str() {
+            } else if name == HEADERS_ARGUMENT_NAME.as_str() {
                 headers = if let Some(values) = value.as_list() {
-                    Some(HTTPHeaderMappings::try_from(values)?)
+                    Some(nodes_to_headers(values)?)
                 } else if value.as_object().is_some() {
-                    let (name, option) = node_to_header_option(value)?;
-                    Some(HTTPHeaderMappings(IndexMap::from([(name, option)])))
+                    Some(once(node_to_header(value)?).collect())
                 } else {
                     return Err(internal!(
                         "`headers` field in `@source` directive's `http` field is not an object or list of objects"
@@ -189,90 +186,64 @@ impl TryFrom<&ObjectNode> for SourceHTTPArguments {
     }
 }
 
-/// Converts a list of (name, value) pairs into a map of HTTP headers. Using
-/// the same name twice is an error.
-/// TODO using the `name` field as a key doesn't actually make sense until
-/// we switch from `as:` to `from:`
-impl TryFrom<&[Node<Value>]> for HTTPHeaderMappings {
-    type Error = FederationError;
-
-    fn try_from(values: &[Node<Value>]) -> Result<Self, Self::Error> {
-        let mut map = IndexMap::new();
-
-        for value in values {
-            let (name, option) = node_to_header_option(value)?;
-
-            match map.entry(name.to_string()) {
-                Occupied(_) => {
-                    return Err(internal!(format!(
-                        "duplicate HTTP header mapping for `{}`",
-                        &name
-                    )));
-                }
-                Vacant(entry) => {
-                    entry.insert(option);
-                }
-            }
-        }
-
-        Ok(Self(map))
-    }
+/// Converts a list of (name, value) pairs into a list of HTTP headers.
+fn nodes_to_headers(
+    values: &[Node<Value>],
+) -> Result<IndexMap<HeaderName, HeaderSource>, FederationError> {
+    values.iter().map(node_to_header).try_collect()
 }
 
-fn node_to_header_option(
-    value: &Node<Value>,
-) -> Result<(String, Option<HTTPHeaderOption>), FederationError> {
+fn node_to_header(value: &Node<Value>) -> Result<(HeaderName, HeaderSource), FederationError> {
     let mappings = value
         .as_object()
         .ok_or(internal!("HTTP header mapping is not an object"))?;
-
-    let mut name = None;
-    let mut option = None;
-    for (field, mapping) in mappings {
-        let field = field.as_str();
-
-        if field == HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME.as_str() {
-            let name_value = mapping.as_str().ok_or(internal!(
+    let name = mappings
+        .iter()
+        .find_map(|(name, value)| {
+            (*name == HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME).then_some(value)
+        })
+        .ok_or(internal!("missing `name` field in HTTP header mapping"))
+        .and_then(|value| {
+            value.as_str().ok_or(internal!(
                 "`name` field in HTTP header mapping is not a string"
-            ))?;
+            ))
+        })
+        .and_then(|name_str| {
+            HeaderName::try_from(name_str)
+                .map_err(|err| internal!(format!("Invalid header name: {}", err.to_string())))
+        })?;
 
-            name = Some(name_value.to_string());
-        } else if field == HTTP_HEADER_MAPPING_AS_ARGUMENT_NAME.as_str() {
-            let as_value = mapping.as_str().ok_or(internal!(
-                "`as` field in HTTP header mapping is not a string"
-            ))?;
-
-            option = Some(HTTPHeaderOption::As(as_value.to_string()));
-        } else if field == HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME.as_str() {
-            let value_values = if let Some(list) = mapping.as_list() {
-                list.iter()
-                    .map(|item| {
-                        item.as_str().ok_or(internal!(
-                            "`value` field in HTTP header mapping is not a string"
-                        ))
-                    })
-                    .try_collect()?
-            } else if let Some(item) = mapping.as_str() {
-                vec![item]
-            } else {
-                return Err(internal!(
-                    "`value` field in HTTP header mapping is not a string or list of strings"
-                ));
-            };
-
-            option = Some(HTTPHeaderOption::Value(
-                value_values.into_iter().map(|s| s.to_string()).collect(),
-            ));
-        } else {
-            return Err(internal!(format!(
-                "unknown argument for HTTP header mapping: {field}"
-            )));
-        }
+    let from = mappings
+        .iter()
+        .find_map(|(name, value)| {
+            (*name == HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME).then_some(value)
+        })
+        .map(|value| {
+            value.as_str().ok_or(internal!(
+                "`from` field in HTTP header mapping is not a string"
+            ))
+        })
+        .transpose()?;
+    if let Some(from) = from {
+        return Ok((name, HeaderSource::From(from.to_string())));
     }
 
-    let name = name.ok_or(internal!("missing `name` field in HTTP header mapping"))?;
+    let value = mappings
+        .iter()
+        .find_map(|(name, value)| {
+            (*name == HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME).then_some(value)
+        })
+        .ok_or(internal!(
+            "missing `from` or `value` field in HTTP header mapping"
+        ))?;
 
-    Ok((name, option))
+    if let Some(value) = value.as_str() {
+        Ok((name, HeaderSource::Value(value.to_string())))
+    } else {
+        Err(internal!(
+            "`value` field in HTTP header mapping is not a string"
+        ))
+    }
 }
 
 impl ConnectDirectiveArguments {
@@ -296,7 +267,7 @@ impl ConnectDirectiveArguments {
                 ))?;
 
                 source = Some(source_value);
-            } else if arg_name == CONNECT_HTTP_ARGUMENT_NAME.as_str() {
+            } else if arg_name == HTTP_ARGUMENT_NAME.as_str() {
                 let http_value = arg.value.as_object().ok_or(internal!(
                     "`http` field in `@connect` directive is not an object"
                 ))?;
@@ -365,12 +336,9 @@ impl TryFrom<&ObjectNode> for ConnectHTTPArguments {
                 }
 
                 body = Some(body_value);
-            } else if name == CONNECT_HEADERS_ARGUMENT_NAME.as_str() {
+            } else if name == HEADERS_ARGUMENT_NAME.as_str() {
                 // TODO: handle a single object since the language spec allows it
-                headers = value
-                    .as_list()
-                    .map(HTTPHeaderMappings::try_from)
-                    .transpose()?;
+                headers = value.as_list().map(nodes_to_headers).transpose()?;
             } else if name == "GET" {
                 get = Some(value.as_str().ok_or(internal!(
                     "supplied HTTP template URL in `@connect` directive's `http` field is not a string"
@@ -535,23 +503,14 @@ mod tests {
                 name: "json",
                 http: SourceHTTPArguments {
                     base_url: "https://jsonplaceholder.typicode.com/",
-                    headers: HTTPHeaderMappings(
-                        {
-                            "X-Auth-Token": Some(
-                                As(
-                                    "AuthToken",
-                                ),
-                            ),
-                            "user-agent": Some(
-                                Value(
-                                    [
-                                        "Firefox",
-                                    ],
-                                ),
-                            ),
-                            "X-From-Env": None,
-                        },
-                    ),
+                    headers: {
+                        "authtoken": From(
+                            "X-Auth-Token",
+                        ),
+                        "user-agent": Value(
+                            "Firefox",
+                        ),
+                    },
                 },
             },
         ]
@@ -591,9 +550,7 @@ mod tests {
                         put: None,
                         delete: None,
                         body: None,
-                        headers: HTTPHeaderMappings(
-                            {},
-                        ),
+                        headers: {},
                     },
                 ),
                 selection: Named(
@@ -634,9 +591,7 @@ mod tests {
                         put: None,
                         delete: None,
                         body: None,
-                        headers: HTTPHeaderMappings(
-                            {},
-                        ),
+                        headers: {},
                     },
                 ),
                 selection: Named(

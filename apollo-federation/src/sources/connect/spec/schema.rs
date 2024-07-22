@@ -1,13 +1,14 @@
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::name;
 use apollo_compiler::Name;
-use indexmap::IndexMap;
+use http::HeaderName;
 
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
 use crate::sources::connect::json_selection::JSONSelection;
+use crate::sources::connect::HeaderSource;
 
 pub(crate) const CONNECT_DIRECTIVE_NAME_IN_SPEC: Name = name!("connect");
 pub(crate) const CONNECT_SOURCE_ARGUMENT_NAME: Name = name!("source");
-pub(crate) const CONNECT_HTTP_ARGUMENT_NAME: Name = name!("http");
 pub(crate) const CONNECT_HTTP_ARGUMENT_GET_METHOD_NAME: Name = name!("GET");
 pub(crate) const CONNECT_HTTP_ARGUMENT_POST_METHOD_NAME: Name = name!("POST");
 pub(crate) const CONNECT_HTTP_ARGUMENT_PUT_METHOD_NAME: Name = name!("PUT");
@@ -18,19 +19,18 @@ pub(crate) const CONNECT_ENTITY_ARGUMENT_NAME: Name = name!("entity");
 
 pub(crate) const CONNECT_HTTP_NAME_IN_SPEC: Name = name!("ConnectHTTP");
 pub(crate) const CONNECT_BODY_ARGUMENT_NAME: Name = name!("body");
-pub(crate) const CONNECT_HEADERS_ARGUMENT_NAME: Name = name!("headers");
 
 pub(crate) const SOURCE_DIRECTIVE_NAME_IN_SPEC: Name = name!("source");
 pub(crate) const SOURCE_NAME_ARGUMENT_NAME: Name = name!("name");
-pub(crate) const SOURCE_HTTP_ARGUMENT_NAME: Name = name!("http");
 
 pub(crate) const SOURCE_HTTP_NAME_IN_SPEC: Name = name!("SourceHTTP");
 pub(crate) const SOURCE_BASE_URL_ARGUMENT_NAME: Name = name!("baseURL");
-pub(crate) const SOURCE_HEADERS_ARGUMENT_NAME: Name = name!("headers");
+pub(crate) const HTTP_ARGUMENT_NAME: Name = name!("http");
+pub(crate) const HEADERS_ARGUMENT_NAME: Name = name!("headers");
 
 pub(crate) const HTTP_HEADER_MAPPING_NAME_IN_SPEC: Name = name!("HTTPHeaderMapping");
 pub(crate) const HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME: Name = name!("name");
-pub(crate) const HTTP_HEADER_MAPPING_AS_ARGUMENT_NAME: Name = name!("as");
+pub(crate) const HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME: Name = name!("from");
 pub(crate) const HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME: Name = name!("value");
 
 pub(crate) const JSON_SELECTION_SCALAR_NAME: Name = name!("JSONSelection");
@@ -56,25 +56,7 @@ pub(crate) struct SourceHTTPArguments {
 
     /// HTTP headers used when requesting resources from the upstream source.
     /// Can be overridden by name with headers in a @connect directive.
-    pub(crate) headers: HTTPHeaderMappings,
-}
-
-/// Map of HTTP header names to configuration options
-#[cfg_attr(test, derive(Debug))]
-#[derive(derive_more::Deref, Default)]
-pub(crate) struct HTTPHeaderMappings(pub(crate) IndexMap<String, Option<HTTPHeaderOption>>);
-
-/// Configuration option for an HTTP header
-#[derive(Debug, Clone)]
-pub enum HTTPHeaderOption {
-    /// The alias for the header name used when making a request
-    ///
-    /// This assumes that a header exists in the original request, as it will be
-    /// renamed to the supplied value.
-    As(String),
-
-    /// The raw values to use for the HTTP header
-    Value(Vec<String>),
+    pub(crate) headers: IndexMap<HeaderName, HeaderSource>,
 }
 
 /// Arguments to the `@connect` directive
@@ -128,5 +110,5 @@ pub(crate) struct ConnectHTTPArguments {
     /// Configuration for headers to attach to the request.
     ///
     /// Overrides headers from the associated @source by name.
-    pub(crate) headers: HTTPHeaderMappings,
+    pub(crate) headers: IndexMap<HeaderName, HeaderSource>,
 }

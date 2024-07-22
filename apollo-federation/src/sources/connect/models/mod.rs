@@ -2,13 +2,13 @@ mod config;
 
 use std::sync::Arc;
 
+use apollo_compiler::collections::IndexMap;
 pub use config::CustomConfiguration;
 pub use config::SourceConfiguration;
 pub use config::SubgraphConnectorConfiguration;
-use indexmap::IndexMap;
+use http::HeaderName;
 
 use super::spec::ConnectHTTPArguments;
-use super::spec::HTTPHeaderOption;
 use super::spec::SourceHTTPArguments;
 use super::ConnectId;
 use super::JSONSelection;
@@ -65,12 +65,12 @@ impl Connector {
         config: Option<SubgraphConnectorConfiguration>,
     ) -> Result<IndexMap<ConnectId, Self>, FederationError> {
         let Some(metadata) = schema.metadata() else {
-            return Ok(IndexMap::new());
+            return Ok(IndexMap::with_hasher(Default::default()));
         };
         let config = config.map(|c| Arc::new(c.custom)).unwrap_or_default();
 
         let Some(link) = metadata.for_identity(&ConnectSpecDefinition::identity()) else {
-            return Ok(IndexMap::new());
+            return Ok(IndexMap::with_hasher(Default::default()));
         };
 
         let source_name = ConnectSpecDefinition::source_directive_name(&link);
@@ -95,7 +95,7 @@ impl Connector {
                 let source_http = source.map(|s| &s.http);
 
                 let transport = Transport::HttpJson(HttpJsonTransport::from_directive(
-                    &connect_http,
+                    connect_http,
                     source_http,
                 )?);
 
@@ -153,13 +153,13 @@ pub struct HttpJsonTransport {
     pub base_url: String,
     pub path_template: URLPathTemplate,
     pub method: HTTPMethod,
-    pub headers: Vec<HTTPHeader>,
+    pub headers: IndexMap<HeaderName, HeaderSource>,
     pub body: Option<JSONSelection>,
 }
 
 impl HttpJsonTransport {
     fn from_directive(
-        http: &ConnectHTTPArguments,
+        http: ConnectHTTPArguments,
         source: Option<&SourceHTTPArguments>,
     ) -> Result<Self, FederationError> {
         let (method, path) = if let Some(path) = &http.get {
@@ -176,11 +176,16 @@ impl HttpJsonTransport {
             return Err(FederationError::internal("missing http method"));
         };
 
-        let mut headers = source
-            .as_ref()
-            .map(|source| source.headers.0.clone())
-            .unwrap_or_default();
-        headers.extend(http.headers.0.clone());
+        #[allow(clippy::mutable_key_type)]
+        // HeaderName is internally mutable, but we don't mutate it
+        let mut headers = http.headers;
+        for (header_name, header_source) in
+            source.map(|source| &source.headers).into_iter().flatten()
+        {
+            if !headers.contains_key(header_name) {
+                headers.insert(header_name.clone(), header_source.clone());
+            }
+        }
 
         Ok(Self {
             // TODO: We'll need to eventually support @connect directives without
@@ -195,7 +200,7 @@ impl HttpJsonTransport {
                 FederationError::internal(format!("could not parse URL template: {e}"))
             })?,
             method,
-            headers: http_headers(headers),
+            headers,
             body: http.body.clone(),
         })
     }
@@ -229,40 +234,9 @@ impl HTTPMethod {
 }
 
 #[derive(Clone, Debug)]
-pub enum HTTPHeader {
-    Propagate {
-        name: String,
-    },
-    Rename {
-        original_name: String,
-        new_name: String,
-    },
-    Inject {
-        name: String,
-        value: String,
-    },
-}
-
-fn http_headers(mappings: IndexMap<String, Option<HTTPHeaderOption>>) -> Vec<HTTPHeader> {
-    let mut headers = vec![];
-    for (name, value) in mappings {
-        match value {
-            Some(HTTPHeaderOption::As(new_name)) => headers.push(HTTPHeader::Rename {
-                original_name: name.clone(),
-                new_name,
-            }),
-            Some(HTTPHeaderOption::Value(values)) => {
-                for value in values {
-                    headers.push(HTTPHeader::Inject {
-                        name: name.clone(),
-                        value: value.clone(),
-                    });
-                }
-            }
-            None => headers.push(HTTPHeader::Propagate { name: name.clone() }),
-        };
-    }
-    headers
+pub enum HeaderSource {
+    From(String),
+    Value(String),
 }
 
 #[cfg(test)]
@@ -331,19 +305,14 @@ mod tests {
                             query: {},
                         },
                         method: Get,
-                        headers: [
-                            Rename {
-                                original_name: "X-Auth-Token",
-                                new_name: "AuthToken",
-                            },
-                            Inject {
-                                name: "user-agent",
-                                value: "Firefox",
-                            },
-                            Propagate {
-                                name: "X-From-Env",
-                            },
-                        ],
+                        headers: {
+                            "authtoken": From(
+                                "X-Auth-Token",
+                            ),
+                            "user-agent": Value(
+                                "Firefox",
+                            ),
+                        },
                         body: None,
                     },
                 ),
@@ -407,19 +376,14 @@ mod tests {
                             query: {},
                         },
                         method: Get,
-                        headers: [
-                            Rename {
-                                original_name: "X-Auth-Token",
-                                new_name: "AuthToken",
-                            },
-                            Inject {
-                                name: "user-agent",
-                                value: "Firefox",
-                            },
-                            Propagate {
-                                name: "X-From-Env",
-                            },
-                        ],
+                        headers: {
+                            "authtoken": From(
+                                "X-Auth-Token",
+                            ),
+                            "user-agent": Value(
+                                "Firefox",
+                            ),
+                        },
                         body: None,
                     },
                 ),

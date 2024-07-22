@@ -2,22 +2,22 @@ use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::InputObjectType;
 use apollo_compiler::ty;
-use indexmap::IndexMap;
 
 use super::schema::CONNECT_DIRECTIVE_NAME_IN_SPEC;
 use super::schema::CONNECT_ENTITY_ARGUMENT_NAME;
-use super::schema::CONNECT_HTTP_ARGUMENT_NAME;
 use super::schema::CONNECT_HTTP_NAME_IN_SPEC;
 use super::schema::CONNECT_SELECTION_ARGUMENT_NAME;
 use super::schema::CONNECT_SOURCE_ARGUMENT_NAME;
+use super::schema::HEADERS_ARGUMENT_NAME;
+use super::schema::HTTP_ARGUMENT_NAME;
 use super::schema::HTTP_HEADER_MAPPING_NAME_IN_SPEC;
 use super::schema::JSON_SELECTION_SCALAR_NAME;
 use super::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
-use super::schema::SOURCE_HTTP_ARGUMENT_NAME;
 use super::schema::SOURCE_HTTP_NAME_IN_SPEC;
 use super::schema::SOURCE_NAME_ARGUMENT_NAME;
 use super::schema::URL_PATH_TEMPLATE_SCALAR_NAME;
@@ -33,12 +33,10 @@ use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 use crate::schema::FederationSchema;
 use crate::sources::connect::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
-use crate::sources::connect::spec::schema::CONNECT_HEADERS_ARGUMENT_NAME;
-use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_AS_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
-use crate::sources::connect::spec::schema::SOURCE_HEADERS_ARGUMENT_NAME;
 
 pub(super) fn check_or_add(
     link: &Link,
@@ -75,7 +73,7 @@ pub(super) fn check_or_add(
         },
         InputValueDefinition {
             description: None,
-            name: HTTP_HEADER_MAPPING_AS_ARGUMENT_NAME.clone(),
+            name: HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME.clone(),
             ty: ty!(String).into(),
             default_value: None,
             directives: Default::default(),
@@ -89,7 +87,7 @@ pub(super) fn check_or_add(
         },
     ];
 
-    let mut http_header_mapping_fields = IndexMap::new();
+    let mut http_header_mapping_fields = IndexMap::with_hasher(Default::default());
     for field in http_header_mapping_field_list {
         http_header_mapping_fields.insert(field.name.clone(), Component::new(field));
     }
@@ -157,7 +155,7 @@ pub(super) fn check_or_add(
         },
         InputValueDefinition {
             description: None,
-            name: CONNECT_HEADERS_ARGUMENT_NAME.clone(),
+            name: HEADERS_ARGUMENT_NAME.clone(),
             ty: Type::List(Box::new(Type::NonNullNamed(
                 http_header_mapping.name.clone(),
             )))
@@ -167,7 +165,7 @@ pub(super) fn check_or_add(
         },
     ];
 
-    let mut connect_http_fields = IndexMap::new();
+    let mut connect_http_fields = IndexMap::with_hasher(Default::default());
     for field in connect_http_field_list {
         connect_http_fields.insert(field.name.clone(), Component::new(field));
     }
@@ -204,7 +202,7 @@ pub(super) fn check_or_add(
             },
             DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
-                    name: CONNECT_HTTP_ARGUMENT_NAME.clone(),
+                    name: HTTP_ARGUMENT_NAME.clone(),
                     get_type: |s| {
                         let name = s
                             .metadata()
@@ -261,7 +259,7 @@ pub(super) fn check_or_add(
         },
         InputValueDefinition {
             description: None,
-            name: SOURCE_HEADERS_ARGUMENT_NAME.clone(),
+            name: HEADERS_ARGUMENT_NAME.clone(),
             ty: Type::List(Box::new(Type::NonNullNamed(
                 http_header_mapping.name.clone(),
             )))
@@ -271,7 +269,7 @@ pub(super) fn check_or_add(
         },
     ];
 
-    let mut source_http_fields = IndexMap::new();
+    let mut source_http_fields = IndexMap::with_hasher(Default::default());
     for field in source_http_field_list {
         source_http_fields.insert(field.name.clone(), Component::new(field));
     }
@@ -310,7 +308,7 @@ pub(super) fn check_or_add(
             },
             DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
-                    name: SOURCE_HTTP_ARGUMENT_NAME.clone(),
+                    name: HTTP_ARGUMENT_NAME.clone(),
                     get_type: |s| {
                         let name = s
                             .metadata()
@@ -407,7 +405,7 @@ mod tests {
 
         input connect__HTTPHeaderMapping {
           name: String!
-          as: String
+          from: String
           value: [String!]
         }
 

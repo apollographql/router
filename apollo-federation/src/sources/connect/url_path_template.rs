@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::fmt::Display;
 
-use indexmap::IndexMap;
+use apollo_compiler::collections::IndexMap;
 use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
@@ -81,7 +81,7 @@ impl URLPathTemplate {
             }
         }
 
-        let mut query = IndexMap::new();
+        let mut query = IndexMap::default();
 
         if let Some(query_suffix) = query_suffix {
             for query_part in query_suffix.split('&') {
@@ -770,7 +770,7 @@ mod tests {
                         })],
                     },
                 ],
-                query: IndexMap::from([(
+                query: IndexMap::from_iter([(
                     "a".to_string(),
                     ParameterValue {
                         parts: vec![ValuePart::Text("b".to_string())],
@@ -794,7 +794,7 @@ mod tests {
                         })],
                     },
                 ],
-                query: IndexMap::from([
+                query: IndexMap::from_iter([
                     (
                         "e".to_string(),
                         ParameterValue {
@@ -842,7 +842,7 @@ mod tests {
                         })],
                     },
                 ],
-                query: IndexMap::from([(
+                query: IndexMap::from_iter([(
                     "a".to_string(),
                     ParameterValue {
                         parts: vec![
@@ -913,7 +913,7 @@ mod tests {
                         ],
                     },
                 ],
-                query: IndexMap::from([(
+                query: IndexMap::from_iter([(
                     "a".to_string(),
                     ParameterValue {
                         parts: vec![ValuePart::Var(VariableExpression {
@@ -1076,7 +1076,7 @@ mod tests {
                 path: vec![ParameterValue {
                     parts: vec![ValuePart::Text("users".to_string())],
                 }],
-                query: IndexMap::from([(
+                query: IndexMap::from_iter([(
                     "ids".to_string(),
                     ParameterValue {
                         parts: vec![ValuePart::Var(VariableExpression {
@@ -1100,7 +1100,7 @@ mod tests {
                         parts: vec![ValuePart::Text("products".to_string())]
                     },
                 ],
-                query: IndexMap::from([
+                query: IndexMap::from_iter([
                     (
                         "ids".to_string(),
                         ParameterValue {
@@ -1131,7 +1131,7 @@ mod tests {
                 path: vec![ParameterValue {
                     parts: vec![ValuePart::Text("people".to_string())],
                 }],
-                query: IndexMap::from([(
+                query: IndexMap::from_iter([(
                     "ids".to_string(),
                     ParameterValue {
                         parts: vec![ValuePart::Var(VariableExpression {
@@ -1162,7 +1162,7 @@ mod tests {
                         parts: vec![ValuePart::Text("notes".to_string())],
                     },
                 ],
-                query: IndexMap::from([(
+                query: IndexMap::from_iter([(
                     "ids".to_string(),
                     ParameterValue {
                         parts: vec![ValuePart::Var(VariableExpression {
@@ -1197,7 +1197,7 @@ mod tests {
                     },
                 ],
 
-                query: IndexMap::from([(
+                query: IndexMap::from_iter([(
                     "ids".to_string(),
                     ParameterValue {
                         parts: vec![

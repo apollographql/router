@@ -7,6 +7,8 @@ use std::sync::Arc;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::FieldDefinition;
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
@@ -31,8 +33,6 @@ use apollo_compiler::schema::UnionType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use indexmap::IndexMap;
-use indexmap::IndexSet;
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use time::OffsetDateTime;
@@ -184,8 +184,8 @@ fn collect_empty_subgraphs(
     let graph_directive_definition =
         join_spec_definition.graph_directive_definition(supergraph_schema)?;
     let graph_enum = join_spec_definition.graph_enum_definition(supergraph_schema)?;
-    let mut federation_spec_definitions = IndexMap::new();
-    let mut graph_enum_value_name_to_subgraph_name = IndexMap::new();
+    let mut federation_spec_definitions = IndexMap::default();
+    let mut graph_enum_value_name_to_subgraph_name = IndexMap::default();
     for (enum_value_name, enum_value_definition) in graph_enum.values.iter() {
         let graph_application = enum_value_definition
             .directives
@@ -516,7 +516,7 @@ fn add_empty_type(
     }
     let mut type_info = TypeInfo {
         name: type_definition_position.type_name().clone(),
-        subgraph_info: IndexMap::new(),
+        subgraph_info: IndexMap::default(),
     };
     for type_directive_application in type_directive_applications {
         let subgraph = get_subgraph(
@@ -1427,12 +1427,7 @@ fn add_subgraph_input_field(
 
 /// Parse a string encoding a type reference.
 fn decode_type(type_: &str) -> Result<Type, FederationError> {
-    Type::parse(type_, "").map_err(|_| {
-        SingleFederationError::InvalidGraphQL {
-            message: format!("Cannot parse type \"{}\"", type_),
-        }
-        .into()
-    })
+    Ok(Type::parse(type_, "")?)
 }
 
 fn get_subgraph<'subgraph>(
@@ -1560,7 +1555,7 @@ impl IntoIterator for ValidFederationSubgraphs {
 
 lazy_static! {
     static ref EXECUTABLE_DIRECTIVE_LOCATIONS: IndexSet<DirectiveLocation> = {
-        IndexSet::from([
+        [
             DirectiveLocation::Query,
             DirectiveLocation::Mutation,
             DirectiveLocation::Subscription,
@@ -1569,7 +1564,9 @@ lazy_static! {
             DirectiveLocation::FragmentSpread,
             DirectiveLocation::InlineFragment,
             DirectiveLocation::VariableDefinition,
-        ])
+        ]
+        .into_iter()
+        .collect()
     };
 }
 
