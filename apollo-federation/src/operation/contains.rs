@@ -193,20 +193,6 @@ fn same_directives(left: &executable::DirectiveList, right: &executable::Directi
     })
 }
 
-/// Sort directives, which means specifically sorting their arguments, sorting the directives by
-/// name, and then breaking directive-name ties by comparing sorted arguments. This is used for
-/// hashing arguments in a way consistent with [same_directives()].
-pub(super) fn sort_directives(directives: &mut executable::DirectiveList) {
-    directives
-        .iter_mut()
-        .for_each(|directive| sort_arguments(&mut directive.make_mut().arguments));
-    directives.sort_by(|left, right| {
-        left.name
-            .cmp(&right.name)
-            .then_with(|| compare_sorted_arguments(&left.arguments, &right.arguments))
-    });
-}
-
 pub(super) fn is_deferred_selection(directives: &executable::DirectiveList) -> bool {
     directives.has("defer")
 }
