@@ -640,6 +640,18 @@ impl SelectionKey {
     pub(crate) fn is_typename_field(&self) -> bool {
         matches!(self, SelectionKey::Field { response_name, directives } if *response_name == TYPENAME_FIELD && directives.is_empty())
     }
+
+    /// Create a selection key for a specific field name.
+    ///
+    /// This is available for tests only as selection keys should not normally be created outside of
+    /// `HasSelectionKey::key`.
+    #[cfg(test)]
+    pub(crate) fn field_name(name: &str) -> Self {
+        SelectionKey::Field {
+            response_name: Name::new(name).unwrap(),
+            directives: Default::default(),
+        }
+    }
 }
 
 pub(crate) trait HasSelectionKey {
@@ -3989,12 +4001,25 @@ impl RebasedFragments {
 
 // Collect used variables from operation types.
 
-fn collect_variables_from_argument<'selection>(
-    argument: &'selection executable::Argument,
+fn collect_variables_from_value<'selection>(
+    value: &'selection executable::Value,
     variables: &mut HashSet<&'selection Name>,
 ) {
-    if let Some(v) = argument.value.as_variable() {
-        variables.insert(v);
+    match value {
+        executable::Value::Variable(v) => {
+            variables.insert(v);
+        }
+        executable::Value::List(list) => {
+            for value in list {
+                collect_variables_from_value(value, variables);
+            }
+        }
+        executable::Value::Object(object) => {
+            for (_key, value) in object {
+                collect_variables_from_value(value, variables);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -4003,14 +4028,14 @@ fn collect_variables_from_directive<'selection>(
     variables: &mut HashSet<&'selection Name>,
 ) {
     for arg in directive.arguments.iter() {
-        collect_variables_from_argument(arg, variables)
+        collect_variables_from_value(&arg.value, variables)
     }
 }
 
 impl Field {
     fn collect_variables<'selection>(&'selection self, variables: &mut HashSet<&'selection Name>) {
         for arg in self.arguments.iter() {
-            collect_variables_from_argument(arg, variables)
+            collect_variables_from_value(&arg.value, variables)
         }
         for dir in self.directives.iter() {
             collect_variables_from_directive(dir, variables)
