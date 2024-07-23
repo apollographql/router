@@ -2,6 +2,7 @@
 /// any/all errors encountered in the process.
 use std::hash::Hash;
 use std::hash::Hasher;
+use std::ops::Deref;
 
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
@@ -242,6 +243,10 @@ impl ApplyTo for NamedSelection {
     }
 }
 
+// $typenames is a special variable for referring to literal typenames. See
+// note in selection_set.rs for more detail.
+pub(super) const TYPENAMES: &str = "$typenames";
+
 impl ApplyTo for PathSelection {
     fn apply_to_path(
         &self,
@@ -260,6 +265,18 @@ impl ApplyTo for PathSelection {
                     // Because $ refers to the current value, we keep using
                     // input_path instead of creating a new var_path here.
                     tail.apply_to_path(data, vars, input_path, errors)
+                } else if var_name == TYPENAMES {
+                    if let PathSelection::Key(Key::Field(name), _) = tail.deref() {
+                        let var_data = json!({ name: name });
+                        let mut var_path = vec![json!(name)];
+                        tail.apply_to_path(&var_data, vars, &mut var_path, errors)
+                    } else {
+                        errors.insert(ApplyToError::new(
+                            format!("Invalid {} usage", TYPENAMES).as_str(),
+                            &[json!(var_name), json!(tail)],
+                        ));
+                        None
+                    }
                 } else if let Some(var_data) = vars.get(var_name) {
                     let mut var_path = vec![json!(var_name)];
                     tail.apply_to_path(var_data, vars, &mut var_path, errors)
@@ -1221,6 +1238,20 @@ mod tests {
                     "path": ["$args", "id"],
                 }))],
             ),
+        );
+    }
+
+    #[test]
+    fn test_apply_to_variable_expressions_typename() {
+        let typename_object =
+            selection!("__typename: $typenames.Product reviews { __typename: $typenames.Review }")
+                .apply_to(&json!({"reviews": [{}]}));
+        assert_eq!(
+            typename_object,
+            (
+                Some(json!({"__typename": "Product", "reviews": [{ "__typename": "Review" }] })),
+                vec![]
+            )
         );
     }
 

@@ -25,6 +25,7 @@ use apollo_compiler::Node;
 use indexmap::IndexMap;
 use multimap::MultiMap;
 
+use super::TYPENAMES;
 use crate::sources::connect::json_selection::Alias;
 use crate::sources::connect::json_selection::NamedSelection;
 use crate::sources::connect::JSONSelection;
@@ -49,6 +50,30 @@ impl SubSelection {
         let mut dropped_fields = IndexMap::new();
         let mut referenced_fields = HashSet::new();
         let field_map = map_fields_by_name(selection_set);
+
+        // When the operation contains __typename, it might be used to complete
+        // an entity reference (e.g. `__typename id`) for a subsequent fetch.
+        // We don't have a way to inject static values into the mapping, so for
+        // now we'll hardcode a special "variable" prefix that returns values
+        // based on the key. ({ "Product": "Product" }).
+        //
+        // TODO: when we support abstract types, we'll want to first check if
+        // the user defined a __typename mapping.
+        if field_map.contains_key("__typename") {
+            new_selections.push(NamedSelection::Path(
+                Alias {
+                    name: "__typename".to_string(),
+                },
+                PathSelection::Var(
+                    TYPENAMES.to_string(),
+                    Box::new(PathSelection::Key(
+                        Key::Field(selection_set.ty.to_string()),
+                        Box::new(PathSelection::Empty),
+                    )),
+                ),
+            ));
+        }
+
         for selection in &self.selections {
             match selection {
                 NamedSelection::Field(alias, name, sub) => {
@@ -489,6 +514,57 @@ mod tests {
                 Some(serde_json_bytes::json!({"a": { "b": { "renamed": "c" } } } )),
                 vec![]
             )
+        );
+    }
+
+    #[test]
+    fn test_typename() {
+        let json = super::JSONSelection::parse(
+            r###"
+            .result {
+              id
+              author: {
+                id: authorId
+              }
+            }
+            "###,
+        )
+        .unwrap()
+        .1;
+
+        let schema = Schema::parse_and_validate(
+            r###"
+        type Query {
+            t: T
+        }
+
+        type T {
+            id: ID
+            author: A
+        }
+
+        type A {
+            id: ID
+        }
+        "###,
+            "./",
+        )
+        .unwrap();
+
+        let selection_set =
+            selection_set(&schema, "{ t { id __typename author { __typename id } } }");
+
+        let transformed = json.apply_selection_set(&selection_set);
+        assert_eq!(
+            transformed.to_string(),
+            r###".result {
+  __typename: $typenames.T
+  id
+  author: {
+    __typename: $typenames.A
+    id: authorId
+  }
+}"###
         );
     }
 }
