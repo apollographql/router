@@ -407,13 +407,13 @@ async fn entity_cache() -> Result<(), BoxError> {
     insta::assert_json_snapshot!(response);
 
     let s:String = client
-          .get("subgraph:products:type:Query:hash:0df945dc1bc08f7fc02e8905b4c72aa9112f29bb7a214e4a38d199f0aa635b48:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .get("version:1.0:subgraph:products:type:Query:hash:0df945dc1bc08f7fc02e8905b4c72aa9112f29bb7a214e4a38d199f0aa635b48:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
     insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
-    let s: String = client.get("subgraph:reviews:Product:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:1de543dab57fde0f00247922ccc4f76d4c916ae26a89dd83cd1a62300d0cda20:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c").await.unwrap();
+    let s: String = client.get("version:1.0:subgraph:reviews:Product:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:1de543dab57fde0f00247922ccc4f76d4c916ae26a89dd83cd1a62300d0cda20:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c").await.unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
     insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
@@ -517,7 +517,7 @@ async fn entity_cache() -> Result<(), BoxError> {
     insta::assert_json_snapshot!(response);
 
     let s:String = client
-        .get("subgraph:reviews:Product:d9a4cd73308dd13ca136390c10340823f94c335b9da198d2339c886c738abf0d:1de543dab57fde0f00247922ccc4f76d4c916ae26a89dd83cd1a62300d0cda20:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+        .get("version:1.0:subgraph:reviews:Product:d9a4cd73308dd13ca136390c10340823f94c335b9da198d2339c886c738abf0d:1de543dab57fde0f00247922ccc4f76d4c916ae26a89dd83cd1a62300d0cda20:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
         .await
         .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
@@ -734,7 +734,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
     insta::assert_json_snapshot!(response);
 
     let s:String = client
-          .get("subgraph:products:type:Query:hash:0df945dc1bc08f7fc02e8905b4c72aa9112f29bb7a214e4a38d199f0aa635b48:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .get("version:1.0:subgraph:products:type:Query:hash:0df945dc1bc08f7fc02e8905b4c72aa9112f29bb7a214e4a38d199f0aa635b48:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
@@ -755,7 +755,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
     );
 
     let s: String = client
-        .get("subgraph:reviews:Product:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:1de543dab57fde0f00247922ccc4f76d4c916ae26a89dd83cd1a62300d0cda20:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+        .get("version:1.0:subgraph:reviews:Product:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:1de543dab57fde0f00247922ccc4f76d4c916ae26a89dd83cd1a62300d0cda20:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
         .await
         .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
@@ -799,7 +799,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
     insta::assert_json_snapshot!(response);
 
     let s:String = client
-          .get("subgraph:reviews:Product:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:3b6ef3c8fd34c469d59f513942c5f4c8f91135e828712de2024e2cd4613c50ae:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .get("version:1.0:subgraph:reviews:Product:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:3b6ef3c8fd34c469d59f513942c5f4c8f91135e828712de2024e2cd4613c50ae:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
