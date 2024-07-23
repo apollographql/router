@@ -1,4 +1,3 @@
-use std::net::TcpListener;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -302,7 +301,7 @@ async fn basic_errors() {
         {
           "message": "http error: 404 Not Found",
           "extensions": {
-            "connector": "connectors.json http: GET https://jsonplaceholder.typicode.com/users",
+            "connector": "connectors.json http: GET /users",
             "code": "404"
           }
         }
@@ -558,16 +557,13 @@ async fn test_nullability() {
 
 #[tokio::test]
 async fn test_no_source() {
-    // TODO: make this port dynamic once overriding via config is supported
-    let mock_server = MockServer::builder()
-        .listener(TcpListener::bind("127.0.0.1:37895").expect("Could not bind port"))
-        .start()
-        .await;
+    let mock_server = MockServer::start().await;
     mock_api::user_1().mount(&mock_server).await;
+    let uri = mock_server.uri();
 
     let response = execute(
-        NO_SOURCES_SCHEMA,
-        &mock_server.uri(),
+        &NO_SOURCES_SCHEMA.replace("http://localhost", &uri),
+        &uri,
         "query { user(id: 1) { id name }}",
         Default::default(),
         None,

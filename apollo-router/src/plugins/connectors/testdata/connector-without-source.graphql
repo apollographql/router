@@ -56,7 +56,7 @@ enum link__Purpose {
 type Query
   @join__type(graph: CONNECTORS)
 {
-  user(id: ID!): User @join__directive(graphs: [CONNECTORS], name: "connect", args: {http: {GET: "http://127.0.0.1:37895/users/{$args.id}"}, selection: "id name"})
+  user(id: ID!): User @join__directive(graphs: [CONNECTORS], name: "connect", args: {http: {GET: "http://localhost/users/{$args.id}"}, selection: "id name"})
 }
 
 type User
