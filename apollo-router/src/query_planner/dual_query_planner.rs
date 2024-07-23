@@ -372,7 +372,7 @@ fn flatten_node_matches(this: &FlattenNode, other: &FlattenNode) -> bool {
 
 // Copied and modified from `apollo_federation::operation::SelectionKey`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) enum SelectionKey {
+enum SelectionKey {
     Field {
         /// The field alias (if specified) or field name in the resulting selection set.
         response_name: Name,
