@@ -217,12 +217,12 @@ impl Field {
     ///
     /// There are 2 valid cases we want to allow:
     /// 1. either `parent_type` and `field_parent_type` are the same underlying type (same name) but from different underlying schema. Typically,
-    ///  happens when we're building subgraph queries but using selections from the original query which is against the supergraph API schema.
+    ///    happens when we're building subgraph queries but using selections from the original query which is against the supergraph API schema.
     /// 2. or they are not the same underlying type, but the field parent type is from an interface (or an interface object, which is the same
-    ///  here), in which case we may be rebasing an interface field on one of the implementation type, which is ok. Note that we don't verify
-    ///  that `parent_type` is indeed an implementation of `field_parent_type` because it's possible that this implementation relationship exists
-    ///  in the supergraph, but not in any of the subgraph schema involved here. So we just let it be. Not that `rebase_on` will complain anyway
-    ///  if the field name simply does not exist in `parent_type`.
+    ///    here), in which case we may be rebasing an interface field on one of the implementation type, which is ok. Note that we don't verify
+    ///    that `parent_type` is indeed an implementation of `field_parent_type` because it's possible that this implementation relationship exists
+    ///    in the supergraph, but not in any of the subgraph schema involved here. So we just let it be. Not that `rebase_on` will complain anyway
+    ///    if the field name simply does not exist in `parent_type`.
     fn can_rebase_on(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
@@ -836,8 +836,8 @@ impl NamedFragments {
 
 #[cfg(test)]
 mod tests {
+    use apollo_compiler::collections::IndexSet;
     use apollo_compiler::name;
-    use indexmap::IndexSet;
 
     use crate::operation::normalize_operation;
     use crate::operation::tests::parse_schema_and_operation;
@@ -893,12 +893,12 @@ type U {
             "operation should have some fragments"
         );
 
-        if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
+        if let Some(operation) = executable_document.operations.named.get_mut("TestQuery") {
             let normalized_operation = normalize_operation(
                 operation,
                 NamedFragments::new(&executable_document.fragments, &schema),
                 &schema,
-                &IndexSet::new(),
+                &IndexSet::default(),
             )
             .unwrap();
 
@@ -979,12 +979,12 @@ type U {
         );
         assert_eq!(2, executable_document.fragments.len());
 
-        if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
+        if let Some(operation) = executable_document.operations.named.get_mut("TestQuery") {
             let normalized_operation = normalize_operation(
                 operation,
                 NamedFragments::new(&executable_document.fragments, &schema),
                 &schema,
-                &IndexSet::new(),
+                &IndexSet::default(),
             )
             .unwrap();
 
@@ -1061,12 +1061,12 @@ type T2 implements I {
             "operation should have some fragments"
         );
 
-        if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
+        if let Some(operation) = executable_document.operations.named.get_mut("TestQuery") {
             let normalized_operation = normalize_operation(
                 operation,
                 NamedFragments::new(&executable_document.fragments, &schema),
                 &schema,
-                &IndexSet::new(),
+                &IndexSet::default(),
             )
             .unwrap();
 
@@ -1138,8 +1138,9 @@ type T implements I {
             "operation should have some fragments"
         );
 
-        if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
-            let mut interface_objects: IndexSet<InterfaceTypeDefinitionPosition> = IndexSet::new();
+        if let Some(operation) = executable_document.operations.named.get_mut("TestQuery") {
+            let mut interface_objects: IndexSet<InterfaceTypeDefinitionPosition> =
+                IndexSet::default();
             interface_objects.insert(InterfaceTypeDefinitionPosition {
                 type_name: name!("I"),
             });
@@ -1236,12 +1237,12 @@ type T {
             "operation should have some fragments"
         );
 
-        if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
+        if let Some(operation) = executable_document.operations.named.get_mut("TestQuery") {
             let normalized_operation = normalize_operation(
                 operation,
                 NamedFragments::new(&executable_document.fragments, &schema),
                 &schema,
-                &IndexSet::new(),
+                &IndexSet::default(),
             )
             .unwrap();
 
@@ -1314,12 +1315,12 @@ type U {
             "operation should have some fragments"
         );
 
-        if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
+        if let Some(operation) = executable_document.operations.named.get_mut("TestQuery") {
             let normalized_operation = normalize_operation(
                 operation,
                 NamedFragments::new(&executable_document.fragments, &schema),
                 &schema,
-                &IndexSet::new(),
+                &IndexSet::default(),
             )
             .unwrap();
 
@@ -1387,12 +1388,12 @@ type T implements I {
             "operation should have some fragments"
         );
 
-        if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
+        if let Some(operation) = executable_document.operations.named.get_mut("TestQuery") {
             let normalized_operation = normalize_operation(
                 operation,
                 NamedFragments::new(&executable_document.fragments, &schema),
                 &schema,
-                &IndexSet::new(),
+                &IndexSet::default(),
             )
             .unwrap();
 

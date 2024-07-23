@@ -139,9 +139,9 @@ impl Instrumented for CacheInstruments {
             for (entity_type, CacheHitMiss { hit, miss }) in &cache_info.0 {
                 // Cache hit
                 {
-                    let cache_hit = cache_hit.clone();
+                    let cloned_cache_hit = cache_hit.clone();
                     {
-                        let mut inner_cache_hit = cache_hit.inner.lock();
+                        let mut inner_cache_hit = cloned_cache_hit.inner.lock();
                         inner_cache_hit.selector = Some(Arc::new(SubgraphSelector::StaticField {
                             r#static: AttributeValue::I64(*hit as i64),
                         }));
@@ -160,13 +160,13 @@ impl Instrumented for CacheInstruments {
                             .attributes
                             .push(KeyValue::new(CACHE_HIT, opentelemetry::Value::Bool(true)));
                     }
-                    cache_hit.on_response(response);
+                    cloned_cache_hit.on_response(response);
                 }
                 // Cache miss
                 {
-                    let cache_miss = cache_hit.clone();
+                    let cloned_cache_miss = cache_hit.clone();
                     {
-                        let mut inner_cache_miss = cache_miss.inner.lock();
+                        let mut inner_cache_miss = cloned_cache_miss.inner.lock();
                         inner_cache_miss.selector = Some(Arc::new(SubgraphSelector::StaticField {
                             r#static: AttributeValue::I64(*miss as i64),
                         }));
@@ -185,11 +185,11 @@ impl Instrumented for CacheInstruments {
                             .attributes
                             .push(KeyValue::new(CACHE_HIT, opentelemetry::Value::Bool(false)));
                     }
-                    cache_miss.on_response(response);
+                    cloned_cache_miss.on_response(response);
                 }
-                // Make sure it won't be incremented when dropped
-                let _ = cache_hit.inner.lock().counter.take();
             }
+            // Make sure it won't be incremented when dropped
+            let _ = cache_hit.inner.lock().counter.take();
         }
     }
 
