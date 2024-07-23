@@ -570,16 +570,6 @@ pub(crate) enum SchemaError {
     Connector(FederationError),
 }
 
-#[derive(Error, Display, Debug, PartialEq)]
-pub(crate) enum ConnectorDirectiveError {
-    /// Invalid Base URI on API
-    InvalidBaseUri(url::ParseError),
-    /// Invalid Path for directive
-    InvalidPath(url::ParseError),
-    /// Could not generate path from inputs
-    PathGenerationError(String),
-}
-
 /// Collection of schema validation errors.
 #[derive(Debug)]
 pub(crate) struct ParseErrors {
