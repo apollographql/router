@@ -76,7 +76,10 @@ impl Invalidation {
         if let Some(storage) = storage.clone() {
             let h = handle.clone();
 
-            tokio::task::spawn(async move { start(storage, h.into_stream()).await });
+            tokio::task::spawn(async move {
+                start(storage, h.into_stream()).await;
+                tracing::error!(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>< FINISHED TASK!");
+            });
         }
         Ok(Self {
             enabled,
