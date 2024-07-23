@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use apollo_federation::sources::connect::Connector;
-use apollo_federation::sources::connect::Transport;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -46,9 +45,7 @@ where
             .and_then(|map| map.get(&connector.id.source_name.clone()?.to_string()))
             .and_then(|api_config| api_config.override_url.as_ref())
         {
-            match &mut connector.transport {
-                Transport::HttpJson(transport) => transport.base_url = url.to_string(),
-            }
+            connector.transport.source_url = Some(url.to_string());
         }
     }
 }

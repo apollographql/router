@@ -219,12 +219,11 @@ mod helpers {
     use crate::schema::FederationSchema;
     use crate::schema::ValidFederationSchema;
     use crate::sources::connect::json_selection::JSONSelectionVisitor;
-    use crate::sources::connect::url_path_template::Parameter;
+    use crate::sources::connect::url_template::Parameter;
     use crate::sources::connect::ConnectSpecDefinition;
     use crate::sources::connect::Connector;
     use crate::sources::connect::EntityResolver;
     use crate::sources::connect::JSONSelection;
-    use crate::sources::connect::Transport;
     use crate::subgraph::spec::EXTERNAL_DIRECTIVE_NAME;
     use crate::subgraph::spec::KEY_DIRECTIVE_NAME;
     use crate::subgraph::spec::REQUIRES_DIRECTIVE_NAME;
@@ -415,14 +414,15 @@ mod helpers {
             connector: &Connector,
             arguments: &[Node<InputValueDefinition>],
         ) -> Result<(), FederationError> {
-            let parameters = match connector.transport {
-                Transport::HttpJson(ref http) => http.path_template.parameters().map_err(|e| {
+            let parameters = connector
+                .transport
+                .connect_template
+                .parameters()
+                .map_err(|e| {
                     FederationError::internal(format!(
                         "could not extract path template parameters: {e}"
                     ))
-                })?,
-            };
-
+                })?;
             for parameter in parameters {
                 match parameter {
                     // Ensure that input arguments are carried over to the new schema, including
@@ -504,14 +504,15 @@ mod helpers {
             let parent_type = self.original_schema.get_type(parent_type_name)?;
             let output_type = to_schema.get_type(output_type_name)?;
 
-            let parameters = match connector.transport {
-                Transport::HttpJson(ref http) => http.path_template.parameters().map_err(|e| {
+            let parameters = connector
+                .transport
+                .connect_template
+                .parameters()
+                .map_err(|e| {
                     FederationError::internal(format!(
                         "could not extract path template parameters: {e}"
                     ))
-                })?,
-            };
-
+                })?;
             // We'll need to collect all synthesized keys for the output type, adding a federation
             // `@key` directive once completed.
             let mut keys = Vec::new();

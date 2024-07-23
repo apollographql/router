@@ -627,10 +627,44 @@ async fn test_nullability() {
     );
 }
 
+#[tokio::test]
+async fn test_no_source() {
+    let mock_server = MockServer::start().await;
+    mock_api::user_1().mount(&mock_server).await;
+    let uri = mock_server.uri();
+
+    let response = execute(
+        &NO_SOURCES_SCHEMA.replace("http://localhost", &uri),
+        &uri,
+        "query { user(id: 1) { id name }}",
+        Default::default(),
+        None,
+        |_| {},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "user": {
+          "id": 1,
+          "name": "Leanne Graham"
+        }
+      }
+    }
+    "###);
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![Matcher::new().method("GET").path("/users/1").build()],
+    );
+}
+
 const STEEL_THREAD_SCHEMA: &str = include_str!("./testdata/steelthread.graphql");
 const MUTATION_SCHEMA: &str = include_str!("./testdata/mutation.graphql");
 const NULLABILITY_SCHEMA: &str = include_str!("./testdata/nullability.graphql");
 const SELECTION_SCHEMA: &str = include_str!("./testdata/selection.graphql");
+const NO_SOURCES_SCHEMA: &str = include_str!("./testdata/connector-without-source.graphql");
 
 async fn execute(
     schema: &str,

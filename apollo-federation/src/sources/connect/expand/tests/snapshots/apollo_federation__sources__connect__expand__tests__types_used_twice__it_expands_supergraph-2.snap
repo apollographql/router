@@ -16,18 +16,19 @@ expression: connectors.by_service_name
                 directive_index: 0,
             },
         },
-        transport: HttpJson(
-            HttpJsonTransport {
-                base_url: "http://example",
-                path_template: URLPathTemplate {
-                    path: [],
-                    query: {},
-                },
-                method: Get,
-                headers: {},
-                body: None,
+        transport: HttpJsonTransport {
+            source_url: Some(
+                "http://example",
+            ),
+            connect_template: URLTemplate {
+                base: None,
+                path: [],
+                query: {},
             },
-        ),
+            method: Get,
+            headers: {},
+            body: None,
+        },
         selection: Named(
             SubSelection {
                 selections: [

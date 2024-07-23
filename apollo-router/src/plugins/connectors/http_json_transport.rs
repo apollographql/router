@@ -121,11 +121,18 @@ pub(crate) fn make_request(
 
 fn make_uri(transport: &HttpJsonTransport, inputs: &Value) -> Result<Url, HttpJsonTransportError> {
     let flat_inputs = flatten_keys(inputs);
-    let path = transport
-        .path_template
-        .generate_path(&Value::Object(flat_inputs))
-        .map_err(HttpJsonTransportError::PathGenerationError)?;
-    append_path(Url::parse(transport.base_url.as_ref()).unwrap(), &path)
+    let generated = transport
+        .connect_template
+        .generate(&flat_inputs)
+        .map_err(HttpJsonTransportError::TemplateGenerationError)?;
+    if let Some(source_url) = transport.source_url.as_ref() {
+        append_path(
+            Url::parse(source_url).map_err(HttpJsonTransportError::InvalidUrl)?,
+            &generated,
+        )
+    } else {
+        Url::parse(&generated).map_err(HttpJsonTransportError::InvalidUrl)
+    }
 }
 
 /// Append a path and query to a URI. Uses the path from base URI (but will discard the query).
@@ -151,7 +158,7 @@ fn append_path(base_uri: Url, path: &str) -> Result<Url, HttpJsonTransportError>
         // This means the schema is invalid.
         let base_segments = base_uri
             .path_segments()
-            .ok_or(HttpJsonTransportError::InvalidBaseUri(
+            .ok_or(HttpJsonTransportError::InvalidUrl(
                 url::ParseError::RelativeUrlWithCannotBeABaseBase,
             ))?
             .filter(|segment| !segment.is_empty());
@@ -169,7 +176,7 @@ fn append_path(base_uri: Url, path: &str) -> Result<Url, HttpJsonTransportError>
         // Here we're trying to only append segments that are not empty, to avoid `//`
         res.path_segments_mut()
             .map_err(|_| {
-                HttpJsonTransportError::InvalidBaseUri(
+                HttpJsonTransportError::InvalidUrl(
                     url::ParseError::RelativeUrlWithCannotBeABaseBase,
                 )
             })?
@@ -192,7 +199,7 @@ fn append_path(base_uri: Url, path: &str) -> Result<Url, HttpJsonTransportError>
     Ok(res)
 }
 
-// URLPathTemplate expects a map with flat dot-delimited keys.
+// URLTemplate expects a map with flat dot-delimited keys.
 fn flatten_keys(inputs: &Value) -> serde_json_bytes::Map<ByteString, Value> {
     let mut flat = serde_json_bytes::Map::new();
     flatten_keys_recursive(inputs, &mut flat, ByteString::from(""));
@@ -271,11 +278,11 @@ pub(crate) enum HttpJsonTransportError {
     /// Invalid arguments
     InvalidArguments(String),
     /// Error building URI: {0:?}
-    InvalidBaseUri(url::ParseError),
+    InvalidUrl(url::ParseError),
     /// Error building URI: {0:?}
     InvalidPath(url::ParseError),
     /// Could not generate path from inputs: {0}
-    PathGenerationError(String),
+    TemplateGenerationError(String),
 }
 
 #[cfg(test)]
