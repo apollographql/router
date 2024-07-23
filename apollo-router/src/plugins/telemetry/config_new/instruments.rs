@@ -1971,8 +1971,8 @@ mod tests {
     use std::path::PathBuf;
     use std::str::FromStr;
 
+    use apollo_compiler::ast::NamedType;
     use apollo_compiler::executable::SelectionSet;
-    use apollo_compiler::schema::NamedType;
     use apollo_compiler::Name;
     use http::HeaderMap;
     use http::HeaderName;
