@@ -31,7 +31,6 @@ use serde_json_bytes::Value;
 use thiserror::Error;
 use url::Url;
 
-use crate::error::ConnectorDirectiveError;
 use crate::plugins::connectors::plugin::ConnectorContext;
 use crate::plugins::connectors::plugin::SelectionData;
 use crate::services::connect;
@@ -93,11 +92,7 @@ pub(crate) fn make_request(
 
     let mut request = http::Request::builder()
         .method(transport.method.as_str())
-        .uri(
-            make_uri(transport, &inputs)
-                .map_err(HttpJsonTransportError::ConnectorDirectiveError)?
-                .as_str(),
-        )
+        .uri(make_uri(transport, &inputs)?.as_str())
         .header("content-type", "application/json")
         .body(body.into())
         .map_err(HttpJsonTransportError::InvalidNewRequest)?;
@@ -124,31 +119,31 @@ pub(crate) fn make_request(
     Ok(request)
 }
 
-fn make_uri(transport: &HttpJsonTransport, inputs: &Value) -> Result<Url, ConnectorDirectiveError> {
+fn make_uri(transport: &HttpJsonTransport, inputs: &Value) -> Result<Url, HttpJsonTransportError> {
     let flat_inputs = flatten_keys(inputs);
     let generated = transport
         .connect_template
         .generate(&flat_inputs)
-        .map_err(ConnectorDirectiveError::PathGenerationError)?;
+        .map_err(HttpJsonTransportError::TemplateGenerationError)?;
     if let Some(source_url) = transport.source_url.as_ref() {
         append_path(
-            Url::parse(source_url).map_err(ConnectorDirectiveError::Url)?,
+            Url::parse(source_url).map_err(HttpJsonTransportError::InvalidUrl)?,
             &generated,
         )
     } else {
-        Url::parse(&generated).map_err(ConnectorDirectiveError::Url)
+        Url::parse(&generated).map_err(HttpJsonTransportError::InvalidUrl)
     }
 }
 
 /// Append a path and query to a URI. Uses the path from base URI (but will discard the query).
 /// Expects the path to start with "/".
-fn append_path(base_uri: Url, path: &str) -> Result<Url, ConnectorDirectiveError> {
+fn append_path(base_uri: Url, path: &str) -> Result<Url, HttpJsonTransportError> {
     // we will need to work on path segments, and on query parameters.
     // the first thing we need to do is parse the path so we have APIs to reason with both:
     let path_uri: Url = Url::options()
         .base_url(Some(&base_uri))
         .parse(path)
-        .map_err(ConnectorDirectiveError::InvalidPath)?;
+        .map_err(HttpJsonTransportError::InvalidPath)?;
     // get query parameters from both base_uri and path
     let base_uri_query_pairs =
         (!base_uri.query().unwrap_or_default().is_empty()).then(|| base_uri.query_pairs());
@@ -163,14 +158,14 @@ fn append_path(base_uri: Url, path: &str) -> Result<Url, ConnectorDirectiveError
         // This means the schema is invalid.
         let base_segments = base_uri
             .path_segments()
-            .ok_or(ConnectorDirectiveError::Url(
+            .ok_or(HttpJsonTransportError::InvalidUrl(
                 url::ParseError::RelativeUrlWithCannotBeABaseBase,
             ))?
             .filter(|segment| !segment.is_empty());
 
         let path_segments = path_uri
             .path_segments()
-            .ok_or(ConnectorDirectiveError::InvalidPath(
+            .ok_or(HttpJsonTransportError::InvalidPath(
                 url::ParseError::RelativeUrlWithCannotBeABaseBase,
             ))?
             .filter(|segment| !segment.is_empty())
@@ -181,7 +176,9 @@ fn append_path(base_uri: Url, path: &str) -> Result<Url, ConnectorDirectiveError
         // Here we're trying to only append segments that are not empty, to avoid `//`
         res.path_segments_mut()
             .map_err(|_| {
-                ConnectorDirectiveError::Url(url::ParseError::RelativeUrlWithCannotBeABaseBase)
+                HttpJsonTransportError::InvalidUrl(
+                    url::ParseError::RelativeUrlWithCannotBeABaseBase,
+                )
             })?
             .clear()
             .extend(base_segments)
@@ -270,7 +267,6 @@ fn add_headers<T>(
     }
 }
 
-// These are runtime error only, configuration errors should be captured as ConnectorDirectiveError
 #[derive(Error, Display, Debug)]
 pub(crate) enum HttpJsonTransportError {
     /// Error building URI: {0:?}
@@ -279,10 +275,14 @@ pub(crate) enum HttpJsonTransportError {
     InvalidNewRequest(#[source] http::Error),
     /// Could not serialize body: {0}
     BodySerialization(#[from] serde_json::Error),
-    /// Invalid connector directive. This error should have been caught earlier: {0}
-    ConnectorDirectiveError(#[source] ConnectorDirectiveError),
     /// Invalid arguments
     InvalidArguments(String),
+    /// Error building URI: {0:?}
+    InvalidUrl(url::ParseError),
+    /// Error building URI: {0:?}
+    InvalidPath(url::ParseError),
+    /// Could not generate path from inputs: {0}
+    TemplateGenerationError(String),
 }
 
 #[cfg(test)]

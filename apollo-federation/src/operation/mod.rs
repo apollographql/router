@@ -640,6 +640,18 @@ impl SelectionKey {
     pub(crate) fn is_typename_field(&self) -> bool {
         matches!(self, SelectionKey::Field { response_name, directives } if *response_name == TYPENAME_FIELD && directives.is_empty())
     }
+
+    /// Create a selection key for a specific field name.
+    ///
+    /// This is available for tests only as selection keys should not normally be created outside of
+    /// `HasSelectionKey::key`.
+    #[cfg(test)]
+    pub(crate) fn field_name(name: &str) -> Self {
+        SelectionKey::Field {
+            response_name: Name::new(name).unwrap(),
+            directives: Default::default(),
+        }
+    }
 }
 
 pub(crate) trait HasSelectionKey {
@@ -771,17 +783,7 @@ impl Selection {
     }
 
     // Note: Fragment spreads can be present in optimized operations.
-    pub(crate) fn selection_set(&self) -> Result<Option<&SelectionSet>, FederationError> {
-        match self {
-            Selection::Field(field_selection) => Ok(field_selection.selection_set.as_ref()),
-            Selection::FragmentSpread(_) => Ok(None),
-            Selection::InlineFragment(inline_fragment_selection) => {
-                Ok(Some(&inline_fragment_selection.selection_set))
-            }
-        }
-    }
-
-    pub(crate) fn try_selection_set(&self) -> Option<&SelectionSet> {
+    pub(crate) fn selection_set(&self) -> Option<&SelectionSet> {
         match self {
             Selection::Field(field_selection) => field_selection.selection_set.as_ref(),
             Selection::FragmentSpread(_) => None,
@@ -792,7 +794,7 @@ impl Selection {
     }
 
     fn sub_selection_type_position(&self) -> Option<CompositeTypeDefinitionPosition> {
-        Some(self.try_selection_set()?.type_position.clone())
+        Some(self.selection_set()?.type_position.clone())
     }
 
     pub(crate) fn conditions(&self) -> Result<Conditions, FederationError> {
@@ -911,7 +913,7 @@ impl Selection {
         &self,
         mapper: impl FnOnce(&SelectionSet) -> Result<Option<SelectionSet>, FederationError>,
     ) -> Result<Self, FederationError> {
-        if let Some(selection_set) = self.selection_set()? {
+        if let Some(selection_set) = self.selection_set() {
             self.with_updated_selection_set(mapper(selection_set)?)
         } else {
             // selection has no (sub-)selection set.
@@ -1884,8 +1886,6 @@ impl SelectionSet {
                 };
                 Box::new(
                     sel.selection_set()
-                        .ok()
-                        .flatten()
                         .cloned()
                         .into_iter()
                         .flat_map(SelectionSet::split_top_level_fields)
@@ -2499,7 +2499,7 @@ impl SelectionSet {
         let mut sub_selection_updates: MultiIndexMap<SelectionKey, Selection> =
             MultiIndexMap::new();
         for selection in [first, second].into_iter().chain(iter) {
-            if let Some(sub_selection_set) = selection.selection_set()? {
+            if let Some(sub_selection_set) = selection.selection_set() {
                 sub_selection_updates.extend(
                     sub_selection_set
                         .selections
@@ -2641,7 +2641,7 @@ impl SelectionSet {
             }
         }
         for selection in self.selections.values() {
-            selection_map.insert(if let Some(selection_set) = selection.selection_set()? {
+            selection_map.insert(if let Some(selection_set) = selection.selection_set() {
                 let type_if_abstract = selection
                     .sub_selection_type_position()
                     .and_then(|ty| ty.try_into().ok());
@@ -2949,7 +2949,7 @@ impl SelectionSet {
                     }
                 })
                 .collect::<Vec<_>>();
-            let selection_set = selection.selection_set()?;
+            let selection_set = selection.selection_set();
             let updated_selection_set = selection_set
                 .map(|selection_set| selection_set.with_field_aliased(&subselection_aliases))
                 .transpose()?;
@@ -3050,7 +3050,7 @@ impl SelectionSet {
             Err(FederationError::internal("Invalid empty selection set"))
         } else {
             for selection in self.selections.values() {
-                if let Some(s) = selection.selection_set()? {
+                if let Some(s) = selection.selection_set() {
                     s.validate(_variable_definitions)?;
                 }
             }
@@ -4001,12 +4001,25 @@ impl RebasedFragments {
 
 // Collect used variables from operation types.
 
-fn collect_variables_from_argument<'selection>(
-    argument: &'selection executable::Argument,
+fn collect_variables_from_value<'selection>(
+    value: &'selection executable::Value,
     variables: &mut HashSet<&'selection Name>,
 ) {
-    if let Some(v) = argument.value.as_variable() {
-        variables.insert(v);
+    match value {
+        executable::Value::Variable(v) => {
+            variables.insert(v);
+        }
+        executable::Value::List(list) => {
+            for value in list {
+                collect_variables_from_value(value, variables);
+            }
+        }
+        executable::Value::Object(object) => {
+            for (_key, value) in object {
+                collect_variables_from_value(value, variables);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -4015,14 +4028,14 @@ fn collect_variables_from_directive<'selection>(
     variables: &mut HashSet<&'selection Name>,
 ) {
     for arg in directive.arguments.iter() {
-        collect_variables_from_argument(arg, variables)
+        collect_variables_from_value(&arg.value, variables)
     }
 }
 
 impl Field {
     fn collect_variables<'selection>(&'selection self, variables: &mut HashSet<&'selection Name>) {
         for arg in self.arguments.iter() {
-            collect_variables_from_argument(arg, variables)
+            collect_variables_from_value(&arg.value, variables)
         }
         for dir in self.directives.iter() {
             collect_variables_from_directive(dir, variables)

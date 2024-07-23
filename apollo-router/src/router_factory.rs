@@ -388,7 +388,7 @@ impl YamlRouterFactory {
                 create_subgraph_services(&http_service_factory, &plugins, &configuration).await?;
             builder = builder.with_http_service_factory(http_service_factory);
             for (name, subgraph_service) in subgraph_services {
-                builder = builder.with_subgraph_service(&name, subgraph_service)
+                builder = builder.with_subgraph_service(&name, subgraph_service);
             }
 
             // Final creation after this line we must NOT fail to go live with the new router from this point as some plugins may interact with globals.
@@ -422,20 +422,19 @@ pub(crate) async fn create_subgraph_services(
     >,
     BoxError,
 > {
-    let shaping = plugins
-        .iter()
-        .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
-        .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
-        .expect("traffic shaping should always be part of the plugin list");
-
     let subscription_plugin_conf = plugins
         .iter()
         .find(|i| i.0.as_str() == APOLLO_SUBSCRIPTION_PLUGIN)
         .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
         .map(|p| p.config.clone());
 
-    let mut subgraph_services = IndexMap::new();
+    let shaping = plugins
+        .iter()
+        .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
+        .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
+        .expect("traffic shaping should always be part of the plugin list");
 
+    let mut subgraph_services = IndexMap::default();
     for (name, http_service_factory) in http_service_factory.iter() {
         let subgraph_service = shaping.subgraph_service_internal(
             name.as_ref(),

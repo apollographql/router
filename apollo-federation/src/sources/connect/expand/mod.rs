@@ -96,8 +96,9 @@ pub fn expand_connectors(supergraph_str: &str) -> Result<ExpansionResult, Federa
     })?;
 
     let mut new_supergraph = FederationSchema::new(new_supergraph.schema.into_inner())?;
-    carryover_directives(&supergraph.schema, &mut new_supergraph)
-        .map_err(|_e| FederationError::internal("could not carry over directives"))?;
+    carryover_directives(&supergraph.schema, &mut new_supergraph).map_err(|e| {
+        FederationError::internal(format!("could not carry over directives: {e:?}"))
+    })?;
 
     let connectors_by_service_name: IndexMap<Arc<str>, Connector> = connect_subgraphs
         .into_iter()

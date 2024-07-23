@@ -687,6 +687,9 @@ impl Merger {
         if original_directives
             .iter()
             .any(|d| d.as_ref().name == directive_names.inaccessible)
+            && !new_directives
+                .iter()
+                .any(|d| d.as_ref().name == INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC)
         {
             self.needs_inaccessible = true;
 
@@ -1708,14 +1711,25 @@ mod tests {
     #[test]
     fn test_inaccessible() {
         let one_sdl = include_str!("./sources/connect/expand/merge/inaccessible.graphql");
+        let two_sdl = include_str!("./sources/connect/expand/merge/inaccessible_2.graphql");
 
         let mut subgraphs = ValidFederationSubgraphs::new();
         subgraphs
             .add(ValidFederationSubgraph {
-                name: "basic_1".to_string(),
+                name: "inaccessible".to_string(),
                 url: "".to_string(),
                 schema: ValidFederationSchema::new(
-                    Schema::parse_and_validate(one_sdl, "./basic_1.graphql").unwrap(),
+                    Schema::parse_and_validate(one_sdl, "./inaccessible.graphql").unwrap(),
+                )
+                .unwrap(),
+            })
+            .unwrap();
+        subgraphs
+            .add(ValidFederationSubgraph {
+                name: "inaccessible_2".to_string(),
+                url: "".to_string(),
+                schema: ValidFederationSchema::new(
+                    Schema::parse_and_validate(two_sdl, "./inaccessible_2.graphql").unwrap(),
                 )
                 .unwrap(),
             })

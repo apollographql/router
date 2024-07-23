@@ -3,4 +3,4 @@ source: apollo-federation/src/sources/connect/validation/mod.rs
 expression: "format!(\"{:?}\", errors)"
 input_file: apollo-federation/src/sources/connect/validation/test_data/validation/missing_http_method_on_connect.graphql
 ---
-[Message { code: MissingHttpMethod, message: "`@connect(http:)` on `Query.resources` must specify an HTTP method.", locations: [Location { line: 9, column: 33 }..Location { line: 9, column: 35 }] }]
+[Message { code: MissingHttpMethod, message: "`@connect(http:)` on `Query.resources` must specify an HTTP method.", locations: [LineColumn { line: 10, column: 34 }..LineColumn { line: 10, column: 36 }] }]

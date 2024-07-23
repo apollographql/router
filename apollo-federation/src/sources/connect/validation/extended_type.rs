@@ -5,7 +5,7 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::parser::FileId;
 use apollo_compiler::parser::SourceFile;
 use apollo_compiler::parser::SourceMap;
-use apollo_compiler::parser::SourceSpan as NodeLocation;
+use apollo_compiler::parser::SourceSpan;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
@@ -26,7 +26,6 @@ use super::selection::validate_selection;
 use super::source_name::validate_source_name_arg;
 use super::source_name::SourceName;
 use super::Code;
-use super::Location;
 use super::Message;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
@@ -48,12 +47,12 @@ pub(super) fn validate_extended_type(
             all_source_names,
         ),
         ExtendedType::Union(union_type) => vec![validate_abstract_type(
-            NodeLocation::recompose(union_type.location(), union_type.name.location()),
+            SourceSpan::recompose(union_type.location(), union_type.name.location()),
             source_map,
             "union",
         )],
         ExtendedType::Interface(interface) => vec![validate_abstract_type(
-            NodeLocation::recompose(interface.location(), interface.name.location()),
+            SourceSpan::recompose(interface.location(), interface.name.location()),
             source_map,
             "interface",
         )],
@@ -89,9 +88,7 @@ fn validate_object_fields(
             message: format!(
                 "A subscription root type is not supported when using `@{connect_directive_name}`."
             ),
-            locations: Location::from_node(object.location(), source_map)
-                .into_iter()
-                .collect(),
+            locations: object.line_column_range(source_map).into_iter().collect(),
         }];
     }
 
@@ -177,9 +174,9 @@ fn validate_field(
         category,
     ));
 
-    let Some((http_arg, http_arg_location)) = connect_directive
+    let Some((http_arg, http_arg_node)) = connect_directive
         .argument_by_name(&HTTP_ARGUMENT_NAME)
-        .and_then(|arg| Some((arg.as_object()?, arg.location())))
+        .and_then(|arg| Some((arg.as_object()?, arg)))
     else {
         errors.push(Message {
             code: Code::GraphQLError,
@@ -188,7 +185,8 @@ fn validate_field(
                 coordinate =
                     connect_directive_coordinate(connect_directive_name, object, &field.name),
             ),
-            locations: Location::from_node(connect_directive.location(), source_map)
+            locations: connect_directive
+                .line_column_range(source_map)
                 .into_iter()
                 .collect(),
         });
@@ -200,7 +198,7 @@ fn validate_field(
     errors.extend(validate_http_method_arg(
         &http_methods,
         connect_directive_http_coordinate(connect_directive_name, object, &field.name),
-        http_arg_location,
+        http_arg_node,
         source_map,
     ));
 
@@ -238,7 +236,7 @@ fn validate_field(
                     message: format!(
                         "{url_coordinate} contains the absolute URL {url} while also specifying a `{CONNECT_SOURCE_ARGUMENT_NAME}`. Either remove the `{CONNECT_SOURCE_ARGUMENT_NAME}` argument or change the URL to a path.",
                     ),
-                    locations: Location::from_node(url.location(), source_map)
+                    locations: url.line_column_range(source_map)
                         .into_iter()
                         .collect(),
                 });
@@ -255,7 +253,7 @@ fn validate_field(
                     code: Code::RelativeConnectUrlWithoutSource,
                     message: format!(
                         "{url_coordinate} specifies the relative URL {url}, but no `{CONNECT_SOURCE_ARGUMENT_NAME}` is defined. Either use an absolute URL, or add a `@{source_directive_name}`."),
-                    locations: Location::from_node(url.location(), source_map).into_iter().collect()
+                    locations: url.line_column_range(source_map).into_iter().collect()
                 });
             } else {
                 errors.push(err);
@@ -277,14 +275,14 @@ fn validate_field(
 }
 
 fn validate_abstract_type(
-    node: Option<NodeLocation>,
+    node: Option<SourceSpan>,
     source_map: &SourceMap,
     keyword: &str,
 ) -> Message {
     Message {
         code: Code::UnsupportedAbstractType,
         message: format!("Abstract schema types, such as `{keyword}`, are not supported when using connectors. You can check out our documentation at https://go.apollo.dev/connectors/best-practices#abstract-schema-types-are-unsupported."),
-        locations: Location::from_node(node, source_map)
+        locations: node.and_then(|location| location.line_column_range(source_map))
             .into_iter()
             .collect(),
     }
@@ -304,8 +302,6 @@ fn get_missing_connect_directive_message(
             field = field.name,
             object_name = object.name,
         ),
-        locations: Location::from_node(field.location(), source_map)
-            .into_iter()
-            .collect(),
+        locations: field.line_column_range(source_map).into_iter().collect(),
     }
 }
