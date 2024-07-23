@@ -2038,8 +2038,13 @@ fn inaccessible_on_builtins() {
 
     // Note this is different from the JS implementation
     insta::assert_snapshot!(errors, @r###"
-    The following errors occurred:
-      - built-in scalar definitions must be omitted
+    Error: built-in scalar definitions must be omitted
+        ╭─[schema.graphql:26:7]
+        │
+     26 │       scalar String @inaccessible
+        │       ─────────────┬─────────────  
+        │                    ╰─────────────── remove this scalar definition
+    ────╯
     "###);
 }
 

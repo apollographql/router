@@ -3,10 +3,11 @@ use std::fmt::Formatter;
 use std::hash::Hash;
 use std::sync::Arc;
 
+use apollo_compiler::collections::IndexMap;
 use indexmap::map::Entry;
-use indexmap::IndexMap;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
+use serde::Serialize;
 
 use crate::error::FederationError;
 use crate::operation::SelectionSet;
@@ -23,12 +24,16 @@ use crate::query_graph::QueryGraphNode;
 // Typescript doesn't have a native way of associating equality/hash functions with types, so they
 // were passed around manually. This isn't the case with Rust, where we instead implement trigger
 // equality via `PartialEq` and `Hash`.
+#[derive(Serialize)]
 pub(crate) struct PathTree<TTrigger, TEdge>
 where
     TTrigger: Eq + Hash,
     TEdge: Copy + Into<Option<EdgeIndex>>,
 {
     /// The query graph of which this is a path tree.
+    // TODO: This is probably useful information for snapshot logging, but it can probably be
+    // inferred by the visualizer
+    #[serde(skip)]
     pub(crate) graph: Arc<QueryGraph>,
     /// The query graph node at which the path tree starts.
     pub(crate) node: NodeIndex,
@@ -72,7 +77,7 @@ where
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub(crate) struct PathTreeChild<TTrigger, TEdge>
 where
     TTrigger: Eq + Hash,
@@ -218,7 +223,8 @@ where
         TEdge: 'inputs,
     {
         // Group by and order by unique edge ID, and among those by unique trigger
-        let mut merged = IndexMap::<TEdge, ByUniqueEdge<TTrigger, /* impl Iterator */ _>>::new();
+        let mut merged =
+            IndexMap::<TEdge, ByUniqueEdge<TTrigger, /* impl Iterator */ _>>::default();
 
         struct ByUniqueEdge<'inputs, TTrigger, GraphPathIter> {
             target_node: NodeIndex,
@@ -252,7 +258,7 @@ where
                             // For a "None" edge, stay on the same node
                             node
                         },
-                        by_unique_trigger: IndexMap::new(),
+                        by_unique_trigger: IndexMap::default(),
                     })
                 }
             };
@@ -576,7 +582,7 @@ mod tests {
         "#;
 
         let (schema, mut executable_document) = parse_schema_and_operation(src);
-        let (op_name, operation) = executable_document.named_operations.first_mut().unwrap();
+        let (op_name, operation) = executable_document.operations.named.first_mut().unwrap();
 
         let query_graph =
             Arc::new(build_query_graph(op_name.to_string().into(), schema.clone()).unwrap());
