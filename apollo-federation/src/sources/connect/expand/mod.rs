@@ -316,11 +316,9 @@ mod helpers {
                     )
                     .walk((
                         object,
-                        connector
-                            .selection
-                            .next_subselection()
-                            .cloned()
-                            .expect("empty selections are not allowed"),
+                        connector.selection.next_subselection().cloned().ok_or(
+                            FederationError::internal("empty selections are not allowed"),
+                        )?,
                     ))?;
                 }
 
@@ -555,10 +553,11 @@ mod helpers {
 
                                         visitor.walk((
                                             output_type,
-                                            parsed
-                                                .next_subselection()
-                                                .cloned()
-                                                .expect("empty selections are not allowed"),
+                                            parsed.next_subselection().cloned().ok_or(
+                                                FederationError::internal(
+                                                    "empty selections are not allowed",
+                                                ),
+                                            )?,
                                         ))?;
                                     }
                                 }
@@ -582,9 +581,12 @@ mod helpers {
                                     )?;
                                 }
                             }
-                            TypeDefinitionPosition::Interface(_) => todo!(),
-                            TypeDefinitionPosition::Union(_) => todo!(),
-                            TypeDefinitionPosition::InputObject(_) => todo!(),
+                            TypeDefinitionPosition::Interface(_)
+                            | TypeDefinitionPosition::Union(_) | TypeDefinitionPosition::InputObject(_)=> {
+                                return Err(FederationError::internal(
+                                    "siblings of type interface, input object, or union are not yet handled",
+                                ))
+                            }
 
                             other => {
                                 return Err(FederationError::internal(format!(
@@ -618,12 +620,18 @@ mod helpers {
                     TypeDefinitionPosition::Object(o) => {
                         o.insert_directive(to_schema, Component::new(key_directive))
                     }
+                    TypeDefinitionPosition::Interface(i) => {
+                        i.insert_directive(to_schema, Component::new(key_directive))
+                    }
 
-                    TypeDefinitionPosition::Scalar(_) => todo!(),
-                    TypeDefinitionPosition::Interface(_) => todo!(),
-                    TypeDefinitionPosition::Union(_) => todo!(),
-                    TypeDefinitionPosition::Enum(_) => todo!(),
-                    TypeDefinitionPosition::InputObject(_) => todo!(),
+                    TypeDefinitionPosition::Scalar(_)
+                    | TypeDefinitionPosition::Union(_)
+                    | TypeDefinitionPosition::Enum(_)
+                    | TypeDefinitionPosition::InputObject(_) => {
+                        return Err(FederationError::internal(
+                            "keys cannot be added to scalars, unions, enums, or input objects",
+                        ))
+                    }
                 }?;
             }
 

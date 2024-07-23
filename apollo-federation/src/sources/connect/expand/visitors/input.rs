@@ -23,7 +23,9 @@ impl FieldVisitor<InputObjectFieldDefinitionPosition>
     type Error = FederationError;
 
     fn visit<'a>(&mut self, field: InputObjectFieldDefinitionPosition) -> Result<(), Self::Error> {
-        let (_, r#type) = self.type_stack.last_mut().unwrap();
+        let (_, r#type) = self.type_stack.last_mut().ok_or(FederationError::internal(
+            "tried to visit a field in a group not yet visited",
+        ))?;
 
         // Extract the node info
         let field_def = field.get(self.original_schema.schema())?;
@@ -106,7 +108,9 @@ impl GroupVisitor<InputObjectTypeDefinitionPosition, InputObjectFieldDefinitionP
     }
 
     fn exit_group(&mut self) -> Result<(), FederationError> {
-        let (definition, r#type) = self.type_stack.pop().unwrap();
+        let (definition, r#type) = self.type_stack.pop().ok_or(FederationError::internal(
+            "tried to exit a group not yet visited",
+        ))?;
 
         // Now actually consolidate the object into our schema
         try_insert!(self.to_schema, definition, Node::new(r#type))

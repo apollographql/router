@@ -33,7 +33,9 @@ impl FieldVisitor<NamedSelection> for SchemaVisitor<'_, ObjectTypeDefinitionPosi
     type Error = FederationError;
 
     fn visit<'a>(&mut self, field: NamedSelection) -> Result<(), Self::Error> {
-        let (definition, r#type) = self.type_stack.last_mut().unwrap();
+        let (definition, r#type) = self.type_stack.last_mut().ok_or(FederationError::internal(
+            "tried to visit a field in a group not yet entered",
+        ))?;
 
         // Get the type of the field so we know how to visit it
         let field_name = Name::new(field.name())?;
@@ -139,7 +141,9 @@ impl GroupVisitor<JSONSelectionGroup, NamedSelection>
         &self,
         field: &NamedSelection,
     ) -> Result<Option<JSONSelectionGroup>, FederationError> {
-        let (definition, _) = self.type_stack.last().unwrap();
+        let (definition, _) = self.type_stack.last().ok_or(FederationError::internal(
+            "tried to get fields on a group not yet visited",
+        ))?;
         let field_name = Name::new(field.name())?;
 
         let field_type_name = definition
@@ -177,7 +181,9 @@ impl GroupVisitor<JSONSelectionGroup, NamedSelection>
     }
 
     fn exit_group(&mut self) -> Result<(), FederationError> {
-        let (definition, r#type) = self.type_stack.pop().unwrap();
+        let (definition, r#type) = self.type_stack.pop().ok_or(FederationError::internal(
+            "tried to exit a group not yet entered",
+        ))?;
 
         try_insert!(self.to_schema, definition, Node::new(r#type))
     }
