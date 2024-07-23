@@ -16,26 +16,27 @@ expression: connectors.by_service_name
                 directive_index: 0,
             },
         },
-        transport: HttpJson(
-            HttpJsonTransport {
-                base_url: "http://example/",
-                path_template: URLPathTemplate {
-                    path: [
-                        ParameterValue {
-                            parts: [
-                                Text(
-                                    "t",
-                                ),
-                            ],
-                        },
-                    ],
-                    query: {},
-                },
-                method: Get,
-                headers: {},
-                body: None,
+        transport: HttpJsonTransport {
+            source_url: Some(
+                "http://example/",
+            ),
+            connect_template: URLTemplate {
+                base: None,
+                path: [
+                    ParameterValue {
+                        parts: [
+                            Text(
+                                "t",
+                            ),
+                        ],
+                    },
+                ],
+                query: {},
             },
-        ),
+            method: Get,
+            headers: {},
+            body: None,
+        },
         selection: Named(
             SubSelection {
                 selections: [
@@ -78,37 +79,38 @@ expression: connectors.by_service_name
                 directive_index: 0,
             },
         },
-        transport: HttpJson(
-            HttpJsonTransport {
-                base_url: "http://example/",
-                path_template: URLPathTemplate {
-                    path: [
-                        ParameterValue {
-                            parts: [
-                                Text(
-                                    "t",
-                                ),
-                            ],
-                        },
-                        ParameterValue {
-                            parts: [
-                                Var(
-                                    VariableExpression {
-                                        var_path: "$args.id",
-                                        batch_separator: None,
-                                        required: true,
-                                    },
-                                ),
-                            ],
-                        },
-                    ],
-                    query: {},
-                },
-                method: Get,
-                headers: {},
-                body: None,
+        transport: HttpJsonTransport {
+            source_url: Some(
+                "http://example/",
+            ),
+            connect_template: URLTemplate {
+                base: None,
+                path: [
+                    ParameterValue {
+                        parts: [
+                            Text(
+                                "t",
+                            ),
+                        ],
+                    },
+                    ParameterValue {
+                        parts: [
+                            Var(
+                                VariableExpression {
+                                    var_path: "$args.id",
+                                    batch_separator: None,
+                                    required: true,
+                                },
+                            ),
+                        ],
+                    },
+                ],
+                query: {},
             },
-        ),
+            method: Get,
+            headers: {},
+            body: None,
+        },
         selection: Named(
             SubSelection {
                 selections: [
@@ -153,44 +155,45 @@ expression: connectors.by_service_name
                 directive_index: 0,
             },
         },
-        transport: HttpJson(
-            HttpJsonTransport {
-                base_url: "http://example/",
-                path_template: URLPathTemplate {
-                    path: [
-                        ParameterValue {
-                            parts: [
-                                Text(
-                                    "t",
-                                ),
-                            ],
-                        },
-                        ParameterValue {
-                            parts: [
-                                Var(
-                                    VariableExpression {
-                                        var_path: "$this.id",
-                                        batch_separator: None,
-                                        required: true,
-                                    },
-                                ),
-                            ],
-                        },
-                        ParameterValue {
-                            parts: [
-                                Text(
-                                    "r",
-                                ),
-                            ],
-                        },
-                    ],
-                    query: {},
-                },
-                method: Get,
-                headers: {},
-                body: None,
+        transport: HttpJsonTransport {
+            source_url: Some(
+                "http://example/",
+            ),
+            connect_template: URLTemplate {
+                base: None,
+                path: [
+                    ParameterValue {
+                        parts: [
+                            Text(
+                                "t",
+                            ),
+                        ],
+                    },
+                    ParameterValue {
+                        parts: [
+                            Var(
+                                VariableExpression {
+                                    var_path: "$this.id",
+                                    batch_separator: None,
+                                    required: true,
+                                },
+                            ),
+                        ],
+                    },
+                    ParameterValue {
+                        parts: [
+                            Text(
+                                "r",
+                            ),
+                        ],
+                    },
+                ],
+                query: {},
             },
-        ),
+            method: Get,
+            headers: {},
+            body: None,
+        },
         selection: Named(
             SubSelection {
                 selections: [
