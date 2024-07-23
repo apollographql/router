@@ -10,7 +10,7 @@ input BazInput {
 }
 
 type Query {
-  foo(bar: String, baz: BazInput): String
+  foo(bar: String, baz: BazInput, doubleBaz: BazInput): String
 }
 
 input QuuxInput {

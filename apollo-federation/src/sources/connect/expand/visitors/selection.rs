@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::EnumType;
@@ -9,6 +11,8 @@ use indexmap::IndexMap;
 use itertools::Itertools;
 
 use super::filter_directives;
+use super::try_insert;
+use super::try_pre_insert;
 use super::FieldVisitor;
 use super::GroupVisitor;
 use super::SchemaVisitor;
@@ -18,6 +22,11 @@ use crate::schema::position::TypeDefinitionPosition;
 use crate::sources::connect::json_selection::NamedSelection;
 use crate::sources::connect::SubSelection;
 
+/// Type alias for JSONSelection group info
+///
+/// A JSONSelection has subselections which do not have a way to lookup the parent subselection
+/// nor the field name corresponding to that selection, so we need to keep the matching schema object
+/// type when validating selections against concrete types.
 pub(crate) type JSONSelectionGroup = (ObjectTypeDefinitionPosition, SubSelection);
 
 impl FieldVisitor<NamedSelection> for SchemaVisitor<'_, ObjectTypeDefinitionPosition, ObjectType> {
@@ -47,8 +56,8 @@ impl FieldVisitor<NamedSelection> for SchemaVisitor<'_, ObjectTypeDefinitionPosi
                         directives: filter_directives(self.directive_deny_list, &def.directives),
                     };
 
-                    scalar.pre_insert(self.to_schema)?;
-                    scalar.insert(self.to_schema, Node::new(def))?;
+                    try_pre_insert!(self.to_schema, scalar)?;
+                    try_insert!(self.to_schema, scalar, Node::new(def))?;
                 }
                 TypeDefinitionPosition::Enum(r#enum) => {
                     let def = r#enum.get(self.original_schema.schema())?;
@@ -59,8 +68,8 @@ impl FieldVisitor<NamedSelection> for SchemaVisitor<'_, ObjectTypeDefinitionPosi
                         values: def.values.clone(),
                     };
 
-                    r#enum.pre_insert(self.to_schema)?;
-                    r#enum.insert(self.to_schema, Node::new(def))?;
+                    try_pre_insert!(self.to_schema, r#enum)?;
+                    try_insert!(self.to_schema, r#enum, Node::new(def))?;
                 }
 
                 // This will be handled by the rest of the visitor
@@ -89,17 +98,24 @@ impl FieldVisitor<NamedSelection> for SchemaVisitor<'_, ObjectTypeDefinitionPosi
             };
         }
 
-        // Add the field to the currently processing object
-        r#type.fields.insert(
-            field_name,
-            Component::new(FieldDefinition {
-                description: field.description.clone(),
-                name: field.name.clone(),
-                arguments: field.arguments.clone(),
-                ty: field.ty.clone(),
-                directives: filter_directives(self.directive_deny_list, &field.directives),
-            }),
-        );
+        // Add the field to the currently processing object, making sure to not overwrite if it already
+        // exists (and verify that we didn't change the type)
+        let new_field = FieldDefinition {
+            description: field.description.clone(),
+            name: field.name.clone(),
+            arguments: field.arguments.clone(),
+            ty: field.ty.clone(),
+            directives: filter_directives(self.directive_deny_list, &field.directives),
+        };
+        if let Some(old_field) = r#type.fields.get(&field_name) {
+            if *old_field.deref().deref() != new_field {
+                return Err(FederationError::internal(
+                   format!( "tried to write field to existing type, but field type was different. expected {new_field:?} found {old_field:?}"),
+                ));
+            }
+        } else {
+            r#type.fields.insert(field_name, Component::new(new_field));
+        }
 
         Ok(())
     }
@@ -145,15 +161,7 @@ impl GroupVisitor<JSONSelectionGroup, NamedSelection>
         &mut self,
         (group_type, group): JSONSelectionGroup,
     ) -> Result<Vec<NamedSelection>, FederationError> {
-        // this is really an upsert — pre_insert/insert will error if the object already exists
-        if !self
-            .to_schema
-            .schema()
-            .types
-            .contains_key(&group_type.type_name)
-        {
-            group_type.pre_insert(self.to_schema)?;
-        }
+        try_pre_insert!(self.to_schema, group_type)?;
         let def = group_type.get(self.original_schema.schema())?;
 
         let sub_type = ObjectType {
@@ -171,17 +179,7 @@ impl GroupVisitor<JSONSelectionGroup, NamedSelection>
     fn exit_group(&mut self) -> Result<(), FederationError> {
         let (definition, r#type) = self.type_stack.pop().unwrap();
 
-        // this is really an upsert — pre_insert/insert will error if the object already exists
-        if !self
-            .to_schema
-            .schema()
-            .types
-            .contains_key(&definition.type_name)
-        {
-            definition.insert(self.to_schema, Node::new(r#type))
-        } else {
-            Ok(())
-        }
+        try_insert!(self.to_schema, definition, Node::new(r#type))
     }
 }
 

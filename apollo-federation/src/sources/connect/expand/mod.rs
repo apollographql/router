@@ -190,6 +190,8 @@ mod helpers {
     use indexmap::IndexSet;
 
     use super::filter_directives;
+    use super::visitors::try_insert;
+    use super::visitors::try_pre_insert;
     use super::visitors::GroupVisitor;
     use super::visitors::SchemaVisitor;
     use crate::error::FederationError;
@@ -314,7 +316,11 @@ mod helpers {
                     )
                     .walk((
                         object,
-                        connector.selection.next_subselection().cloned().unwrap(),
+                        connector
+                            .selection
+                            .next_subselection()
+                            .cloned()
+                            .expect("empty selections are not allowed"),
                     ))?;
                 }
 
@@ -549,7 +555,10 @@ mod helpers {
 
                                         visitor.walk((
                                             output_type,
-                                            parsed.next_subselection().cloned().unwrap(),
+                                            parsed
+                                                .next_subselection()
+                                                .cloned()
+                                                .expect("empty selections are not allowed"),
                                         ))?;
                                     }
                                 }
@@ -638,8 +647,8 @@ mod helpers {
                         directives: filter_directives(&self.directive_deny_list, &def.directives),
                     };
 
-                    scalar.pre_insert(to_schema)?;
-                    scalar.insert(to_schema, Node::new(def))
+                    try_pre_insert!(to_schema, scalar)?;
+                    try_insert!(to_schema, scalar, Node::new(def))
                 }
                 TypeDefinitionPosition::Enum(r#enum) => {
                     let def = r#enum.get(self.original_schema.schema())?;
@@ -650,8 +659,8 @@ mod helpers {
                         values: def.values.clone(),
                     };
 
-                    r#enum.pre_insert(to_schema)?;
-                    r#enum.insert(to_schema, Node::new(def))
+                    try_pre_insert!(to_schema, r#enum)?;
+                    try_insert!(to_schema, r#enum, Node::new(def))
                 }
 
                 other => Err(FederationError::internal(format!(
@@ -673,7 +682,7 @@ mod helpers {
         /// ```
         ///
         /// Note: This would probably be better off expanding the query to have
-        /// an __entries vs. adding an inaccessible field.
+        /// an __entities vs. adding an inaccessible field.
         fn insert_query_for_field(
             &self,
             to_schema: &mut FederationSchema,
@@ -695,7 +704,7 @@ mod helpers {
                 // We'll need to upsert the actual type for the field's parent
                 let parent_type = field_parent.get(self.original_schema.schema())?;
 
-                field_parent.pre_insert(to_schema)?;
+                try_pre_insert!(to_schema, field_parent)?;
                 let field_def = FieldDefinition {
                     description: original.description.clone(),
                     name: original.name.clone(),
@@ -703,8 +712,9 @@ mod helpers {
                     ty: original.ty.clone(),
                     directives: filter_directives(&self.directive_deny_list, &original.directives),
                 };
-                field_parent.insert(
+                try_insert!(
                     to_schema,
+                    field_parent,
                     Node::new(ObjectType {
                         description: parent_type.description.clone(),
                         name: parent_type.name.clone(),
@@ -717,7 +727,7 @@ mod helpers {
                             field_def.name.clone(),
                             Component::new(field_def.clone()),
                         )]),
-                    }),
+                    })
                 )?;
 
                 // Return the dummy field to add to the root Query
@@ -726,20 +736,10 @@ mod helpers {
                     name: name!("_"),
                     arguments: Vec::new(),
                     ty: ast::Type::Named(ast::NamedType::new("ID")?),
-                    directives: ast::DirectiveList(
-                        [
-                            name!("federation__shareable"),
-                            name!("federation__inaccessible"),
-                        ]
-                        .into_iter()
-                        .map(|name| {
-                            Node::new(ast::Directive {
-                                name,
-                                arguments: Vec::new(),
-                            })
-                        })
-                        .collect(),
-                    ),
+                    directives: ast::DirectiveList(vec![Node::new(ast::Directive {
+                        name: name!("federation__inaccessible"),
+                        arguments: Vec::new(),
+                    })]),
                 }
             } else {
                 FieldDefinition {
@@ -752,6 +752,7 @@ mod helpers {
             };
 
             // Insert the root Query
+            // Note: This should error if Query is already defined, as it shouldn't be
             query.pre_insert(to_schema)?;
             query.insert(
                 to_schema,

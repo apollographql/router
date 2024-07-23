@@ -45,6 +45,7 @@ subgraphs:
                 name
                 catchPhrase
                 bs
+                email
               }""", entity: true)
         }
 
@@ -76,6 +77,7 @@ subgraphs:
           name: String
           catchPhrase: String
           bs: String
+          email: EmailAddress
         }
 
         input CompanyInput {

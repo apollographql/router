@@ -237,6 +237,11 @@ expression: connectors.by_service_name
                                         "bs",
                                         None,
                                     ),
+                                    Field(
+                                        None,
+                                        "email",
+                                        None,
+                                    ),
                                 ],
                                 star: None,
                             },

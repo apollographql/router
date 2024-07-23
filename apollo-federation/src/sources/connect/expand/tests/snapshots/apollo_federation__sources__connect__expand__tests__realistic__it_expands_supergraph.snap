@@ -21,6 +21,7 @@ type CompanyInfo {
   name: String
   catchPhrase: String
   bs: String
+  email: EmailAddress
 }
 
 input CompanyInput {

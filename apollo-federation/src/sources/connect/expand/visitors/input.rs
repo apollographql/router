@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::InputObjectType;
@@ -5,6 +7,8 @@ use apollo_compiler::Node;
 use indexmap::IndexMap;
 
 use super::filter_directives;
+use super::try_insert;
+use super::try_pre_insert;
 use super::FieldVisitor;
 use super::GroupVisitor;
 use super::SchemaVisitor;
@@ -19,22 +23,31 @@ impl FieldVisitor<InputObjectFieldDefinitionPosition>
     type Error = FederationError;
 
     fn visit<'a>(&mut self, field: InputObjectFieldDefinitionPosition) -> Result<(), Self::Error> {
-        let (_, type_) = self.type_stack.last_mut().unwrap();
+        let (_, r#type) = self.type_stack.last_mut().unwrap();
 
         // Extract the node info
         let field_def = field.get(self.original_schema.schema())?;
 
-        // Add it to the currently processing object
-        type_.fields.insert(
-            field.field_name,
-            Component::new(InputValueDefinition {
-                description: field_def.description.clone(),
-                name: field_def.name.clone(),
-                default_value: field_def.default_value.clone(),
-                ty: field_def.ty.clone(),
-                directives: filter_directives(self.directive_deny_list, &field_def.directives),
-            }),
-        );
+        // Add the input to the currently processing object, making sure to not overwrite if it already
+        // exists (and verify that we didn't change the type)
+        let new_field = InputValueDefinition {
+            description: field_def.description.clone(),
+            name: field_def.name.clone(),
+            default_value: field_def.default_value.clone(),
+            ty: field_def.ty.clone(),
+            directives: filter_directives(self.directive_deny_list, &field_def.directives),
+        };
+        if let Some(old_field) = r#type.fields.get(&field.field_name) {
+            if *old_field.deref().deref() != new_field {
+                return Err(FederationError::internal(
+                   format!( "tried to write field to existing type, but field type was different. expected {new_field:?} found {old_field:?}"),
+                ));
+            }
+        } else {
+            r#type
+                .fields
+                .insert(field.field_name, Component::new(new_field));
+        }
 
         Ok(())
     }
@@ -78,7 +91,7 @@ impl GroupVisitor<InputObjectTypeDefinitionPosition, InputObjectFieldDefinitionP
         &mut self,
         group: InputObjectTypeDefinitionPosition,
     ) -> Result<Vec<InputObjectFieldDefinitionPosition>, FederationError> {
-        group.pre_insert(self.to_schema)?;
+        try_pre_insert!(self.to_schema, group)?;
 
         let group_def = group.get(self.original_schema.schema())?;
         let output_type = InputObjectType {
@@ -93,9 +106,9 @@ impl GroupVisitor<InputObjectTypeDefinitionPosition, InputObjectFieldDefinitionP
     }
 
     fn exit_group(&mut self) -> Result<(), FederationError> {
-        let (definition, type_) = self.type_stack.pop().unwrap();
+        let (definition, r#type) = self.type_stack.pop().unwrap();
 
         // Now actually consolidate the object into our schema
-        definition.insert(self.to_schema, Node::new(type_))
+        try_insert!(self.to_schema, definition, Node::new(r#type))
     }
 }

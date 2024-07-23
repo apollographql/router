@@ -47,5 +47,5 @@ input BazInput @join__type(graph: CONNECTORS_QUERY_FOO_0) {
 }
 
 type Query @join__type(graph: CONNECTORS_QUERY_FOO_0) {
-  foo(bar: String, baz: BazInput): String @join__field(graph: CONNECTORS_QUERY_FOO_0)
+  foo(bar: String, baz: BazInput, doubleBaz: BazInput): String @join__field(graph: CONNECTORS_QUERY_FOO_0)
 }

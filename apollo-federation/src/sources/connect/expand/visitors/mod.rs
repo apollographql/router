@@ -29,6 +29,50 @@ where
         .collect()
 }
 
+/// Try to pre-insert into a schema, ignoring the operation if the type already exists
+/// and matches the existing type
+macro_rules! try_pre_insert {
+    ($schema:expr, $pos:expr) => {{
+        if let Some(old_pos) = $schema.try_get_type($pos.type_name.clone()) {
+            // Verify that the types match
+            let pos = $crate::schema::position::TypeDefinitionPosition::from($pos.clone());
+            if old_pos != pos {
+                Err($crate::FederationError::internal(format!(
+                    "found different type when upserting: expected {:?} found {:?}",
+                    pos, old_pos
+                )))
+            } else {
+                Ok(())
+            }
+        } else {
+            $pos.pre_insert($schema)
+        }
+    }};
+}
+
+/// Try to insert into a schema, ignoring the operation if the type already exists
+/// and matches the existing type
+macro_rules! try_insert {
+    ($schema:expr, $pos:expr, $def:expr) => {{
+        if let Some(old_pos) = $schema.try_get_type($pos.type_name.clone()) {
+            // Verify that the types match
+            let pos = $crate::schema::position::TypeDefinitionPosition::from($pos.clone());
+            if old_pos != pos {
+                Err($crate::FederationError::internal(format!(
+                    "found different type when upserting: expected {:?} found {:?}",
+                    pos, old_pos
+                )))
+            } else {
+                Ok(())
+            }
+        } else {
+            $pos.insert($schema, $def)
+        }
+    }};
+}
+pub(crate) use try_insert;
+pub(crate) use try_pre_insert;
+
 /// Visitor for arbitrary field types.
 ///
 /// Any type of interest that should be viewed when traversing the tree-like structure
@@ -55,6 +99,7 @@ where
         group: Group,
     ) -> Result<Vec<Field>, <Self as FieldVisitor<Field>>::Error>;
 
+    /// Try to get a group from a field, returning None if the field is not a group
     fn try_get_group_for_field(
         &self,
         field: &Field,
@@ -293,7 +338,7 @@ mod tests {
     fn it_iterates_over_nested_selection() {
         let mut visited = Vec::new();
         let visitor = TestVisitor::new(&mut visited);
-        let (unmatched, selection) = JSONSelection::parse("a { b { c { d { e } } } }").unwrap();
+        let (unmatched, selection) = JSONSelection::parse("a { b { c { d { e } } } } f").unwrap();
         assert!(unmatched.is_empty());
 
         visitor
@@ -305,6 +350,7 @@ mod tests {
         |  |  c
         |  |  |  d
         |  |  |  |  e
+        f
         "###);
     }
 

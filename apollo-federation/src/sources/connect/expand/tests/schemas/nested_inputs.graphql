@@ -55,7 +55,7 @@ enum link__Purpose {
 type Query
   @join__type(graph: CONNECTORS)
 {
-  foo(bar: String, baz: BazInput): String @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "example", http: {GET: "/{$args.bar}/{$args.baz.buzz}/{$args.baz.quux.quaz}"}, selection: ""})
+  foo(bar: String, baz: BazInput, doubleBaz: BazInput): String @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "example", http: {GET: "/{$args.bar}/{$args.doubleBaz.buzz}/{$args.baz.quux.quaz}"}, selection: "$"})
 }
 
 input QuuxInput
