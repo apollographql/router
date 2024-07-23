@@ -291,7 +291,7 @@ impl SchemaQueryGraphBuilder {
         if let Some(subgraph_metadata) = self.base.query_graph.schema()?.subgraph_metadata() {
             Ok(subgraph_metadata
                 .external_metadata()
-                .is_external(field_definition_position)?)
+                .is_external(field_definition_position))
         } else {
             Ok(false)
         }
