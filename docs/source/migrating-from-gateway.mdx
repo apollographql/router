@@ -134,10 +134,10 @@ Examples for each are provided in their respective documentation, and in the [Ro
 For migrating to the Apollo Router deployed on Kubernetes, see some tips for [configuring your router deployment](./containerization/kubernetes/#configure-for-migration-from-gateway).
 
 ## Responses and errors
-Apollo Gateway runs it's core GraphQL server using Apollo Server and an user configured HTTP server. Apollo Router is built as an all-in-one product with the GraphQL and HTTP server bundled together. With this change there may be some slight difference to the logic of HTTP status codes or GraphQL error extension codes.
 
-Refer the full list of [Apollo Router error codes](https://www.apollographql.com/docs/router/errors) for any changes to your Gateway implementation and if you need to customize the responses, learn more in [Apollo Router customizations](https://www.apollographql.com/docs/router/customizations/overview).
+Apollo Gateway runs it's core GraphQL server using Apollo Server and a user configured HTTP server. GraphOS Router is built as an all-in-one product with the GraphQL and HTTP server bundled together. With this change there may be some slight difference to the logic of HTTP status codes or GraphQL error extension codes.
 
+Refer the full list of [router error codes](./errors) for any changes to your gateway implementation. If you need to customize the responses, refer to [router customizations](./customizations/overview).
 ## Reporting migration issues
 
 If you encounter a migration issue that isn't resolved by this article, please search for existing [GitHub discussions](https://github.com/apollographql/router/discussions/) and start a new discussion if you don't find what you're looking for.
