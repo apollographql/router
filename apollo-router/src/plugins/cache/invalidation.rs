@@ -14,6 +14,7 @@ use crate::cache::redis::RedisKey;
 use crate::notification::Handle;
 use crate::notification::HandleStream;
 use crate::plugins::cache::entity::hash_entity_key;
+use crate::plugins::cache::entity::ENTITY_CACHE_VERSION;
 use crate::Notify;
 
 #[derive(Clone)]
@@ -180,10 +181,10 @@ impl InvalidationRequest {
     fn key_prefix(&self) -> String {
         match self {
             InvalidationRequest::Subgraph { subgraph } => {
-                format!("subgraph:{subgraph}*",)
+                format!("version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph}*",)
             }
             InvalidationRequest::Type { subgraph, r#type } => {
-                format!("subgraph:{subgraph}:type:{type}*",)
+                format!("version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph}:type:{type}*",)
             }
             InvalidationRequest::Entity {
                 subgraph,
@@ -191,7 +192,7 @@ impl InvalidationRequest {
                 key,
             } => {
                 let entity_key = hash_entity_key(key);
-                format!("subgraph:{subgraph}:type:{type}:entity:{entity_key}*")
+                format!("version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph}:type:{type}:entity:{entity_key}*")
             }
         }
     }
