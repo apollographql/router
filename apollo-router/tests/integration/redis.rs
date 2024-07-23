@@ -364,6 +364,10 @@ async fn entity_cache() -> Result<(), BoxError> {
                     "urls": ["redis://127.0.0.1:6379"],
                     "ttl": "2s"
                 },
+                "invalidation": {
+                    "listen": "127.0.0.1:4000",
+                    "path": "/invalidation"
+                },
                 "subgraph": {
                     "all": {
                         "enabled": false
@@ -473,6 +477,10 @@ async fn entity_cache() -> Result<(), BoxError> {
                 "redis": {
                     "urls": ["redis://127.0.0.1:6379"],
                     "ttl": "2s"
+                },
+                "invalidation": {
+                    "listen": "127.0.0.1:4000",
+                    "path": "/invalidation"
                 },
                 "subgraph": {
                     "all": {
@@ -676,6 +684,10 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
                 "redis": {
                     "urls": ["redis://127.0.0.1:6379"],
                     "ttl": "2s"
+                },
+                "invalidation": {
+                    "listen": "127.0.0.1:4000",
+                    "path": "/invalidation"
                 },
                 "subgraph": {
                     "all": {
