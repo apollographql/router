@@ -65,7 +65,7 @@ register_plugin!("apollo", "preview_entity_cache", EntityCache);
 #[derive(Clone)]
 pub(crate) struct EntityCache {
     storage: Option<RedisCacheStorage>,
-    endpoint_config: Arc<InvalidationEndpointConfig>,
+    endpoint_config: Option<Arc<InvalidationEndpointConfig>>,
     subgraphs: Arc<SubgraphConfiguration<Subgraph>>,
     entity_type: Option<String>,
     enabled: bool,
@@ -87,7 +87,7 @@ pub(crate) struct Config {
     subgraph: SubgraphConfiguration<Subgraph>,
 
     /// Global invalidation configuration
-    invalidation: InvalidationEndpointConfig,
+    invalidation: Option<InvalidationEndpointConfig>,
 
     /// Entity caching evaluation metrics
     #[serde(default)]
@@ -224,7 +224,7 @@ impl Plugin for EntityCache {
             storage,
             entity_type,
             enabled: init.config.enabled,
-            endpoint_config: Arc::new(init.config.invalidation.clone()),
+            endpoint_config: init.config.invalidation.clone().map(Arc::new),
             subgraphs: Arc::new(init.config.subgraph),
             metrics: init.config.metrics,
             private_queries: Arc::new(RwLock::new(HashSet::new())),
@@ -347,16 +347,24 @@ impl Plugin for EntityCache {
                 .map(|i| i.enabled)
                 .unwrap_or_default()
         {
-            let endpoint = Endpoint::from_router_service(
-                self.endpoint_config.path.clone(),
-                InvalidationService::new(self.subgraphs.clone(), self.invalidation.clone()).boxed(),
-            );
-            tracing::info!(
-                "Entity caching invalidation endpoint listening on: {}{}",
-                self.endpoint_config.listen,
-                self.endpoint_config.path
-            );
-            map.insert(self.endpoint_config.listen.clone(), endpoint);
+            match &self.endpoint_config {
+                Some(endpoint_config) => {
+                    let endpoint = Endpoint::from_router_service(
+                        endpoint_config.path.clone(),
+                        InvalidationService::new(self.subgraphs.clone(), self.invalidation.clone())
+                            .boxed(),
+                    );
+                    tracing::info!(
+                        "Entity caching invalidation endpoint listening on: {}{}",
+                        endpoint_config.listen,
+                        endpoint_config.path
+                    );
+                    map.insert(endpoint_config.listen.clone(), endpoint);
+                }
+                None => {
+                    tracing::warn!("Cannot start entity caching invalidation endpoint because the listen address and endpoint is not configured");
+                }
+            }
         }
 
         map
@@ -387,13 +395,13 @@ impl EntityCache {
             }),
             metrics: Metrics::default(),
             private_queries: Default::default(),
-            endpoint_config: Arc::new(InvalidationEndpointConfig {
+            endpoint_config: Some(Arc::new(InvalidationEndpointConfig {
                 path: String::from("/invalidation"),
                 listen: ListenAddr::SocketAddr(SocketAddr::new(
                     IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
                     4000,
                 )),
-            }),
+            })),
             invalidation,
         })
     }
