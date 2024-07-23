@@ -56,6 +56,8 @@ use crate::Context;
 use crate::Endpoint;
 use crate::ListenAddr;
 
+/// Change this key if you introduce a breaking change in entity caching algorithm to make sure it won't take the previous entries
+pub(crate) const ENTITY_CACHE_VERSION: &str = "1.0";
 pub(crate) const ENTITIES: &str = "_entities";
 pub(crate) const REPRESENTATIONS: &str = "representations";
 pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_entity_cache::key";
@@ -992,6 +994,7 @@ fn extract_cache_key_root(
     let entity_type = entity_type_opt.unwrap_or("Query");
 
     // the cache key is written to easily find keys matching a prefix for deletion:
+    // - entity cache version: current version of the hash
     // - subgraph name: subgraph name
     // - entity type: entity type
     // - query hash: invalidate the entry for a specific query and operation name
@@ -999,7 +1002,7 @@ fn extract_cache_key_root(
     let mut key = String::new();
     let _ = write!(
         &mut key,
-        "subgraph:{subgraph_name}:type:{entity_type}:hash:{query_hash}:data:{additional_data_hash}"
+        "version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}:hash:{query_hash}:data:{additional_data_hash}"
     );
 
     if is_known_private {
@@ -1048,13 +1051,14 @@ fn extract_cache_keys(
         let hashed_entity_key = hex::encode(digest.finalize().as_slice());
 
         // the cache key is written to easily find keys matching a prefix for deletion:
+        // - entity cache version: current version of the hash
         // - subgraph name: caching is done per subgraph
         // - type: can invalidate all instances of a type
         // - entity key: invalidate a specific entity
         // - query hash: invalidate the entry for a specific query and operation name
         // - additional data: separate cache entries depending on info like authorization status
         let mut key = String::new();
-        let _ = write!(&mut key,  "subgraph:{subgraph_name}:{typename}:{hashed_entity_key}:{query_hash}:{additional_data_hash}");
+        let _ = write!(&mut key,  "version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph_name}:{typename}:{hashed_entity_key}:{query_hash}:{additional_data_hash}");
         if is_known_private {
             if let Some(id) = private_id {
                 let _ = write!(&mut key, ":{id}");
