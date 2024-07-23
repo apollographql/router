@@ -1,0 +1,30 @@
+federation_version: =2.9.0-connectors.0
+subgraphs:
+  connectors:
+    routing_url: none
+    schema:
+      sdl: |
+        extend schema
+          @link(
+            url: "https://specs.apollo.dev/federation/v2.7"
+            import: ["@key"]
+          )
+          @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"])
+          @source(name: "example", http: { baseURL: "http://example" })
+
+        type Query {
+          foo(bar: String, baz: BazInput, doubleBaz: BazInput): String @connect(
+            source: "example",
+            http: { GET: "/{$$args.bar}/{$$args.doubleBaz.buzz}/{$$args.baz.quux.quaz}" }
+            selection: "$"
+          )
+        }
+
+        input BazInput {
+          buzz: String
+          quux: QuuxInput
+        }
+
+        input QuuxInput {
+          quaz: String
+        }
