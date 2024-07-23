@@ -116,7 +116,7 @@ impl InstrumentsConfig {
             .defaults_for_levels(self.default_requirement_level, TelemetryDataKind::Metrics);
     }
 
-    pub(crate) fn new_static_router_instruments(&self) -> HashMap<String, StaticInstrument> {
+    pub(crate) fn new_builtin_router_instruments(&self) -> HashMap<String, StaticInstrument> {
         let meter = metrics::meter_provider().meter(METER_NAME);
         let mut static_instruments = HashMap::with_capacity(self.router.custom.len());
 
@@ -383,7 +383,7 @@ impl InstrumentsConfig {
         }
     }
 
-    pub(crate) fn new_static_supergraph_instruments(&self) -> HashMap<String, StaticInstrument> {
+    pub(crate) fn new_builtin_supergraph_instruments(&self) -> HashMap<String, StaticInstrument> {
         let meter = metrics::meter_provider().meter(METER_NAME);
 
         let mut static_instruments = HashMap::with_capacity(self.supergraph.custom.len());
@@ -434,7 +434,7 @@ impl InstrumentsConfig {
         }
     }
 
-    pub(crate) fn new_static_subgraph_instruments(&self) -> HashMap<String, StaticInstrument> {
+    pub(crate) fn new_builtin_subgraph_instruments(&self) -> HashMap<String, StaticInstrument> {
         let meter = metrics::meter_provider().meter(METER_NAME);
         let mut static_instruments = HashMap::with_capacity(self.subgraph.custom.len());
 
@@ -655,7 +655,7 @@ impl InstrumentsConfig {
         }
     }
 
-    pub(crate) fn new_static_graphql_instruments(&self) -> HashMap<String, StaticInstrument> {
+    pub(crate) fn new_builtin_graphql_instruments(&self) -> HashMap<String, StaticInstrument> {
         let meter = metrics::meter_provider().meter(METER_NAME);
         let mut static_instruments = HashMap::with_capacity(self.graphql.custom.len());
         if self.graphql.attributes.list_length.is_enabled() {
@@ -795,7 +795,7 @@ impl InstrumentsConfig {
         }
     }
 
-    pub(crate) fn new_static_cache_instruments(&self) -> HashMap<String, StaticInstrument> {
+    pub(crate) fn new_builtin_cache_instruments(&self) -> HashMap<String, StaticInstrument> {
         let meter = metrics::meter_provider().meter(METER_NAME);
         let mut static_instruments: HashMap<String, StaticInstrument> = HashMap::new();
         if self.cache.attributes.cache.is_enabled() {
@@ -2845,7 +2845,7 @@ mod tests {
                         let mut cache_instruments: Option<CacheInstruments> = None;
                         let graphql_instruments: GraphQLInstruments = config
                             .new_graphql_instruments(Arc::new(
-                                config.new_static_graphql_instruments(),
+                                config.new_builtin_graphql_instruments(),
                             ));
                         let context = Context::new();
                         for event in request {
@@ -2865,7 +2865,7 @@ mod tests {
                                         .build()
                                         .unwrap();
                                     router_instruments = Some(config.new_router_instruments(
-                                        Arc::new(config.new_static_router_instruments()),
+                                        Arc::new(config.new_builtin_router_instruments()),
                                     ));
                                     router_instruments
                                         .as_mut()
@@ -2903,7 +2903,7 @@ mod tests {
                                 } => {
                                     supergraph_instruments =
                                         Some(config.new_supergraph_instruments(Arc::new(
-                                            config.new_static_supergraph_instruments(),
+                                            config.new_builtin_supergraph_instruments(),
                                         )));
 
                                     let mut request = supergraph::Request::fake_builder()
@@ -2957,10 +2957,10 @@ mod tests {
                                     headers,
                                 } => {
                                     subgraph_instruments = Some(config.new_subgraph_instruments(
-                                        Arc::new(config.new_static_subgraph_instruments()),
+                                        Arc::new(config.new_builtin_subgraph_instruments()),
                                     ));
                                     cache_instruments = Some(config.new_cache_instruments(
-                                        Arc::new(config.new_static_cache_instruments()),
+                                        Arc::new(config.new_builtin_cache_instruments()),
                                     ));
                                     let graphql_request = graphql::Request::fake_builder()
                                         .query(query)
@@ -3258,7 +3258,7 @@ mod tests {
             .unwrap();
 
             let router_instruments =
-                config.new_router_instruments(Arc::new(config.new_static_router_instruments()));
+                config.new_router_instruments(Arc::new(config.new_builtin_router_instruments()));
             let router_req = RouterRequest::fake_builder()
                 .header("conditional-custom", "X")
                 .header("x-my-header-count", "55")
@@ -3297,7 +3297,7 @@ mod tests {
             );
 
             let router_instruments =
-                config.new_router_instruments(Arc::new(config.new_static_router_instruments()));
+                config.new_router_instruments(Arc::new(config.new_builtin_router_instruments()));
             let router_req = RouterRequest::fake_builder()
                 .header("content-length", "35")
                 .header("x-my-header-count", "5")
@@ -3339,7 +3339,7 @@ mod tests {
             );
 
             let router_instruments =
-                config.new_router_instruments(Arc::new(config.new_static_router_instruments()));
+                config.new_router_instruments(Arc::new(config.new_builtin_router_instruments()));
             let router_req = RouterRequest::fake_builder()
                 .header("content-length", "35")
                 .header("content-type", "application/graphql")
@@ -3369,7 +3369,7 @@ mod tests {
             );
 
             let router_instruments =
-                config.new_router_instruments(Arc::new(config.new_static_router_instruments()));
+                config.new_router_instruments(Arc::new(config.new_builtin_router_instruments()));
             let router_req = RouterRequest::fake_builder()
                 .header("content-length", "35")
                 .header("content-type", "application/graphql")
@@ -3509,7 +3509,7 @@ mod tests {
 
             let custom_instruments = SupergraphCustomInstruments::new(
                 &config.supergraph.custom,
-                Arc::new(config.new_static_supergraph_instruments()),
+                Arc::new(config.new_builtin_supergraph_instruments()),
             );
             let context = crate::context::Context::new();
             let _ = context.insert(OPERATION_KIND, "query".to_string()).unwrap();
@@ -3577,7 +3577,7 @@ mod tests {
 
             let custom_instruments = SupergraphCustomInstruments::new(
                 &config.supergraph.custom,
-                Arc::new(config.new_static_supergraph_instruments()),
+                Arc::new(config.new_builtin_supergraph_instruments()),
             );
             let supergraph_req = supergraph::Request::fake_builder()
                 .header("content-length", "35")
@@ -3634,7 +3634,7 @@ mod tests {
 
             let custom_instruments = SupergraphCustomInstruments::new(
                 &config.supergraph.custom,
-                Arc::new(config.new_static_supergraph_instruments()),
+                Arc::new(config.new_builtin_supergraph_instruments()),
             );
             let supergraph_req = supergraph::Request::fake_builder()
                 .header("content-length", "35")

@@ -10,6 +10,7 @@ use ::tracing::info_span;
 use ::tracing::Span;
 use axum::headers::HeaderName;
 use config_new::cache::CacheInstruments;
+use config_new::instruments::InstrumentsConfig;
 use config_new::instruments::StaticInstrument;
 use config_new::Selectors;
 use dashmap::DashMap;
@@ -258,6 +259,24 @@ impl Drop for Telemetry {
     }
 }
 
+struct BuiltinInstruments {
+    graphql_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
+    router_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
+    supergraph_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
+    subgraph_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
+    cache_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
+}
+
+fn create_builtin_instruments(config: &InstrumentsConfig) -> BuiltinInstruments {
+    BuiltinInstruments {
+        graphql_custom_instruments: Arc::new(config.new_builtin_graphql_instruments()),
+        router_custom_instruments: Arc::new(config.new_builtin_router_instruments()),
+        supergraph_custom_instruments: Arc::new(config.new_builtin_supergraph_instruments()),
+        subgraph_custom_instruments: Arc::new(config.new_builtin_subgraph_instruments()),
+        cache_custom_instruments: Arc::new(config.new_builtin_cache_instruments()),
+    }
+}
+
 #[async_trait::async_trait]
 impl Plugin for Telemetry {
     type Config = config::Conf;
@@ -281,56 +300,13 @@ impl Plugin for Telemetry {
             ::tracing::warn!("telemetry.instrumentation.spans.mode is currently set to 'deprecated', either explicitly or via defaulting. Set telemetry.instrumentation.spans.mode explicitly in your router.yaml to 'spec_compliant' for log and span attributes that follow OpenTelemetry semantic conventions. This option will be defaulted to 'spec_compliant' in a future release and eventually removed altogether");
         }
 
-        let graphql_custom_instruments = if cfg!(test) {
-            RwLock::new(Arc::new(
-                config
-                    .instrumentation
-                    .instruments
-                    .new_static_graphql_instruments(),
-            ))
-        } else {
-            RwLock::default()
-        };
-        let router_custom_instruments = if cfg!(test) {
-            RwLock::new(Arc::new(
-                config
-                    .instrumentation
-                    .instruments
-                    .new_static_router_instruments(),
-            ))
-        } else {
-            RwLock::default()
-        };
-        let supergraph_custom_instruments = if cfg!(test) {
-            RwLock::new(Arc::new(
-                config
-                    .instrumentation
-                    .instruments
-                    .new_static_supergraph_instruments(),
-            ))
-        } else {
-            RwLock::default()
-        };
-        let subgraph_custom_instruments = if cfg!(test) {
-            RwLock::new(Arc::new(
-                config
-                    .instrumentation
-                    .instruments
-                    .new_static_subgraph_instruments(),
-            ))
-        } else {
-            RwLock::default()
-        };
-        let cache_custom_instruments = if cfg!(test) {
-            RwLock::new(Arc::new(
-                config
-                    .instrumentation
-                    .instruments
-                    .new_static_cache_instruments(),
-            ))
-        } else {
-            RwLock::default()
-        };
+        let BuiltinInstruments {
+            graphql_custom_instruments,
+            router_custom_instruments,
+            supergraph_custom_instruments,
+            subgraph_custom_instruments,
+            cache_custom_instruments,
+        } = create_builtin_instruments(&config.instrumentation.instruments);
 
         Ok(Telemetry {
             custom_endpoints: metrics_builder.custom_endpoints,
@@ -349,11 +325,11 @@ impl Plugin for Telemetry {
                     .map(FilterMeterProvider::public),
                 is_active: false,
             }),
-            graphql_custom_instruments,
-            router_custom_instruments,
-            supergraph_custom_instruments,
-            subgraph_custom_instruments,
-            cache_custom_instruments,
+            graphql_custom_instruments: RwLock::new(graphql_custom_instruments),
+            router_custom_instruments: RwLock::new(router_custom_instruments),
+            supergraph_custom_instruments: RwLock::new(supergraph_custom_instruments),
+            subgraph_custom_instruments: RwLock::new(subgraph_custom_instruments),
+            cache_custom_instruments: RwLock::new(cache_custom_instruments),
             sampling_filter_ratio,
             config: Arc::new(config),
         })
@@ -912,36 +888,19 @@ impl Telemetry {
 
         activation.reload_metrics();
 
-        *self.graphql_custom_instruments.write() = Arc::new(
-            self.config
-                .instrumentation
-                .instruments
-                .new_static_graphql_instruments(),
-        );
-        *self.router_custom_instruments.write() = Arc::new(
-            self.config
-                .instrumentation
-                .instruments
-                .new_static_router_instruments(),
-        );
-        *self.supergraph_custom_instruments.write() = Arc::new(
-            self.config
-                .instrumentation
-                .instruments
-                .new_static_supergraph_instruments(),
-        );
-        *self.subgraph_custom_instruments.write() = Arc::new(
-            self.config
-                .instrumentation
-                .instruments
-                .new_static_subgraph_instruments(),
-        );
-        *self.cache_custom_instruments.write() = Arc::new(
-            self.config
-                .instrumentation
-                .instruments
-                .new_static_cache_instruments(),
-        );
+        let BuiltinInstruments {
+            graphql_custom_instruments,
+            router_custom_instruments,
+            supergraph_custom_instruments,
+            subgraph_custom_instruments,
+            cache_custom_instruments,
+        } = create_builtin_instruments(&self.config.instrumentation.instruments);
+
+        *self.graphql_custom_instruments.write() = graphql_custom_instruments;
+        *self.router_custom_instruments.write() = router_custom_instruments;
+        *self.supergraph_custom_instruments.write() = supergraph_custom_instruments;
+        *self.subgraph_custom_instruments.write() = subgraph_custom_instruments;
+        *self.cache_custom_instruments.write() = cache_custom_instruments;
 
         reload_fmt(create_fmt_layer(&self.config));
         activation.is_active = true;
