@@ -52,7 +52,7 @@ subgraphs:
           id: ID!
           name: String
           username: String
-          email: String
+          email: EmailAddress
           address: Address
           phone: String
           website: String
@@ -82,3 +82,5 @@ subgraphs:
           name: String!
           catchPhrase: String
         }
+
+        scalar EmailAddress

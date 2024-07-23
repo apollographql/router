@@ -28,6 +28,8 @@ input CompanyInput {
   catchPhrase: String
 }
 
+scalar EmailAddress
+
 type Query {
   usersByCompany(company: CompanyInput!): [User]
   user(id: ID!): User
@@ -37,7 +39,7 @@ type User {
   id: ID!
   name: String
   username: String
-  email: String
+  email: EmailAddress
   address: Address
   phone: String
   website: String

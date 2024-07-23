@@ -57,10 +57,12 @@ type CompanyInfo @join__type(graph: CONNECTORS_QUERY_USER_0) @join__type(graph: 
   name: String @join__field(graph: CONNECTORS_QUERY_USER_0) @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0)
 }
 
+scalar EmailAddress @join__type(graph: CONNECTORS_QUERY_USER_0)
+
 type User @join__type(graph: CONNECTORS_QUERY_USER_0, key: "id") @join__type(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0) {
   address: Address @join__field(graph: CONNECTORS_QUERY_USER_0)
   company: CompanyInfo @join__field(graph: CONNECTORS_QUERY_USER_0) @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0)
-  email: String @join__field(graph: CONNECTORS_QUERY_USER_0)
+  email: EmailAddress @join__field(graph: CONNECTORS_QUERY_USER_0)
   id: ID! @join__field(graph: CONNECTORS_QUERY_USER_0) @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0)
   name: String @join__field(graph: CONNECTORS_QUERY_USER_0) @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0)
   phone: String @join__field(graph: CONNECTORS_QUERY_USER_0)
