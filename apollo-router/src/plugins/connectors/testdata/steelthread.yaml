@@ -30,13 +30,13 @@ subgraphs:
           users: [User]
             @connect(
               source: "json"
-              http: { 
+              http: {
                 GET: "/users"
                 headers: [
                  {name: "x-new-name", from: "x-rename-connect"}
                  {name: "x-insert-multi-value", value: "first,second"}
                 ]
-              } 
+              }
               selection: "id name"
             )
 
@@ -50,6 +50,13 @@ subgraphs:
               username
               """
               entity: true
+            )
+
+          posts: [Post]
+            @connect(
+              source: "json"
+              http: { GET: "/posts" }
+              selection: "id title user: { id: userId }"
             )
         }
 
@@ -65,6 +72,12 @@ subgraphs:
               http: { GET: "/users/{$$this.c}" }
               selection: "$.phone"
             )
+        }
+
+        type Post {
+          id: ID!
+          title: String
+          user: User
         }
 
   graphql:

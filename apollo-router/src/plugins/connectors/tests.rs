@@ -140,6 +140,23 @@ pub(crate) mod mock_api {
                 }]
             )))
     }
+
+    pub(crate) fn posts() -> Mock {
+        Mock::given(method("GET")).and(path("/posts")).respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!([
+              {
+                "id": 1,
+                "title": "Post 1",
+                "userId": 1
+              },
+              {
+                "id": 2,
+                "title": "Post 2",
+                "userId": 2
+              }
+            ])),
+        )
+    }
 }
 
 pub(crate) mod mock_subgraph {
@@ -262,6 +279,55 @@ async fn test_root_field_plus_entity_plus_requires() {
             Matcher::new().method("POST").path("/graphql").build(),
             Matcher::new().method("GET").path("/users/1").build(),
             Matcher::new().method("GET").path("/users/2").build(),
+            Matcher::new().method("GET").path("/users/1").build(),
+            Matcher::new().method("GET").path("/users/2").build(),
+        ],
+    );
+}
+
+/// Tests that a connector can vend an entity reference like `user: { id: userId }`
+#[tokio::test]
+async fn test_entity_references() {
+    let mock_server = MockServer::start().await;
+    mock_api::posts().mount(&mock_server).await;
+    mock_api::user_1().mount(&mock_server).await;
+    mock_api::user_2().mount(&mock_server).await;
+
+    let response = execute(
+        STEEL_THREAD_SCHEMA,
+        &mock_server.uri(),
+        "query { posts { title user { name } } }",
+        Default::default(),
+        None,
+        |_| {},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "posts": [
+          {
+            "title": "Post 1",
+            "user": {
+              "name": "Leanne Graham"
+            }
+          },
+          {
+            "title": "Post 2",
+            "user": {
+              "name": "Ervin Howell"
+            }
+          }
+        ]
+      }
+    }
+    "###);
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+            Matcher::new().method("GET").path("/posts").build(),
             Matcher::new().method("GET").path("/users/1").build(),
             Matcher::new().method("GET").path("/users/2").build(),
         ],
@@ -455,7 +521,9 @@ async fn test_selection_set() {
         "query Commits($owner: String!, $repo: String!, $skipInlineFragment: Boolean!,
                              $skipNamedFragment: Boolean!, $skipField: Boolean!) {
               commits(owner: $owner, repo: $repo) {
+                __typename
                 commit {
+                __typename
                   from_path_alias: name_from_path
                   ...CommitDetails @skip(if: $skipNamedFragment)
                 }
@@ -464,6 +532,7 @@ async fn test_selection_set() {
 
             fragment CommitDetails on CommitDetail {
               by {
+                __typename
                 user: name @skip(if: $skipField)
                 name
                 ...on CommitAuthor @skip(if: $skipInlineFragment) {
@@ -493,9 +562,12 @@ async fn test_selection_set() {
       "data": {
         "commits": [
           {
+            "__typename": "Commit",
             "commit": {
+              "__typename": "CommitDetail",
               "from_path_alias": "Foo Bar",
               "by": {
+                "__typename": "CommitAuthor",
                 "user": "Foo Bar",
                 "name": "Foo Bar",
                 "address": "noone@nowhere",
