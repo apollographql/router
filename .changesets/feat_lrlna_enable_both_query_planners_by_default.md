@@ -1,8 +1,7 @@
 ### Enable running both query planners by default ([PR #5709](https://github.com/apollographql/router/pull/5709))
 
-<!-- [ROUTER-458] -->
 
-This change is enabling running the Native query planner in a background thread
+This change enables running the Native query planner in a background thread
 in order to compare output and performance differences to the existing JS query
 planner. Execution continues to be based on query plans produced by the JS query
 planner, as Native query planner results are discarded after the comparison.
