@@ -2,7 +2,6 @@
 /// any/all errors encountered in the process.
 use std::hash::Hash;
 use std::hash::Hasher;
-use std::ops::Deref;
 
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
@@ -266,7 +265,7 @@ impl ApplyTo for PathSelection {
                     // input_path instead of creating a new var_path here.
                     tail.apply_to_path(data, vars, input_path, errors)
                 } else if var_name == TYPENAMES {
-                    if let PathSelection::Key(Key::Field(name), _) = tail.deref() {
+                    if let PathSelection::Key(Key::Field(ref name), _) = **tail {
                         let var_data = json!({ name: name });
                         let mut var_path = vec![json!(name)];
                         tail.apply_to_path(&var_data, vars, &mut var_path, errors)
