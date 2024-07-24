@@ -1,3 +1,4 @@
+use apollo_compiler::Name;
 use http::HeaderName;
 use indexmap::IndexMap;
 
@@ -112,6 +113,10 @@ impl Connector {
                 Ok((id, connector))
             })
             .collect()
+    }
+
+    pub fn field_name(&self) -> &Name {
+        self.id.directive.field.field_name()
     }
 }
 
