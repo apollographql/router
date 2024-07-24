@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use apollo_federation::sources::connect::ApplyToError;
 use bytes::Bytes;
 use futures::future::ready;
@@ -7,17 +5,16 @@ use futures::stream::once;
 use futures::StreamExt;
 use http::HeaderValue;
 use itertools::Itertools;
-use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::json;
 use tower::BoxError;
 use tower::ServiceExt as TowerServiceExt;
 
-use super::configuration::SourceApiConfiguration;
 use crate::layers::ServiceExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugins::connectors::configuration::ConnectorsConfig;
 use crate::register_plugin;
 use crate::services::router::body::RouterBody;
 use crate::services::supergraph;
@@ -28,18 +25,6 @@ const CONNECTORS_DEBUG_ENV: &str = "APOLLO_CONNECTORS_DEBUGGING";
 #[derive(Debug, Clone)]
 struct Connectors {
     debug_extensions: bool,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct ConnectorsConfig {
-    /// Per subgraph configuration
-    #[serde(default)]
-    pub(crate) subgraphs: HashMap<String, HashMap<String, SourceApiConfiguration>>,
-
-    /// Enables connector debugging information on response extensions if the feature is enabled
-    #[serde(default)]
-    pub(crate) debug_extensions: bool,
 }
 
 #[async_trait::async_trait]
@@ -117,7 +102,9 @@ impl Plugin for Connectors {
     }
 }
 
-register_plugin!("apollo", "preview_connectors", Connectors);
+pub(crate) const PLUGIN_NAME: &str = "preview_connectors";
+
+register_plugin!("apollo", PLUGIN_NAME, Connectors);
 
 // === Structs for collecting debugging information ============================
 

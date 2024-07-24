@@ -2,11 +2,11 @@ use std::iter::once;
 
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::schema::Component;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use http::HeaderName;
-use indexmap::IndexMap;
 use itertools::Itertools;
 
 use super::schema::ConnectDirectiveArguments;

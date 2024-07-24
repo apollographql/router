@@ -39,6 +39,16 @@ subgraphs:
               }
               selection: "id name"
             )
+        
+          me: User @connect(
+              source: "json"
+              http: { GET: "/users/{$$config.id}" }
+              selection: """
+              id
+              name
+              username
+              """
+            )
 
           user(id: ID!): User
             @connect(

@@ -68,6 +68,7 @@ type Query
   @join__type(graph: GRAPHQL)
 {
   users: [User] @join__field(graph: CONNECTORS) @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/users", headers: [{name: "x-new-name", from: "x-rename-connect"}, {name: "x-insert-multi-value", value: "first,second"}]}, selection: "id name"})
+  me: User @join__field(graph: CONNECTORS) @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/users/{$config.id}"}, selection: "id\nname\nusername"})
   user(id: ID!): User @join__field(graph: CONNECTORS) @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/users/{$args.id}"}, selection: "id\nname\nusername", entity: true})
   posts: [Post] @join__field(graph: CONNECTORS) @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/posts"}, selection: "id title user: { id: userId }"})
 }

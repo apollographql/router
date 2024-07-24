@@ -478,9 +478,9 @@ impl ParameterValue {
                             field: name,
                             paths: parts.collect(),
                         },
-
+                        "$config" => continue,  // Config is valid, just not needed in this code path
                         other => {
-                            return Err(format!("expected parameter variable to be either $args or $this, found: {other}"));
+                            return Err(format!("expected parameter variable to be $args, $this or $config, found: {other}"));
                         }
                     });
                 }
@@ -636,7 +636,12 @@ impl Display for VariableExpression {
 }
 
 fn nom_parse_identifier_possible_namespace(input: &str) -> IResult<&str, &str> {
-    recognize(alt((tag("$args"), tag("$this"), nom_parse_identifier)))(input)
+    recognize(alt((
+        tag("$args"),
+        tag("$this"),
+        tag("$config"),
+        nom_parse_identifier,
+    )))(input)
 }
 
 fn nom_parse_identifier(input: &str) -> IResult<&str, &str> {
@@ -1017,7 +1022,7 @@ mod tests {
                     "d": "c",
                     "f.g": "e",
                     // Extra variables should be ignored.
-                    "extra": "ignored"
+                    "extra": "ignored",
                 })
                 .as_object()
                 .unwrap()

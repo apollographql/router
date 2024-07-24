@@ -23,7 +23,7 @@ use sha2::Sha256;
 
 use crate::error::ParseErrors;
 use crate::error::SchemaError;
-use crate::plugins::connectors::configuration::override_connector_base_urls;
+use crate::plugins::connectors::configuration::apply_config;
 use crate::query_planner::OperationKind;
 use crate::Configuration;
 
@@ -69,24 +69,18 @@ impl Schema {
     pub(crate) fn parse(sdl: &str, config: &Configuration) -> Result<Self, SchemaError> {
         let start = Instant::now();
 
-        let mut api_schema: Option<_> = None;
-        let mut connectors: Option<_> = None;
         let expansion = expand_connectors(sdl).map_err(SchemaError::Connector)?;
-        let sdl = match expansion {
+        let (sdl, api_schema, connectors) = match expansion {
             ExpansionResult::Expanded {
                 ref raw_sdl,
                 api_schema: api,
-                connectors: mut connectors_,
-            } => {
-                override_connector_base_urls(
-                    config,
-                    Arc::make_mut(&mut connectors_.by_service_name).values_mut(),
-                );
-                api_schema = Some(ValidFederationSchema::new(api).map_err(SchemaError::Connector)?);
-                connectors = Some(connectors_);
-                raw_sdl
-            }
-            ExpansionResult::Unchanged => sdl,
+                connectors,
+            } => (
+                raw_sdl.as_str(),
+                Some(ValidFederationSchema::new(api).map_err(SchemaError::Connector)?),
+                Some(apply_config(config, connectors)),
+            ),
+            ExpansionResult::Unchanged => (sdl, None, None),
         };
 
         let definitions = Self::parse_compiler_schema(sdl)?;

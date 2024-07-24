@@ -1,6 +1,7 @@
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable::Selection;
 use apollo_federation::sources::connect::Connector;
+use apollo_federation::sources::connect::CustomConfiguration;
 use apollo_federation::sources::connect::EntityResolver;
 use itertools::Itertools;
 use serde_json_bytes::json;
@@ -18,18 +19,21 @@ const REPRESENTATIONS_VAR: &str = "representations";
 const ENTITIES: &str = "_entities";
 const TYPENAME: &str = "__typename";
 
-#[derive(Debug, Default)]
-struct RequestInputs {
+#[derive(Clone, Debug, Default)]
+pub(crate) struct RequestInputs {
     args: Map<ByteString, Value>,
     this: Map<ByteString, Value>,
 }
 
 impl RequestInputs {
-    fn merge(&self) -> Value {
-        json!({
-            "$args": self.args,
-            "$this": self.this
-        })
+    pub(crate) fn merge(&self, config: Option<&CustomConfiguration>) -> IndexMap<String, Value> {
+        let mut map = IndexMap::with_capacity_and_hasher(3, Default::default());
+        map.insert("$args".to_string(), Value::Object(self.args.clone()));
+        map.insert("$this".to_string(), Value::Object(self.this.clone()));
+        if let Some(config) = config {
+            map.insert("$config".to_string(), json!(config));
+        }
+        map
     }
 }
 
@@ -39,20 +43,20 @@ pub(crate) enum ResponseKey {
         name: String,
         typename: ResponseTypeName,
         selection_set: apollo_compiler::executable::SelectionSet,
-        inputs: Value,
+        inputs: RequestInputs,
     },
     Entity {
         index: usize,
         typename: ResponseTypeName,
         selection_set: apollo_compiler::executable::SelectionSet,
-        inputs: Value,
+        inputs: RequestInputs,
     },
     EntityField {
         index: usize,
         field_name: String,
         typename: ResponseTypeName,
         selection_set: apollo_compiler::executable::SelectionSet,
-        inputs: Value,
+        inputs: RequestInputs,
     },
 }
 
@@ -65,18 +69,11 @@ impl ResponseKey {
         }
     }
 
-    pub(crate) fn inputs(&self) -> IndexMap<String, Value> {
-        if let Value::Object(ref inputs_map) = match self {
+    pub(crate) fn inputs(&self) -> &RequestInputs {
+        match self {
             ResponseKey::RootField { inputs, .. } => inputs,
             ResponseKey::Entity { inputs, .. } => inputs,
             ResponseKey::EntityField { inputs, .. } => inputs,
-        } {
-            inputs_map
-                .iter()
-                .map(|(k, v)| (k.as_str().to_string(), v.clone()))
-                .collect()
-        } else {
-            Default::default()
         }
     }
 }
@@ -91,33 +88,35 @@ impl std::fmt::Debug for ResponseKey {
             .map(|s| format!("{}", s))
             .join(" ");
         match self {
-            ResponseKey::RootField { name, typename, .. } => f
-                .debug_struct("RootField")
-                .field("name", name)
-                .field("typename", typename)
-                .field("selection_set", &selection_set)
-                .finish(),
+            ResponseKey::RootField { name, typename, .. } => {
+                let mut debug = f.debug_struct("RootField");
+                debug.field("name", name).field("typename", typename);
+                debug
+            }
             ResponseKey::Entity {
                 index, typename, ..
-            } => f
-                .debug_struct("Entity")
-                .field("index", index)
-                .field("typename", typename)
-                .field("selection_set", &selection_set)
-                .finish(),
+            } => {
+                let mut debug = f.debug_struct("Entity");
+                debug.field("index", index).field("typename", typename);
+                debug
+            }
             ResponseKey::EntityField {
                 index,
                 field_name,
                 typename,
                 ..
-            } => f
-                .debug_struct("EntityField")
-                .field("index", index)
-                .field("field_name", field_name)
-                .field("typename", typename)
-                .field("selection_set", &selection_set)
-                .finish(),
+            } => {
+                let mut debug = f.debug_struct("EntityField");
+                debug
+                    .field("index", index)
+                    .field("field_name", field_name)
+                    .field("typename", typename);
+                debug
+            }
         }
+        .field("selection_set", &selection_set)
+        .field("inputs", self.inputs())
+        .finish()
     }
 }
 
@@ -145,16 +144,16 @@ pub(crate) fn make_requests(
 
 fn request_params_to_requests(
     connector: &Connector,
-    request_params: Vec<(ResponseKey, RequestInputs)>,
+    request_params: Vec<ResponseKey>,
     original_request: &connect::Request,
     debug: &mut Option<ConnectorContext>,
 ) -> Result<Vec<(http::Request<RouterBody>, ResponseKey)>, MakeRequestError> {
     let mut results = vec![];
 
-    for (response_key, inputs) in request_params {
+    for response_key in request_params {
         let request = make_request(
             &connector.transport,
-            inputs.merge(),
+            response_key.inputs().merge(connector.config.as_ref()),
             original_request,
             debug,
         )?;
@@ -206,9 +205,7 @@ pub(crate) enum MakeRequestError {
 ///   b: foo(bar: "b") # another request
 /// }
 /// ```
-fn root_fields(
-    request: &connect::Request,
-) -> Result<Vec<(ResponseKey, RequestInputs)>, MakeRequestError> {
+fn root_fields(request: &connect::Request) -> Result<Vec<ResponseKey>, MakeRequestError> {
     use MakeRequestError::*;
 
     let op = request
@@ -230,9 +227,7 @@ fn root_fields(
 
                 let args = graphql_utils::field_arguments_map(field, &request.variables.variables)
                     .map_err(|_| {
-                        MakeRequestError::InvalidArguments(
-                            "cannot get inputs from field arguments".into(),
-                        )
+                        InvalidArguments("cannot get inputs from field arguments".into())
                     })?;
 
                 let request_inputs = RequestInputs {
@@ -246,16 +241,16 @@ fn root_fields(
                         field.definition.ty.inner_named_type().to_string(),
                     ),
                     selection_set: field.selection_set.clone(),
-                    inputs: request_inputs.merge(),
+                    inputs: request_inputs,
                 };
 
-                Ok((response_key, request_inputs))
+                Ok(response_key)
             }
 
             // The query planner removes fragments at the root so we don't have
             // to worry these branches
             Selection::FragmentSpread(_) | Selection::InlineFragment(_) => {
-                Err(MakeRequestError::UnsupportedOperation(
+                Err(UnsupportedOperation(
                     "top-level fragments in query planner nodes should not happen".into(),
                 ))
             }
@@ -282,9 +277,7 @@ fn root_fields(
 /// ```
 ///
 /// Returns a list of request inputs and the response key (index in the array).
-fn entities_from_request(
-    request: &connect::Request,
-) -> Result<Vec<(ResponseKey, RequestInputs)>, MakeRequestError> {
+fn entities_from_request(request: &connect::Request) -> Result<Vec<ResponseKey>, MakeRequestError> {
     use MakeRequestError::*;
 
     let Some(representations) = request.variables.variables.get(REPRESENTATIONS_VAR) else {
@@ -338,15 +331,12 @@ fn entities_from_request(
                 this: Default::default(),
             };
 
-            Ok((
-                ResponseKey::Entity {
-                    index: i,
-                    typename,
-                    selection_set: entities_field.selection_set.clone(),
-                    inputs: request_inputs.merge(),
-                },
-                request_inputs,
-            ))
+            Ok(ResponseKey::Entity {
+                index: i,
+                typename,
+                selection_set: entities_field.selection_set.clone(),
+                inputs: request_inputs,
+            })
         })
         .collect::<Result<Vec<_>, _>>()
 }
@@ -371,7 +361,7 @@ fn entities_from_request(
 /// name/alias of field) for each.
 fn entities_with_fields_from_request(
     request: &connect::Request,
-) -> Result<Vec<(ResponseKey, RequestInputs)>, MakeRequestError> {
+) -> Result<Vec<ResponseKey>, MakeRequestError> {
     use MakeRequestError::*;
 
     let op = request
@@ -466,16 +456,13 @@ fn entities_with_fields_from_request(
                         })?
                         .clone(),
                 };
-                Ok::<_, MakeRequestError>((
-                    ResponseKey::EntityField {
-                        index: *i,
-                        field_name: response_name.to_string(),
-                        typename,
-                        selection_set: field.selection_set.clone(),
-                        inputs: request_inputs.merge(),
-                    },
-                    request_inputs,
-                ))
+                Ok::<_, MakeRequestError>(ResponseKey::EntityField {
+                    index: *i,
+                    field_name: response_name.to_string(),
+                    typename,
+                    selection_set: field.selection_set.clone(),
+                    inputs: request_inputs,
+                })
             })
         })
         .collect::<Result<Vec<_>, _>>()
@@ -532,32 +519,28 @@ mod tests {
         assert_debug_snapshot!(super::root_fields(&req), @r###"
         Ok(
             [
-                (
-                    RootField {
-                        name: "a",
-                        typename: Concrete(
-                            "A",
-                        ),
-                        selection_set: "f",
-                    },
-                    RequestInputs {
+                RootField {
+                    name: "a",
+                    typename: Concrete(
+                        "A",
+                    ),
+                    selection_set: "f",
+                    inputs: RequestInputs {
                         args: {},
                         this: {},
                     },
-                ),
-                (
-                    RootField {
-                        name: "a2",
-                        typename: Concrete(
-                            "A",
-                        ),
-                        selection_set: "f2: f",
-                    },
-                    RequestInputs {
+                },
+                RootField {
+                    name: "a2",
+                    typename: Concrete(
+                        "A",
+                    ),
+                    selection_set: "f2: f",
+                    inputs: RequestInputs {
                         args: {},
                         this: {},
                     },
-                ),
+                },
             ],
         )
         "###);
@@ -598,15 +581,13 @@ mod tests {
         assert_debug_snapshot!(super::root_fields(&req), @r###"
         Ok(
             [
-                (
-                    RootField {
-                        name: "b",
-                        typename: Concrete(
-                            "String",
-                        ),
-                        selection_set: "",
-                    },
-                    RequestInputs {
+                RootField {
+                    name: "b",
+                    typename: Concrete(
+                        "String",
+                    ),
+                    selection_set: "",
+                    inputs: RequestInputs {
                         args: {
                             "var": String(
                                 "inline",
@@ -614,16 +595,14 @@ mod tests {
                         },
                         this: {},
                     },
-                ),
-                (
-                    RootField {
-                        name: "b2",
-                        typename: Concrete(
-                            "String",
-                        ),
-                        selection_set: "",
-                    },
-                    RequestInputs {
+                },
+                RootField {
+                    name: "b2",
+                    typename: Concrete(
+                        "String",
+                    ),
+                    selection_set: "",
+                    inputs: RequestInputs {
                         args: {
                             "var": String(
                                 "variable",
@@ -631,7 +610,7 @@ mod tests {
                         },
                         this: {},
                     },
-                ),
+                },
             ],
         )
         "###);
@@ -698,15 +677,13 @@ mod tests {
         assert_debug_snapshot!(super::root_fields(&req), @r###"
         Ok(
             [
-                (
-                    RootField {
-                        name: "c",
-                        typename: Concrete(
-                            "String",
-                        ),
-                        selection_set: "",
-                    },
-                    RequestInputs {
+                RootField {
+                    name: "c",
+                    typename: Concrete(
+                        "String",
+                    ),
+                    selection_set: "",
+                    inputs: RequestInputs {
                         args: {
                             "var1": Number(1),
                             "var2": Bool(
@@ -728,16 +705,14 @@ mod tests {
                         },
                         this: {},
                     },
-                ),
-                (
-                    RootField {
-                        name: "c2",
-                        typename: Concrete(
-                            "String",
-                        ),
-                        selection_set: "",
-                    },
-                    RequestInputs {
+                },
+                RootField {
+                    name: "c2",
+                    typename: Concrete(
+                        "String",
+                    ),
+                    selection_set: "",
+                    inputs: RequestInputs {
                         args: {
                             "var1": Number(1),
                             "var2": Bool(
@@ -759,7 +734,7 @@ mod tests {
                         },
                         this: {},
                     },
-                ),
+                },
             ],
         )
         "###);
@@ -837,15 +812,13 @@ mod tests {
 
         assert_debug_snapshot!(super::entities_from_request(&req).unwrap(), @r###"
         [
-            (
-                Entity {
-                    index: 0,
-                    typename: Concrete(
-                        "Entity",
-                    ),
-                    selection_set: "__typename ... on Entity {\n  field\n  alias: field\n}",
-                },
-                RequestInputs {
+            Entity {
+                index: 0,
+                typename: Concrete(
+                    "Entity",
+                ),
+                selection_set: "__typename ... on Entity {\n  field\n  alias: field\n}",
+                inputs: RequestInputs {
                     args: {
                         "__typename": String(
                             "Entity",
@@ -856,16 +829,14 @@ mod tests {
                     },
                     this: {},
                 },
-            ),
-            (
-                Entity {
-                    index: 1,
-                    typename: Concrete(
-                        "Entity",
-                    ),
-                    selection_set: "__typename ... on Entity {\n  field\n  alias: field\n}",
-                },
-                RequestInputs {
+            },
+            Entity {
+                index: 1,
+                typename: Concrete(
+                    "Entity",
+                ),
+                selection_set: "__typename ... on Entity {\n  field\n  alias: field\n}",
+                inputs: RequestInputs {
                     args: {
                         "__typename": String(
                             "Entity",
@@ -876,7 +847,7 @@ mod tests {
                     },
                     this: {},
                 },
-            ),
+            },
         ]
         "###);
     }
@@ -935,15 +906,13 @@ mod tests {
 
         assert_debug_snapshot!(super::entities_from_request(&req).unwrap(), @r###"
         [
-            (
-                RootField {
-                    name: "a",
-                    typename: Concrete(
-                        "Entity",
-                    ),
-                    selection_set: "field {\n  field\n}",
-                },
-                RequestInputs {
+            RootField {
+                name: "a",
+                typename: Concrete(
+                    "Entity",
+                ),
+                selection_set: "field {\n  field\n}",
+                inputs: RequestInputs {
                     args: {
                         "id": String(
                             "1",
@@ -951,16 +920,14 @@ mod tests {
                     },
                     this: {},
                 },
-            ),
-            (
-                RootField {
-                    name: "b",
-                    typename: Concrete(
-                        "Entity",
-                    ),
-                    selection_set: "field {\n  alias: field\n}",
-                },
-                RequestInputs {
+            },
+            RootField {
+                name: "b",
+                typename: Concrete(
+                    "Entity",
+                ),
+                selection_set: "field {\n  alias: field\n}",
+                inputs: RequestInputs {
                     args: {
                         "id": String(
                             "2",
@@ -968,7 +935,7 @@ mod tests {
                     },
                     this: {},
                 },
-            ),
+            },
         ]
         "###);
     }
@@ -1049,16 +1016,14 @@ mod tests {
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(&req).unwrap(), @r###"
         [
-            (
-                EntityField {
-                    index: 0,
-                    field_name: "field",
-                    typename: Concrete(
-                        "Entity",
-                    ),
-                    selection_set: "selected",
-                },
-                RequestInputs {
+            EntityField {
+                index: 0,
+                field_name: "field",
+                typename: Concrete(
+                    "Entity",
+                ),
+                selection_set: "selected",
+                inputs: RequestInputs {
                     args: {
                         "foo": String(
                             "hi",
@@ -1073,17 +1038,15 @@ mod tests {
                         ),
                     },
                 },
-            ),
-            (
-                EntityField {
-                    index: 1,
-                    field_name: "field",
-                    typename: Concrete(
-                        "Entity",
-                    ),
-                    selection_set: "selected",
-                },
-                RequestInputs {
+            },
+            EntityField {
+                index: 1,
+                field_name: "field",
+                typename: Concrete(
+                    "Entity",
+                ),
+                selection_set: "selected",
+                inputs: RequestInputs {
                     args: {
                         "foo": String(
                             "hi",
@@ -1098,17 +1061,15 @@ mod tests {
                         ),
                     },
                 },
-            ),
-            (
-                EntityField {
-                    index: 0,
-                    field_name: "alias",
-                    typename: Concrete(
-                        "Entity",
-                    ),
-                    selection_set: "selected",
-                },
-                RequestInputs {
+            },
+            EntityField {
+                index: 0,
+                field_name: "alias",
+                typename: Concrete(
+                    "Entity",
+                ),
+                selection_set: "selected",
+                inputs: RequestInputs {
                     args: {
                         "foo": String(
                             "bye",
@@ -1123,17 +1084,15 @@ mod tests {
                         ),
                     },
                 },
-            ),
-            (
-                EntityField {
-                    index: 1,
-                    field_name: "alias",
-                    typename: Concrete(
-                        "Entity",
-                    ),
-                    selection_set: "selected",
-                },
-                RequestInputs {
+            },
+            EntityField {
+                index: 1,
+                field_name: "alias",
+                typename: Concrete(
+                    "Entity",
+                ),
+                selection_set: "selected",
+                inputs: RequestInputs {
                     args: {
                         "foo": String(
                             "bye",
@@ -1148,7 +1107,7 @@ mod tests {
                         ),
                     },
                 },
-            ),
+            },
         ]
         "###);
     }
@@ -1227,14 +1186,12 @@ mod tests {
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(&req).unwrap(), @r###"
         [
-            (
-                EntityField {
-                    index: 0,
-                    field_name: "field",
-                    typename: Omitted,
-                    selection_set: "selected",
-                },
-                RequestInputs {
+            EntityField {
+                index: 0,
+                field_name: "field",
+                typename: Omitted,
+                selection_set: "selected",
+                inputs: RequestInputs {
                     args: {
                         "foo": String(
                             "bar",
@@ -1249,15 +1206,13 @@ mod tests {
                         ),
                     },
                 },
-            ),
-            (
-                EntityField {
-                    index: 1,
-                    field_name: "field",
-                    typename: Omitted,
-                    selection_set: "selected",
-                },
-                RequestInputs {
+            },
+            EntityField {
+                index: 1,
+                field_name: "field",
+                typename: Omitted,
+                selection_set: "selected",
+                inputs: RequestInputs {
                     args: {
                         "foo": String(
                             "bar",
@@ -1272,7 +1227,7 @@ mod tests {
                         ),
                     },
                 },
-            ),
+            },
         ]
         "###);
     }
@@ -1322,6 +1277,7 @@ mod tests {
             },
             selection: JSONSelection::parse(".data").unwrap().1,
             entity_resolver: None,
+            config: Default::default(),
         };
 
         let requests = super::make_requests(req, &connector, &mut None).unwrap();
@@ -1346,6 +1302,10 @@ mod tests {
                         "String",
                     ),
                     selection_set: "",
+                    inputs: RequestInputs {
+                        args: {},
+                        this: {},
+                    },
                 },
             ),
         ]

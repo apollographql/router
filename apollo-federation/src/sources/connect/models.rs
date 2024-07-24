@@ -1,6 +1,10 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::Name;
 use http::HeaderName;
-use indexmap::IndexMap;
+use serde_json::Value;
 
 use super::spec::ConnectHTTPArguments;
 use super::spec::SourceHTTPArguments;
@@ -12,7 +16,6 @@ use crate::schema::ValidFederationSchema;
 use crate::sources::connect::spec::extract_connect_directive_arguments;
 use crate::sources::connect::spec::extract_source_directive_arguments;
 use crate::sources::connect::ConnectSpecDefinition;
-
 // --- Connector ---------------------------------------------------------------
 
 #[derive(Debug, Clone)]
@@ -20,10 +23,13 @@ pub struct Connector {
     pub id: ConnectId,
     pub transport: HttpJsonTransport,
     pub selection: JSONSelection,
+    pub config: Option<CustomConfiguration>,
 
     /// The type of entity resolver to use for this connector
     pub entity_resolver: Option<EntityResolver>,
 }
+
+pub type CustomConfiguration = Arc<HashMap<String, Value>>;
 
 /// Entity resolver type
 ///
@@ -45,11 +51,11 @@ impl Connector {
         subgraph_name: &str,
     ) -> Result<IndexMap<ConnectId, Self>, FederationError> {
         let Some(metadata) = schema.metadata() else {
-            return Ok(IndexMap::new());
+            return Ok(IndexMap::with_hasher(Default::default()));
         };
 
         let Some(link) = metadata.for_identity(&ConnectSpecDefinition::identity()) else {
-            return Ok(IndexMap::new());
+            return Ok(IndexMap::with_hasher(Default::default()));
         };
 
         let source_name = ConnectSpecDefinition::source_directive_name(&link);
@@ -108,6 +114,7 @@ impl Connector {
                     transport,
                     selection: args.selection,
                     entity_resolver,
+                    config: None,
                 };
 
                 Ok((id, connector))
@@ -308,6 +315,7 @@ mod tests {
                         star: None,
                     },
                 ),
+                config: None,
                 entity_resolver: None,
             },
             ConnectId {
@@ -384,6 +392,7 @@ mod tests {
                         star: None,
                     },
                 ),
+                config: None,
                 entity_resolver: None,
             },
         }

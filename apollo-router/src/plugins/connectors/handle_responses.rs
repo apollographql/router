@@ -72,8 +72,10 @@ pub(crate) async fn handle_responses(
                     .selection
                     .apply_selection_set(response_key.selection_set());
 
-                let (res, apply_to_errors) =
-                    transformed_selection.apply_with_vars(&json_data, &response_key.inputs());
+                let (res, apply_to_errors) = transformed_selection.apply_with_vars(
+                    &json_data,
+                    &response_key.inputs().merge(connector.config.as_ref()),
+                );
 
                 if let Some(ref mut debug) = debug {
                     debug.push_response(
@@ -243,7 +245,6 @@ mod tests {
     use apollo_federation::sources::connect::JSONSelection;
     use apollo_federation::sources::connect::URLTemplate;
     use insta::assert_debug_snapshot;
-    use serde_json_bytes::json;
 
     use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::plugins::connectors::make_requests::ResponseTypeName;
@@ -268,12 +269,13 @@ mod tests {
             },
             selection: JSONSelection::parse(".data").unwrap().1,
             entity_resolver: None,
+            config: Default::default(),
         };
 
         let response1 = http::Response::builder()
             .extension(ResponseKey::RootField {
                 name: "hello".to_string(),
-                inputs: json!({}),
+                inputs: Default::default(),
                 typename: ResponseTypeName::Concrete("String".to_string()),
                 selection_set: SelectionSet {
                     ty: name!(Todo), // TODO
@@ -286,7 +288,7 @@ mod tests {
         let response2 = http::Response::builder()
             .extension(ResponseKey::RootField {
                 name: "hello2".to_string(),
-                inputs: json!({}),
+                inputs: Default::default(),
                 typename: ResponseTypeName::Concrete("String".to_string()),
                 selection_set: SelectionSet {
                     ty: name!(Todo), // TODO
@@ -354,6 +356,7 @@ mod tests {
             },
             selection: JSONSelection::parse(".data { id }").unwrap().1,
             entity_resolver: Some(EntityResolver::Explicit),
+            config: Default::default(),
         };
 
         let id_field_definition = FieldDefinition {
@@ -367,7 +370,7 @@ mod tests {
         let response1 = http::Response::builder()
             .extension(ResponseKey::Entity {
                 index: 0,
-                inputs: json!({}),
+                inputs: Default::default(),
                 typename: ResponseTypeName::Concrete("User".to_string()),
                 selection_set: SelectionSet {
                     ty: name!(Todo), // TODO
@@ -380,7 +383,7 @@ mod tests {
         let response2 = http::Response::builder()
             .extension(ResponseKey::Entity {
                 index: 1,
-                inputs: json!({}),
+                inputs: Default::default(),
                 typename: ResponseTypeName::Concrete("User".to_string()),
                 selection_set: SelectionSet {
                     ty: name!(Todo), // TODO
@@ -465,12 +468,13 @@ mod tests {
             },
             selection: JSONSelection::parse(".data").unwrap().1,
             entity_resolver: Some(EntityResolver::Implicit),
+            config: Default::default(),
         };
 
         let response1 = http::Response::builder()
             .extension(ResponseKey::EntityField {
                 index: 0,
-                inputs: json!({}),
+                inputs: Default::default(),
                 field_name: "field".to_string(),
                 typename: ResponseTypeName::Concrete("User".to_string()),
                 selection_set: SelectionSet {
@@ -484,7 +488,7 @@ mod tests {
         let response2 = http::Response::builder()
             .extension(ResponseKey::EntityField {
                 index: 1,
-                inputs: json!({}),
+                inputs: Default::default(),
                 field_name: "field".to_string(),
                 typename: ResponseTypeName::Concrete("User".to_string()),
                 selection_set: SelectionSet {
@@ -570,12 +574,13 @@ mod tests {
             },
             selection: JSONSelection::parse(".data").unwrap().1,
             entity_resolver: Some(EntityResolver::Explicit),
+            config: Default::default(),
         };
 
         let response1 = http::Response::builder()
             .extension(ResponseKey::Entity {
                 index: 0,
-                inputs: json!({}),
+                inputs: Default::default(),
                 typename: ResponseTypeName::Concrete("User".to_string()),
                 selection_set: SelectionSet {
                     ty: name!(Todo), // TODO
@@ -589,7 +594,7 @@ mod tests {
         let response2 = http::Response::builder()
             .extension(ResponseKey::Entity {
                 index: 1,
-                inputs: json!({}),
+                inputs: Default::default(),
                 typename: ResponseTypeName::Concrete("User".to_string()),
                 selection_set: SelectionSet {
                     ty: name!(Todo), // TODO
@@ -602,7 +607,7 @@ mod tests {
         let response3 = http::Response::builder()
             .extension(ResponseKey::Entity {
                 index: 2,
-                inputs: json!({}),
+                inputs: Default::default(),
                 typename: ResponseTypeName::Concrete("User".to_string()),
                 selection_set: SelectionSet {
                     ty: name!(Todo), // TODO

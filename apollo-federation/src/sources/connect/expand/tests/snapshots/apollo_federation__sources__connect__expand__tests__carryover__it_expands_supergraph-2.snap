@@ -64,6 +64,7 @@ expression: connectors.by_service_name
                 star: None,
             },
         ),
+        config: None,
         entity_resolver: None,
     },
     "one_Query_t_0": Connector {
@@ -138,6 +139,7 @@ expression: connectors.by_service_name
                 star: None,
             },
         ),
+        config: None,
         entity_resolver: Some(
             Explicit,
         ),
@@ -206,6 +208,7 @@ expression: connectors.by_service_name
                 star: None,
             },
         ),
+        config: None,
         entity_resolver: Some(
             Implicit,
         ),

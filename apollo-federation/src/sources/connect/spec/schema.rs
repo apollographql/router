@@ -1,7 +1,7 @@
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::name;
 use apollo_compiler::Name;
 use http::HeaderName;
-use indexmap::IndexMap;
 
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
 use crate::sources::connect::json_selection::JSONSelection;
