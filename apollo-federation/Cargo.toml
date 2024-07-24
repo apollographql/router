@@ -1,6 +1,6 @@
 [package]
 name = "apollo-federation"
-version = "1.51.0"
+version = "1.52.0-rc.0"
 authors = ["The Apollo GraphQL Contributors"]
 edition = "2021"
 description = "Apollo Federation"
