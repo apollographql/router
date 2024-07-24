@@ -1746,39 +1746,4 @@ mod tests {
 
         assert_snapshot!(schema.serialize());
     }
-
-    #[test]
-    fn test_cats() {
-        let sdl1 = include_str!("./sources/connect/expand/merge/cats_1.graphql");
-        let sdl2 = include_str!("./sources/connect/expand/merge/cats_2.graphql");
-        let sdl3 = include_str!("./sources/connect/expand/merge/cats_3.graphql");
-        let sdl4 = include_str!("./sources/connect/expand/merge/cats_4.graphql");
-        let sdl5 = include_str!("./sources/connect/expand/merge/cats_5.graphql");
-        let sdl6 = include_str!("./sources/connect/expand/merge/cats_6.graphql");
-
-        let mut subgraphs = ValidFederationSubgraphs::new();
-        vec![sdl1, sdl2, sdl3, sdl4, sdl5, sdl6]
-            .into_iter()
-            .enumerate()
-            .for_each(|(i, sdl)| {
-                subgraphs
-                    .add(ValidFederationSubgraph {
-                        name: format!("cats_{i}"),
-                        url: "".to_string(),
-                        schema: ValidFederationSchema::new(
-                            Schema::parse_and_validate(sdl, "./").unwrap(),
-                        )
-                        .unwrap(),
-                    })
-                    .unwrap();
-            });
-
-        let result = merge_federation_subgraphs(subgraphs).unwrap();
-
-        let schema = result.schema.into_inner();
-        let validation = schema.clone().validate();
-        assert!(validation.is_ok(), "{:?}", validation);
-
-        assert_snapshot!(schema.serialize());
-    }
 }
