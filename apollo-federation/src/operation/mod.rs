@@ -67,7 +67,10 @@ static NEXT_ID: atomic::AtomicUsize = atomic::AtomicUsize::new(1);
 ///
 /// Note that we shouldn't add `derive(Serialize, Deserialize)` to this without changing the types
 /// to be something like UUIDs.
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+// NOTE(@TylerBloom): This feature gate can be removed once the condition in the comment above is
+// met.
+#[cfg_attr(feature = "snapshot_tracing", derive(Serialize))]
 pub(crate) struct SelectionId(usize);
 
 impl SelectionId {
