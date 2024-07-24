@@ -82,7 +82,7 @@ persisted_queries:
 
 <ExperimentalFeature />
 
-Adding `experimental_local_manifests` to your `persisted-queries` configuration lets you use local persisted query manifests instead of the hosted Uplink version. This is helpful when you're using an offline Enterprise license and can't use Uplink. With the  `experimental_local_manifests`, the router doesn't reload the manifest from the file system, so you need to restart the router to apply changes.
+Adding `experimental_local_manifests` to your `persisted-queries` configuration lets you use local persisted query manifests instead of the hosted Uplink version. With the  `experimental_local_manifests`, the router doesn't reload the manifest from the file system, so you need to restart the router to apply changes.
 
 ```yaml title="router.yaml"
 persisted_queries:
@@ -135,7 +135,3 @@ apq:
 To enable safelisting, you _must_ turn off [automatic persisted queries](./in-memory-caching#caching-automatic-persisted-queries-apq) (APQs). APQs let clients [register arbitrary operations at runtime](/graphos/operations/persisted-queries/#differences-from-automatic-persisted-queries) while safelisting restricts operations to those that have been explicitly registered.
 
 </Note>
-
-## Limitations
-
-* **Unsupported with offline license**. An Apollo Router using an [offline Enterprise license](../enterprise-features/#offline-enterprise-license) cannot use safelisting with persisted queries. The feature relies on Apollo Uplink to fetch persisted query manifests, so it doesn't work as designed when the router is disconnected from Uplink.
