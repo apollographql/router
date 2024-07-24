@@ -88,7 +88,7 @@ impl tower::Service<ConnectRequest> for ConnectorService {
                 "otel.kind" = "INTERNAL",
                 "apollo.connector.type" = CONNECTOR_TYPE_HTTP,
                 "apollo.connector.detail" = tracing::field::Empty,
-                "apollo.connector.field.name" = connector.id.directive.field.to_string(),
+                "apollo.connector.field.name" = connector.field_name().to_string(),
                 "apollo.connector.selection" = connector.selection.to_string(),
                 "apollo.connector.source.name" = tracing::field::Empty,
                 "apollo.connector.source.detail" = tracing::field::Empty,

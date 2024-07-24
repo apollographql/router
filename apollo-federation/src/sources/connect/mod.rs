@@ -36,7 +36,7 @@ pub struct ConnectId {
     pub label: String,
     pub subgraph_name: String,
     pub source_name: Option<String>,
-    pub directive: ObjectOrInterfaceFieldDirectivePosition,
+    pub(crate) directive: ObjectOrInterfaceFieldDirectivePosition,
 }
 
 impl ConnectId {
