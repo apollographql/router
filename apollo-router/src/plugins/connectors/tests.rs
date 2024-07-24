@@ -203,7 +203,7 @@ async fn value_from_config() {
             "preview_connectors": {
                 "subgraphs": {
                     "connectors": {
-                        "custom": {
+                        "$config": {
                             "id": 1,
                         }
                     }
