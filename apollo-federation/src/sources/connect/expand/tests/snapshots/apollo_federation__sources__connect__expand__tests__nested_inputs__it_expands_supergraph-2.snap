@@ -69,6 +69,7 @@ expression: connectors.by_service_name
                 Empty,
             ),
         ),
+        config: None,
         entity_resolver: None,
     },
 }

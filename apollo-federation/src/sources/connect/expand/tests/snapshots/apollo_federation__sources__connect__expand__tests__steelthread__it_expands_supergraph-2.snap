@@ -54,7 +54,7 @@ expression: connectors.by_service_name
                 star: None,
             },
         ),
-        config: {},
+        config: None,
         entity_resolver: None,
     },
     "connectors_Query_user_0": Connector {
@@ -124,7 +124,7 @@ expression: connectors.by_service_name
                 star: None,
             },
         ),
-        config: {},
+        config: None,
         entity_resolver: Some(
             Explicit,
         ),
@@ -185,7 +185,7 @@ expression: connectors.by_service_name
                 ),
             ),
         ),
-        config: {},
+        config: None,
         entity_resolver: Some(
             Implicit,
         ),
