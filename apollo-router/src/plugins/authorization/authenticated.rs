@@ -176,7 +176,7 @@ impl<'a> traverse::Visitor for AuthenticatedCheckVisitor<'a> {
 pub(crate) struct AuthenticatedVisitor<'a> {
     schema: &'a schema::Schema,
     fragments: HashMap<&'a Name, &'a ast::FragmentDefinition>,
-    implementers_map: &'a HashMap<Name, Implementers>,
+    implementers_map: &'a apollo_compiler::collections::HashMap<Name, Implementers>,
     pub(crate) query_requires_authentication: bool,
     pub(crate) unauthorized_paths: Vec<Path>,
     // store the error paths from fragments so we can  add them at
@@ -191,7 +191,7 @@ impl<'a> AuthenticatedVisitor<'a> {
     pub(crate) fn new(
         schema: &'a schema::Schema,
         executable: &'a ast::Document,
-        implementers_map: &'a HashMap<Name, Implementers>,
+        implementers_map: &'a apollo_compiler::collections::HashMap<Name, Implementers>,
         dry_run: bool,
     ) -> Option<Self> {
         Some(Self {

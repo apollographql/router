@@ -116,8 +116,7 @@ impl InnerCacheMetricsService {
             .into_iter()
             .filter_map(|val| {
                 val.to_str().ok().map(|v| {
-                    v.to_string()
-                        .split(", ")
+                    v.split(", ")
                         .map(|s| s.to_string())
                         .collect::<Vec<String>>()
                 })

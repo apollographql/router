@@ -205,7 +205,7 @@ fn scopes_sets_argument(directive: &ast::Directive) -> impl Iterator<Item = Hash
 pub(crate) struct ScopeFilteringVisitor<'a> {
     schema: &'a schema::Schema,
     fragments: HashMap<&'a Name, &'a ast::FragmentDefinition>,
-    implementers_map: &'a HashMap<Name, Implementers>,
+    implementers_map: &'a apollo_compiler::collections::HashMap<Name, Implementers>,
     request_scopes: HashSet<String>,
     pub(crate) query_requires_scopes: bool,
     pub(crate) unauthorized_paths: Vec<Path>,
@@ -221,7 +221,7 @@ impl<'a> ScopeFilteringVisitor<'a> {
     pub(crate) fn new(
         schema: &'a schema::Schema,
         executable: &'a ast::Document,
-        implementers_map: &'a HashMap<Name, Implementers>,
+        implementers_map: &'a apollo_compiler::collections::HashMap<Name, Implementers>,
         scopes: HashSet<String>,
         dry_run: bool,
     ) -> Option<Self> {
