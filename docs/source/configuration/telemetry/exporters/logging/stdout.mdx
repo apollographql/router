@@ -1,10 +1,10 @@
 ---
 title: Router Logging to stdout
 subtitle: Configure logging to stdout
-description: Configure logging output to stdout in the Apollo Router. Format in human-readable text or machine-readable JSON.
+description: Configure logging output to stdout in the Apollo GraphOS Router or Apollo Router Core. Format in human-readable text or machine-readable JSON.
 ---
 
-You can configure Apollo Router logging to be directed to stdout, and its output format can be set to text or JSON.
+You can configure GraphOS Router or Apollo Router Core logging to be directed to stdout, and its output format can be set to text or JSON.
 
 For general logging configuration, refer to [Router Logging Configuration](./overview).
 
@@ -46,7 +46,7 @@ telemetry:
 
 You can configure the log format when you're running on an interactive shell. This is useful during development.
 
-If both `format` and `tty_format` are configured then the output depends on the environment where the Router is run:
+If both `format` and `tty_format` are configured then the output depends on the environment where the router is run:
 
 * In an interactive shell, `tty_format` will take precedence.
 * In a non-interactive shell, `format` will take precedence.
