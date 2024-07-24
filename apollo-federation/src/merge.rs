@@ -128,6 +128,7 @@ impl Merger {
             needs_inaccessible: false,
         }
     }
+
     fn merge(&mut self, subgraphs: ValidFederationSubgraphs) -> Result<MergeSuccess, MergeFailure> {
         let mut subgraphs = subgraphs
             .into_iter()
@@ -534,20 +535,35 @@ impl Merger {
                 );
 
                 for arg in field.arguments.iter() {
-                    let arguments = &mut supergraph_field.make_mut().arguments;
-                    if let Some(index) = arguments.iter().position(|a| a.name == arg.name) {
-                        if let Some(existing_arg) = arguments.get_mut(index) {
-                            // TODO add args
-                            let mutable_arg = existing_arg.make_mut();
-                            self.add_inaccessible(
-                                directive_names,
-                                &mut mutable_arg.directives,
-                                &arg.directives,
-                            );
-                        } else {
-                            // TODO mismatch no args
-                        }
-                    }
+                    let arguments_to_merge = &mut supergraph_field.make_mut().arguments;
+                    let argument_to_merge = arguments_to_merge
+                        .iter()
+                        .position(|a| a.name == arg.name)
+                        .and_then(|index| arguments_to_merge.get_mut(index))
+                        .map(|a| a.make_mut());
+
+                    if let Some(argument) = argument_to_merge {
+                        self.add_inaccessible(
+                            directive_names,
+                            &mut argument.directives,
+                            &arg.directives,
+                        );
+                    } else {
+                        let mut argument = InputValueDefinition {
+                            name: arg.name.clone(),
+                            description: arg.description.clone(),
+                            directives: Default::default(),
+                            ty: arg.ty.clone(),
+                            default_value: arg.default_value.clone(),
+                        };
+
+                        self.add_inaccessible(
+                            directive_names,
+                            &mut argument.directives,
+                            &arg.directives,
+                        );
+                        arguments_to_merge.push(argument.into());
+                    };
                 }
 
                 let requires_directive_option = field
@@ -702,19 +718,6 @@ impl Merger {
             );
         }
     }
-}
-
-fn filter_directives<'a, D, I, O>(deny_list: &IndexSet<Name>, directives: D) -> O
-where
-    D: IntoIterator<Item = &'a I>,
-    I: 'a + AsRef<Directive> + Clone,
-    O: FromIterator<I>,
-{
-    directives
-        .into_iter()
-        .filter(|d| !deny_list.contains(&d.as_ref().name))
-        .cloned()
-        .collect()
 }
 
 struct DirectiveNames {
@@ -1734,6 +1737,41 @@ mod tests {
                 .unwrap(),
             })
             .unwrap();
+
+        let result = merge_federation_subgraphs(subgraphs).unwrap();
+
+        let schema = result.schema.into_inner();
+        let validation = schema.clone().validate();
+        assert!(validation.is_ok(), "{:?}", validation);
+
+        assert_snapshot!(schema.serialize());
+    }
+
+    #[test]
+    fn test_cats() {
+        let sdl1 = include_str!("./sources/connect/expand/merge/cats_1.graphql");
+        let sdl2 = include_str!("./sources/connect/expand/merge/cats_2.graphql");
+        let sdl3 = include_str!("./sources/connect/expand/merge/cats_3.graphql");
+        let sdl4 = include_str!("./sources/connect/expand/merge/cats_4.graphql");
+        let sdl5 = include_str!("./sources/connect/expand/merge/cats_5.graphql");
+        let sdl6 = include_str!("./sources/connect/expand/merge/cats_6.graphql");
+
+        let mut subgraphs = ValidFederationSubgraphs::new();
+        vec![sdl1, sdl2, sdl3, sdl4, sdl5, sdl6]
+            .into_iter()
+            .enumerate()
+            .for_each(|(i, sdl)| {
+                subgraphs
+                    .add(ValidFederationSubgraph {
+                        name: format!("cats_{i}"),
+                        url: "".to_string(),
+                        schema: ValidFederationSchema::new(
+                            Schema::parse_and_validate(sdl, "./").unwrap(),
+                        )
+                        .unwrap(),
+                    })
+                    .unwrap();
+            });
 
         let result = merge_federation_subgraphs(subgraphs).unwrap();
 
