@@ -537,10 +537,8 @@ impl Merger {
                 for arg in field.arguments.iter() {
                     let arguments_to_merge = &mut supergraph_field.make_mut().arguments;
                     let argument_to_merge = arguments_to_merge
-                        .iter()
-                        .position(|a| a.name == arg.name)
-                        .and_then(|index| arguments_to_merge.get_mut(index))
-                        .map(|a| a.make_mut());
+                        .iter_mut()
+                        .find_map(|a| (a.name == arg.name).then(|| a.make_mut()));
 
                     if let Some(argument) = argument_to_merge {
                         self.add_inaccessible(
