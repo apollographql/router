@@ -73,7 +73,7 @@ type User @join__type(graph: CONNECTORS_QUERY_USER_0, key: "id") @join__type(gra
 
 type Query @join__type(graph: CONNECTORS_QUERY_USER_0) @join__type(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0) {
   user(id: ID!): User @join__field(graph: CONNECTORS_QUERY_USER_0)
-  usersByCompany: [User] @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0)
+  usersByCompany(company: CompanyInput!): [User] @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0)
 }
 
 input CompanyInput @join__type(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0) {
