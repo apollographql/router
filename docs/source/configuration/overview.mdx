@@ -35,7 +35,7 @@ APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
 
 The graph ref for the GraphOS graph and variant that the router fetches its supergraph schema from (e.g., `docs-example-graph@staging`).
 
-**Required** when using [managed federation](/federation/managed-federation/overview/), except when using an [offline license](#--license) to run the router.
+**Required** when using [managed federation](/federation/managed-federation/overview/).
 
 </td>
 </tr>
@@ -49,7 +49,7 @@ The graph ref for the GraphOS graph and variant that the router fetches its supe
 
 The [graph API key](/graphos/api-keys/#graph-api-keys) that the router should use to authenticate with GraphOS when fetching its supergraph schema.
 
-**Required** when using [managed federation](/federation/managed-federation/overview/), except when using an [offline license](#--license) to run the router.
+**Required** when using [managed federation](/federation/managed-federation/overview/).
 
 </td>
 </tr>
@@ -162,27 +162,6 @@ If set, the router watches for changes to its configuration file and any supergr
 The log level, indicating the _most_ severe log message type to include. In ascending order of verbosity, can be one of: `off`, `error`, `warn`, `info`, `debug`, or `trace`.
 
 The default value is `info`.
-
-</td>
-</tr>
-
-<tr>
-<td style="min-width: 150px;">
-
-##### `--license`
-
-`APOLLO_ROUTER_LICENSE_PATH`, `APOLLO_ROUTER_LICENSE`
-
-</td>
-<td>
-
-An offline GraphOS Enterprise license. Enables Enterprise router features when disconnected from GraphOS.
-
-An offline license is specified either as an absolute or relative path to a license file (`--license <license_path>` or `APOLLO_ROUTER_LICENSE_PATH`), or as the stringified contents of a license (`APOLLO_ROUTER_LICENSE`).
-
-When not set, the router retrieves an Enterprise license [from GraphOS via Apollo Uplink](../enterprise-features/#the-enterprise-license).
-
-For information about fetching an offline license and configuring the router, see [Offline Enterprise license](../enterprise-features/#offline-enterprise-license).
 
 </td>
 </tr>

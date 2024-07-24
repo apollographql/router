@@ -1,7 +1,7 @@
 ---
 title: Enterprise Features of the Apollo Router
 subtitle: Connect the router to GraphOS for advanced features
-description: Unlock Enterprise features for the Apollo Router by connecting it to GraphOS. Enable offline licenses for extended disconnections.
+description: Unlock Enterprise features for the Apollo Router by connecting it to GraphOS.
 ---
 
 Since the Apollo Router is [source-available](https://www.apollographql.com/blog/evaluating-apollo-router-understanding-free-and-open-vs-commercial-features), you can use its codebase without connecting it to GraphOS. GraphOS organizations with the Enterprise plan can [connect a self-hosted router to GraphOS](/graphos/quickstart/self-hosted#6-connect-the-router-to-graphos) for an expanded feature set.
@@ -59,67 +59,6 @@ A router instance retains its license for the duration of its execution. If you 
 Licenses are served via [Apollo Uplink](/federation/managed-federation/uplink/), the same multi-cloud endpoint that your router uses to fetch its supergraph schema from GraphOS. Because of this, licenses introduce no additional network dependencies, meaning your router's uptime remains unaffected. To learn more about multi-cloud Uplink, read the [Apollo blog post](https://www.apollographql.com/blog/announcement/backend/introducing-multi-cloud-support-for-apollo-uplink).
 
 A router instance's license is valid for the duration of your organization's current subscription billing period (plus a [grace period](#grace-period-for-expired-plans)), even if the router temporarily becomes disconnected from GraphOS.
-
-<MinVersion version="1.37.0">
-
-### Offline Enterprise license
-
-</MinVersion>
-
-<Tip>
-
-Offline Enterprise license support is available on an as-needed basis. Send a request to your Apollo contact to enable it for your GraphOS Studio organization.
-
-</Tip>
-
-Running your Apollo Router fleet while fully connected to GraphOS is the best choice for  most Apollo users. However, some scenarios can prevent your routers from connecting to GraphOS for an extended period, ranging from disasters that break connectivity to isolated sites operating with air-gapped networks. If you need to restart or rapidly scale your entire router fleet, but you're unable to communicate with Apollo Uplink, new router instances won't be able to serve traffic.
-
-To support long-term disconnection scenarios, GraphOS supports **offline Enterprise licenses** for the Apollo Router. An offline license enables routers to start and serve traffic without a persistent connection to GraphOS. The functionality available with an offline license is much like being fully connected to GraphOS, including managed federation for supergraph CI (operation checks, schema linting, contracts, etc.).
-
-An offline license can be retrieved from GraphOS with the [`rover license fetch`](/rover/commands/license) command.
-
-With an offline license, a router can either be fully disconnected from GraphOS or configured to connect to GraphOS on a best-effort basis so that it can send graph usage metrics. Apollo recommends configuring your router to report graph usage metrics to GraphOS whenever possible. Since your router sends metrics in a best-effort fashion, it incurs no performance or uptime penalties while enabling several powerful GraphOS features, such as operation checks, field insights, operation traces, and contracts.
-
-<Note>
-
-A router using an offline license requires [the use of local manifests](./configuration/persisted-queries/#experimental_local_manifests) when using [safelisting with persisted queries](./configuration/persisted-queries), otherwise it will not work as designed when the router is disconnected from Uplink.
-
-</Note>
-
-An offline license is valid for the lesser of the duration of your contract with Apollo, or one year, with an added grace period of 28 days. You are responsible for keeping your offline license files up to date within your infrastructure by rerunning `rover license fetch` to fetch updated license files.
-
-#### Set up offline license for the Apollo Router
-
-Follow these steps to configure an Apollo Router to use an offline Enterprise license:
-
-1. Fetch an offline license by running [`rover license fetch`](/rover/commands/license/#license-fetch) with the ID of the graph from which you want to fetch a license:
-
-    ```bash
-    rover license fetch --graph-id <apollo-graph-id>
-    ```
-
-1. Provide the offline license to your router on startup. The router accepts an offline license in a few ways:
-
-    1. [`--license <license_path>`](./configuration/overview/#--license) CLI option, with an argument containing an absolute or relative path to an offline license file
-    1. [`APOLLO_ROUTER_LICENSE_PATH`](./configuration/overview/#--license) environment variable, containing an absolute or relative path to an offline license file 
-    1. [`APOLLO_ROUTER_LICENSE`](./configuration/overview/#--license) environment variable, containing the stringified contents of an offline license file
-
-    <Note>
-
-    - The router checks the CLI option and environment variables in the listed order, then it uses the value of the first option or variable that is set.
-    - The `--license <license_path>` option is only available when running the router binary. When running a router with `rover dev`, you must use environment variables to provide your offline license.
-    
-    </Note>
-
-1. Configure the router to use a local supergraph schema by setting one of the following:
-
-    * [`--s/-supergraph`](./configuration/overview/#-s----supergraph) CLI option, with an argument containing an absolute or relative path to supergraph schema file
-    * [`APOLLO_SUPERGRAPH_PATH`](./configuration/overview/#-s----supergraph) environment variable, containing an absolute or relative path to supergraph schema file
-    * [`APOLLO_SUPERGRAPH_URLS`](./configuration/overview/#-s----supergraph) environment variable, containing URLs to supergraph schemas
-
-1. (**Recommended**) Configure the router to report usage metrics to GraphOS in a best-effort basis by setting both the [`APOLLO_KEY`](./configuration/overview/#apollo_key) and [`APOLLO_GRAPH_REF`](./configuration/overview#apollo_graph_ref) environment variables. 
-
-    These metrics are necessary for several important GraphOS features (operations checks, field insights, operation traces, contracts). Sending them best-effort incurs no performance or uptime penalties. 
 
 ### Licenses with local development
 
