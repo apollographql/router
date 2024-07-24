@@ -72,8 +72,10 @@ pub(crate) async fn handle_responses(
                     .selection
                     .apply_selection_set(response_key.selection_set());
 
-                let (res, apply_to_errors) = transformed_selection
-                    .apply_with_vars(&json_data, &response_key.inputs().merge(&connector.config));
+                let (res, apply_to_errors) = transformed_selection.apply_with_vars(
+                    &json_data,
+                    &response_key.inputs().merge(connector.config.as_ref()),
+                );
 
                 if let Some(ref mut debug) = debug {
                     debug.push_response(

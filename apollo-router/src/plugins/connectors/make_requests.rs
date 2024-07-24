@@ -26,11 +26,13 @@ pub(crate) struct RequestInputs {
 }
 
 impl RequestInputs {
-    pub(crate) fn merge(&self, config: &CustomConfiguration) -> IndexMap<String, Value> {
+    pub(crate) fn merge(&self, config: Option<&CustomConfiguration>) -> IndexMap<String, Value> {
         let mut map = IndexMap::with_capacity_and_hasher(3, Default::default());
         map.insert("$args".to_string(), Value::Object(self.args.clone()));
         map.insert("$this".to_string(), Value::Object(self.this.clone()));
-        map.insert("$config".to_string(), json!(config));
+        if let Some(config) = config {
+            map.insert("$config".to_string(), json!(config));
+        }
         map
     }
 }

@@ -19,8 +19,6 @@ pub use json_selection::Key;
 pub use json_selection::PathSelection;
 pub use json_selection::SubSelection;
 pub use models::CustomConfiguration;
-pub use models::SourceConfiguration;
-pub use models::SubgraphConnectorConfiguration;
 pub(crate) use spec::ConnectSpecDefinition;
 pub use url_path_template::URLPathTemplate;
 

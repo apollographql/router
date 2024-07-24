@@ -439,7 +439,6 @@ dependencies = [
  "nom",
  "petgraph",
  "pretty_assertions",
- "schemars",
  "serde",
  "serde_json",
  "serde_json_bytes",

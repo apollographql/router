@@ -16,7 +16,7 @@ macro_rules! test_expands {
                         raw_sdl,
                         api_schema,
                         connectors,
-                    } = expand_connectors(to_expand, None).unwrap()
+                    } = expand_connectors(to_expand).unwrap()
                     else {
                         panic!(
                             concat!(
@@ -45,7 +45,7 @@ macro_rules! test_ignores {
                     use crate::sources::connect::expand::ExpansionResult;
 
                     let to_ignore = include_str!(concat!("schemas/", stringify!($name), ".graphql"));
-                    let ExpansionResult::Unchanged = expand_connectors(to_ignore, None).unwrap() else {
+                    let ExpansionResult::Unchanged = expand_connectors(to_ignore).unwrap() else {
                         panic!(
                             concat!(
                                 "expected expansion to ignorenon-connector supergraph for schemas/",

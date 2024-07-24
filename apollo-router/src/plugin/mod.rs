@@ -806,6 +806,20 @@ macro_rules! register_plugin {
                 Lazy::new(|| $crate::plugin::PluginFactory::new::<$plugin_type>($group, $name));
         };
     };
+
+    ($group: literal, $name: ident, $plugin_type: ident) => {
+        //  Artificial scope to avoid naming collisions
+        const _: () = {
+            use $crate::_private::once_cell::sync::Lazy;
+            use $crate::_private::PluginFactory;
+            use $crate::_private::PLUGINS;
+
+            #[$crate::_private::linkme::distributed_slice(PLUGINS)]
+            #[linkme(crate = $crate::_private::linkme)]
+            static REGISTER_PLUGIN: Lazy<PluginFactory> =
+                Lazy::new(|| $crate::plugin::PluginFactory::new::<$plugin_type>($group, $name));
+        };
+    };
 }
 
 /// Register a private plugin with a group and a name

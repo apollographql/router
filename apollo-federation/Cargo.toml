@@ -39,7 +39,6 @@ thiserror = "1.0"
 url = "2"
 either = "1.12"
 pretty_assertions = "1.4.0"
-schemars = { workspace = true, optional = true }
 tracing = "0.1.40"
 
 [dev-dependencies]

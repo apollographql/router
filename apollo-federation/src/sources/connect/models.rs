@@ -1,12 +1,9 @@
-mod config;
-
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use apollo_compiler::collections::IndexMap;
-pub use config::CustomConfiguration;
-pub use config::SourceConfiguration;
-pub use config::SubgraphConnectorConfiguration;
 use http::HeaderName;
+use serde_json::Value;
 
 use super::spec::ConnectHTTPArguments;
 use super::spec::SourceHTTPArguments;
@@ -25,11 +22,13 @@ pub struct Connector {
     pub id: ConnectId,
     pub transport: Transport,
     pub selection: JSONSelection,
-    pub config: Arc<CustomConfiguration>,
+    pub config: Option<CustomConfiguration>,
 
     /// The type of entity resolver to use for this connector
     pub entity_resolver: Option<EntityResolver>,
 }
+
+pub type CustomConfiguration = Arc<HashMap<String, Value>>;
 
 #[derive(Debug, Clone)]
 pub enum Transport {
@@ -62,12 +61,10 @@ impl Connector {
     pub(crate) fn from_valid_schema(
         schema: &ValidFederationSchema,
         subgraph_name: &str,
-        config: Option<SubgraphConnectorConfiguration>,
     ) -> Result<IndexMap<ConnectId, Self>, FederationError> {
         let Some(metadata) = schema.metadata() else {
             return Ok(IndexMap::with_hasher(Default::default()));
         };
-        let config = config.map(|c| Arc::new(c.custom)).unwrap_or_default();
 
         let Some(link) = metadata.for_identity(&ConnectSpecDefinition::identity()) else {
             return Ok(IndexMap::with_hasher(Default::default()));
@@ -132,7 +129,7 @@ impl Connector {
                     transport,
                     selection: args.selection,
                     entity_resolver,
-                    config: config.clone(),
+                    config: None,
                 };
 
                 Ok((id, connector))
@@ -249,7 +246,7 @@ mod tests {
     use crate::schema::FederationSchema;
     use crate::ValidFederationSubgraphs;
 
-    static SIMPLE_SUPERGRAPH: &str = include_str!("../tests/schemas/simple.graphql");
+    static SIMPLE_SUPERGRAPH: &str = include_str!("./tests/schemas/simple.graphql");
 
     fn get_subgraphs(supergraph_sdl: &str) -> ValidFederationSubgraphs {
         let schema = Schema::parse(supergraph_sdl, "supergraph.graphql").unwrap();
@@ -261,8 +258,7 @@ mod tests {
     fn test_from_schema() {
         let subgraphs = get_subgraphs(SIMPLE_SUPERGRAPH);
         let subgraph = subgraphs.get("connectors").unwrap();
-        let connectors =
-            Connector::from_valid_schema(&subgraph.schema, "connectors", None).unwrap();
+        let connectors = Connector::from_valid_schema(&subgraph.schema, "connectors").unwrap();
         assert_debug_snapshot!(&connectors, @r###"
         {
             ConnectId {
