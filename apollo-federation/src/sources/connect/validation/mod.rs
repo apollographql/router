@@ -47,7 +47,6 @@ mod entity;
 mod extended_type;
 mod http_headers;
 mod http_method;
-mod http_url;
 mod selection;
 mod source_name;
 
@@ -56,8 +55,8 @@ use std::ops::Range;
 
 use apollo_compiler::ast::Value;
 use apollo_compiler::name;
+use apollo_compiler::parser::LineColumn;
 use apollo_compiler::parser::SourceMap;
-use apollo_compiler::parser::SourceSpan as NodeLocation;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::Name;
@@ -119,10 +118,7 @@ pub fn validate(schema: Schema) -> Vec<Message> {
             Ok(name) => valid_source_names
                 .entry(name)
                 .or_insert_with(Vec::new)
-                .extend(Location::from_node(
-                    directive.directive.node.location(),
-                    source_map,
-                )),
+                .extend(directive.directive.node.line_column_range(source_map)),
         }
     }
     for (name, locations) in valid_source_names {
@@ -155,7 +151,7 @@ pub fn validate(schema: Schema) -> Vec<Message> {
         messages.push(Message {
             code: Code::NoSourceImport,
             message: format!("The `@{SOURCE_DIRECTIVE_NAME_IN_SPEC}` directive is not imported. Try adding `@{SOURCE_DIRECTIVE_NAME_IN_SPEC}` to `import` for `@{link_name}(url: \"{connect_identity}\")`", link_name=link_directive.name),
-            locations: Location::from_node(link_directive.location(), source_map)
+            locations: link_directive.line_column_range(source_map)
                 .into_iter()
                 .collect(),
         });
@@ -199,8 +195,7 @@ fn check_conflicting_directives(schema: &Schema) -> Vec<Message> {
                     locations: imports
                         .iter()
                         .find_map(|(value, reparsed)| {
-                            (*reparsed == *import)
-                                .then(|| Location::from_node(value.location(), &schema.sources))
+                            (*reparsed == *import).then(|| value.line_column_range(&schema.sources))
                         })
                         .flatten()
                         .into_iter()
@@ -249,9 +244,7 @@ fn validate_source(directive: &Component<Directive>, sources: &SourceMap) -> Sou
                 "{coordinate} must have a `{HTTP_ARGUMENT_NAME}` argument.",
                 coordinate = source_http_argument_coordinate(&directive.name),
             ),
-            locations: Location::from_node(directive.location(), sources)
-                .into_iter()
-                .collect(),
+            locations: directive.line_column_range(sources).into_iter().collect(),
         })
     }
 
@@ -274,9 +267,7 @@ fn parse_url(value: &Node<Value>, coordinate: &str, sources: &SourceMap) -> Resu
     let url = Url::parse(str_value).map_err(|inner| Message {
         code: Code::InvalidUrl,
         message: format!("The value {value} for {coordinate} is not a valid URL: {inner}.",),
-        locations: Location::from_node(value.location(), sources)
-            .into_iter()
-            .collect(),
+        locations: value.line_column_range(sources).into_iter().collect(),
     })?;
     let scheme = url.scheme();
     if scheme != "http" && scheme != "https" {
@@ -285,9 +276,7 @@ fn parse_url(value: &Node<Value>, coordinate: &str, sources: &SourceMap) -> Resu
             message: format!(
                 "The value {value} for {coordinate} must be http or https, got {scheme}.",
             ),
-            locations: Location::from_node(value.location(), sources)
-                .into_iter()
-                .collect(),
+            locations: value.line_column_range(sources).into_iter().collect(),
         });
     }
     Ok(url)
@@ -301,9 +290,7 @@ fn require_value_is_str<'a>(
     value.as_str().ok_or_else(|| Message {
         code: Code::GraphQLError,
         message: format!("The value for {coordinate} must be a string.",),
-        locations: Location::from_node(value.location(), sources)
-            .into_iter()
-            .collect(),
+        locations: value.line_column_range(sources).into_iter().collect(),
     })
 }
 
@@ -326,30 +313,7 @@ pub struct Message {
     /// 3. When referring to code elements (including schema coordinates), surround them with
     /// backticks. This clarifies that `Type.field` is not ending a sentence with its period.
     pub message: String,
-    pub locations: Vec<Range<Location>>,
-}
-
-/// A 0-indexed line/column reference to SDL source
-#[derive(Clone, Copy, Debug)]
-pub struct Location {
-    pub line: usize,
-    pub column: usize,
-}
-
-impl Location {
-    // TODO: This is a ripoff of GraphQLLocation::from_node in apollo_compiler, contribute it back
-    fn from_node(node: Option<NodeLocation>, sources: &SourceMap) -> Option<Range<Self>> {
-        node?.line_column_range(sources).map(|range| Range {
-            start: Self {
-                line: range.start.line - 1,
-                column: range.start.column - 1,
-            },
-            end: Self {
-                line: range.end.line - 1,
-                column: range.end.column - 1,
-            },
-        })
-    }
+    pub locations: Vec<Range<LineColumn>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -1296,7 +1296,7 @@ impl FetchDependencyGraph {
                     }
                 }
 
-                let Some(sub_selection_set) = selection.selection_set()? else {
+                let Some(sub_selection_set) = selection.selection_set() else {
                     // we're only here if `conditionInSupergraphIfInterfaceObject` returned something,
                     // we imply that selection is a fragment selection and so has a sub-selectionSet.
                     return Err(FederationError::internal(format!(
@@ -1311,14 +1311,14 @@ impl FetchDependencyGraph {
                 // case as a "safe" default).
                 if !interface_input_selections.is_empty() {
                     Ok(interface_input_selections.iter().any(|input| {
-                        let Ok(Some(input_selection_set)) = input.selection_set() else {
+                        let Some(input_selection_set) = input.selection_set() else {
                             return false;
                         };
                         input_selection_set.contains(sub_selection_set)
                     }))
                 } else if !implementation_input_selections.is_empty() {
                     Ok(interface_input_selections.iter().all(|input| {
-                        let Ok(Some(input_selection_set)) = input.selection_set() else {
+                        let Some(input_selection_set) = input.selection_set() else {
                             return false;
                         };
                         input_selection_set.contains(sub_selection_set)

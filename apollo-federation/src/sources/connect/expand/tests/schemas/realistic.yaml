@@ -45,6 +45,7 @@ subgraphs:
                 name
                 catchPhrase
                 bs
+                email
               }""", entity: true)
         }
 
@@ -52,7 +53,7 @@ subgraphs:
           id: ID!
           name: String
           username: String
-          email: String
+          email: EmailAddress
           address: Address
           phone: String
           website: String
@@ -76,9 +77,12 @@ subgraphs:
           name: String
           catchPhrase: String
           bs: String
+          email: EmailAddress
         }
 
         input CompanyInput {
           name: String!
           catchPhrase: String
         }
+
+        scalar EmailAddress

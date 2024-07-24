@@ -1,0 +1,81 @@
+# rover supergraph compose --config apollo-federation/src/sources/connect/expand/tests/schemas/carryover.yaml > apollo-federation/src/sources/connect/expand/tests/schemas/carryover.graphql
+federation_version: =2.9.0-connectors.9
+subgraphs:
+  one:
+    routing_url: none
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.8", import: [
+              "@key",
+              "@inaccessible", "@tag", "@override",
+              "@authenticated", "@requiresScopes", "@policy",
+              "@composeDirective"
+            ]
+          )
+          @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom"])
+          @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"])
+          # @composeDirective(name: "@custom")
+          @source(name: "json" http: { baseURL: "http://example/" })
+        # directive @custom on OBJECT | FIELD_DEFINITION
+        type Query {
+          ts: [T] @connect(
+            source: "json"
+            http: { GET: "/t" }
+            selection: """
+              id
+              tagged
+              hidden
+              # custom
+              # authenticated
+              # requiresScopes
+              # policy
+              overridden
+            """
+          )
+          t(id: ID): T @connect(
+            source: "json"
+            http: { GET: "/t/{$$args.id}" }
+            selection: """
+              id
+              tagged
+              hidden
+              # custom
+              # authenticated
+              # requiresScopes
+              # policy
+              overridden
+            """
+            entity: true
+          )
+        }
+
+        type T @key(fields: "id") {
+          id: ID!
+          tagged: String @tag(name: "tag")
+          hidden: String @inaccessible
+          # custom: String @custom
+          # authenticated: String @authenticated
+          # requiresScopes: String @requiresScopes(scopes: ["scope"])
+          # policy: String @policy(policies: [["admin"]])
+          overridden: String @override(from: "two", label: "label")
+          r: R @connect(
+            source: "json"
+            http: { GET: "/t/{$$this.id}/r" }
+            selection: "id"
+          )
+        }
+
+        type R {
+          id: ID!
+        }
+  two:
+    routing_url: none
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@key"])
+        type T @key(fields: "id") {
+          id: ID!
+          overridden: String
+        }

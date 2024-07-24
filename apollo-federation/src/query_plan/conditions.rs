@@ -213,7 +213,7 @@ pub(crate) fn remove_conditions_from_selection_set(
                 // We remove any of the conditions on the element and recurse.
                 let updated_element =
                     remove_conditions_of_element(element.clone(), variable_conditions);
-                let new_selection = if let Ok(Some(selection_set)) = selection.selection_set() {
+                let new_selection = if let Some(selection_set) = selection.selection_set() {
                     let updated_selection_set =
                         remove_conditions_from_selection_set(selection_set, conditions)?;
                     if updated_element == element {

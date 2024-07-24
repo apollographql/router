@@ -128,6 +128,7 @@ impl Merger {
             needs_inaccessible: false,
         }
     }
+
     fn merge(&mut self, subgraphs: ValidFederationSubgraphs) -> Result<MergeSuccess, MergeFailure> {
         let mut subgraphs = subgraphs
             .into_iter()
@@ -534,20 +535,33 @@ impl Merger {
                 );
 
                 for arg in field.arguments.iter() {
-                    let arguments = &mut supergraph_field.make_mut().arguments;
-                    if let Some(index) = arguments.iter().position(|a| a.name == arg.name) {
-                        if let Some(existing_arg) = arguments.get_mut(index) {
-                            // TODO add args
-                            let mutable_arg = existing_arg.make_mut();
-                            self.add_inaccessible(
-                                directive_names,
-                                &mut mutable_arg.directives,
-                                &arg.directives,
-                            );
-                        } else {
-                            // TODO mismatch no args
-                        }
-                    }
+                    let arguments_to_merge = &mut supergraph_field.make_mut().arguments;
+                    let argument_to_merge = arguments_to_merge
+                        .iter_mut()
+                        .find_map(|a| (a.name == arg.name).then(|| a.make_mut()));
+
+                    if let Some(argument) = argument_to_merge {
+                        self.add_inaccessible(
+                            directive_names,
+                            &mut argument.directives,
+                            &arg.directives,
+                        );
+                    } else {
+                        let mut argument = InputValueDefinition {
+                            name: arg.name.clone(),
+                            description: arg.description.clone(),
+                            directives: Default::default(),
+                            ty: arg.ty.clone(),
+                            default_value: arg.default_value.clone(),
+                        };
+
+                        self.add_inaccessible(
+                            directive_names,
+                            &mut argument.directives,
+                            &arg.directives,
+                        );
+                        arguments_to_merge.push(argument.into());
+                    };
                 }
 
                 let requires_directive_option = field
@@ -687,6 +701,9 @@ impl Merger {
         if original_directives
             .iter()
             .any(|d| d.as_ref().name == directive_names.inaccessible)
+            && !new_directives
+                .iter()
+                .any(|d| d.as_ref().name == INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC)
         {
             self.needs_inaccessible = true;
 
@@ -699,19 +716,6 @@ impl Merger {
             );
         }
     }
-}
-
-fn filter_directives<'a, D, I, O>(deny_list: &IndexSet<Name>, directives: D) -> O
-where
-    D: IntoIterator<Item = &'a I>,
-    I: 'a + AsRef<Directive> + Clone,
-    O: FromIterator<I>,
-{
-    directives
-        .into_iter()
-        .filter(|d| !deny_list.contains(&d.as_ref().name))
-        .cloned()
-        .collect()
 }
 
 struct DirectiveNames {
@@ -1708,14 +1712,25 @@ mod tests {
     #[test]
     fn test_inaccessible() {
         let one_sdl = include_str!("./sources/connect/expand/merge/inaccessible.graphql");
+        let two_sdl = include_str!("./sources/connect/expand/merge/inaccessible_2.graphql");
 
         let mut subgraphs = ValidFederationSubgraphs::new();
         subgraphs
             .add(ValidFederationSubgraph {
-                name: "basic_1".to_string(),
+                name: "inaccessible".to_string(),
                 url: "".to_string(),
                 schema: ValidFederationSchema::new(
-                    Schema::parse_and_validate(one_sdl, "./basic_1.graphql").unwrap(),
+                    Schema::parse_and_validate(one_sdl, "./inaccessible.graphql").unwrap(),
+                )
+                .unwrap(),
+            })
+            .unwrap();
+        subgraphs
+            .add(ValidFederationSubgraph {
+                name: "inaccessible_2".to_string(),
+                url: "".to_string(),
+                schema: ValidFederationSchema::new(
+                    Schema::parse_and_validate(two_sdl, "./inaccessible_2.graphql").unwrap(),
                 )
                 .unwrap(),
             })

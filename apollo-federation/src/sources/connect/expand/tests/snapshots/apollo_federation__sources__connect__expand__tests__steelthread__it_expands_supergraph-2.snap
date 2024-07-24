@@ -16,26 +16,27 @@ expression: connectors.by_service_name
                 directive_index: 0,
             },
         },
-        transport: HttpJson(
-            HttpJsonTransport {
-                base_url: "https://jsonplaceholder.typicode.com/",
-                path_template: URLPathTemplate {
-                    path: [
-                        ParameterValue {
-                            parts: [
-                                Text(
-                                    "users",
-                                ),
-                            ],
-                        },
-                    ],
-                    query: {},
-                },
-                method: Get,
-                headers: {},
-                body: None,
+        transport: HttpJsonTransport {
+            source_url: Some(
+                "https://jsonplaceholder.typicode.com/",
+            ),
+            connect_template: URLTemplate {
+                base: None,
+                path: [
+                    ParameterValue {
+                        parts: [
+                            Text(
+                                "users",
+                            ),
+                        ],
+                    },
+                ],
+                query: {},
             },
-        ),
+            method: Get,
+            headers: {},
+            body: None,
+        },
         selection: Named(
             SubSelection {
                 selections: [
@@ -69,37 +70,38 @@ expression: connectors.by_service_name
                 directive_index: 0,
             },
         },
-        transport: HttpJson(
-            HttpJsonTransport {
-                base_url: "https://jsonplaceholder.typicode.com/",
-                path_template: URLPathTemplate {
-                    path: [
-                        ParameterValue {
-                            parts: [
-                                Text(
-                                    "users",
-                                ),
-                            ],
-                        },
-                        ParameterValue {
-                            parts: [
-                                Var(
-                                    VariableExpression {
-                                        var_path: "$args.id",
-                                        batch_separator: None,
-                                        required: true,
-                                    },
-                                ),
-                            ],
-                        },
-                    ],
-                    query: {},
-                },
-                method: Get,
-                headers: {},
-                body: None,
+        transport: HttpJsonTransport {
+            source_url: Some(
+                "https://jsonplaceholder.typicode.com/",
+            ),
+            connect_template: URLTemplate {
+                base: None,
+                path: [
+                    ParameterValue {
+                        parts: [
+                            Text(
+                                "users",
+                            ),
+                        ],
+                    },
+                    ParameterValue {
+                        parts: [
+                            Var(
+                                VariableExpression {
+                                    var_path: "$args.id",
+                                    batch_separator: None,
+                                    required: true,
+                                },
+                            ),
+                        ],
+                    },
+                ],
+                query: {},
             },
-        ),
+            method: Get,
+            headers: {},
+            body: None,
+        },
         selection: Named(
             SubSelection {
                 selections: [
@@ -140,37 +142,38 @@ expression: connectors.by_service_name
                 directive_index: 1,
             },
         },
-        transport: HttpJson(
-            HttpJsonTransport {
-                base_url: "https://jsonplaceholder.typicode.com/",
-                path_template: URLPathTemplate {
-                    path: [
-                        ParameterValue {
-                            parts: [
-                                Text(
-                                    "users",
-                                ),
-                            ],
-                        },
-                        ParameterValue {
-                            parts: [
-                                Var(
-                                    VariableExpression {
-                                        var_path: "$this.c",
-                                        batch_separator: None,
-                                        required: true,
-                                    },
-                                ),
-                            ],
-                        },
-                    ],
-                    query: {},
-                },
-                method: Get,
-                headers: {},
-                body: None,
+        transport: HttpJsonTransport {
+            source_url: Some(
+                "https://jsonplaceholder.typicode.com/",
+            ),
+            connect_template: URLTemplate {
+                base: None,
+                path: [
+                    ParameterValue {
+                        parts: [
+                            Text(
+                                "users",
+                            ),
+                        ],
+                    },
+                    ParameterValue {
+                        parts: [
+                            Var(
+                                VariableExpression {
+                                    var_path: "$this.c",
+                                    batch_separator: None,
+                                    required: true,
+                                },
+                            ),
+                        ],
+                    },
+                ],
+                query: {},
             },
-        ),
+            method: Get,
+            headers: {},
+            body: None,
+        },
         selection: Path(
             Var(
                 "$",

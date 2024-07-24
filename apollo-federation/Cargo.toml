@@ -38,7 +38,6 @@ strum_macros = "0.26.0"
 thiserror = "1.0"
 url = "2"
 either = "1.12"
-pretty_assertions = "1.4.0"
 tracing = "0.1.40"
 
 [dev-dependencies]

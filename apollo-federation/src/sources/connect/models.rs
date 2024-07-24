@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::Name;
 use http::HeaderName;
 use serde_json::Value;
 
@@ -9,7 +10,7 @@ use super::spec::ConnectHTTPArguments;
 use super::spec::SourceHTTPArguments;
 use super::ConnectId;
 use super::JSONSelection;
-use super::URLPathTemplate;
+use super::URLTemplate;
 use crate::error::FederationError;
 use crate::schema::ValidFederationSchema;
 use crate::sources::connect::spec::extract_connect_directive_arguments;
@@ -20,7 +21,7 @@ use crate::sources::connect::ConnectSpecDefinition;
 #[derive(Debug, Clone)]
 pub struct Connector {
     pub id: ConnectId,
-    pub transport: Transport,
+    pub transport: HttpJsonTransport,
     pub selection: JSONSelection,
     pub config: Option<CustomConfiguration>,
 
@@ -29,19 +30,6 @@ pub struct Connector {
 }
 
 pub type CustomConfiguration = Arc<HashMap<String, Value>>;
-
-#[derive(Debug, Clone)]
-pub enum Transport {
-    HttpJson(HttpJsonTransport),
-}
-
-impl Transport {
-    fn label(&self) -> String {
-        match self {
-            Transport::HttpJson(http) => http.label(),
-        }
-    }
-}
 
 /// Entity resolver type
 ///
@@ -91,10 +79,7 @@ impl Connector {
                 let connect_http = args.http.expect("@connect http missing");
                 let source_http = source.map(|s| &s.http);
 
-                let transport = Transport::HttpJson(HttpJsonTransport::from_directive(
-                    connect_http,
-                    source_http,
-                )?);
+                let transport = HttpJsonTransport::from_directive(connect_http, source_http)?;
 
                 let parent_type_name = args.position.field.type_name().clone();
                 let schema_def = &schema.schema().schema_definition;
@@ -136,19 +121,26 @@ impl Connector {
             })
             .collect()
     }
+
+    pub fn field_name(&self) -> &Name {
+        self.id.directive.field.field_name()
+    }
 }
 
-fn make_label(subgraph_name: &str, source: &Option<String>, transport: &Transport) -> String {
+fn make_label(
+    subgraph_name: &str,
+    source: &Option<String>,
+    transport: &HttpJsonTransport,
+) -> String {
     let source = format!(".{}", source.as_deref().unwrap_or(""));
     format!("{}{} {}", subgraph_name, source, transport.label())
 }
 
 // --- HTTP JSON ---------------------------------------------------------------
-
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct HttpJsonTransport {
-    pub base_url: String,
-    pub path_template: URLPathTemplate,
+    pub source_url: Option<String>,
+    pub connect_template: URLTemplate,
     pub method: HTTPMethod,
     pub headers: IndexMap<HeaderName, HeaderSource>,
     pub body: Option<JSONSelection>,
@@ -159,16 +151,16 @@ impl HttpJsonTransport {
         http: ConnectHTTPArguments,
         source: Option<&SourceHTTPArguments>,
     ) -> Result<Self, FederationError> {
-        let (method, path) = if let Some(path) = &http.get {
-            (HTTPMethod::Get, path)
-        } else if let Some(path) = &http.post {
-            (HTTPMethod::Post, path)
-        } else if let Some(path) = &http.patch {
-            (HTTPMethod::Patch, path)
-        } else if let Some(path) = &http.put {
-            (HTTPMethod::Put, path)
-        } else if let Some(path) = &http.delete {
-            (HTTPMethod::Delete, path)
+        let (method, connect_url) = if let Some(url) = &http.get {
+            (HTTPMethod::Get, url)
+        } else if let Some(url) = &http.post {
+            (HTTPMethod::Post, url)
+        } else if let Some(url) = &http.patch {
+            (HTTPMethod::Patch, url)
+        } else if let Some(url) = &http.put {
+            (HTTPMethod::Put, url)
+        } else if let Some(url) = &http.delete {
+            (HTTPMethod::Delete, url)
         } else {
             return Err(FederationError::internal("missing http method"));
         };
@@ -185,15 +177,8 @@ impl HttpJsonTransport {
         }
 
         Ok(Self {
-            // TODO: We'll need to eventually support @connect directives without
-            // a corresponding @source...
-            // See: https://apollographql.atlassian.net/browse/CNN-201
-            base_url: source
-                .map(|s| s.base_url.clone())
-                .ok_or(FederationError::internal(
-                    "@connect must have a source with a base URL",
-                ))?,
-            path_template: URLPathTemplate::parse(path).map_err(|e| {
+            source_url: source.map(|s| s.base_url.clone()),
+            connect_template: URLTemplate::parse(connect_url).map_err(|e| {
                 FederationError::internal(format!("could not parse URL template: {e}"))
             })?,
             method,
@@ -203,7 +188,7 @@ impl HttpJsonTransport {
     }
 
     fn label(&self) -> String {
-        format!("http: {} {}", self.method.as_str(), self.path_template)
+        format!("http: {} {}", self.method.as_str(), self.connect_template)
     }
 }
 
@@ -285,33 +270,34 @@ mod tests {
                         directive_index: 0,
                     },
                 },
-                transport: HttpJson(
-                    HttpJsonTransport {
-                        base_url: "https://jsonplaceholder.typicode.com/",
-                        path_template: URLPathTemplate {
-                            path: [
-                                ParameterValue {
-                                    parts: [
-                                        Text(
-                                            "users",
-                                        ),
-                                    ],
-                                },
-                            ],
-                            query: {},
-                        },
-                        method: Get,
-                        headers: {
-                            "authtoken": From(
-                                "X-Auth-Token",
-                            ),
-                            "user-agent": Value(
-                                "Firefox",
-                            ),
-                        },
-                        body: None,
+                transport: HttpJsonTransport {
+                    source_url: Some(
+                        "https://jsonplaceholder.typicode.com/",
+                    ),
+                    connect_template: URLTemplate {
+                        base: None,
+                        path: [
+                            ParameterValue {
+                                parts: [
+                                    Text(
+                                        "users",
+                                    ),
+                                ],
+                            },
+                        ],
+                        query: {},
                     },
-                ),
+                    method: Get,
+                    headers: {
+                        "authtoken": From(
+                            "X-Auth-Token",
+                        ),
+                        "user-agent": Value(
+                            "Firefox",
+                        ),
+                    },
+                    body: None,
+                },
                 selection: Named(
                     SubSelection {
                         selections: [
@@ -356,33 +342,34 @@ mod tests {
                         directive_index: 0,
                     },
                 },
-                transport: HttpJson(
-                    HttpJsonTransport {
-                        base_url: "https://jsonplaceholder.typicode.com/",
-                        path_template: URLPathTemplate {
-                            path: [
-                                ParameterValue {
-                                    parts: [
-                                        Text(
-                                            "posts",
-                                        ),
-                                    ],
-                                },
-                            ],
-                            query: {},
-                        },
-                        method: Get,
-                        headers: {
-                            "authtoken": From(
-                                "X-Auth-Token",
-                            ),
-                            "user-agent": Value(
-                                "Firefox",
-                            ),
-                        },
-                        body: None,
+                transport: HttpJsonTransport {
+                    source_url: Some(
+                        "https://jsonplaceholder.typicode.com/",
+                    ),
+                    connect_template: URLTemplate {
+                        base: None,
+                        path: [
+                            ParameterValue {
+                                parts: [
+                                    Text(
+                                        "posts",
+                                    ),
+                                ],
+                            },
+                        ],
+                        query: {},
                     },
-                ),
+                    method: Get,
+                    headers: {
+                        "authtoken": From(
+                            "X-Auth-Token",
+                        ),
+                        "user-agent": Value(
+                            "Firefox",
+                        ),
+                    },
+                    body: None,
+                },
                 selection: Named(
                     SubSelection {
                         selections: [

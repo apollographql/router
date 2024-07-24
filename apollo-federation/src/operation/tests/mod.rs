@@ -1149,7 +1149,7 @@ fn get_value_at_path<'a>(ss: &'a SelectionSet, path: &[Name]) -> Option<&'a Sele
         Some(value)
     } else {
         // Recursive case
-        match value.selection_set().unwrap() {
+        match value.selection_set() {
             None => None, // Error: Sub-selection expected, but not found.
             Some(ss) => get_value_at_path(ss, rest),
         }
@@ -1199,7 +1199,7 @@ mod make_selection_tests {
 
         // Create a new foo with a different selection order using `make_selection`.
         let clone_selection_at_path = |base: &Selection, path: &[Name]| {
-            let base_selection_set = base.selection_set().unwrap().unwrap();
+            let base_selection_set = base.selection_set().unwrap();
             let selection = get_value_at_path(base_selection_set, path).expect("path should exist");
             let subselections = SelectionSet::from_selection(
                 base_selection_set.type_position.clone(),
@@ -1237,7 +1237,7 @@ mod lazy_map_tests {
             if !pred(s) {
                 return Ok(SelectionMapperReturn::None);
             }
-            match s.selection_set()? {
+            match s.selection_set() {
                 // Base case: leaf field
                 None => Ok(s.clone().into()),
 
@@ -1577,4 +1577,65 @@ fn test_expand_all_fragments1() {
             }
             "###);
     }
+}
+
+#[test]
+fn used_variables() {
+    let schema = r#"
+        input Ints { a: Int }
+        input LInts { a: [Int], b: LInts }
+        type Query {
+            f(ints: [Int]): Int
+            g(ints: Ints): Int
+            h(ints: LInts): Int
+            subquery: Query
+        }
+    "#;
+    let query = r#"
+        query ($a: Int, $b: Int, $c: Int, $d: Int) {
+            f(ints: [1, $a, 2])
+            g(ints: { a: $b })
+            subquery {
+                h(ints: {
+                    b: {
+                        a: [$d, $d]
+                        b: {
+                            a: [$c, 3, 4]
+                        }
+                    }
+                })
+            }
+        }
+    "#;
+
+    let valid = parse_schema(schema);
+    let operation = Operation::parse(valid, query, "used_variables.graphql", None).unwrap();
+
+    let mut variables = operation
+        .selection_set
+        .used_variables()
+        .unwrap()
+        .into_iter()
+        .collect::<Vec<_>>();
+    variables.sort();
+    assert_eq!(variables, ["a", "b", "c", "d"]);
+
+    let Selection::Field(subquery) = operation
+        .selection_set
+        .selections
+        .get(&SelectionKey::field_name("subquery"))
+        .unwrap()
+    else {
+        unreachable!();
+    };
+    let mut variables = subquery
+        .selection_set
+        .as_ref()
+        .unwrap()
+        .used_variables()
+        .unwrap()
+        .into_iter()
+        .collect::<Vec<_>>();
+    variables.sort();
+    assert_eq!(variables, ["c", "d"], "works for a subset of the query");
 }

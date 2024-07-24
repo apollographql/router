@@ -48,7 +48,14 @@ pub(super) fn carryover_directives(
         from.referencers()
             .get_directive(&directive_name)
             .and_then(|referencers| {
-                if referencers.len() > 0 {
+                // because the merge code handles inaccessible, we have to check if the
+                // @link and directive definition are already present in the schema
+                if referencers.len() > 0
+                    && to
+                        .metadata()
+                        .and_then(|m| m.by_identity.get(&Identity::inaccessible_identity()))
+                        .is_none()
+                {
                     SchemaDefinitionPosition
                         .insert_directive(to, link.to_directive_application().into())?;
                     copy_directive_definition(from, to, directive_name.clone())?;
@@ -245,7 +252,7 @@ impl Link {
         if !self.imports.is_empty() {
             arguments.push(
                 Argument {
-                    name: name!(imports),
+                    name: name!(import),
                     value: Value::List(
                         self.imports
                             .iter()

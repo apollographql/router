@@ -46,6 +46,7 @@ type CompanyInfo
   name: String
   catchPhrase: String
   bs: String
+  email: EmailAddress
 }
 
 input CompanyInput
@@ -54,6 +55,9 @@ input CompanyInput
   name: String!
   catchPhrase: String
 }
+
+scalar EmailAddress
+  @join__type(graph: CONNECTORS)
 
 scalar join__DirectiveArguments
 
@@ -81,7 +85,7 @@ type Query
   @join__type(graph: CONNECTORS)
 {
   usersByCompany(company: CompanyInput!): [User] @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "example", http: {GET: "/by-company/{$args.company.name}"}, selection: "id\nname\ncompany {\n  name\n  catchPhrase\n  bs\n}"})
-  user(id: ID!): User @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "example", http: {GET: "/{$args.id}"}, selection: "id\nname\nusername\nemail\naddress {\n  street\n  suite\n  city\n  zipcode\n  geo {\n    lat\n    lng\n  }\n}\nphone\nwebsite\ncompany {\n  name\n  catchPhrase\n  bs\n}", entity: true})
+  user(id: ID!): User @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "example", http: {GET: "/{$args.id}"}, selection: "id\nname\nusername\nemail\naddress {\n  street\n  suite\n  city\n  zipcode\n  geo {\n    lat\n    lng\n  }\n}\nphone\nwebsite\ncompany {\n  name\n  catchPhrase\n  bs\n  email\n}", entity: true})
 }
 
 type User
@@ -90,7 +94,7 @@ type User
   id: ID!
   name: String
   username: String
-  email: String
+  email: EmailAddress
   address: Address
   phone: String
   website: String

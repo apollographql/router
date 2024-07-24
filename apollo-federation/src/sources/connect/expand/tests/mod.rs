@@ -61,10 +61,12 @@ macro_rules! test_ignores {
 }
 
 test_expands! {
+    nested_inputs,
     realistic,
     simple,
     steelthread,
     types_used_twice,
+    carryover
 }
 
 test_ignores! {

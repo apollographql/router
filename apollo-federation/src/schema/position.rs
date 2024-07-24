@@ -744,7 +744,7 @@ impl FieldDefinitionPosition {
 infallible_conversions!(ObjectOrInterfaceFieldDefinitionPosition::{Object, Interface} -> FieldDefinitionPosition);
 
 #[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
-pub enum ObjectOrInterfaceFieldDefinitionPosition {
+pub(crate) enum ObjectOrInterfaceFieldDefinitionPosition {
     Object(ObjectFieldDefinitionPosition),
     Interface(InterfaceFieldDefinitionPosition),
 }
@@ -2045,9 +2045,9 @@ impl Debug for ObjectTypeDefinitionPosition {
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Serialize)]
-pub struct ObjectFieldDefinitionPosition {
-    pub type_name: Name,
-    pub field_name: Name,
+pub(crate) struct ObjectFieldDefinitionPosition {
+    pub(crate) type_name: Name,
+    pub(crate) field_name: Name,
 }
 
 impl ObjectFieldDefinitionPosition {
@@ -2723,10 +2723,10 @@ impl Debug for ObjectFieldArgumentDefinitionPosition {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub struct ObjectOrInterfaceFieldDirectivePosition {
-    pub field: ObjectOrInterfaceFieldDefinitionPosition,
-    pub directive_name: Name,
-    pub directive_index: usize,
+pub(crate) struct ObjectOrInterfaceFieldDirectivePosition {
+    pub(crate) field: ObjectOrInterfaceFieldDefinitionPosition,
+    pub(crate) directive_name: Name,
+    pub(crate) directive_index: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
@@ -3155,9 +3155,9 @@ impl Display for InterfaceTypeDefinitionPosition {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
-pub struct InterfaceFieldDefinitionPosition {
-    pub type_name: Name,
-    pub field_name: Name,
+pub(crate) struct InterfaceFieldDefinitionPosition {
+    pub(crate) type_name: Name,
+    pub(crate) field_name: Name,
 }
 
 impl InterfaceFieldDefinitionPosition {

@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use apollo_federation::sources::connect::expand::Connectors;
 use apollo_federation::sources::connect::CustomConfiguration;
-use apollo_federation::sources::connect::Transport;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -65,9 +64,7 @@ pub(crate) fn apply_config(config: &Configuration, mut connectors: Connectors) -
         if let Some(url) =
             source_config.and_then(|source_config| source_config.override_url.as_ref())
         {
-            match &mut connector.transport {
-                Transport::HttpJson(transport) => transport.base_url = url.to_string(),
-            }
+            connector.transport.source_url = Some(url.to_string());
         }
 
         connector.config = Some(subgraph_config.custom.clone());

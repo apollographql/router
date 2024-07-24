@@ -8,7 +8,7 @@ pub mod expand;
 mod json_selection;
 mod models;
 pub(crate) mod spec;
-mod url_path_template;
+mod url_template;
 pub mod validation;
 
 use apollo_compiler::name;
@@ -20,14 +20,13 @@ pub use json_selection::PathSelection;
 pub use json_selection::SubSelection;
 pub use models::CustomConfiguration;
 pub(crate) use spec::ConnectSpecDefinition;
-pub use url_path_template::URLPathTemplate;
+pub use url_template::URLTemplate;
 
 pub use self::models::Connector;
 pub use self::models::EntityResolver;
 pub use self::models::HTTPMethod;
 pub use self::models::HeaderSource;
 pub use self::models::HttpJsonTransport;
-pub use self::models::Transport;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
@@ -37,7 +36,7 @@ pub struct ConnectId {
     pub label: String,
     pub subgraph_name: String,
     pub source_name: Option<String>,
-    pub directive: ObjectOrInterfaceFieldDirectivePosition,
+    pub(crate) directive: ObjectOrInterfaceFieldDirectivePosition,
 }
 
 impl ConnectId {
