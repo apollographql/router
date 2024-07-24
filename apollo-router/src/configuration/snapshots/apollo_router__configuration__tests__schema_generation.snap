@@ -5763,7 +5763,7 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Configuration for a connector subgraph",
       "properties": {
-        "custom": {
+        "$config": {
           "additionalProperties": true,
           "default": {},
           "description": "Other values that can be used by connectors via `{$config.<key>}`",
