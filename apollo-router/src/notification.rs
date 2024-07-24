@@ -30,8 +30,8 @@ use crate::graphql;
 use crate::spec::Schema;
 use crate::Configuration;
 
-static NOTIFY_CHANNEL_SIZE: usize = 25000;
-static DEFAULT_MSG_CHANNEL_SIZE: usize = 25000;
+static NOTIFY_CHANNEL_SIZE: usize = 1024;
+static DEFAULT_MSG_CHANNEL_SIZE: usize = 128;
 
 #[derive(Error, Debug)]
 pub(crate) enum NotifyError<K, V> {
