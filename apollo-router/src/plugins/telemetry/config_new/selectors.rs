@@ -2592,6 +2592,14 @@ mod test {
         assert_eq!(
             selector.on_request(
                 &crate::services::SubgraphRequest::fake_builder()
+                    .context(context.clone())
+                    .build(),
+            ),
+            Some("query".into())
+        );
+        assert_eq!(
+            selector.on_response(
+                &crate::services::SubgraphResponse::fake_builder()
                     .context(context)
                     .build(),
             ),
@@ -2608,6 +2616,15 @@ mod test {
         assert_eq!(
             selector.on_request(
                 &crate::services::SubgraphRequest::fake_builder()
+                    .context(context.clone())
+                    .subgraph_name("test".to_string())
+                    .build(),
+            ),
+            Some("test".into())
+        );
+        assert_eq!(
+            selector.on_response(
+                &crate::services::SubgraphResponse::fake_builder()
                     .context(context)
                     .subgraph_name("test".to_string())
                     .build(),
@@ -2743,6 +2760,14 @@ mod test {
         assert_eq!(
             selector.on_request(
                 &crate::services::SubgraphRequest::fake_builder()
+                    .context(context.clone())
+                    .build(),
+            ),
+            Some("topProducts".into())
+        );
+        assert_eq!(
+            selector.on_response(
+                &crate::services::SubgraphResponse::fake_builder()
                     .context(context)
                     .build(),
             ),
