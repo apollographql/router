@@ -13,6 +13,9 @@ use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 use apollo_federation::subgraph;
 use clap::Parser;
 
+mod bench;
+use bench::cmd_bench;
+
 /// CLI arguments. See <https://docs.rs/clap/latest/clap/_derive/index.html>
 #[derive(Parser)]
 struct Args {
@@ -60,6 +63,12 @@ enum Command {
         /// The output directory for the extracted subgraph schemas
         destination_dir: Option<PathBuf>,
     },
+    Bench {
+        /// The path to the supergraph schema file
+        supergraph_schema: PathBuf,
+        /// The path to the directory that contains all operations to run against
+        operations_dir: PathBuf
+    }
 }
 
 fn main() -> ExitCode {
@@ -75,6 +84,7 @@ fn main() -> ExitCode {
             supergraph_schema,
             destination_dir,
         } => cmd_extract(&supergraph_schema, destination_dir.as_ref()),
+        Command::Bench { supergraph_schema, operations_dir } => cmd_bench(&supergraph_schema, &operations_dir),
     };
     match result {
         Err(error) => {
