@@ -1,29 +1,19 @@
 use std::sync::Arc;
 
 use attributes::CacheAttributes;
-use opentelemetry::metrics::MeterProvider;
-use opentelemetry::metrics::Unit;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
-use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
 use super::instruments::CustomCounter;
-use super::instruments::CustomCounterInner;
-use super::instruments::Increment;
-use super::instruments::InstrumentsConfig;
-use super::instruments::METER_NAME;
-use super::selectors::CacheKind;
 use super::selectors::SubgraphSelector;
-use crate::metrics;
 use crate::plugins::cache::entity::CacheHitMiss;
 use crate::plugins::cache::entity::CacheSubgraph;
 use crate::plugins::cache::metrics::CacheMetricContextKey;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
-use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
 use crate::plugins::telemetry::config_new::instruments::Instrumented;
@@ -33,7 +23,7 @@ use crate::services::subgraph;
 
 pub(crate) mod attributes;
 
-static CACHE_METRIC: &str = "apollo.router.operations.entity.cache";
+pub(crate) const CACHE_METRIC: &str = "apollo.router.operations.entity.cache";
 const ENTITY_TYPE: Key = Key::from_static_str("entity.type");
 const CACHE_HIT: Key = Key::from_static_str("cache.hit");
 
@@ -61,48 +51,6 @@ pub(crate) struct CacheInstruments {
     pub(crate) cache_hit: Option<
         CustomCounter<subgraph::Request, subgraph::Response, CacheAttributes, SubgraphSelector>,
     >,
-}
-
-impl From<&InstrumentsConfig> for CacheInstruments {
-    fn from(value: &InstrumentsConfig) -> Self {
-        let meter = metrics::meter_provider().meter(METER_NAME);
-        CacheInstruments {
-            cache_hit: value.cache.attributes.cache.is_enabled().then(|| {
-                let mut nb_attributes = 0;
-                let selectors = match &value.cache.attributes.cache {
-                    DefaultedStandardInstrument::Bool(_) | DefaultedStandardInstrument::Unset => {
-                        None
-                    }
-                    DefaultedStandardInstrument::Extendable { attributes } => {
-                        nb_attributes = attributes.custom.len();
-                        Some(attributes.clone())
-                    }
-                };
-                CustomCounter {
-                    inner: Mutex::new(CustomCounterInner {
-                        increment: Increment::Custom(None),
-                        condition: Condition::True,
-                        counter: Some(
-                            meter
-                                .f64_counter(CACHE_METRIC)
-                                .with_unit(Unit::new("ops"))
-                                .with_description(
-                                    "Entity cache hit/miss operations at the subgraph level",
-                                )
-                                .init(),
-                        ),
-                        attributes: Vec::with_capacity(nb_attributes),
-                        selector: Some(Arc::new(SubgraphSelector::Cache {
-                            cache: CacheKind::Hit,
-                            entity_type: None,
-                        })),
-                        selectors,
-                        incremented: false,
-                    }),
-                }
-            }),
-        }
-    }
 }
 
 impl Instrumented for CacheInstruments {
