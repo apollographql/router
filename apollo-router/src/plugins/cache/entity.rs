@@ -50,6 +50,8 @@ use crate::services::supergraph;
 use crate::spec::TYPENAME;
 use crate::Context;
 
+/// Change this key if you introduce a breaking change in entity caching algorithm to make sure it won't take the previous entries
+pub(crate) const ENTITY_CACHE_VERSION: &str = "1.0";
 pub(crate) const ENTITIES: &str = "_entities";
 pub(crate) const REPRESENTATIONS: &str = "representations";
 pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_entity_cache::key";
@@ -910,6 +912,7 @@ fn extract_cache_key_root(
     let entity_type = entity_type_opt.unwrap_or("Query");
 
     // the cache key is written to easily find keys matching a prefix for deletion:
+    // - entity cache version: current version of the hash
     // - subgraph name: subgraph name
     // - entity type: entity type
     // - query hash: invalidate the entry for a specific query and operation name
@@ -917,7 +920,7 @@ fn extract_cache_key_root(
     let mut key = String::new();
     let _ = write!(
         &mut key,
-        "subgraph:{subgraph_name}:type:{entity_type}:hash:{query_hash}:data:{additional_data_hash}"
+        "version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}:hash:{query_hash}:data:{additional_data_hash}"
     );
 
     if is_known_private {
@@ -960,19 +963,17 @@ fn extract_cache_keys(
 
         let typename = opt_type.as_str().unwrap_or("-");
 
-        // We have to hash the representation because it can contains PII
-        let mut digest = Sha256::new();
-        digest.update(serde_json::to_string(&representation).unwrap().as_bytes());
-        let hashed_entity_key = hex::encode(digest.finalize().as_slice());
+        let hashed_entity_key = hash_entity_key(representation);
 
         // the cache key is written to easily find keys matching a prefix for deletion:
+        // - entity cache version: current version of the hash
         // - subgraph name: caching is done per subgraph
         // - type: can invalidate all instances of a type
         // - entity key: invalidate a specific entity
         // - query hash: invalidate the entry for a specific query and operation name
         // - additional data: separate cache entries depending on info like authorization status
         let mut key = String::new();
-        let _ = write!(&mut key,  "subgraph:{subgraph_name}:{typename}:{hashed_entity_key}:{query_hash}:{additional_data_hash}");
+        let _ = write!(&mut key, "version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}:entity:{hashed_entity_key}:hash:{query_hash}:data:{additional_data_hash}");
         if is_known_private {
             if let Some(id) = private_id {
                 let _ = write!(&mut key, ":{id}");
@@ -985,6 +986,13 @@ fn extract_cache_keys(
         res.push(key);
     }
     Ok(res)
+}
+
+pub(crate) fn hash_entity_key(representation: &Value) -> String {
+    // We have to hash the representation because it can contains PII
+    let mut digest = Sha256::new();
+    digest.update(serde_json::to_string(&representation).unwrap().as_bytes());
+    hex::encode(digest.finalize().as_slice())
 }
 
 /// represents the result of a cache lookup for an entity type and key

@@ -67,11 +67,11 @@ scalar federation__FieldSet
 
 scalar federation__Scope
 
-type User {
-  id: ID!
-  a: String
+type Query {
+  as: [A] @federation__inaccessible
 }
 
-type Query {
-  users(limit: Int): [User]
+type A @federation__key(fields: "id") {
+  id: ID!
+  c: Int @federation__inaccessible
 }
