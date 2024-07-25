@@ -1,5 +1,3 @@
-use std::net::Ipv4Addr;
-use std::net::SocketAddrV4;
 use std::sync::Arc;
 use std::task::Poll;
 
@@ -37,22 +35,10 @@ pub(crate) struct SubgraphInvalidationConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) struct InvalidationEndpointConfig {
-    /// Specify on which path you want to listen for invalidation endpoint. (default: /invalidation)
+    /// Specify on which path you want to listen for invalidation endpoint.
     pub(crate) path: String,
-    /// Listen address on which the invalidation endpoint must listen. (default: 127.0.0.1:4001)
+    /// Listen address on which the invalidation endpoint must listen.
     pub(crate) listen: ListenAddr,
-}
-
-impl Default for InvalidationEndpointConfig {
-    fn default() -> Self {
-        Self {
-            path: String::from("/invalidation"),
-            listen: ListenAddr::SocketAddr(std::net::SocketAddr::V4(SocketAddrV4::new(
-                Ipv4Addr::new(127, 0, 0, 1),
-                4001,
-            ))),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

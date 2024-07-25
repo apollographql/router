@@ -3531,7 +3531,7 @@ expression: "&schema"
           "description": "#/definitions/ListenAddr"
         },
         "path": {
-          "description": "Specify on which path you want to listen for invalidation endpoint. (default: /invalidation)",
+          "description": "Specify on which path you want to listen for invalidation endpoint.",
           "type": "string"
         }
       },
