@@ -3,4 +3,4 @@ source: apollo-federation/src/sources/connect/validation/mod.rs
 expression: "format!(\"{:?}\", errors)"
 input_file: apollo-federation/src/sources/connect/validation/test_data/validation/non_root_circular_reference.graphql
 ---
-[Message { code: CircularReference, message: "`@connect(selection:)` on `Query.user` path `user.favoriteBooks.author` contains a circular reference to `Book`.", locations: [LineColumn { line: 12, column: 20 }..LineColumn { line: 24, column: 12 }, LineColumn { line: 31, column: 5 }..LineColumn { line: 31, column: 26 }, LineColumn { line: 41, column: 5 }..LineColumn { line: 41, column: 18 }] }]
+[Message { code: CircularReference, message: "Circular reference detected in `@connect(selection:)` on `Query.user`: type `Book` appears more than once in `Query.user.favoriteBooks.author.books`. For more information, see https://go.apollo.dev/connectors/limitations#circular-references", locations: [LineColumn { line: 12, column: 20 }..LineColumn { line: 24, column: 12 }, LineColumn { line: 31, column: 5 }..LineColumn { line: 31, column: 26 }, LineColumn { line: 41, column: 5 }..LineColumn { line: 41, column: 18 }] }]
