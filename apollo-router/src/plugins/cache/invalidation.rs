@@ -80,7 +80,6 @@ impl Invalidation {
 
             tokio::task::spawn(async move {
                 start(storage, h.into_stream()).await;
-                tracing::error!(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>< FINISHED TASK!");
             });
         }
         Ok(Self { enabled, handle })
