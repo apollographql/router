@@ -145,7 +145,7 @@ impl BothModeComparisonJob {
                     tracing::debug!("JS v.s. Rust query plan mismatch{operation_desc}");
                     tracing::debug!(
                         "Diff of formatted plans:\n{}",
-                        diff_plan(&js_plan, &rust_plan)
+                        diff_plan(js_plan, rust_plan)
                     );
                     tracing::trace!("JS query plan Debug: {js_root_node:#?}");
                     tracing::trace!("Rust query plan Debug: {rust_root_node:#?}");
