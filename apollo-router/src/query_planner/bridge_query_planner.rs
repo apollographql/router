@@ -882,7 +882,7 @@ impl BridgeQueryPlanner {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueryPlanResult {
-    pub formatted_query_plan: Option<Arc<String>>,
+    pub(super) formatted_query_plan: Option<Arc<String>>,
     pub(super) query_plan: QueryPlan,
 }
 
