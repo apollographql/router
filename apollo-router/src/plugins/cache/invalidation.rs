@@ -98,7 +98,16 @@ impl Invalidation {
                 .await
                 .map_err(|e| format!("cannot send invalidation request: {}", e.message))?;
 
-            let result = response_rx.recv().await??;
+            let result = response_rx
+                .recv()
+                .await
+                .map_err(|err| {
+                    format!(
+                        "cannot receive response for invalidation request: {:?}",
+                        err
+                    )
+                })?
+                .map_err(|err| format!("received an invalidation error: {:?}", err))?;
 
             Ok(result)
         } else {
