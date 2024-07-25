@@ -93,8 +93,8 @@ impl Invalidation {
     ) -> Result<u64, BoxError> {
         if self.enabled {
             let mut sink = self.handle.clone().into_sink();
-            let (response_tx, mut response_rx) = broadcast::channel(1);
-            sink.send((requests, origin, response_tx))
+            let (response_tx, mut response_rx) = broadcast::channel(2);
+            sink.send((requests, origin, response_tx.clone()))
                 .await
                 .map_err(|e| format!("cannot send invalidation request: {}", e.message))?;
 
