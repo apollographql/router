@@ -37,7 +37,6 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::ops::Not;
 use std::sync::Arc;
 
 use apollo_compiler::executable;
@@ -665,7 +664,7 @@ impl Fragment {
         ty: &CompositeTypeDefinitionPosition,
     ) -> Result<FragmentRestrictionAtType, FederationError> {
         let expanded_selection_set = self.selection_set.expand_all_fragments()?;
-        let normalized_selection_set = expanded_selection_set.flatten_unnecessary_fragments(
+        let selection_set = expanded_selection_set.flatten_unnecessary_fragments(
             ty,
             /*named_fragments*/ &Default::default(),
             &self.schema,
@@ -677,7 +676,7 @@ impl Fragment {
             // Thus, we have to use the full validator in this case. (see
             // https://github.com/graphql/graphql-spec/issues/1085 for details.)
             return Ok(FragmentRestrictionAtType::new(
-                normalized_selection_set.clone(),
+                selection_set.clone(),
                 Some(FieldsConflictValidator::from_selection_set(
                     &expanded_selection_set,
                 )),
@@ -693,13 +692,11 @@ impl Fragment {
         // validator because we know the non-trimmed parts cannot create field conflict issues so
         // we're trying to build a smaller validator, but it's ok if trimmed is not as small as it
         // theoretically can be.
-        let trimmed = expanded_selection_set.minus(&normalized_selection_set)?;
-        let validator = trimmed
-            .is_empty()
-            .not()
+        let trimmed = expanded_selection_set.minus(&selection_set)?;
+        let validator = (!trimmed.is_empty())
             .then(|| FieldsConflictValidator::from_selection_set(&trimmed));
         Ok(FragmentRestrictionAtType::new(
-            normalized_selection_set.clone(),
+            selection_set.clone(),
             validator,
         ))
     }
