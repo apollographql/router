@@ -1,16 +1,17 @@
-use std::{fmt::Display, path::{Path, PathBuf}, time::Instant};
+use std::fmt::Display;
+use std::path::PathBuf;
+use std::time::Instant;
 
-use apollo_compiler::{ExecutableDocument, Schema};
-use apollo_federation::{
-    error::FederationError, query_plan::query_planner::{QueryPlanner, QueryPlannerConfig}, Supergraph
-};
+use apollo_compiler::ExecutableDocument;
+use apollo_federation::error::FederationError;
+use apollo_federation::query_plan::query_planner::QueryPlanner;
+use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
+use apollo_federation::Supergraph;
 
-pub(crate) fn cmd_bench(file_path: &Path, queries_dir: &PathBuf) -> Result<(), FederationError> {
-
-    let schema_str = std::fs::read_to_string(file_path).expect("Couldn't find schema");
-    let schema = Schema::parse_and_validate(schema_str, "schema").expect("Invalid schema");
-    let supergraph = Supergraph::from_schema(schema.clone()).expect("Invalid schema");
-
+pub(crate) fn run_bench(
+    supergraph: Supergraph,
+    queries_dir: &PathBuf,
+) -> Result<(), FederationError> {
     let planner = QueryPlanner::new(
         &supergraph,
         QueryPlannerConfig {
@@ -42,10 +43,14 @@ pub(crate) fn cmd_bench(file_path: &Path, queries_dir: &PathBuf) -> Result<(), F
             .to_string_lossy()
             .to_string();
 
-        let document = match ExecutableDocument::parse_and_validate(&schema, query_string, "query") {
+        let document = match ExecutableDocument::parse_and_validate(
+            supergraph.schema.schema(),
+            query_string,
+            "query",
+        ) {
             Ok(document) => document,
             Err(_) => {
-                results.push(Res {
+                results.push(BenchOutput {
                     query_name: file_name.split('-').next().unwrap().to_string(),
                     file_name,
                     timing: 0.0,
@@ -67,7 +72,7 @@ pub(crate) fn cmd_bench(file_path: &Path, queries_dir: &PathBuf) -> Result<(), F
             error = Some("error".to_string());
         };
 
-        results.push(Res {
+        results.push(BenchOutput {
             query_name: file_name.split('-').next().unwrap().to_string(),
             file_name,
             timing: elapsed,
@@ -88,8 +93,7 @@ pub(crate) fn cmd_bench(file_path: &Path, queries_dir: &PathBuf) -> Result<(), F
     Ok(())
 }
 
-
-struct Res {
+struct BenchOutput {
     file_name: String,
     query_name: String,
     timing: f64,
@@ -97,22 +101,22 @@ struct Res {
     error: Option<String>,
 }
 
-impl PartialEq for Res {
+impl PartialEq for BenchOutput {
     fn eq(&self, other: &Self) -> bool {
         self.timing == other.timing
     }
 }
 
-impl PartialOrd for Res {
+impl PartialOrd for BenchOutput {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         match other.timing.partial_cmp(&self.timing) {
             Some(core::cmp::Ordering::Equal) => Some(core::cmp::Ordering::Equal),
-            ord => return ord,
+            ord => ord,
         }
     }
 }
 
-impl Display for Res {
+impl Display for BenchOutput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
