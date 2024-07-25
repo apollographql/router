@@ -177,7 +177,7 @@ impl<'schema> JSONSelectionVisitor for SelectionValidator<'schema> {
                     locations:
                         self.selection_location.iter().cloned()
                         // Root field includes the selection location, which duplicates the diagnostic
-                            .chain(field_def.map(|def| def.line_column_range(&self.schema.sources)).flatten())
+                            .chain(field_def.and_then(|def| def.line_column_range(&self.schema.sources)))
                             .chain(definition.line_column_range(&self.schema.sources))
                             .collect(),
                 });
