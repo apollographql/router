@@ -894,7 +894,7 @@ pub(super) struct QueryPlan {
     pub(super) node: Option<Arc<PlanNode>>,
 }
 
-pub fn render_diff(differences: &[diff::Result<&str>]) -> String {
+pub(crate) fn render_diff(differences: &[diff::Result<&str>]) -> String {
     let mut output = String::new();
     for diff_line in differences {
         match diff_line {
