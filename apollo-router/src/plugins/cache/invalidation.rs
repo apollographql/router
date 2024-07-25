@@ -83,11 +83,7 @@ impl Invalidation {
                 tracing::error!(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>< FINISHED TASK!");
             });
         }
-        Ok(Self {
-            enabled,
-            handle,
-            // storage,
-        })
+        Ok(Self { enabled, handle })
     }
 
     pub(crate) async fn invalidate(
@@ -100,7 +96,7 @@ impl Invalidation {
             let (response_tx, mut response_rx) = broadcast::channel(1);
             sink.send((requests, origin, response_tx))
                 .await
-                .map_err(|e| e.message)?;
+                .map_err(|e| format!("cannot send invalidation request: {}", e.message))?;
 
             let result = response_rx.recv().await??;
 
