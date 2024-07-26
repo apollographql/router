@@ -779,7 +779,8 @@ enum SelectionSetOrFragment {
 }
 
 impl SelectionSet {
-    /// Reduce the list of applicable fragments by eliminating ones that are subsumed by another.
+    /// Reduce the list of applicable fragments by eliminating fragments that directly include
+    /// another fragment.
     //
     // We have found the list of fragments that applies to some subset of sub-selection. In
     // general, we want to now produce the selection set with spread for those fragments plus
@@ -1405,10 +1406,10 @@ impl SelectionSet {
         }
 
         if self.contains_fragment_spread() {
-            return Err(FederationError::internal("optimize() must only be used on selection sets that do not contain named fragment spreads"));
+            return Err(FederationError::internal("reuse_fragments() must only be used on selection sets that do not contain named fragment spreads"));
         }
 
-        // Calling optimize() will not match a fragment that would have expanded at
+        // Calling reuse_fragments() will not match a fragment that would have expanded at
         // top-level. That is, say we have the selection set `{ x y }` for a top-level `Query`, and
         // we have a fragment
         // ```
@@ -1417,12 +1418,12 @@ impl SelectionSet {
         //   y
         // }
         // ```
-        // then calling `self.optimize(fragments)` would only apply check if F apply to
+        // then calling `self.reuse_fragments(fragments)` would only apply check if F apply to
         // `x` and then `y`.
         //
         // To ensure the fragment match in this case, we "wrap" the selection into a trivial
         // fragment of the selection parent, so in the example above, we create selection `... on
-        // Query { x y}`. With that, `optimize` will correctly match on the `on Query`
+        // Query { x y }`. With that, `reuse_fragments` will correctly match on the `on Query`
         // fragment; after which we can unpack the final result.
         let wrapped = InlineFragmentSelection::from_selection_set(
             self.type_position.clone(), // parent type
@@ -1453,7 +1454,7 @@ impl SelectionSet {
 }
 
 impl Operation {
-    // PORT_NOTE: The JS version of `optimize` takes an optional `minUsagesToOptimize` argument.
+    // PORT_NOTE: The JS version of `reuse_fragments` takes an optional `minUsagesToOptimize` argument.
     //            However, it's only used in tests. So, it's removed in the Rust version.
     const DEFAULT_MIN_USAGES_TO_OPTIMIZE: u32 = 2;
 
