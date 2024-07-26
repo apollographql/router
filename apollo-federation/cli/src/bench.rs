@@ -11,7 +11,7 @@ use apollo_federation::Supergraph;
 pub(crate) fn run_bench(
     supergraph: Supergraph,
     queries_dir: &PathBuf,
-) -> Result<(), FederationError> {
+) -> Result<Vec<BenchOutput>, FederationError> {
     let planner = QueryPlanner::new(
         &supergraph,
         QueryPlannerConfig {
@@ -83,17 +83,12 @@ pub(crate) fn run_bench(
 
     // totally arbitrary
     results.sort_by(|a, b| a.partial_cmp(b).unwrap_or(a.query_name.cmp(&b.query_name)));
-
-    println!("| operation_name | time (ms) | evaluated_plans (max 10000) | error |");
-    println!("|----------------|----------------|-----------|-----------------------------|");
-    for r in results {
-        println!("{}", r);
-    }
-
-    Ok(())
+    Ok(results)
 }
 
-struct BenchOutput {
+#[derive(Debug)]
+#[cfg_attr(test, derive(serde::Serialize))]
+pub(crate) struct BenchOutput {
     file_name: String,
     query_name: String,
     timing: f64,

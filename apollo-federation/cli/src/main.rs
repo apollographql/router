@@ -11,6 +11,7 @@ use apollo_federation::query_graph;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 use apollo_federation::subgraph;
+use bench::BenchOutput;
 use clap::Parser;
 
 mod bench;
@@ -224,7 +225,25 @@ fn cmd_extract(file_path: &Path, dest: Option<&PathBuf>) -> Result<(), Federatio
     Ok(())
 }
 
-fn cmd_bench(file_path: &Path, operations_dir: &PathBuf) -> Result<(), FederationError> {
+fn _cmd_bench(
+    file_path: &Path,
+    operations_dir: &PathBuf,
+) -> Result<Vec<BenchOutput>, FederationError> {
     let supergraph = load_supergraph_file(file_path)?;
     run_bench(supergraph, operations_dir)
+}
+
+fn cmd_bench(file_path: &Path, operations_dir: &PathBuf) -> Result<(), FederationError> {
+    let results = _cmd_bench(file_path, operations_dir)?;
+    println!("| operation_name | time (ms) | evaluated_plans (max 10000) | error |");
+    println!("|----------------|----------------|-----------|-----------------------------|");
+    for r in results {
+        println!("{}", r);
+    }
+    Ok(())
+}
+
+#[test]
+fn test_bench() {
+    insta::assert_json_snapshot!(_cmd_bench(&Path::new("./fixtures/starstuff.graphql"), &PathBuf::from("./fixtures/queries")).unwrap(), { "[].timing" => 1.234 });
 }
