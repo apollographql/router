@@ -3145,6 +3145,89 @@ mod tests {
         "###);
     }
 
+    #[test]
+    fn reuse_fragments_with_non_intersecting_types() {
+        let schema = r#"
+            type Query {
+              t: T
+              s: S
+              s2: S
+              i: I
+            }
+
+            interface I {
+                a: Int
+                b: Int
+            }
+
+            type T implements I {
+              a: Int
+              b: Int
+
+              c: Int
+              d: Int
+            }
+            type S implements I {
+              a: Int
+              b: Int
+
+              f: Int
+              g: Int
+            }
+        "#;
+        let query = r#"
+            query A ($if: Boolean!) {
+              t { ...x }
+              s { ...x }
+              i { ...x }
+            }
+            query B {
+              s {
+                # this matches fragment x once it is flattened,
+                # because the `...on T` condition does not intersect with our
+                # current type `S`
+                __typename
+                a b
+              }
+              s2 {
+                # same snippet to get it to use the fragment
+                __typename
+                a b
+              }
+            }
+            fragment x on I {
+                __typename
+                a
+                b
+                ... on T { c d @include(if: $if) }
+            }
+        "#;
+        let schema = parse_schema(schema);
+        let query = ExecutableDocument::parse_and_validate(schema.schema(), query, "query.graphql")
+            .unwrap();
+
+        let operation_a =
+            Operation::from_operation_document(schema.clone(), &query, Some("A")).unwrap();
+        let operation_b =
+            Operation::from_operation_document(schema.clone(), &query, Some("B")).unwrap();
+        let expanded_b = operation_b.expand_all_fragments_and_normalize().unwrap();
+
+        assert_optimized!(expanded_b, operation_a.named_fragments, @r###"
+        query B {
+          s {
+            __typename
+            a
+            b
+          }
+          s2 {
+            __typename
+            a
+            b
+          }
+        }
+        "###);
+    }
+
     ///
     /// empty branches removal
     ///
