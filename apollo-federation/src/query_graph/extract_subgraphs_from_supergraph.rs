@@ -2235,10 +2235,10 @@ fn join_directive_to_real_directive(directive: &Node<Directive>) -> (Directive, 
                 .map(|node| {
                     Name::new(
                         node.as_enum()
-                            .expect("join__directive(graphs:) value is not an enum")
+                            .expect("join__directive(graphs:) value is an enum")
                             .as_str(),
                     )
-                    .expect("join__directive(graphs:) value is not a valid name")
+                    .expect("join__directive(graphs:) value is a valid name")
                 })
                 .collect()
         })
@@ -2246,9 +2246,9 @@ fn join_directive_to_real_directive(directive: &Node<Directive>) -> (Directive, 
 
     let name = directive
         .argument_by_name("name")
-        .expect("join__directive(name:) missing")
+        .expect("join__directive(name:) is present")
         .as_str()
-        .expect("join__directive(name:) is not a string");
+        .expect("join__directive(name:) is a string");
 
     let arguments = directive
         .argument_by_name("args")
@@ -2267,7 +2267,7 @@ fn join_directive_to_real_directive(directive: &Node<Directive>) -> (Directive, 
         .unwrap_or_default();
 
     let directive = Directive {
-        name: Name::new(name).expect("join__directive(name:) invalid"),
+        name: Name::new(name).expect("join__directive(name:) is a valid name"),
         arguments,
     };
 
