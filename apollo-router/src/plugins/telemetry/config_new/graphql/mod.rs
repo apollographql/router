@@ -452,7 +452,7 @@ pub(crate) mod test {
     }
 
     fn context(schema_str: &str, query_str: &str) -> Context {
-        let schema = crate::spec::Schema::parse_test(schema_str, &Default::default()).unwrap();
+        let schema = crate::spec::Schema::parse(schema_str, &Default::default()).unwrap();
         let query =
             crate::spec::Query::parse_document(query_str, None, &schema, &Configuration::default())
                 .unwrap();

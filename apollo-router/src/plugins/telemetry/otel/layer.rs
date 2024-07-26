@@ -42,6 +42,7 @@ use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_MESSAGE;
 use crate::plugins::telemetry::consts::REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
+use crate::plugins::telemetry::formatters::filter_metric_events;
 use crate::plugins::telemetry::reload::IsSampled;
 use crate::plugins::telemetry::reload::SampledSpan;
 use crate::plugins::telemetry::reload::SPAN_SAMPLING_RATE;
@@ -960,6 +961,10 @@ where
     /// [`ERROR`]: tracing::Level::ERROR
     /// [`Error`]: opentelemetry::trace::StatusCode::Error
     fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
+        // Don't include deprecated metric events
+        if !filter_metric_events(event) {
+            return;
+        }
         // Ignore events that are not in the context of a span
         if let Some(span) = ctx.lookup_current() {
             let mut extensions = span.extensions_mut();

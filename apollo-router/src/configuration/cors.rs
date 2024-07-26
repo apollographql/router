@@ -35,7 +35,7 @@ pub(crate) struct Cors {
     /// and make sure you either:
     /// - accept `x-apollo-operation-name` AND / OR `apollo-require-preflight`
     /// - defined `csrf` required headers in your yml configuration, as shown in the
-    /// `examples/cors-and-csrf/custom-headers.router.yaml` files.
+    ///   `examples/cors-and-csrf/custom-headers.router.yaml` files.
     pub(crate) allow_headers: Vec<String>,
 
     /// Which response headers should be made available to scripts running in the browser,
