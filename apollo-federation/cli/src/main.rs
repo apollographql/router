@@ -245,5 +245,5 @@ fn cmd_bench(file_path: &Path, operations_dir: &PathBuf) -> Result<(), Federatio
 
 #[test]
 fn test_bench() {
-    insta::assert_json_snapshot!(_cmd_bench(&Path::new("./fixtures/starstuff.graphql"), &PathBuf::from("./fixtures/queries")).unwrap(), { "[].timing" => 1.234 });
+    insta::assert_json_snapshot!(_cmd_bench(Path::new("./fixtures/starstuff.graphql"), &PathBuf::from("./fixtures/queries")).unwrap(), { "[].timing" => 1.234 });
 }
