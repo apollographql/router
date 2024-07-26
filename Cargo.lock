@@ -33,7 +33,7 @@ dependencies = [
  "actix-macros",
  "actix-rt",
  "actix_derive",
- "bitflags 2.4.0",
+ "bitflags 2.6.0",
  "bytes",
  "crossbeam-channel",
  "futures-core",
@@ -55,7 +55,7 @@ version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f7b0a21988c1bf877cf4759ef5ddaac04c1c9fe808c9142ecb78ba97d97a28a"
 dependencies = [
- "bitflags 2.4.0",
+ "bitflags 2.6.0",
  "bytes",
  "futures-core",
  "futures-sink",
@@ -78,7 +78,7 @@ dependencies = [
  "actix-utils",
  "ahash",
  "base64 0.22.1",
- "bitflags 2.4.0",
+ "bitflags 2.6.0",
  "brotli 6.0.0",
  "bytes",
  "bytestring",
@@ -439,6 +439,7 @@ dependencies = [
  "nom",
  "petgraph",
  "pretty_assertions",
+ "ron",
  "serde",
  "serde_json",
  "serde_json_bytes",
@@ -459,6 +460,9 @@ dependencies = [
  "apollo-compiler",
  "apollo-federation",
  "clap",
+ "insta",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1601,9 +1605,12 @@ checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
 name = "bitflags"
-version = "2.4.0"
+version = "2.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4682ae6287fcf752ecaabbfcc7b6f9b72aa33933dc23a554d853aea8eea8635"
+checksum = "b048fb63fd8b5923fc5aa7b340d8e156aec7ec02f0c78fa8a6ddc2613f6f71de"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "block-buffer"
@@ -3383,7 +3390,7 @@ version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b3ba52851e73b46a4c3df1d89343741112003f0f6f13beb0dfac9e457c3fdcd"
 dependencies = [
- "bitflags 2.4.0",
+ "bitflags 2.6.0",
  "libc",
  "libgit2-sys",
  "log",
@@ -4685,7 +4692,7 @@ version = "6.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6205bd8bb1e454ad2e27422015fb5e4f2bcc7e08fa8f27058670d208324a4d2d"
 dependencies = [
- "bitflags 2.4.0",
+ "bitflags 2.6.0",
  "filetime",
  "inotify",
  "kqueue",
@@ -5688,7 +5695,7 @@ version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57206b407293d2bcd3af849ce869d52068623f19e1b5ff8e8778e3309439682b"
 dependencies = [
- "bitflags 2.4.0",
+ "bitflags 2.6.0",
  "memchr",
  "unicase",
 ]
@@ -6007,7 +6014,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "61797318be89b1a268a018a92a7657096d83f3ecb31418b9e9c16dcbb043b702"
 dependencies = [
  "ahash",
- "bitflags 2.4.0",
+ "bitflags 2.6.0",
  "instant",
  "num-traits",
  "once_cell",
@@ -6127,6 +6134,18 @@ dependencies = [
  "byteorder",
  "num-traits",
  "paste",
+]
+
+[[package]]
+name = "ron"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b91f7eff05f748767f183df4320a63d6936e9c6107d97c9e6bdd9784f4289c94"
+dependencies = [
+ "base64 0.21.7",
+ "bitflags 2.6.0",
+ "serde",
+ "serde_derive",
 ]
 
 [[package]]
@@ -6288,7 +6307,7 @@ version = "0.38.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ea3e1a662af26cd7a3ba09c0297a31af215563ecf42817c98df621387f4e949"
 dependencies = [
- "bitflags 2.4.0",
+ "bitflags 2.6.0",
  "errno",
  "libc",
  "linux-raw-sys 0.4.13",
@@ -7564,7 +7583,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "61c5bb1d698276a2443e5ecfabc1008bf15a36c12e6a7176e7bf089ea9131140"
 dependencies = [
  "async-compression",
- "bitflags 2.4.0",
+ "bitflags 2.6.0",
  "bytes",
  "futures-core",
  "futures-util",
