@@ -2,7 +2,6 @@
 
 use std::fmt::Debug;
 use std::fmt::Formatter;
-use std::time::Duration;
 
 use ahash::HashMap;
 use ahash::HashMapExt;
@@ -197,13 +196,7 @@ impl TracingConfigurator for Config {
                     .expect("cargo version is set as a resource default;qed")
                     .to_string(),
             )
-            .with_http_client(
-                reqwest::Client::builder()
-                    // https://github.com/open-telemetry/opentelemetry-rust-contrib/issues/7
-                    // Set the idle timeout to something low to prevent termination of connections.
-                    .pool_idle_timeout(Duration::from_millis(1))
-                    .build()?,
-            )
+            .with_http_client(reqwest::Client::builder().build()?)
             .with_trace_config(common)
             .build_exporter()?;
 
