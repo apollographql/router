@@ -457,6 +457,9 @@ dependencies = [
  "apollo-compiler",
  "apollo-federation",
  "clap",
+ "insta",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
