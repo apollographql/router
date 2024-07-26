@@ -18,7 +18,21 @@ expression: connectors.by_service_name
         },
         transport: HttpJsonTransport {
             source_url: Some(
-                "https://jsonplaceholder.typicode.com/",
+                Url {
+                    scheme: "https",
+                    cannot_be_a_base: false,
+                    username: "",
+                    password: None,
+                    host: Some(
+                        Domain(
+                            "jsonplaceholder.typicode.com",
+                        ),
+                    ),
+                    port: None,
+                    path: "/",
+                    query: None,
+                    fragment: None,
+                },
             ),
             connect_template: URLTemplate {
                 base: None,
@@ -72,7 +86,21 @@ expression: connectors.by_service_name
         },
         transport: HttpJsonTransport {
             source_url: Some(
-                "https://jsonplaceholder.typicode.com/",
+                Url {
+                    scheme: "https",
+                    cannot_be_a_base: false,
+                    username: "",
+                    password: None,
+                    host: Some(
+                        Domain(
+                            "jsonplaceholder.typicode.com",
+                        ),
+                    ),
+                    port: None,
+                    path: "/",
+                    query: None,
+                    fragment: None,
+                },
             ),
             connect_template: URLTemplate {
                 base: None,
@@ -144,7 +172,21 @@ expression: connectors.by_service_name
         },
         transport: HttpJsonTransport {
             source_url: Some(
-                "https://jsonplaceholder.typicode.com/",
+                Url {
+                    scheme: "https",
+                    cannot_be_a_base: false,
+                    username: "",
+                    password: None,
+                    host: Some(
+                        Domain(
+                            "jsonplaceholder.typicode.com",
+                        ),
+                    ),
+                    port: None,
+                    path: "/",
+                    query: None,
+                    fragment: None,
+                },
             ),
             connect_template: URLTemplate {
                 base: None,

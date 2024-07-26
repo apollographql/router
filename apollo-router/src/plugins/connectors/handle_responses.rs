@@ -243,8 +243,8 @@ mod tests {
     use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HttpJsonTransport;
     use apollo_federation::sources::connect::JSONSelection;
-    use apollo_federation::sources::connect::URLTemplate;
     use insta::assert_debug_snapshot;
+    use url::Url;
 
     use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::plugins::connectors::make_requests::ResponseTypeName;
@@ -261,8 +261,8 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some("http://localhost/api".into()),
-                connect_template: URLTemplate::parse("/path").unwrap(),
+                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                connect_template: "/path".parse().unwrap(),
                 method: HTTPMethod::Get,
                 headers: Default::default(),
                 body: Default::default(),
@@ -348,8 +348,8 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some("http://localhost/api".into()),
-                connect_template: URLTemplate::parse("/path").unwrap(),
+                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                connect_template: "/path".parse().unwrap(),
                 method: HTTPMethod::Get,
                 headers: Default::default(),
                 body: Default::default(),
@@ -460,8 +460,8 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some("http://localhost/api".into()),
-                connect_template: URLTemplate::parse("/path").unwrap(),
+                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                connect_template: "/path".parse().unwrap(),
                 method: HTTPMethod::Get,
                 headers: Default::default(),
                 body: Default::default(),
@@ -566,8 +566,8 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some("http://localhost/api".into()),
-                connect_template: URLTemplate::parse("/path").unwrap(),
+                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                connect_template: "/path".parse().unwrap(),
                 method: HTTPMethod::Get,
                 headers: Default::default(),
                 body: Default::default(),
