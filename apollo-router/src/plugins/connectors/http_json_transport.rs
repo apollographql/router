@@ -127,8 +127,6 @@ fn make_uri(
         .ok_or(HttpJsonTransportError::NoBaseUrl)?
         .clone();
 
-    // We're going to use the `url` crate to handle URL encoding, it won't do paths only, though
-    // so we fake a base URL when we have to.
     url.path_segments_mut()
         .map_err(|_| {
             HttpJsonTransportError::InvalidUrl(url::ParseError::RelativeUrlWithCannotBeABaseBase)
