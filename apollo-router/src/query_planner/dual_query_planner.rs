@@ -235,7 +235,7 @@ fn operation_matches(this: &SubgraphOperation, other: &SubgraphOperation) -> boo
 // The rest is calling the comparison functions above instead of `PartialEq`,
 // but otherwise behave just like `PartialEq`:
 
-// Note: Reexported under `apollo_compiler::_private`
+// Note: Reexported under `apollo_router::_private`
 pub fn plan_matches(js_plan: &QueryPlanResult, rust_plan: &QueryPlan) -> bool {
     let js_root_node = &js_plan.query_plan.node;
     let rust_root_node = convert_root_query_plan_node(rust_plan);

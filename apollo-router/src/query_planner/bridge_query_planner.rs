@@ -878,12 +878,18 @@ impl BridgeQueryPlanner {
 }
 
 /// Data coming from the `plan` method on the router_bridge
-// Note: Reexported under `apollo_compiler::_private`
+// Note: Reexported under `apollo_router::_private`
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueryPlanResult {
     pub(super) formatted_query_plan: Option<Arc<String>>,
     pub(super) query_plan: QueryPlan,
+}
+
+impl QueryPlanResult {
+    pub fn formatted_query_plan(&self) -> Option<&str> {
+        self.formatted_query_plan.as_deref().map(String::as_str)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -894,7 +900,8 @@ pub(super) struct QueryPlan {
     pub(super) node: Option<Arc<PlanNode>>,
 }
 
-pub(crate) fn render_diff(differences: &[diff::Result<&str>]) -> String {
+// Note: Reexported under `apollo_router::_private`
+pub fn render_diff(differences: &[diff::Result<&str>]) -> String {
     let mut output = String::new();
     for diff_line in differences {
         match diff_line {
