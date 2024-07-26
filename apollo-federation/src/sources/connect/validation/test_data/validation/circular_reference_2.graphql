@@ -1,0 +1,26 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect"])
+
+type Query {
+  track(id: ID!): Track
+    @connect(
+      http: { GET: "http://track/{$args.id}" }
+      selection: "id title"
+      entity: true
+    )
+}
+
+type Track {
+  id: ID!
+  modules: [Module]
+    @connect(
+      http: { GET: "http://track/{$this.id}/modules" }
+      selection: "id title track: { id: trackId }"
+    )
+}
+
+type Module {
+  id: ID!
+  title: String
+  track: Track
+}

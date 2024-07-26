@@ -39,12 +39,12 @@ pub(super) fn validate_selection(
     };
 
     SelectionValidator {
-        root: Field {
+        root: PathPart::Root(parent_type),
+        schema,
+        path: vec![PathPart::Field {
             definition: field,
             ty: return_type,
-        },
-        schema,
-        path: vec![],
+        }],
         selection_coordinate: connect_directive_selection_coordinate(
             &connect_directive.name,
             parent_type,
@@ -105,18 +105,21 @@ fn get_json_selection<'a>(
 
 struct SelectionValidator<'schema> {
     schema: &'schema Schema,
-    root: Field<'schema>,
-    path: Vec<Field<'schema>>,
+    root: PathPart<'schema>,
+    path: Vec<PathPart<'schema>>,
     selection_location: Option<Range<LineColumn>>,
     selection_coordinate: String,
 }
 
 #[derive(Clone, Copy, Debug)]
-struct Field<'a> {
-    definition: &'a Node<FieldDefinition>,
-    ty: &'a Node<ObjectType>,
+enum PathPart<'a> {
+    // Query, Mutation, Subscription OR an Entity type
+    Root(&'a Node<ObjectType>),
+    Field {
+        definition: &'a Node<FieldDefinition>,
+        ty: &'a Node<ObjectType>,
+    },
 }
-
 // TODO: Once there is location data for JSONSelection, return multiple errors instead of stopping
 //  at the first
 impl<'schema> JSONSelectionVisitor for SelectionValidator<'schema> {
@@ -129,13 +132,18 @@ impl<'schema> JSONSelectionVisitor for SelectionValidator<'schema> {
 
     fn enter_group(&mut self, field_name: &str) -> Result<(), Self::Error> {
         let parent = self.path.last().copied().unwrap_or(self.root);
-        let definition = parent.ty.fields.get(field_name).ok_or_else(||  {
+        let parent_type = match parent {
+            PathPart::Root(root) => root,
+            PathPart::Field { ty, .. } => ty,
+        };
+
+        let definition = parent_type.fields.get(field_name).ok_or_else(||  {
             Message {
                 code: Code::SelectedFieldNotFound,
                 message: format!(
                     "{coordinate} contains field `{field_name}`, which does not exist on `{parent_type}`.",
                     coordinate = &self.selection_coordinate,
-                    parent_type = parent.ty.name
+                    parent_type = parent_type.name
                 ),
                 locations: self.selection_location.iter().cloned().collect(),
             }})?;
@@ -146,33 +154,36 @@ impl<'schema> JSONSelectionVisitor for SelectionValidator<'schema> {
                 message: format!(
                     "{coordinate} selects a group `{field_name}`, but `{parent_type}.{field_name}` is not an object.",
                     coordinate = &self.selection_coordinate,
-                    parent_type = parent.ty.name,
+                    parent_type = parent_type.name,
                 ),
                 locations: self.selection_location.iter().cloned().chain(definition.line_column_range(&self.schema.sources)).collect(),
             }})?;
 
-        for parent_field in self.path_with_root() {
-            if parent_field.ty == ty {
+        for seen_part in self.path_with_root() {
+            let (seen_type, field_def) = match seen_part {
+                PathPart::Root(root) => (root, None),
+                PathPart::Field { ty, definition } => (ty, Some(definition)),
+            };
+
+            if seen_type == ty {
                 return Err(Message {
                     code: Code::CircularReference,
                     message: format!(
-                        "{coordinate} path `{selection_path}` contains a circular reference to `{new_object_name}`.",
+                        "Circular reference detected in {coordinate}: type `{new_object_name}` appears more than once in `{selection_path}`. For more information, see https://go.apollo.dev/connectors/limitations#circular-references",
                         coordinate = &self.selection_coordinate,
-                        selection_path = self.path_with_root().map(|field| field.definition.name.as_str()).join("."),
+                        selection_path = self.path_string(&definition.name),
                         new_object_name = ty.name,
                     ),
                     locations:
                         self.selection_location.iter().cloned()
-                            .chain((parent_field.definition != self.root.definition).then(|| {
-                                // Root field includes the selection location, which duplicates the diagnostic
-                                parent_field.definition.line_column_range(&self.schema.sources)
-                            }).flatten())
+                        // Root field includes the selection location, which duplicates the diagnostic
+                            .chain(field_def.and_then(|def| def.line_column_range(&self.schema.sources)))
                             .chain(definition.line_column_range(&self.schema.sources))
                             .collect(),
                 });
             }
         }
-        self.path.push(Field { definition, ty });
+        self.path.push(PathPart::Field { definition, ty });
         Ok(())
     }
 
@@ -187,7 +198,17 @@ impl<'schema> JSONSelectionVisitor for SelectionValidator<'schema> {
 }
 
 impl SelectionValidator<'_> {
-    fn path_with_root(&self) -> impl Iterator<Item = Field> {
+    fn path_with_root(&self) -> impl Iterator<Item = PathPart> {
         once(self.root).chain(self.path.iter().copied())
+    }
+
+    fn path_string(&self, tail: &str) -> String {
+        self.path_with_root()
+            .map(|part| match part {
+                PathPart::Root(ty) => ty.name.as_str(),
+                PathPart::Field { definition, .. } => definition.name.as_str(),
+            })
+            .chain(once(tail))
+            .join(".")
     }
 }
