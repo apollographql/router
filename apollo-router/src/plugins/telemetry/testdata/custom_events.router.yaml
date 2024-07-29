@@ -116,9 +116,13 @@ telemetry:
         response:
           level: warn
           condition:
-            eq:
-            - subgraph_response_header: x-log-response
-            - "log"
+            all:
+            - eq:
+              - subgraph_response_header: x-log-response
+              - "log"
+            - eq:
+              - subgraph_name: true
+              - "subgraph"
         error: error
 
         # Custom events
