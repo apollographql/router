@@ -100,7 +100,7 @@ impl StaticCostCalculator {
         )?;
 
         for argument in &field.definition.arguments {
-            type_cost += self.score_argument(argument, schema)?;
+            type_cost += Self::score_argument(argument, schema)?;
         }
 
         let mut requirements_cost = 0.0;
@@ -135,7 +135,6 @@ impl StaticCostCalculator {
     }
 
     fn score_argument(
-        &self,
         argument: &InputValueDefinition,
         schema: &Valid<Schema>,
     ) -> Result<f64, DemandControlError> {
@@ -144,7 +143,7 @@ impl StaticCostCalculator {
                 apollo_compiler::schema::ExtendedType::InputObject(inner_arguments) => {
                     let mut cost = 1.0;
                     for inner_argument in inner_arguments.fields.values() {
-                        cost += self.score_argument(inner_argument, schema)?;
+                        cost += Self::score_argument(inner_argument, schema)?;
                     }
                     Ok(cost)
                 }
