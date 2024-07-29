@@ -14,6 +14,7 @@ use apollo_compiler::ast::Type;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
+use apollo_compiler::executable::DirectiveList;
 use apollo_compiler::executable::VariableDefinition;
 use apollo_compiler::name;
 use apollo_compiler::schema;
@@ -2325,6 +2326,7 @@ impl FetchDependencyGraphNode {
         query_graph: &QueryGraph,
         handled_conditions: &Conditions,
         variable_definitions: &[Node<VariableDefinition>],
+        operation_directives: &Arc<DirectiveList>,
         fragments: Option<&mut RebasedFragments>,
         operation_name: Option<Name>,
     ) -> Result<Option<super::PlanNode>, FederationError> {
@@ -2358,6 +2360,7 @@ impl FetchDependencyGraphNode {
                 subgraph_schema,
                 selection,
                 variable_definitions,
+                operation_directives,
                 &operation_name,
             )?
         } else {
@@ -2366,6 +2369,7 @@ impl FetchDependencyGraphNode {
                 self.root_kind,
                 selection,
                 variable_definitions,
+                operation_directives,
                 &operation_name,
             )?
         };
@@ -2536,6 +2540,7 @@ fn operation_for_entities_fetch(
     subgraph_schema: &ValidFederationSchema,
     selection_set: SelectionSet,
     all_variable_definitions: &[Node<VariableDefinition>],
+    operation_directives: &Arc<DirectiveList>,
     operation_name: &Option<Name>,
 ) -> Result<Operation, FederationError> {
     let mut variable_definitions: Vec<Node<VariableDefinition>> =
@@ -2611,7 +2616,7 @@ fn operation_for_entities_fetch(
         root_kind: SchemaRootDefinitionKind::Query,
         name: operation_name.clone(),
         variables: Arc::new(variable_definitions),
-        directives: Default::default(),
+        directives: Arc::clone(operation_directives),
         selection_set,
         named_fragments: Default::default(),
     })
@@ -2622,6 +2627,7 @@ fn operation_for_query_fetch(
     root_kind: SchemaRootDefinitionKind,
     selection_set: SelectionSet,
     variable_definitions: &[Node<VariableDefinition>],
+    operation_directives: &Arc<DirectiveList>,
     operation_name: &Option<Name>,
 ) -> Result<Operation, FederationError> {
     let used_variables = selection_set.used_variables();
@@ -2636,7 +2642,7 @@ fn operation_for_query_fetch(
         root_kind,
         name: operation_name.clone(),
         variables: Arc::new(variable_definitions),
-        directives: Default::default(),
+        directives: Arc::clone(operation_directives),
         selection_set,
         named_fragments: Default::default(),
     })
