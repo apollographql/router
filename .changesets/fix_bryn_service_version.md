@@ -2,7 +2,7 @@
 
 Previously `service.version` was not overridable via yaml and was ignored. It is now possible to set this explicitly which can be useful for users producing custom builds of the Router.
 
-For example:
+The following example overrides the version to be `1.0`:
 ```yaml
 telemetry:
   exporters:
