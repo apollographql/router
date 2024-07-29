@@ -4044,8 +4044,6 @@ impl Field {
 }
 
 impl FieldSelection {
-    /// # Errors
-    /// Returns an error if the selection contains a named fragment spread.
     fn collect_variables<'selection>(
         &'selection self,
         variables: &mut HashSet<&'selection Name>,
@@ -4066,8 +4064,6 @@ impl InlineFragment {
 }
 
 impl InlineFragmentSelection {
-    /// # Errors
-    /// Returns an error if the selection contains a named fragment spread.
     fn collect_variables<'selection>(
         &'selection self,
         variables: &mut HashSet<&'selection Name>,
@@ -4120,8 +4116,6 @@ impl SelectionSet {
         variables
     }
 
-    /// # Errors
-    /// Returns an error if the selection set contains a named fragment spread.
     fn collect_variables<'selection>(
         &'selection self,
         variables: &mut HashSet<&'selection Name>,
