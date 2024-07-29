@@ -18,7 +18,21 @@ expression: connectors.by_service_name
         },
         transport: HttpJsonTransport {
             source_url: Some(
-                "http://example",
+                Url {
+                    scheme: "http",
+                    cannot_be_a_base: false,
+                    username: "",
+                    password: None,
+                    host: Some(
+                        Domain(
+                            "example",
+                        ),
+                    ),
+                    port: None,
+                    path: "/",
+                    query: None,
+                    fragment: None,
+                },
             ),
             connect_template: URLTemplate {
                 base: None,
@@ -109,7 +123,21 @@ expression: connectors.by_service_name
         },
         transport: HttpJsonTransport {
             source_url: Some(
-                "http://example",
+                Url {
+                    scheme: "http",
+                    cannot_be_a_base: false,
+                    username: "",
+                    password: None,
+                    host: Some(
+                        Domain(
+                            "example",
+                        ),
+                    ),
+                    port: None,
+                    path: "/",
+                    query: None,
+                    fragment: None,
+                },
             ),
             connect_template: URLTemplate {
                 base: None,

@@ -5,6 +5,7 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::Name;
 use http::HeaderName;
 use serde_json::Value;
+use url::Url;
 
 use super::spec::ConnectHTTPArguments;
 use super::spec::SourceHTTPArguments;
@@ -139,7 +140,7 @@ fn make_label(
 // --- HTTP JSON ---------------------------------------------------------------
 #[derive(Clone, Debug)]
 pub struct HttpJsonTransport {
-    pub source_url: Option<String>,
+    pub source_url: Option<Url>,
     pub connect_template: URLTemplate,
     pub method: HTTPMethod,
     pub headers: IndexMap<HeaderName, HeaderSource>,
@@ -178,7 +179,7 @@ impl HttpJsonTransport {
 
         Ok(Self {
             source_url: source.map(|s| s.base_url.clone()),
-            connect_template: URLTemplate::parse(connect_url).map_err(|e| {
+            connect_template: connect_url.parse().map_err(|e| {
                 FederationError::internal(format!("could not parse URL template: {e}"))
             })?,
             method,
@@ -272,7 +273,21 @@ mod tests {
                 },
                 transport: HttpJsonTransport {
                     source_url: Some(
-                        "https://jsonplaceholder.typicode.com/",
+                        Url {
+                            scheme: "https",
+                            cannot_be_a_base: false,
+                            username: "",
+                            password: None,
+                            host: Some(
+                                Domain(
+                                    "jsonplaceholder.typicode.com",
+                                ),
+                            ),
+                            port: None,
+                            path: "/",
+                            query: None,
+                            fragment: None,
+                        },
                     ),
                     connect_template: URLTemplate {
                         base: None,
@@ -344,7 +359,21 @@ mod tests {
                 },
                 transport: HttpJsonTransport {
                     source_url: Some(
-                        "https://jsonplaceholder.typicode.com/",
+                        Url {
+                            scheme: "https",
+                            cannot_be_a_base: false,
+                            username: "",
+                            password: None,
+                            host: Some(
+                                Domain(
+                                    "jsonplaceholder.typicode.com",
+                                ),
+                            ),
+                            port: None,
+                            path: "/",
+                            query: None,
+                            fragment: None,
+                        },
                     ),
                     connect_template: URLTemplate {
                         base: None,

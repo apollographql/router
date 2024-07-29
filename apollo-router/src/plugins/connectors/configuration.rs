@@ -64,7 +64,7 @@ pub(crate) fn apply_config(config: &Configuration, mut connectors: Connectors) -
         if let Some(url) =
             source_config.and_then(|source_config| source_config.override_url.as_ref())
         {
-            connector.transport.source_url = Some(url.to_string());
+            connector.transport.source_url = Some(url.clone());
         }
 
         connector.config = Some(subgraph_config.custom.clone());

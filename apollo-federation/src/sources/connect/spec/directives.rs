@@ -157,7 +157,11 @@ impl TryFrom<&ObjectNode> for SourceHTTPArguments {
                     "`baseURL` field in `@source` directive's `http` field is not a string"
                 ))?;
 
-                base_url = Some(base_url_value);
+                base_url = Some(
+                    base_url_value
+                        .parse()
+                        .map_err(|err| internal!(format!("Invalid base URL: {}", err)))?,
+                );
             } else if name == HEADERS_ARGUMENT_NAME.as_str() {
                 headers = if let Some(values) = value.as_list() {
                     Some(nodes_to_headers(values)?)
@@ -176,11 +180,9 @@ impl TryFrom<&ObjectNode> for SourceHTTPArguments {
         }
 
         Ok(Self {
-            base_url: base_url
-                .ok_or(internal!(
-                    "missing `base_url` field in `@source` directive's `http` argument"
-                ))?
-                .to_string(),
+            base_url: base_url.ok_or(internal!(
+                "missing `base_url` field in `@source` directive's `http` argument"
+            ))?,
             headers: headers.unwrap_or_default(),
         })
     }
@@ -502,7 +504,21 @@ mod tests {
             SourceDirectiveArguments {
                 name: "json",
                 http: SourceHTTPArguments {
-                    base_url: "https://jsonplaceholder.typicode.com/",
+                    base_url: Url {
+                        scheme: "https",
+                        cannot_be_a_base: false,
+                        username: "",
+                        password: None,
+                        host: Some(
+                            Domain(
+                                "jsonplaceholder.typicode.com",
+                            ),
+                        ),
+                        port: None,
+                        path: "/",
+                        query: None,
+                        fragment: None,
+                    },
                     headers: {
                         "authtoken": From(
                             "X-Auth-Token",

@@ -1,11 +1,11 @@
 use std::collections::HashSet;
-use std::iter::Iterator;
 use std::sync::Arc;
 
 use apollo_compiler::collections::IndexMap;
 use apollo_federation::sources::connect::ApplyTo;
 use apollo_federation::sources::connect::HeaderSource;
 use apollo_federation::sources::connect::HttpJsonTransport;
+use apollo_federation::sources::connect::URLTemplate;
 use displaydoc::Display;
 use http::header::ACCEPT;
 use http::header::ACCEPT_ENCODING;
@@ -24,7 +24,6 @@ use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
 use lazy_static::lazy_static;
-use percent_encoding::percent_decode_str;
 use serde_json_bytes::json;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
@@ -70,7 +69,11 @@ pub(crate) fn make_request(
     original_request: &connect::Request,
     debug: &mut Option<ConnectorContext>,
 ) -> Result<http::Request<RouterBody>, HttpJsonTransportError> {
-    let uri = make_uri(transport, &inputs)?;
+    let uri = make_uri(
+        transport.source_url.as_ref(),
+        &transport.connect_template,
+        &inputs,
+    )?;
 
     let (json_body, body, apply_to_errors) = if let Some(ref selection) = transport.body {
         let (json_body, apply_to_errors) = selection.apply_with_vars(&json!({}), &inputs);
@@ -114,86 +117,34 @@ pub(crate) fn make_request(
 }
 
 fn make_uri(
-    transport: &HttpJsonTransport,
+    source_url: Option<&Url>,
+    template: &URLTemplate,
     inputs: &IndexMap<String, Value>,
 ) -> Result<Url, HttpJsonTransportError> {
     let flat_inputs = flatten_keys(inputs);
-    let generated = transport
-        .connect_template
-        .generate(&flat_inputs)
+    let mut url = source_url
+        .or(template.base.as_ref())
+        .ok_or(HttpJsonTransportError::NoBaseUrl)?
+        .clone();
+
+    url.path_segments_mut()
+        .map_err(|_| {
+            HttpJsonTransportError::InvalidUrl(url::ParseError::RelativeUrlWithCannotBeABaseBase)
+        })?
+        .pop_if_empty()
+        .extend(
+            template
+                .interpolate_path(&flat_inputs)
+                .map_err(HttpJsonTransportError::TemplateGenerationError)?,
+        );
+
+    let query_params = template
+        .interpolate_query(&flat_inputs)
         .map_err(HttpJsonTransportError::TemplateGenerationError)?;
-    if let Some(source_url) = transport.source_url.as_ref() {
-        append_path(
-            Url::parse(source_url).map_err(HttpJsonTransportError::InvalidUrl)?,
-            &generated,
-        )
-    } else {
-        Url::parse(&generated).map_err(HttpJsonTransportError::InvalidUrl)
+    if !query_params.is_empty() {
+        url.query_pairs_mut().extend_pairs(query_params);
     }
-}
-
-/// Append a path and query to a URI. Uses the path from base URI (but will discard the query).
-/// Expects the path to start with "/".
-fn append_path(base_uri: Url, path: &str) -> Result<Url, HttpJsonTransportError> {
-    // we will need to work on path segments, and on query parameters.
-    // the first thing we need to do is parse the path so we have APIs to reason with both:
-    let path_uri: Url = Url::options()
-        .base_url(Some(&base_uri))
-        .parse(path)
-        .map_err(HttpJsonTransportError::InvalidPath)?;
-    // get query parameters from both base_uri and path
-    let base_uri_query_pairs =
-        (!base_uri.query().unwrap_or_default().is_empty()).then(|| base_uri.query_pairs());
-    let path_uri_query_pairs =
-        (!path_uri.query().unwrap_or_default().is_empty()).then(|| path_uri.query_pairs());
-
-    let mut res = base_uri.clone();
-
-    // append segments
-    {
-        // Path segments being none indicates the base_uri cannot be a base URL.
-        // This means the schema is invalid.
-        let base_segments = base_uri
-            .path_segments()
-            .ok_or(HttpJsonTransportError::InvalidUrl(
-                url::ParseError::RelativeUrlWithCannotBeABaseBase,
-            ))?
-            .filter(|segment| !segment.is_empty());
-
-        let path_segments = path_uri
-            .path_segments()
-            .ok_or(HttpJsonTransportError::InvalidPath(
-                url::ParseError::RelativeUrlWithCannotBeABaseBase,
-            ))?
-            .filter(|segment| !segment.is_empty())
-            // parsing encodes the segments, so we need to decode them before adding them
-            .map(|segment| percent_decode_str(segment).decode_utf8().unwrap());
-
-        // Ok this one is a bit tricky.
-        // Here we're trying to only append segments that are not empty, to avoid `//`
-        res.path_segments_mut()
-            .map_err(|_| {
-                HttpJsonTransportError::InvalidUrl(
-                    url::ParseError::RelativeUrlWithCannotBeABaseBase,
-                )
-            })?
-            .clear()
-            .extend(base_segments)
-            .extend(path_segments);
-    }
-    // Calling clear on query_pairs will cause a `?` to be appended.
-    // We only want to do it if necessary
-    if base_uri_query_pairs.is_some() || path_uri_query_pairs.is_some() {
-        res.query_pairs_mut().clear();
-    }
-    if let Some(pairs) = base_uri_query_pairs {
-        res.query_pairs_mut().extend_pairs(pairs);
-    }
-    if let Some(pairs) = path_uri_query_pairs {
-        res.query_pairs_mut().extend_pairs(pairs);
-    }
-
-    Ok(res)
+    Ok(url)
 }
 
 // URLTemplate expects a map with flat dot-delimited keys.
@@ -272,10 +223,486 @@ pub(crate) enum HttpJsonTransportError {
     BodySerialization(#[from] serde_json::Error),
     /// Error building URI: {0:?}
     InvalidUrl(url::ParseError),
-    /// Error building URI: {0:?}
-    InvalidPath(url::ParseError),
     /// Could not generate path from inputs: {0}
     TemplateGenerationError(String),
+    /// Either a source or a fully qualified URL must be provided to `@connect`
+    NoBaseUrl,
+}
+
+#[cfg(test)]
+mod test_make_uri {
+    use pretty_assertions::assert_eq;
+    use serde_json_bytes::json;
+
+    use super::*;
+
+    macro_rules! map {
+        ($($key:expr => $value:expr),* $(,)?) => {
+            {
+                let mut map = IndexMap::with_hasher(Default::default());
+                $(
+                    map.insert($key.to_string(), json!($value));
+                )*
+                map
+            }
+        };
+    }
+
+    #[test]
+    fn append_path() {
+        assert_eq!(
+            make_uri(
+                Some(&Url::parse("https://localhost:8080/v1").unwrap()),
+                &"/hello/42".parse().unwrap(),
+                &Default::default(),
+            )
+            .unwrap()
+            .as_str(),
+            "https://localhost:8080/v1/hello/42"
+        );
+    }
+
+    #[test]
+    fn append_path_with_trailing_slash() {
+        assert_eq!(
+            make_uri(
+                Some(&Url::parse("https://localhost:8080/").unwrap()),
+                &"/hello/42".parse().unwrap(),
+                &Default::default(),
+            )
+            .unwrap()
+            .as_str(),
+            "https://localhost:8080/hello/42"
+        );
+    }
+
+    #[test]
+    fn append_path_test_with_trailing_slash_and_base_path() {
+        assert_eq!(
+            make_uri(
+                Some(&Url::parse("https://localhost:8080/v1/").unwrap()),
+                &"/hello/{id}?id={id}".parse().unwrap(),
+                &map! { "id" => 42 },
+            )
+            .unwrap()
+            .as_str(),
+            "https://localhost:8080/v1/hello/42?id=42"
+        );
+    }
+    #[test]
+    fn append_path_test_with_and_base_path_and_params() {
+        assert_eq!(
+            make_uri(
+                Some(&Url::parse("https://localhost:8080/v1?foo=bar").unwrap()),
+                &"/hello/{id}?id={id}".parse().unwrap(),
+                &map! { "id" => 42 },
+            )
+            .unwrap()
+            .as_str(),
+            "https://localhost:8080/v1/hello/42?foo=bar&id=42"
+        );
+    }
+    #[test]
+    fn append_path_test_with_and_base_path_and_trailing_slash_and_params() {
+        assert_eq!(
+            make_uri(
+                Some(&Url::parse("https://localhost:8080/v1/?foo=bar").unwrap()),
+                &"/hello/{id}?id={id}".parse().unwrap(),
+                &map! { "id" => 42 },
+            )
+            .unwrap()
+            .as_str(),
+            "https://localhost:8080/v1/hello/42?foo=bar&id=42"
+        );
+    }
+
+    #[test]
+    fn path_cases() {
+        let template = "http://localhost/users/{user_id}?a={b}&c={d!}&e={f.g}"
+            .parse()
+            .unwrap();
+
+        assert_eq!(
+            make_uri(None, &template, &Default::default())
+                .err()
+                .unwrap()
+                .to_string(),
+            "Could not generate path from inputs: Missing required variable user_id"
+        );
+
+        assert_eq!(
+            make_uri(
+                None,
+                &template,
+                &map! {
+                    "user_id" => 123,
+                    "b" => "456",
+                    "d" => 789,
+                    "f.g" => "abc"
+                }
+            )
+            .unwrap()
+            .to_string(),
+            "http://localhost/users/123?a=456&c=789&e=abc"
+        );
+
+        assert_eq!(
+            make_uri(
+                None,
+                &template,
+                &map! {
+                    "user_id" => 123,
+                    "d" => 789,
+                    "f" => "not an object"
+                }
+            )
+            .unwrap()
+            .to_string(),
+            "http://localhost/users/123?c=789"
+        );
+
+        assert_eq!(
+            make_uri(
+                None,
+                &template,
+                &map! {
+                    "b" => "456",
+                    "f.g" => "abc",
+                    "user_id" => "123"
+                }
+            )
+            .err()
+            .unwrap()
+            .to_string(),
+            r#"Could not generate path from inputs: Missing required variable d"#
+        );
+
+        assert_eq!(
+            make_uri(
+                None,
+                &template,
+                &map! {
+                    // The order of the variables should not matter.
+                    "d" => "789",
+                    "b" => "456",
+                    "user_id" => "123"
+                }
+            )
+            .unwrap()
+            .to_string(),
+            "http://localhost/users/123?a=456&c=789"
+        );
+
+        assert_eq!(
+            make_uri(
+                None,
+                &template,
+                &map! {
+                    "user_id" => "123",
+                    "b" => "a",
+                    "d" => "c",
+                    "f.g" => "e",
+                    // Extra variables should be ignored.
+                    "extra" => "ignored"
+                }
+            )
+            .unwrap()
+            .to_string(),
+            "http://localhost/users/123?a=a&c=c&e=e",
+        );
+
+        let template_with_nested_required_var =
+            "http://localhost/repositories/{user.login}/{repo.name}?testing={a.b.c!}"
+                .parse()
+                .unwrap();
+
+        assert_eq!(
+            make_uri(
+                None,
+                &template_with_nested_required_var,
+                &map! {
+                    "repo.name" => "repo",
+                    "user.login" => "user"
+                }
+            )
+            .err()
+            .unwrap()
+            .to_string(),
+            r#"Could not generate path from inputs: Missing required variable a.b.c"#
+        );
+
+        assert_eq!(
+            make_uri(
+                None,
+                &template_with_nested_required_var,
+                &map! {
+                    "user.login" => "user",
+                    "repo.name" => "repo",
+                    "a.b.c" => "value"
+                }
+            )
+            .unwrap()
+            .as_str(),
+            "http://localhost/repositories/user/repo?testing=value"
+        );
+    }
+
+    #[test]
+    fn multi_variable_parameter_values() {
+        let template =
+            "http://localhost/locations/xyz({x},{y},{z})?required={b},{c};{d!}&optional=[{e},{f}]"
+                .parse()
+                .unwrap();
+
+        assert_eq!(
+            make_uri(
+                None,
+                &template,
+                &map! {
+                    "x" => 1,
+                    "y" => 2,
+                    "z" => 3,
+                    "b" => 4,
+                    "c" => 5,
+                    "d" => 6,
+                    "e" => 7,
+                    "f" => 8,
+                }
+            )
+            .unwrap()
+            .as_str(),
+            "http://localhost/locations/xyz(1,2,3)?required=4%2C5%3B6&optional=%5B7%2C8%5D"
+        );
+
+        assert_eq!(
+            make_uri(
+                None,
+                &template,
+                &map! {
+                    "x" => 1,
+                    "y" => 2,
+                    "z" => 3,
+                    "b" => 4,
+                    "c" => 5,
+                    "d" => 6,
+                    "e" => 7
+                    // "f" => 8,
+                }
+            )
+            .unwrap()
+            .as_str(),
+            "http://localhost/locations/xyz(1,2,3)?required=4%2C5%3B6",
+        );
+
+        assert_eq!(
+            make_uri(
+                None,
+                &template,
+                &map! {
+                    "x" => 1,
+                    "y" => 2,
+                    "z" => 3,
+                    "b" => 4,
+                    "c" => 5,
+                    "d" => 6,
+                    // "e" => 7,
+                    "f" => 8
+                }
+            )
+            .unwrap()
+            .as_str(),
+            "http://localhost/locations/xyz(1,2,3)?required=4%2C5%3B6",
+        );
+
+        assert_eq!(
+            make_uri(
+                None,
+                &template,
+                &map! {
+                    "x" => 1,
+                    "y" => 2,
+                    "z" => 3,
+                    "b" => 4,
+                    "c" => 5,
+                    "d" => 6
+                }
+            )
+            .unwrap()
+            .as_str(),
+            "http://localhost/locations/xyz(1,2,3)?required=4%2C5%3B6",
+        );
+
+        assert_eq!(
+            make_uri(
+                None,
+                &template,
+                &map! {
+                    // "x" => 1,
+                    "y" => 2,
+                    "z" => 3
+                }
+            )
+            .err()
+            .unwrap()
+            .to_string(),
+            r#"Could not generate path from inputs: Missing required variable x"#,
+        );
+
+        assert_eq!(
+            make_uri(
+                None,
+                &template,
+                &map! {
+                    "x" => 1,
+                    "y" => 2
+                    // "z" => 3,
+                }
+            )
+            .err()
+            .unwrap()
+            .to_string(),
+            r#"Could not generate path from inputs: Missing required variable z"#
+        );
+
+        assert_eq!(
+            make_uri(
+                None,
+                &template,
+                &map! {
+                    "b" => 4,
+                    "c" => 5,
+                    "x" => 1,
+                    "y" => 2,
+                    "z" => 3
+                    // "d" => 6,
+                }
+            )
+            .err()
+            .unwrap()
+            .to_string(),
+            r#"Could not generate path from inputs: Missing required variable d"#
+        );
+
+        assert_eq!(
+            make_uri(
+                None,
+                &template,
+                &map! {
+                    "b" => 4,
+                    // "c" => 5,
+                    "d" => 6,
+                    "x" => 1,
+                    "y" => 2,
+                    "z" => 3
+                }
+            )
+            .err()
+            .unwrap()
+            .to_string(),
+            r#"Could not generate path from inputs: Missing variable c for required parameter {b},{c};{d!} given variables {"b":4,"d":6,"x":1,"y":2,"z":3}"#
+        );
+
+        assert_eq!(
+            make_uri(
+                None,
+                &template,
+                &map! {
+                    // "b" => 4,
+                    // "c" => 5,
+                    "d" => 6,
+                    "x" => 1,
+                    "y" => 2,
+                    "z" => 3
+                }
+            )
+            .err()
+            .unwrap()
+            .to_string(),
+            r#"Could not generate path from inputs: Missing variable b for required parameter {b},{c};{d!} given variables {"d":6,"x":1,"y":2,"z":3}"#
+        );
+
+        let line_template = "http://localhost/line/{p1.x},{p1.y},{p1.z}/{p2.x},{p2.y},{p2.z}"
+            .parse()
+            .unwrap();
+
+        assert_eq!(
+            make_uri(
+                None,
+                &line_template,
+                &map! {
+                    "p1.x" => 1,
+                    "p1.y" => 2,
+                    "p1.z" => 3,
+                    "p2.x" => 4,
+                    "p2.y" => 5,
+                    "p2.z" => 6,
+                }
+            )
+            .unwrap()
+            .as_str(),
+            "http://localhost/line/1,2,3/4,5,6"
+        );
+
+        assert_eq!(
+            make_uri(
+                None,
+                &line_template,
+                &map! {
+                    "p1.x" => 1,
+                    "p1.y" => 2,
+                    "p1.z" => 3,
+                    "p2.x" => 4,
+                    "p2.y" => 5
+                    // "p2.z" => 6,
+                }
+            )
+            .err()
+            .unwrap()
+            .to_string(),
+            r#"Could not generate path from inputs: Missing required variable p2.z"#
+        );
+
+        assert_eq!(
+            make_uri(
+                None,
+                &line_template,
+                &map! {
+                    "p1.x" => 1,
+                    // "p1.y" => 2,
+                    "p1.z" => 3,
+                    "p2.x" => 4,
+                    "p2.y" => 5,
+                    "p2.z" => 6
+                }
+            )
+            .err()
+            .unwrap()
+            .to_string(),
+            r#"Could not generate path from inputs: Missing required variable p1.y"#
+        );
+    }
+
+    /// Values are all strings, they can't have semantic value for HTTP. That means no dynamic paths,
+    /// no nested query params, etc. When we expand values, we have to make sure they're safe.
+    #[test]
+    fn parameter_encoding() {
+        let vars = &map! {
+            "path" => "/some/path",
+            "question_mark" => "a?b",
+            "ampersand" => "a&b=b",
+            "hash" => "a#b",
+        };
+
+        let template = "http://localhost/{path}/{question_mark}?a={ampersand}&c={hash}"
+            .parse()
+            .expect("Failed to parse URL template");
+        let url = make_uri(None, &template, vars).expect("Failed to generate URL");
+
+        assert_eq!(
+            url.as_str(),
+            "http://localhost/%2Fsome%2Fpath/a%3Fb?a=a%26b%3Db&c=a%23b"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -284,77 +711,8 @@ mod tests {
     use http::header::CONTENT_ENCODING;
     use http::HeaderMap;
     use http::HeaderValue;
-    use serde_json_bytes::json;
 
     use super::*;
-    use crate::plugins::connectors::http_json_transport::add_headers;
-
-    #[test]
-    fn append_path_test() {
-        assert_eq!(
-            super::append_path("https://localhost:8080/v1".parse().unwrap(), "/hello/42")
-                .unwrap()
-                .as_str(),
-            "https://localhost:8080/v1/hello/42"
-        );
-    }
-
-    #[test]
-    fn append_path_test_with_trailing_slash() {
-        assert_eq!(
-            super::append_path("https://localhost:8080/".parse().unwrap(), "/hello/42")
-                .unwrap()
-                .as_str(),
-            "https://localhost:8080/hello/42"
-        );
-    }
-
-    #[test]
-    fn append_path_test_with_trailing_slash_and_base_path() {
-        assert_eq!(
-            super::append_path("https://localhost:8080/v1/".parse().unwrap(), "/hello/42")
-                .unwrap()
-                .as_str(),
-            "https://localhost:8080/v1/hello/42"
-        );
-    }
-    #[test]
-    fn append_path_test_with_and_base_path_and_params() {
-        assert_eq!(
-            super::append_path(
-                "https://localhost:8080/v1?foo=bar".parse().unwrap(),
-                "/hello/42"
-            )
-            .unwrap()
-            .as_str(),
-            "https://localhost:8080/v1/hello/42?foo=bar"
-        );
-    }
-    #[test]
-    fn append_path_test_with_and_base_path_and_trailing_slash_and_params() {
-        assert_eq!(
-            super::append_path(
-                "https://localhost:8080/v1/?foo=bar".parse().unwrap(),
-                "/hello/42"
-            )
-            .unwrap()
-            .as_str(),
-            "https://localhost:8080/v1/hello/42?foo=bar"
-        );
-    }
-
-    #[test]
-    fn append_path_test_with_encoded_characters() {
-        assert_eq!(
-            super::append_path(
-                "https://localhost:8080/v1".parse().unwrap(),
-                "/users/user%3A1" // must be authored encoded
-            )
-            .unwrap()
-            .as_str(),
-            "https://localhost:8080/v1/users/user:1"
-        );
-    }
 
     #[test]
     fn test_headers_to_add_no_directives() {
