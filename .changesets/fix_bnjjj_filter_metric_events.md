@@ -1,5 +1,5 @@
-### Don't include metric events in spans ([PR #5649](https://github.com/apollographql/router/pull/5649))
+### Remove unnecessary internal metric events from traces and spans ([PR #5649](https://github.com/apollographql/router/pull/5649))
 
-Previously some internal metric events were included in traces and spans. This PR remove this noise.
+The router no longer includes some internal metric events in traces and spans that shouldn't have been included originally.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5649
