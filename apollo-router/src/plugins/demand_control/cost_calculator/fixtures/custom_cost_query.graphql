@@ -1,0 +1,12 @@
+{
+  fieldWithCost
+  argWithCost(arg: 3)
+  enumWithCost
+  inputWithCost(someInput: { somethingWithCost: 10 })
+  fieldWithListSize
+  fieldWithDynamicListSize(first: 5) {
+    items {
+      id
+    }
+  }
+}

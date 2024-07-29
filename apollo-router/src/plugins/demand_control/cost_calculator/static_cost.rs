@@ -19,6 +19,8 @@ use super::directives::SkipDirective;
 use super::DemandControlError;
 use crate::graphql::Response;
 use crate::graphql::ResponseVisitor;
+use crate::plugins::demand_control::cost_calculator::directives::CostDirective;
+use crate::plugins::demand_control::cost_calculator::directives::ListSizeDirective;
 use crate::query_planner::fetch::SubgraphOperation;
 use crate::query_planner::fetch::SubgraphSchemas;
 use crate::query_planner::DeferredNode;
@@ -79,14 +81,21 @@ impl StaticCostCalculator {
         // Determine how many instances we're scoring. If there's no user-provided
         // information, assume lists have 100 items.
         let instance_count = if field.ty().is_list() {
-            self.list_size as f64
+            ListSizeDirective::from_field(&field.definition)?
+                .map_or(Ok(self.list_size as f64), |list_size| {
+                    list_size.expected_size(field)
+                })?
         } else {
             1.0
         };
 
         // Determine the cost for this particular field. Scalars are free, non-scalars are not.
         // For fields with selections, add in the cost of the selections as well.
-        let mut type_cost = if ty.is_interface() || ty.is_object() || ty.is_union() {
+        let mut type_cost = if let Some(cost_directive) =
+            CostDirective::from_field(&field.definition).or(CostDirective::from_type(ty))
+        {
+            cost_directive.weight()
+        } else if ty.is_interface() || ty.is_object() || ty.is_union() {
             1.0
         } else {
             0.0
@@ -138,10 +147,11 @@ impl StaticCostCalculator {
         argument: &InputValueDefinition,
         schema: &Valid<Schema>,
     ) -> Result<f64, DemandControlError> {
+        let cost_directive = CostDirective::from_argument(argument);
         if let Some(ty) = schema.types.get(argument.ty.inner_named_type().as_str()) {
             match ty {
                 apollo_compiler::schema::ExtendedType::InputObject(inner_arguments) => {
-                    let mut cost = 1.0;
+                    let mut cost = cost_directive.map_or(1.0, |cost| cost.weight());
                     for inner_argument in inner_arguments.fields.values() {
                         cost += Self::score_argument(inner_argument, schema)?;
                     }
@@ -149,7 +159,7 @@ impl StaticCostCalculator {
                 }
 
                 apollo_compiler::schema::ExtendedType::Scalar(_)
-                | apollo_compiler::schema::ExtendedType::Enum(_) => Ok(0.0),
+                | apollo_compiler::schema::ExtendedType::Enum(_) => Ok(cost_directive.map_or(0.0, |cost| cost.weight())),
 
                 apollo_compiler::schema::ExtendedType::Object(_)
                 | apollo_compiler::schema::ExtendedType::Interface(_)
@@ -694,5 +704,14 @@ mod tests {
 
         assert_eq!(conservative_estimate, 10200.0);
         assert_eq!(narrow_estimate, 35.0);
+    }
+
+    #[test(tokio::test)]
+    async fn custom_cost_query() {
+        let schema = include_str!("./fixtures/custom_cost_schema.graphql");
+        let query = include_str!("./fixtures/custom_cost_query.graphql");
+
+        assert_eq!(estimated_cost(schema, query), 57.0);
+        assert_eq!(planned_cost(schema, query).await, 57.0);
     }
 }

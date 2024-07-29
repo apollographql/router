@@ -285,8 +285,9 @@ impl Query {
             }
         };
 
-        let api_schema = schema.api_schema();
-        let executable_document = match ast.to_executable_validate(api_schema) {
+        // TODO: Make sure using schema directly doesn't negatively impact other features
+        // let api_schema = schema.api_schema();
+        let executable_document = match ast.to_executable_validate(schema.supergraph_schema()) {
             Ok(doc) => doc,
             Err(errors) => {
                 return Err(SpecError::ValidationError(errors.into()));
