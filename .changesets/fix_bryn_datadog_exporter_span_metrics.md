@@ -29,4 +29,4 @@ telemetry:
           my_custom_span: true
 ```
 
-By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/5609
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/5609 and https://github.com/apollographql/router/pull/5703
