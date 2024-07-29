@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::executable::ExecutableDocument;
 use apollo_compiler::executable::Field;
@@ -98,6 +99,10 @@ impl StaticCostCalculator {
             should_estimate_requires,
         )?;
 
+        for argument in &field.definition.arguments {
+            type_cost += self.score_argument(argument, schema)?;
+        }
+
         let mut requirements_cost = 0.0;
         if should_estimate_requires {
             // If the field is marked with `@requires`, the required selection may not be included
@@ -127,6 +132,41 @@ impl StaticCostCalculator {
         );
 
         Ok(cost)
+    }
+
+    fn score_argument(
+        &self,
+        argument: &InputValueDefinition,
+        schema: &Valid<Schema>,
+    ) -> Result<f64, DemandControlError> {
+        if let Some(ty) = schema.types.get(argument.ty.inner_named_type().as_str()) {
+            match ty {
+                apollo_compiler::schema::ExtendedType::InputObject(inner_arguments) => {
+                    let mut cost = 1.0;
+                    for inner_argument in inner_arguments.fields.values() {
+                        cost += self.score_argument(inner_argument, schema)?;
+                    }
+                    Ok(cost)
+                }
+
+                apollo_compiler::schema::ExtendedType::Scalar(_)
+                | apollo_compiler::schema::ExtendedType::Enum(_) => Ok(0.0),
+
+                apollo_compiler::schema::ExtendedType::Object(_)
+                | apollo_compiler::schema::ExtendedType::Interface(_)
+                | apollo_compiler::schema::ExtendedType::Union(_) => {
+                    Err(DemandControlError::QueryParseFailure(
+                        format!("Argument {} has type {}, but objects, interfaces, and unions are disallowed in this position", argument.name, argument.ty.inner_named_type())
+                    ))
+                }
+            }
+        } else {
+            Err(DemandControlError::QueryParseFailure(format!(
+                "Argument {} was found in query, but its type ({}) was not found in the schema",
+                argument.name,
+                argument.ty.inner_named_type()
+            )))
+        }
     }
 
     fn score_fragment_spread(
@@ -560,6 +600,14 @@ mod tests {
         let query = include_str!("./fixtures/basic_nested_list_query.graphql");
 
         assert_eq!(basic_estimated_cost(schema, query), 10100.0)
+    }
+
+    #[test]
+    fn input_object_cost() {
+        let schema = include_str!("./fixtures/basic_schema.graphql");
+        let query = include_str!("./fixtures/basic_input_object_query.graphql");
+
+        assert_eq!(basic_estimated_cost(schema, query), 2.0)
     }
 
     #[test]
