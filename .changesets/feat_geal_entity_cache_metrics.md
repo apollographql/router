@@ -1,4 +1,4 @@
-### Entity cache: convert spans and metrics to the new format ([PR #5625](https://github.com/apollographql/router/pull/5625))
+### Support new span and metrics formats for entity caching ([PR #5625](https://github.com/apollographql/router/pull/5625))
 
 <!-- [ROUTER-387] -->
 Metrics of the router's entity cache have been converted to the latest format with support for custom telemetry.
