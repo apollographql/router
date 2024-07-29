@@ -198,6 +198,7 @@ mod helpers {
     use crate::link::spec::Identity;
     use crate::link::Link;
     use crate::query_graph::extract_subgraphs_from_supergraph::new_empty_fed_2_subgraph_schema;
+    use crate::schema::position::ObjectFieldDefinitionPosition;
     use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
     use crate::schema::position::ObjectTypeDefinitionPosition;
     use crate::schema::position::SchemaRootDefinitionKind;
@@ -731,12 +732,19 @@ mod helpers {
                             &self.directive_deny_list,
                             &parent_type.directives,
                         ),
-                        fields: IndexMap::from_iter([(
-                            field_def.name.clone(),
-                            Component::new(field_def.clone()),
-                        )]),
+                        // don't insert field def here. if the type already existed
+                        // which happens with circular references, then this defintion
+                        // won't be used.
+                        fields: Default::default()
                     })
                 )?;
+
+                let pos = ObjectFieldDefinitionPosition {
+                    type_name: parent_type.name.clone(),
+                    field_name: field_def.name.clone(),
+                };
+
+                pos.insert(to_schema, field_def.into())?;
 
                 // Return the dummy field to add to the root Query
                 FieldDefinition {
