@@ -12,6 +12,5 @@ telemetry:
           service.version: 1.0
 ```
 
-Overrides the version to `1.0`.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/5689
