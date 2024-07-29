@@ -73,5 +73,5 @@ type User {
 }
 
 type Query {
-  users: [User]
+  users(limit: Int): [User]
 }

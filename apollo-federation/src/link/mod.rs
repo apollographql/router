@@ -6,9 +6,11 @@ use std::sync::Arc;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
 use apollo_compiler::name;
+use apollo_compiler::schema::Component;
 use apollo_compiler::InvalidNameError;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::Schema;
 use thiserror::Error;
 
 use crate::error::FederationError;
@@ -328,6 +330,24 @@ impl Link {
             imports,
             purpose,
         })
+    }
+
+    pub fn for_identity<'schema>(
+        schema: &'schema Schema,
+        identity: &Identity,
+    ) -> Option<(Self, &'schema Component<Directive>)> {
+        schema
+            .schema_definition
+            .directives
+            .iter()
+            .find_map(|directive| {
+                let link = Link::from_directive_application(directive).ok()?;
+                if link.url.identity == *identity {
+                    Some((link, directive))
+                } else {
+                    None
+                }
+            })
     }
 }
 

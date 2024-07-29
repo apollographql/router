@@ -67,7 +67,10 @@ static NEXT_ID: atomic::AtomicUsize = atomic::AtomicUsize::new(1);
 ///
 /// Note that we shouldn't add `derive(Serialize, Deserialize)` to this without changing the types
 /// to be something like UUIDs.
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+// NOTE(@TylerBloom): This feature gate can be removed once the condition in the comment above is
+// met. Note that there are `serde(skip)` statements that should be removed once this is removed.
+#[cfg_attr(feature = "snapshot_tracing", derive(Serialize))]
 pub(crate) struct SelectionId(usize);
 
 impl SelectionId {
@@ -631,6 +634,7 @@ pub(crate) enum SelectionKey {
     },
     Defer {
         /// Unique selection ID used to distinguish deferred fragment spreads that cannot be merged.
+        #[cfg_attr(not(feature = "snapshot_tracing"), serde(skip))]
         deferred_id: SelectionId,
     },
 }
@@ -1467,6 +1471,7 @@ mod fragment_spread_selection {
         // on different locations. While we now keep track of those references, they are currently ignored.
         #[serde(serialize_with = "crate::display_helpers::serialize_as_string")]
         pub(crate) fragment_directives: Arc<executable::DirectiveList>,
+        #[cfg_attr(not(feature = "snapshot_tracing"), serde(skip))]
         pub(crate) selection_id: SelectionId,
     }
 
@@ -1759,6 +1764,7 @@ mod inline_fragment_selection {
         pub(crate) type_condition_position: Option<CompositeTypeDefinitionPosition>,
         #[serde(serialize_with = "crate::display_helpers::serialize_as_string")]
         pub(crate) directives: Arc<executable::DirectiveList>,
+        #[cfg_attr(not(feature = "snapshot_tracing"), serde(skip))]
         pub(crate) selection_id: SelectionId,
     }
 
