@@ -1342,6 +1342,39 @@ impl Selector for SubgraphSelector {
                     .canonical_reason()
                     .map(|reason| reason.into()),
             },
+            SubgraphSelector::SubgraphOperationKind { .. } => response
+                .context
+                .get::<_, String>(OPERATION_KIND)
+                .ok()
+                .flatten()
+                .map(opentelemetry::Value::from),
+            SubgraphSelector::SupergraphOperationKind { .. } => response
+                .context
+                .get::<_, String>(OPERATION_KIND)
+                .ok()
+                .flatten()
+                .map(opentelemetry::Value::from),
+            SubgraphSelector::SupergraphOperationName {
+                supergraph_operation_name,
+                default,
+                ..
+            } => {
+                let op_name = response.context.get(OPERATION_NAME).ok().flatten();
+                match supergraph_operation_name {
+                    OperationName::String => op_name.or_else(|| default.clone()),
+                    OperationName::Hash => op_name.or_else(|| default.clone()).map(|op_name| {
+                        let mut hasher = sha2::Sha256::new();
+                        hasher.update(op_name.as_bytes());
+                        let result = hasher.finalize();
+                        hex::encode(result)
+                    }),
+                }
+                .map(opentelemetry::Value::from)
+            }
+            SubgraphSelector::SubgraphName { subgraph_name } if *subgraph_name => response
+                .subgraph_name
+                .clone()
+                .map(opentelemetry::Value::from),
             SubgraphSelector::SubgraphResponseBody {
                 subgraph_response_body,
                 default,
@@ -1437,6 +1470,33 @@ impl Selector for SubgraphSelector {
 
     fn on_error(&self, error: &tower::BoxError, ctx: &Context) -> Option<opentelemetry::Value> {
         match self {
+            SubgraphSelector::SubgraphOperationKind { .. } => ctx
+                .get::<_, String>(OPERATION_KIND)
+                .ok()
+                .flatten()
+                .map(opentelemetry::Value::from),
+            SubgraphSelector::SupergraphOperationKind { .. } => ctx
+                .get::<_, String>(OPERATION_KIND)
+                .ok()
+                .flatten()
+                .map(opentelemetry::Value::from),
+            SubgraphSelector::SupergraphOperationName {
+                supergraph_operation_name,
+                default,
+                ..
+            } => {
+                let op_name = ctx.get(OPERATION_NAME).ok().flatten();
+                match supergraph_operation_name {
+                    OperationName::String => op_name.or_else(|| default.clone()),
+                    OperationName::Hash => op_name.or_else(|| default.clone()).map(|op_name| {
+                        let mut hasher = sha2::Sha256::new();
+                        hasher.update(op_name.as_bytes());
+                        let result = hasher.finalize();
+                        hex::encode(result)
+                    }),
+                }
+                .map(opentelemetry::Value::from)
+            }
             SubgraphSelector::Error { .. } => Some(error.to_string().into()),
             SubgraphSelector::Static(val) => Some(val.clone().into()),
             SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
@@ -2547,6 +2607,14 @@ mod test {
         assert_eq!(
             selector.on_request(
                 &crate::services::SubgraphRequest::fake_builder()
+                    .context(context.clone())
+                    .build(),
+            ),
+            Some("query".into())
+        );
+        assert_eq!(
+            selector.on_response(
+                &crate::services::SubgraphResponse::fake_builder()
                     .context(context)
                     .build(),
             ),
@@ -2563,6 +2631,15 @@ mod test {
         assert_eq!(
             selector.on_request(
                 &crate::services::SubgraphRequest::fake_builder()
+                    .context(context.clone())
+                    .subgraph_name("test".to_string())
+                    .build(),
+            ),
+            Some("test".into())
+        );
+        assert_eq!(
+            selector.on_response(
+                &crate::services::SubgraphResponse::fake_builder()
                     .context(context)
                     .subgraph_name("test".to_string())
                     .build(),
@@ -2698,6 +2775,14 @@ mod test {
         assert_eq!(
             selector.on_request(
                 &crate::services::SubgraphRequest::fake_builder()
+                    .context(context.clone())
+                    .build(),
+            ),
+            Some("topProducts".into())
+        );
+        assert_eq!(
+            selector.on_response(
+                &crate::services::SubgraphResponse::fake_builder()
                     .context(context)
                     .build(),
             ),
