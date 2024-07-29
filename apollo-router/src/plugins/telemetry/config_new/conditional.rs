@@ -334,6 +334,10 @@ where
             _ => None,
         }
     }
+
+    fn is_active(&self, stage: super::Stage) -> bool {
+        self.selector.is_active(stage)
+    }
 }
 
 /// Custom Deserializer for attributes that will deserialize into a custom field if possible, but otherwise into one of the pre-defined attributes.

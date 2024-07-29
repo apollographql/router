@@ -456,6 +456,13 @@ where
             SelectorOrValue::Selector(selector) => selector.on_drop(),
         }
     }
+
+    fn is_active(&self, stage: super::Stage) -> bool {
+        match self {
+            SelectorOrValue::Value(_) => true,
+            SelectorOrValue::Selector(selector) => selector.is_active(stage),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -544,6 +551,10 @@ mod test {
                 Static(v) => Some((*v).into()),
                 _ => None,
             }
+        }
+
+        fn is_active(&self, _stage: crate::plugins::telemetry::config_new::Stage) -> bool {
+            true
         }
     }
 

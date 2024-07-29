@@ -51,6 +51,15 @@ pub(crate) trait Selectors {
     }
 }
 
+pub(crate) enum Stage {
+    Request,
+    Response,
+    ResponseEvent,
+    ResponseField,
+    Error,
+    Drop,
+}
+
 pub(crate) trait Selector {
     type Request;
     type Response;
@@ -79,6 +88,8 @@ pub(crate) trait Selector {
     fn on_drop(&self) -> Option<Value> {
         None
     }
+
+    fn is_active(&self, stage: Stage) -> bool;
 }
 
 pub(crate) trait DefaultForLevel {
