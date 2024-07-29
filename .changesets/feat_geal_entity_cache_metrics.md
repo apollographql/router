@@ -40,4 +40,6 @@ telemetry:
 
 ```
 
+To learn more, go to [Entity caching docs](https://www.apollographql.com/docs/router/configuration/entity-caching).
+
 By [@Geal](https://github.com/Geal) and [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5625
