@@ -4044,10 +4044,7 @@ impl Field {
 }
 
 impl FieldSelection {
-    fn collect_variables<'selection>(
-        &'selection self,
-        variables: &mut HashSet<&'selection Name>,
-    ) {
+    fn collect_variables<'selection>(&'selection self, variables: &mut HashSet<&'selection Name>) {
         self.field.collect_variables(variables);
         if let Some(set) = &self.selection_set {
             set.collect_variables(variables);
@@ -4064,10 +4061,7 @@ impl InlineFragment {
 }
 
 impl InlineFragmentSelection {
-    fn collect_variables<'selection>(
-        &'selection self,
-        variables: &mut HashSet<&'selection Name>,
-    ) {
+    fn collect_variables<'selection>(&'selection self, variables: &mut HashSet<&'selection Name>) {
         self.inline_fragment.collect_variables(variables);
         self.selection_set.collect_variables(variables);
     }
@@ -4085,20 +4079,14 @@ impl FragmentSpread {
 }
 
 impl FragmentSpreadSelection {
-    fn collect_variables<'selection>(
-        &'selection self,
-        variables: &mut HashSet<&'selection Name>,
-    ) {
+    fn collect_variables<'selection>(&'selection self, variables: &mut HashSet<&'selection Name>) {
         self.spread.collect_variables(variables);
         self.selection_set.collect_variables(variables);
     }
 }
 
 impl Selection {
-    fn collect_variables<'selection>(
-        &'selection self,
-        variables: &mut HashSet<&'selection Name>,
-    ) {
+    fn collect_variables<'selection>(&'selection self, variables: &mut HashSet<&'selection Name>) {
         match self {
             Selection::Field(field) => field.collect_variables(variables),
             Selection::InlineFragment(frag) => frag.collect_variables(variables),
@@ -4116,10 +4104,7 @@ impl SelectionSet {
         variables
     }
 
-    fn collect_variables<'selection>(
-        &'selection self,
-        variables: &mut HashSet<&'selection Name>,
-    ) {
+    fn collect_variables<'selection>(&'selection self, variables: &mut HashSet<&'selection Name>) {
         for selection in self.selections.values() {
             selection.collect_variables(variables);
         }

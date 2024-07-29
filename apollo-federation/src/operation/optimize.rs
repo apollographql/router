@@ -40,9 +40,9 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use apollo_compiler::executable;
+use apollo_compiler::executable::VariableDefinition;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::executable::VariableDefinition;
 
 use super::Containment;
 use super::ContainmentOptions;
@@ -67,13 +67,19 @@ struct ReuseContext<'a> {
     operation_variables: Option<HashSet<&'a Name>>,
 }
 
-impl <'a> ReuseContext<'a> {
+impl<'a> ReuseContext<'a> {
     fn for_fragments(fragments: &'a NamedFragments) -> Self {
-        Self { fragments, operation_variables: None }
+        Self {
+            fragments,
+            operation_variables: None,
+        }
     }
 
     // Taking two separate parameters so the caller can still mutate the operation's selection set.
-    fn for_operation(fragments: &'a NamedFragments, operation_variables: &'a Vec<Node<VariableDefinition>>) -> Self {
+    fn for_operation(
+        fragments: &'a NamedFragments,
+        operation_variables: &'a Vec<Node<VariableDefinition>>,
+    ) -> Self {
         Self {
             fragments,
             operation_variables: Some(operation_variables.iter().map(|var| &var.name).collect()),
@@ -892,7 +898,9 @@ impl SelectionSet {
         // fragment whose type _is_ the fragment condition (at which point, this
         // `can_apply_directly_at_type` method will apply. Also note that this is because we have
         // this restriction that calling `expanded_selection_set_at_type` is ok.
-        let candidates = context.fragments.get_all_may_apply_directly_at_type(parent_type);
+        let candidates = context
+            .fragments
+            .get_all_may_apply_directly_at_type(parent_type);
 
         // First, we check which of the candidates do apply inside the selection set, if any. If we
         // find a candidate that applies to the whole selection set, then we stop and only return
@@ -1512,7 +1520,8 @@ impl Operation {
 
         // Optimize the operation's selection set by re-using existing fragments.
         let before_optimization = self.selection_set.clone();
-        self.selection_set.reuse_fragments(&ReuseContext::for_operation(fragments, &self.variables))?;
+        self.selection_set
+            .reuse_fragments(&ReuseContext::for_operation(fragments, &self.variables))?;
         if before_optimization == self.selection_set {
             return Ok(());
         }
