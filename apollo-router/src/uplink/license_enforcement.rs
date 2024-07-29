@@ -725,6 +725,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(not(windows))] // http::uri::Uri parsing appears to reject unix:// on Windows
     fn test_restricted_unix_socket_via_schema() {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
