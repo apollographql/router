@@ -590,11 +590,7 @@ impl VariableExpression {
             }
             Ok(Some(self.value_as_string(child_value)))
         } else if self.required {
-            return Err(format!(
-                "Missing required variable {} in {}",
-                self.var_path,
-                JSON::Object(vars.clone()),
-            ));
+            return Err(format!("Missing required variable {}", self.var_path,));
         } else {
             return Ok(None);
         }

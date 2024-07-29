@@ -327,7 +327,7 @@ mod test_make_uri {
                 .err()
                 .unwrap()
                 .to_string(),
-            "Could not generate path from inputs: Missing required variable user_id in {}"
+            "Could not generate path from inputs: Missing required variable user_id"
         );
 
         assert_eq!(
@@ -374,7 +374,7 @@ mod test_make_uri {
             .err()
             .unwrap()
             .to_string(),
-            r#"Could not generate path from inputs: Missing required variable d in {"b":"456","f.g":"abc","user_id":"123"}"#
+            r#"Could not generate path from inputs: Missing required variable d"#
         );
 
         assert_eq!(
@@ -428,7 +428,7 @@ mod test_make_uri {
             .err()
             .unwrap()
             .to_string(),
-            r#"Could not generate path from inputs: Missing required variable a.b.c in {"repo.name":"repo","user.login":"user"}"#
+            r#"Could not generate path from inputs: Missing required variable a.b.c"#
         );
 
         assert_eq!(
@@ -545,7 +545,7 @@ mod test_make_uri {
             .err()
             .unwrap()
             .to_string(),
-            r#"Could not generate path from inputs: Missing required variable x in {"y":2,"z":3}"#,
+            r#"Could not generate path from inputs: Missing required variable x"#,
         );
 
         assert_eq!(
@@ -561,7 +561,7 @@ mod test_make_uri {
             .err()
             .unwrap()
             .to_string(),
-            r#"Could not generate path from inputs: Missing required variable z in {"x":1,"y":2}"#
+            r#"Could not generate path from inputs: Missing required variable z"#
         );
 
         assert_eq!(
@@ -580,7 +580,7 @@ mod test_make_uri {
             .err()
             .unwrap()
             .to_string(),
-            r#"Could not generate path from inputs: Missing required variable d in {"b":4,"c":5,"x":1,"y":2,"z":3}"#
+            r#"Could not generate path from inputs: Missing required variable d"#
         );
 
         assert_eq!(
@@ -659,7 +659,7 @@ mod test_make_uri {
             .err()
             .unwrap()
             .to_string(),
-            r#"Could not generate path from inputs: Missing required variable p2.z in {"p1.x":1,"p1.y":2,"p1.z":3,"p2.x":4,"p2.y":5}"#
+            r#"Could not generate path from inputs: Missing required variable p2.z"#
         );
 
         assert_eq!(
@@ -678,7 +678,7 @@ mod test_make_uri {
             .err()
             .unwrap()
             .to_string(),
-            r#"Could not generate path from inputs: Missing required variable p1.y in {"p1.x":1,"p1.z":3,"p2.x":4,"p2.y":5,"p2.z":6}"#
+            r#"Could not generate path from inputs: Missing required variable p1.y"#
         );
     }
 
