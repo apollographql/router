@@ -1,6 +1,7 @@
 ### Allow overriding of service version ([PR #5689](https://github.com/apollographql/router/pull/5689))
 
-Previously `service.version` was not overridable via yaml and was ignored. It is now possible to set this explicitly which can be useful for users producing custom builds of the Router.
+The router now supports configuration of `service.version` via YAML file configuration. This enables users to produce custom versioned builds of the router.
+
 
 The following example overrides the version to be `1.0`:
 ```yaml
