@@ -4028,17 +4028,17 @@ fn collect_variables_from_directive<'selection>(
     variables: &mut HashSet<&'selection Name>,
 ) {
     for arg in directive.arguments.iter() {
-        collect_variables_from_value(&arg.value, variables)
+        collect_variables_from_value(&arg.value, variables);
     }
 }
 
 impl Field {
     fn collect_variables<'selection>(&'selection self, variables: &mut HashSet<&'selection Name>) {
         for arg in self.arguments.iter() {
-            collect_variables_from_value(&arg.value, variables)
+            collect_variables_from_value(&arg.value, variables);
         }
         for dir in self.directives.iter() {
-            collect_variables_from_directive(dir, variables)
+            collect_variables_from_directive(dir, variables);
         }
     }
 }
@@ -4049,19 +4049,18 @@ impl FieldSelection {
     fn collect_variables<'selection>(
         &'selection self,
         variables: &mut HashSet<&'selection Name>,
-    ) -> Result<(), FederationError> {
+    ) {
         self.field.collect_variables(variables);
         if let Some(set) = &self.selection_set {
-            set.collect_variables(variables)?
+            set.collect_variables(variables);
         }
-        Ok(())
     }
 }
 
 impl InlineFragment {
     fn collect_variables<'selection>(&'selection self, variables: &mut HashSet<&'selection Name>) {
         for dir in self.directives.iter() {
-            collect_variables_from_directive(dir, variables)
+            collect_variables_from_directive(dir, variables);
         }
     }
 }
@@ -4072,40 +4071,53 @@ impl InlineFragmentSelection {
     fn collect_variables<'selection>(
         &'selection self,
         variables: &mut HashSet<&'selection Name>,
-    ) -> Result<(), FederationError> {
+    ) {
         self.inline_fragment.collect_variables(variables);
-        self.selection_set.collect_variables(variables)
+        self.selection_set.collect_variables(variables);
+    }
+}
+
+impl FragmentSpread {
+    fn collect_variables<'selection>(&'selection self, variables: &mut HashSet<&'selection Name>) {
+        for dir in self.directives.iter() {
+            collect_variables_from_directive(dir, variables);
+        }
+        for dir in self.fragment_directives.iter() {
+            collect_variables_from_directive(dir, variables);
+        }
+    }
+}
+
+impl FragmentSpreadSelection {
+    fn collect_variables<'selection>(
+        &'selection self,
+        variables: &mut HashSet<&'selection Name>,
+    ) {
+        self.spread.collect_variables(variables);
+        self.selection_set.collect_variables(variables);
     }
 }
 
 impl Selection {
-    /// # Errors
-    /// Returns an error if the selection contains a named fragment spread.
     fn collect_variables<'selection>(
         &'selection self,
         variables: &mut HashSet<&'selection Name>,
-    ) -> Result<(), FederationError> {
+    ) {
         match self {
             Selection::Field(field) => field.collect_variables(variables),
-            Selection::InlineFragment(inline_fragment) => {
-                inline_fragment.collect_variables(variables)
-            }
-            Selection::FragmentSpread(_) => Err(FederationError::internal(
-                "collect_variables(): unexpected fragment spread",
-            )),
+            Selection::InlineFragment(frag) => frag.collect_variables(variables),
+            Selection::FragmentSpread(frag) => frag.collect_variables(variables),
         }
     }
 }
 
 impl SelectionSet {
-    /// Returns the variable names that are used by this selection set.
-    ///
-    /// # Errors
-    /// Returns an error if the selection set contains a named fragment spread.
-    pub(crate) fn used_variables(&self) -> Result<HashSet<&'_ Name>, FederationError> {
+    /// Returns the variable names that are used by this selection set, including through fragment
+    /// spreads.
+    pub(crate) fn used_variables(&self) -> HashSet<&'_ Name> {
         let mut variables = HashSet::new();
-        self.collect_variables(&mut variables)?;
-        Ok(variables)
+        self.collect_variables(&mut variables);
+        variables
     }
 
     /// # Errors
@@ -4113,11 +4125,10 @@ impl SelectionSet {
     fn collect_variables<'selection>(
         &'selection self,
         variables: &mut HashSet<&'selection Name>,
-    ) -> Result<(), FederationError> {
+    ) {
         for selection in self.selections.values() {
-            selection.collect_variables(variables)?
+            selection.collect_variables(variables);
         }
-        Ok(())
     }
 }
 

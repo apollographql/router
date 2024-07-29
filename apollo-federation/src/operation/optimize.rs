@@ -918,10 +918,11 @@ impl SelectionSet {
             // over fragment reuse, and so we do not want to invest a lot of time into improving
             // fragment reuse. We do the simple, less-than-ideal thing.
             if let Some(variable_definitions) = &context.operation_variables {
-                let fragment_variables = candidate.selection_set.used_variables()?;
-                if let Some(missing) = fragment_variables
+                let fragment_variables = candidate.selection_set.used_variables();
+                if fragment_variables
                     .difference(variable_definitions)
                     .next()
+                    .is_some()
                 {
                     continue;
                 }
@@ -1511,7 +1512,7 @@ impl Operation {
 
         // Optimize the operation's selection set by re-using existing fragments.
         let before_optimization = self.selection_set.clone();
-        self.selection_set.reuse_fragments(&ReuseContext::for_operation(&self.named_fragments, &self.variables))?;
+        self.selection_set.reuse_fragments(&ReuseContext::for_operation(fragments, &self.variables))?;
         if before_optimization == self.selection_set {
             return Ok(());
         }
