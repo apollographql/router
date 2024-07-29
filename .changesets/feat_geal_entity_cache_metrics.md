@@ -3,7 +3,7 @@
 <!-- [ROUTER-387] -->
 This converts the entity cache metrics to the new metric format and using the custom telemetry stack.
 
-Here is an example of configuration:
+The following example configuration shows the the `cache` instrument, the `cache` selector in the subgraph service, and the `cache` attribute of a subgraph span: 
 
 ```yaml
 telemetry:
