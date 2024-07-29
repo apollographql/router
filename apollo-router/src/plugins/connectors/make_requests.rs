@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable::Selection;
 use apollo_federation::sources::connect::Connector;
@@ -128,11 +130,27 @@ pub(crate) enum ResponseTypeName {
     Omitted,
 }
 
+type ConnectorRequestMap = HashMap<String, u32>;
+
 pub(crate) fn make_requests(
     request: connect::Request,
     connector: &Connector,
     debug: &mut Option<ConnectorContext>,
 ) -> Result<Vec<(http::Request<RouterBody>, ResponseKey)>, MakeRequestError> {
+    if let Some(source_name) = connector.source_name() {
+        request.context.extensions().with_lock(|mut lock| {
+            let map = lock.get_or_default_mut::<ConnectorRequestMap>();
+            let v = map
+                .entry(source_name.to_string())
+                .and_modify(|count| *count += 1)
+                .or_insert(1);
+
+            if *v > connector.max_requests_per_operation {
+                return todo!("return a placeholder request/response key to indicate the limit was reached and errors should end up in the response");
+            }
+        });
+    }
+
     let request_params = match connector.entity_resolver {
         Some(EntityResolver::Explicit) => entities_from_request(&request),
         Some(EntityResolver::Implicit) => entities_with_fields_from_request(&request),
@@ -1278,6 +1296,7 @@ mod tests {
             selection: JSONSelection::parse(".data").unwrap().1,
             entity_resolver: None,
             config: Default::default(),
+            max_requests_per_operation: 1,
         };
 
         let requests = super::make_requests(req, &connector, &mut None).unwrap();

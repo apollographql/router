@@ -270,6 +270,7 @@ mod tests {
             selection: JSONSelection::parse(".data").unwrap().1,
             entity_resolver: None,
             config: Default::default(),
+            max_requests_per_operation: 1,
         };
 
         let response1 = http::Response::builder()
@@ -357,6 +358,7 @@ mod tests {
             selection: JSONSelection::parse(".data { id }").unwrap().1,
             entity_resolver: Some(EntityResolver::Explicit),
             config: Default::default(),
+            max_requests_per_operation: 1,
         };
 
         let id_field_definition = FieldDefinition {
@@ -469,6 +471,7 @@ mod tests {
             selection: JSONSelection::parse(".data").unwrap().1,
             entity_resolver: Some(EntityResolver::Implicit),
             config: Default::default(),
+            max_requests_per_operation: 1,
         };
 
         let response1 = http::Response::builder()
@@ -575,6 +578,7 @@ mod tests {
             selection: JSONSelection::parse(".data").unwrap().1,
             entity_resolver: Some(EntityResolver::Explicit),
             config: Default::default(),
+            max_requests_per_operation: 1,
         };
 
         let response1 = http::Response::builder()

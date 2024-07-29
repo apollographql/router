@@ -28,6 +28,8 @@ pub struct Connector {
 
     /// The type of entity resolver to use for this connector
     pub entity_resolver: Option<EntityResolver>,
+
+    pub max_requests_per_operation: u32,
 }
 
 pub type CustomConfiguration = Arc<HashMap<String, Value>>;
@@ -52,11 +54,11 @@ impl Connector {
         subgraph_name: &str,
     ) -> Result<IndexMap<ConnectId, Self>, FederationError> {
         let Some(metadata) = schema.metadata() else {
-            return Ok(IndexMap::with_hasher(Default::default()));
+            return Ok(IndexMap::default());
         };
 
         let Some(link) = metadata.for_identity(&ConnectSpecDefinition::identity()) else {
-            return Ok(IndexMap::with_hasher(Default::default()));
+            return Ok(IndexMap::default());
         };
 
         let source_name = ConnectSpecDefinition::source_directive_name(&link);
@@ -116,11 +118,16 @@ impl Connector {
                     selection: args.selection,
                     entity_resolver,
                     config: None,
+                    max_requests_per_operation: 0,
                 };
 
                 Ok((id, connector))
             })
             .collect()
+    }
+
+    pub fn source_name(&self) -> Option<&str> {
+        self.id.source_name.as_deref()
     }
 
     pub fn field_name(&self) -> &Name {

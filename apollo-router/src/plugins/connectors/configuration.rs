@@ -21,6 +21,11 @@ pub(crate) struct ConnectorsConfig {
     /// Enables connector debugging information on response extensions if the feature is enabled
     #[serde(default)]
     pub(crate) debug_extensions: bool,
+
+    /// Set an upper bound on the number of requests genereated by a single operation
+    /// to a specific source (`@source(name:)`) to avoid overloading an upstream service
+    #[serde(default = "default_max_requests_per_source_and_operation")]
+    pub(crate) default_max_requests_per_source_and_operation: u32,
 }
 
 /// Configuration for a connector subgraph
@@ -41,6 +46,11 @@ pub(crate) struct SubgraphConnectorConfiguration {
 pub(crate) struct SourceConfiguration {
     /// Override the `@source(http: {baseURL:})`
     pub(crate) override_url: Option<Url>,
+
+    /// Set an upper bound on the number of requests genereated by a single operation
+    /// for this source to avoid overloading the upstream resources
+    #[serde(default)]
+    pub(crate) max_requests_per_operation: u32,
 }
 
 /// Modifies connectors with values from the configuration
@@ -68,6 +78,14 @@ pub(crate) fn apply_config(config: &Configuration, mut connectors: Connectors) -
         }
 
         connector.config = Some(subgraph_config.custom.clone());
+
+        connector.max_requests_per_operation = source_config
+            .map(|source_config| source_config.max_requests_per_operation)
+            .unwrap_or(config.default_max_requests_per_source_and_operation);
     }
     connectors
+}
+
+fn default_max_requests_per_source_and_operation() -> u32 {
+    100
 }
