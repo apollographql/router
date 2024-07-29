@@ -1,7 +1,7 @@
 ### Entity cache: convert spans and metrics to the new format ([PR #5625](https://github.com/apollographql/router/pull/5625))
 
 <!-- [ROUTER-387] -->
-This converts the entity cache metrics to the new metric format and using the custom telemetry stack.
+Metrics of the router's entity cache have been converted to the latest format with support for custom telemetry.
 
 The following example configuration shows the the `cache` instrument, the `cache` selector in the subgraph service, and the `cache` attribute of a subgraph span: 
 
