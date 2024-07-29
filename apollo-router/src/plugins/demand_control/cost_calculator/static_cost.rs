@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use apollo_compiler::ast::InputValueDefinition;
@@ -67,7 +66,7 @@ impl StaticCostCalculator {
         schema: &Valid<Schema>,
         executable: &ExecutableDocument,
         should_estimate_requires: bool,
-        list_size_from_upstream: Option<f64>,
+        list_size_from_upstream: Option<i32>,
     ) -> Result<f64, DemandControlError> {
         if StaticCostCalculator::skipped_by_directives(field) {
             return Ok(0.0);
@@ -80,21 +79,19 @@ impl StaticCostCalculator {
             ))
         })?;
 
-        let list_size_directive = ListSizeDirective::from_field(&field.definition)?;
+        let list_size_directive = ListSizeDirective::from_field(field)?;
         let instance_count = if !field.ty().is_list() {
-            1.0
+            1
         } else if let Some(value) = list_size_from_upstream {
             value
-        } else if let Some(list_size) = list_size_directive.as_ref() {
-            list_size.expected_size(field)?
-        } else {
-            self.list_size as f64
-        };
-        let sized_fields = list_size_directive
+        } else if let Some(expected_size) = list_size_directive
             .as_ref()
-            .map_or(Ok(Default::default()), |list_size| {
-                list_size.sized_fields(field)
-            })?;
+            .and_then(|list_size| list_size.expected_size)
+        {
+            expected_size
+        } else {
+            self.list_size as i32
+        };
 
         // Determine the cost for this particular field. Scalars are free, non-scalars are not.
         // For fields with selections, add in the cost of the selections as well.
@@ -113,7 +110,7 @@ impl StaticCostCalculator {
             schema,
             executable,
             should_estimate_requires,
-            &sized_fields,
+            list_size_directive.as_ref(),
         )?;
 
         for argument in &field.definition.arguments {
@@ -134,12 +131,12 @@ impl StaticCostCalculator {
                     schema,
                     executable,
                     should_estimate_requires,
-                    &sized_fields,
+                    list_size_directive.as_ref(),
                 )?;
             }
         }
 
-        let cost = instance_count * type_cost + requirements_cost;
+        let cost = (instance_count as f64) * type_cost + requirements_cost;
         tracing::debug!(
             "Field {} cost breakdown: (count) {} * (type cost) {} + (requirements) {} = {}",
             field.name,
@@ -194,7 +191,7 @@ impl StaticCostCalculator {
         schema: &Valid<Schema>,
         executable: &ExecutableDocument,
         should_estimate_requires: bool,
-        sized_fields: &HashMap<&str, f64>,
+        list_size_directive: Option<&ListSizeDirective>,
     ) -> Result<f64, DemandControlError> {
         let fragment = fragment_spread.fragment_def(executable).ok_or_else(|| {
             DemandControlError::QueryParseFailure(format!(
@@ -208,7 +205,7 @@ impl StaticCostCalculator {
             schema,
             executable,
             should_estimate_requires,
-            sized_fields,
+            list_size_directive,
         )
     }
 
@@ -219,7 +216,7 @@ impl StaticCostCalculator {
         schema: &Valid<Schema>,
         executable: &ExecutableDocument,
         should_estimate_requires: bool,
-        sized_fields: &HashMap<&str, f64>,
+        list_size_directive: Option<&ListSizeDirective>,
     ) -> Result<f64, DemandControlError> {
         self.score_selection_set(
             &inline_fragment.selection_set,
@@ -227,7 +224,7 @@ impl StaticCostCalculator {
             schema,
             executable,
             should_estimate_requires,
-            sized_fields,
+            list_size_directive,
         )
     }
 
@@ -253,7 +250,7 @@ impl StaticCostCalculator {
             schema,
             executable,
             should_estimate_requires,
-            &Default::default(),
+            None,
         )?;
 
         Ok(cost)
@@ -266,7 +263,7 @@ impl StaticCostCalculator {
         schema: &Valid<Schema>,
         executable: &ExecutableDocument,
         should_estimate_requires: bool,
-        sized_fields: &HashMap<&str, f64>,
+        list_size_directive: Option<&ListSizeDirective>,
     ) -> Result<f64, DemandControlError> {
         match selection {
             Selection::Field(f) => self.score_field(
@@ -275,7 +272,7 @@ impl StaticCostCalculator {
                 schema,
                 executable,
                 should_estimate_requires,
-                sized_fields.get(f.name.as_str()).copied(),
+                list_size_directive.and_then(|dir| dir.size_of(f)),
             ),
             Selection::FragmentSpread(s) => self.score_fragment_spread(
                 s,
@@ -283,7 +280,7 @@ impl StaticCostCalculator {
                 schema,
                 executable,
                 should_estimate_requires,
-                sized_fields,
+                list_size_directive,
             ),
             Selection::InlineFragment(i) => self.score_inline_fragment(
                 i,
@@ -291,7 +288,7 @@ impl StaticCostCalculator {
                 schema,
                 executable,
                 should_estimate_requires,
-                sized_fields,
+                list_size_directive,
             ),
         }
     }
@@ -303,7 +300,7 @@ impl StaticCostCalculator {
         schema: &Valid<Schema>,
         executable: &ExecutableDocument,
         should_estimate_requires: bool,
-        sized_fields: &HashMap<&str, f64>,
+        list_size_directive: Option<&ListSizeDirective>,
     ) -> Result<f64, DemandControlError> {
         let mut cost = 0.0;
         for selection in selection_set.selections.iter() {
@@ -313,7 +310,7 @@ impl StaticCostCalculator {
                 schema,
                 executable,
                 should_estimate_requires,
-                sized_fields,
+                list_size_directive,
             )?;
         }
         Ok(cost)
