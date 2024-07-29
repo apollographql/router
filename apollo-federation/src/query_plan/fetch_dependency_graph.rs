@@ -45,6 +45,7 @@ use crate::operation::SelectionId;
 use crate::operation::SelectionMap;
 use crate::operation::SelectionSet;
 use crate::operation::TYPENAME_FIELD;
+use crate::operation::VariableCollector;
 use crate::query_graph::extract_subgraphs_from_supergraph::FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME;
 use crate::query_graph::extract_subgraphs_from_supergraph::FEDERATION_REPRESENTATIONS_VAR_NAME;
 use crate::query_graph::graph_path::concat_op_paths;
@@ -2348,11 +2349,18 @@ impl FetchDependencyGraphNode {
             .transpose()?;
         let subgraph_schema = query_graph.schema_by_source(&self.subgraph_name)?;
 
-        let variable_usages = {
-            let set = selection.used_variables();
-            let mut list = set.into_iter().cloned().collect::<Vec<_>>();
-            list.sort();
-            list
+        // Narrow down the variable definitions to only the ones used in the subgraph operation.
+        let variable_definitions = {
+            let mut collector = VariableCollector::new();
+            collector.visit_directive_list(operation_directives);
+            collector.visit_selection_set(&selection);
+            let used_variables = collector.into_inner();
+
+            variable_definitions
+                .iter()
+                .filter(|variable| used_variables.contains(&variable.name))
+                .cloned()
+                .collect::<Vec<_>>()
         };
 
         let mut operation = if self.is_entity_fetch {
@@ -2378,6 +2386,14 @@ impl FetchDependencyGraphNode {
         {
             operation.reuse_fragments(fragments)?;
         }
+
+        let variable_usages = {
+            let mut list = operation.variables.iter()
+                .map(|variable| variable.name.clone()).collect::<Vec<_>>();
+            list.sort();
+            list
+        };
+
         let operation_document = operation.try_into()?;
 
         let node = super::PlanNode::Fetch(Box::new(super::FetchNode {
@@ -2539,20 +2555,11 @@ impl FetchDependencyGraphNode {
 fn operation_for_entities_fetch(
     subgraph_schema: &ValidFederationSchema,
     selection_set: SelectionSet,
-    all_variable_definitions: &[Node<VariableDefinition>],
+    mut variable_definitions: Vec<Node<VariableDefinition>>,
     operation_directives: &Arc<DirectiveList>,
     operation_name: &Option<Name>,
 ) -> Result<Operation, FederationError> {
-    let mut variable_definitions: Vec<Node<VariableDefinition>> =
-        Vec::with_capacity(all_variable_definitions.len() + 1);
-    variable_definitions.push(representations_variable_definition(subgraph_schema)?);
-    let used_variables = selection_set.used_variables();
-    variable_definitions.extend(
-        all_variable_definitions
-            .iter()
-            .filter(|definition| used_variables.contains(&definition.name))
-            .cloned(),
-    );
+    variable_definitions.insert(0, representations_variable_definition(subgraph_schema)?);
 
     let query_type_name = subgraph_schema.schema().root_operation(OperationType::Query).ok_or_else(||
     SingleFederationError::InvalidSubgraph {
@@ -2626,17 +2633,10 @@ fn operation_for_query_fetch(
     subgraph_schema: &ValidFederationSchema,
     root_kind: SchemaRootDefinitionKind,
     selection_set: SelectionSet,
-    variable_definitions: &[Node<VariableDefinition>],
+    variable_definitions: Vec<Node<VariableDefinition>>,
     operation_directives: &Arc<DirectiveList>,
     operation_name: &Option<Name>,
 ) -> Result<Operation, FederationError> {
-    let used_variables = selection_set.used_variables();
-    let variable_definitions = variable_definitions
-        .iter()
-        .filter(|definition| used_variables.contains(&definition.name))
-        .cloned()
-        .collect();
-
     Ok(Operation {
         schema: subgraph_schema.clone(),
         root_kind,

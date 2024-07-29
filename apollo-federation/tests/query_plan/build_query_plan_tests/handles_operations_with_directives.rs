@@ -169,7 +169,7 @@ fn test_if_directives_on_mutations_are_passed_down_to_subgraph_queries() {
       @r###"
       QueryPlan {
         Fetch(service: "subgraphA") {
-              mutation TestMutation__subgraphA__0 {
+          {
             updateFoo(bar: "something") @field {
               id @field
               bar @field

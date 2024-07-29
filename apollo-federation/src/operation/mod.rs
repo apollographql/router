@@ -3671,97 +3671,106 @@ impl RebasedFragments {
 
 // Collect used variables from operation types.
 
-fn collect_variables_from_value<'selection>(
-    value: &'selection executable::Value,
-    variables: &mut HashSet<&'selection Name>,
-) {
-    match value {
-        executable::Value::Variable(v) => {
-            variables.insert(v);
-        }
-        executable::Value::List(list) => {
-            for value in list {
-                collect_variables_from_value(value, variables);
+pub(crate) struct VariableCollector<'s> {
+    variables: HashSet<&'s Name>,
+}
+
+impl<'s> VariableCollector<'s> {
+    pub(crate) fn new() -> Self {
+        Self { variables: Default::default() }
+    }
+
+    fn visit_value(&mut self, value: &'s executable::Value) {
+        match value {
+            executable::Value::Variable(v) => {
+                self.variables.insert(v);
             }
-        }
-        executable::Value::Object(object) => {
-            for (_key, value) in object {
-                collect_variables_from_value(value, variables);
+            executable::Value::List(list) => {
+                for value in list {
+                    self.visit_value(value);
+                }
             }
+            executable::Value::Object(object) => {
+                for (_key, value) in object {
+                    self.visit_value(value);
+                }
+            }
+            _ => {}
         }
-        _ => {}
+    }
+
+    fn visit_directive(&mut self, directive: &'s executable::Directive) {
+        for arg in directive.arguments.iter() {
+            self.visit_value(&arg.value);
+        }
+    }
+
+    pub(crate) fn visit_directive_list(&mut self, directives: &'s executable::DirectiveList) {
+        for dir in directives.iter() {
+            self.visit_directive(dir);
+        }
+    }
+
+    fn visit_field(&mut self, field: &'s Field) {
+        for arg in field.arguments.iter() {
+            self.visit_value(&arg.value);
+        }
+        self.visit_directive_list(&field.directives);
+    }
+
+    fn visit_field_selection(&mut self, selection: &'s FieldSelection) {
+        self.visit_field(&selection.field);
+        if let Some(set) = &selection.selection_set {
+            self.visit_selection_set(set);
+        }
+    }
+
+    fn visit_inline_fragment(&mut self, fragment: &'s InlineFragment) {
+        self.visit_directive_list(&fragment.directives);
+    }
+
+    fn visit_inline_fragment_selection(&mut self, selection: &'s InlineFragmentSelection) {
+        self.visit_inline_fragment(&selection.inline_fragment);
+        self.visit_selection_set(&selection.selection_set);
+    }
+
+    fn visit_fragment_spread(&mut self, fragment: &'s FragmentSpread) {
+        self.visit_directive_list(&fragment.directives);
+        self.visit_directive_list(&fragment.fragment_directives);
+    }
+
+    fn visit_fragment_spread_selection(&mut self, selection: &'s FragmentSpreadSelection) {
+        self.visit_fragment_spread(&selection.spread);
+        self.visit_selection_set(&selection.selection_set);
+    }
+
+    fn visit_selection(&mut self, selection: &'s Selection) {
+        match selection {
+            Selection::Field(field) => self.visit_field_selection(field),
+            Selection::InlineFragment(frag) => self.visit_inline_fragment_selection(frag),
+            Selection::FragmentSpread(frag) => self.visit_fragment_spread_selection(frag),
+        }
+    }
+
+    pub(crate) fn visit_selection_set(&mut self, selection_set: &'s SelectionSet) {
+        for selection in selection_set.iter() {
+            self.visit_selection(selection);
+        }
+    }
+
+    /// Consume the collector and return the collected names.
+    pub(crate) fn into_inner(self) -> HashSet<&'s Name> {
+        self.variables
     }
 }
 
-fn collect_variables_from_directive<'selection>(
-    directive: &'selection executable::Directive,
-    variables: &mut HashSet<&'selection Name>,
-) {
-    for arg in directive.arguments.iter() {
-        collect_variables_from_value(&arg.value, variables);
-    }
-}
-
-impl Field {
-    fn collect_variables<'selection>(&'selection self, variables: &mut HashSet<&'selection Name>) {
-        for arg in self.arguments.iter() {
-            collect_variables_from_value(&arg.value, variables);
-        }
-        for dir in self.directives.iter() {
-            collect_variables_from_directive(dir, variables);
-        }
-    }
-}
-
-impl FieldSelection {
-    fn collect_variables<'selection>(&'selection self, variables: &mut HashSet<&'selection Name>) {
-        self.field.collect_variables(variables);
-        if let Some(set) = &self.selection_set {
-            set.collect_variables(variables);
-        }
-    }
-}
-
-impl InlineFragment {
-    fn collect_variables<'selection>(&'selection self, variables: &mut HashSet<&'selection Name>) {
-        for dir in self.directives.iter() {
-            collect_variables_from_directive(dir, variables);
-        }
-    }
-}
-
-impl InlineFragmentSelection {
-    fn collect_variables<'selection>(&'selection self, variables: &mut HashSet<&'selection Name>) {
-        self.inline_fragment.collect_variables(variables);
-        self.selection_set.collect_variables(variables);
-    }
-}
-
-impl FragmentSpread {
-    fn collect_variables<'selection>(&'selection self, variables: &mut HashSet<&'selection Name>) {
-        for dir in self.directives.iter() {
-            collect_variables_from_directive(dir, variables);
-        }
-        for dir in self.fragment_directives.iter() {
-            collect_variables_from_directive(dir, variables);
-        }
-    }
-}
-
-impl FragmentSpreadSelection {
-    fn collect_variables<'selection>(&'selection self, variables: &mut HashSet<&'selection Name>) {
-        self.spread.collect_variables(variables);
-        self.selection_set.collect_variables(variables);
-    }
-}
-
-impl Selection {
-    fn collect_variables<'selection>(&'selection self, variables: &mut HashSet<&'selection Name>) {
-        match self {
-            Selection::Field(field) => field.collect_variables(variables),
-            Selection::InlineFragment(frag) => frag.collect_variables(variables),
-            Selection::FragmentSpread(frag) => frag.collect_variables(variables),
-        }
+impl Fragment {
+    /// Returns the variable names that are used by this fragment.
+    pub(crate) fn used_variables(&self) -> HashSet<&'_ Name> {
+        let mut collector = VariableCollector::new();
+        collector.visit_directive_list(&self.directives);
+        collector.visit_selection_set(&self.selection_set);
+        collector.into_inner()
     }
 }
 
@@ -3769,15 +3778,9 @@ impl SelectionSet {
     /// Returns the variable names that are used by this selection set, including through fragment
     /// spreads.
     pub(crate) fn used_variables(&self) -> HashSet<&'_ Name> {
-        let mut variables = HashSet::new();
-        self.collect_variables(&mut variables);
-        variables
-    }
-
-    fn collect_variables<'selection>(&'selection self, variables: &mut HashSet<&'selection Name>) {
-        for selection in self.selections.values() {
-            selection.collect_variables(variables);
-        }
+        let mut collector = VariableCollector::new();
+        collector.visit_selection_set(self);
+        collector.into_inner()
     }
 }
 
