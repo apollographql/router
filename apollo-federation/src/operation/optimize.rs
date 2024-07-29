@@ -78,7 +78,7 @@ impl<'a> ReuseContext<'a> {
     // Taking two separate parameters so the caller can still mutate the operation's selection set.
     fn for_operation(
         fragments: &'a NamedFragments,
-        operation_variables: &'a Vec<Node<VariableDefinition>>,
+        operation_variables: &'a [Node<VariableDefinition>],
     ) -> Self {
         Self {
             fragments,
