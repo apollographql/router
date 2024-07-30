@@ -1,8 +1,8 @@
-### Datadog span metrics are now supported ([PR #5609](https://github.com/apollographql/router/pull/5609))
+### Support Datadog span metrics ([PR #5609](https://github.com/apollographql/router/pull/5609))
 
-When using the APM view in Datadog, span metrics will be displayed for any span that was a top level span or has the `_dd.measured` flag set.
+When using the APM view in Datadog, the router now displays span metrics for top-level spans or spans with the `_dd.measured` flag set.
 
-Apollo Router now sets the `_dd.measured` flag by default for the following spans:
+The router sets the `_dd.measured` flag by default for the following spans:
 
 * `request`
 * `router`
@@ -14,7 +14,7 @@ Apollo Router now sets the `_dd.measured` flag by default for the following span
 * `execution`
 * `query_parsing`
 
-You can override this behaviour to enable or disable span metrics for any span by setting the `span_metrics` configuration in the Datadog exporter configuration.
+To enable or disable span metrics for any span, configure `span_metrics` for the Datadog exporter:
 
 ```yaml
 telemetry:
