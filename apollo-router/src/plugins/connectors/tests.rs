@@ -5,10 +5,9 @@ use apollo_compiler::execution::JsonMap;
 use http::header::CONTENT_TYPE;
 use itertools::EitherOrBoth;
 use itertools::Itertools;
-use json_value_merge::Merge;
 use mime::APPLICATION_JSON;
 use req_asserts::Matcher;
-use serde_json::json;
+use serde_json_bytes::json;
 use tower::ServiceExt;
 use tracing_fluent_assertions::AssertionRegistry;
 use tracing_fluent_assertions::AssertionsLayer;
@@ -23,6 +22,7 @@ use wiremock::Mock;
 use wiremock::MockServer;
 use wiremock::ResponseTemplate;
 
+use crate::json_ext::ValueExt;
 use crate::plugins::connectors::tracing::CONNECT_SPAN_NAME;
 use crate::router_factory::RouterSuperServiceFactory;
 use crate::router_factory::YamlRouterFactory;
@@ -716,7 +716,7 @@ async fn execute(
     uri: &str,
     query: &str,
     variables: JsonMap,
-    config: Option<serde_json::Value>,
+    config: Option<serde_json_bytes::Value>,
     mut request_mutator: impl FnMut(&mut Request),
 ) -> serde_json::Value {
     let connector_uri = format!("{}/", uri);
@@ -725,28 +725,32 @@ async fn execute(
     // we cannot use Testharness because the subgraph connectors are actually extracted in YamlRouterFactory
     let mut factory = YamlRouterFactory;
 
-    let mut config = config.unwrap_or(json!({
-      "include_subgraph_errors": { "all": true },
-    }));
-    config
-        .merge_in(
-            "/preview_connectors/subgraphs/connectors/sources",
-            &json!({
-                "json": {
-                  "override_url": connector_uri
+    let common_config = json!({
+        "include_subgraph_errors": { "all": true },
+        "override_subgraph_url": {"graphql": subgraph_uri},
+        "preview_connectors": {
+            "subgraphs": {
+                "connectors": {
+                    "sources": {
+                        "json": {
+                            "override_url": connector_uri
+                        }
+                    }
                 }
-            }),
-        )
-        .unwrap();
-
-    config["override_subgraph_url"] = json!({
-      "graphql": subgraph_uri
+            }
+        }
     });
+    let config = if let Some(mut config) = config {
+        config.deep_merge(common_config);
+        config
+    } else {
+        common_config
+    };
 
     let router_creator = factory
         .create(
             false,
-            Arc::new(serde_json::from_value(config).unwrap()),
+            Arc::new(serde_json_bytes::from_value(config).unwrap()),
             schema.to_string(),
             None,
             None,
