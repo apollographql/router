@@ -12,6 +12,8 @@ use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::plugin::serde::deserialize_json_query;
 use crate::plugin::serde::deserialize_jsonpath;
+use crate::plugins::cache::entity::CacheSubgraph;
+use crate::plugins::cache::metrics::CacheMetricContextKey;
 use crate::plugins::demand_control::CostContext;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::cost::CostValue;
@@ -227,12 +229,6 @@ pub(crate) enum SupergraphValue {
     Custom(SupergraphSelector),
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum EventHolder {
-    EventCustom(SupergraphSelector),
-}
-
 impl From<&SupergraphValue> for InstrumentValue<SupergraphSelector> {
     fn from(value: &SupergraphValue) -> Self {
         match value {
@@ -437,6 +433,10 @@ pub(crate) enum SubgraphSelector {
         #[allow(dead_code)]
         subgraph_operation_kind: OperationKind,
     },
+    SubgraphName {
+        /// The subgraph name
+        subgraph_name: bool,
+    },
     SubgraphQuery {
         /// The graphql query to the subgraph.
         subgraph_query: SubgraphQuery,
@@ -617,10 +617,42 @@ pub(crate) enum SubgraphSelector {
         r#static: AttributeValue,
     },
     Error {
-        #[allow(dead_code)]
         /// Critical error if it happens
         error: ErrorRepr,
     },
+    Cache {
+        /// Select if you want to get cache hit or cache miss
+        cache: CacheKind,
+        /// Specify the entity type on which you want the cache data. (default: all)
+        entity_type: Option<EntityType>,
+    },
+}
+
+#[derive(Deserialize, JsonSchema, Clone, PartialEq, Debug)]
+#[serde(rename_all = "snake_case", untagged)]
+pub(crate) enum EntityType {
+    All(All),
+    Named(String),
+}
+
+impl Default for EntityType {
+    fn default() -> Self {
+        Self::All(All::All)
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum All {
+    #[default]
+    All,
+}
+
+#[derive(Deserialize, JsonSchema, Clone, PartialEq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum CacheKind {
+    Hit,
+    Miss,
 }
 
 impl Selector for RouterSelector {
@@ -1171,6 +1203,10 @@ impl Selector for SubgraphSelector {
                 }
                 .map(opentelemetry::Value::from)
             }
+            SubgraphSelector::SubgraphName { subgraph_name } if *subgraph_name => request
+                .subgraph_name
+                .clone()
+                .map(opentelemetry::Value::from),
             SubgraphSelector::SubgraphOperationKind { .. } => request
                 .context
                 .get::<_, String>(OPERATION_KIND)
@@ -1321,6 +1357,39 @@ impl Selector for SubgraphSelector {
                     .canonical_reason()
                     .map(|reason| reason.into()),
             },
+            SubgraphSelector::SubgraphOperationKind { .. } => response
+                .context
+                .get::<_, String>(OPERATION_KIND)
+                .ok()
+                .flatten()
+                .map(opentelemetry::Value::from),
+            SubgraphSelector::SupergraphOperationKind { .. } => response
+                .context
+                .get::<_, String>(OPERATION_KIND)
+                .ok()
+                .flatten()
+                .map(opentelemetry::Value::from),
+            SubgraphSelector::SupergraphOperationName {
+                supergraph_operation_name,
+                default,
+                ..
+            } => {
+                let op_name = response.context.get(OPERATION_NAME).ok().flatten();
+                match supergraph_operation_name {
+                    OperationName::String => op_name.or_else(|| default.clone()),
+                    OperationName::Hash => op_name.or_else(|| default.clone()).map(|op_name| {
+                        let mut hasher = sha2::Sha256::new();
+                        hasher.update(op_name.as_bytes());
+                        let result = hasher.finalize();
+                        hex::encode(result)
+                    }),
+                }
+                .map(opentelemetry::Value::from)
+            }
+            SubgraphSelector::SubgraphName { subgraph_name } if *subgraph_name => response
+                .subgraph_name
+                .clone()
+                .map(opentelemetry::Value::from),
             SubgraphSelector::SubgraphResponseBody {
                 subgraph_response_body,
                 default,
@@ -1372,6 +1441,43 @@ impl Selector for SubgraphSelector {
             } if *on_graphql_error => Some((!response.response.body().errors.is_empty()).into()),
             SubgraphSelector::Static(val) => Some(val.clone().into()),
             SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            SubgraphSelector::Cache { cache, entity_type } => {
+                let cache_info: CacheSubgraph = response
+                    .context
+                    .get(CacheMetricContextKey::new(response.subgraph_name.clone()?))
+                    .ok()
+                    .flatten()?;
+
+                match entity_type {
+                    Some(EntityType::All(All::All)) | None => Some(
+                        (cache_info
+                            .0
+                            .iter()
+                            .fold(0usize, |acc, (_entity_type, cache_hit_miss)| match cache {
+                                CacheKind::Hit => acc + cache_hit_miss.hit,
+                                CacheKind::Miss => acc + cache_hit_miss.miss,
+                            }) as i64)
+                            .into(),
+                    ),
+                    Some(EntityType::Named(entity_type_name)) => {
+                        let res = cache_info.0.iter().fold(
+                            0usize,
+                            |acc, (entity_type, cache_hit_miss)| {
+                                if entity_type == entity_type_name {
+                                    match cache {
+                                        CacheKind::Hit => acc + cache_hit_miss.hit,
+                                        CacheKind::Miss => acc + cache_hit_miss.miss,
+                                    }
+                                } else {
+                                    acc
+                                }
+                            },
+                        );
+
+                        (res != 0).then_some((res as i64).into())
+                    }
+                }
+            }
             // For request
             _ => None,
         }
@@ -1379,6 +1485,33 @@ impl Selector for SubgraphSelector {
 
     fn on_error(&self, error: &tower::BoxError, ctx: &Context) -> Option<opentelemetry::Value> {
         match self {
+            SubgraphSelector::SubgraphOperationKind { .. } => ctx
+                .get::<_, String>(OPERATION_KIND)
+                .ok()
+                .flatten()
+                .map(opentelemetry::Value::from),
+            SubgraphSelector::SupergraphOperationKind { .. } => ctx
+                .get::<_, String>(OPERATION_KIND)
+                .ok()
+                .flatten()
+                .map(opentelemetry::Value::from),
+            SubgraphSelector::SupergraphOperationName {
+                supergraph_operation_name,
+                default,
+                ..
+            } => {
+                let op_name = ctx.get(OPERATION_NAME).ok().flatten();
+                match supergraph_operation_name {
+                    OperationName::String => op_name.or_else(|| default.clone()),
+                    OperationName::Hash => op_name.or_else(|| default.clone()).map(|op_name| {
+                        let mut hasher = sha2::Sha256::new();
+                        hasher.update(op_name.as_bytes());
+                        let result = hasher.finalize();
+                        hex::encode(result)
+                    }),
+                }
+                .map(opentelemetry::Value::from)
+            }
             SubgraphSelector::Error { .. } => Some(error.to_string().into()),
             SubgraphSelector::Static(val) => Some(val.clone().into()),
             SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
@@ -1430,7 +1563,13 @@ mod test {
     use crate::context::OPERATION_KIND;
     use crate::context::OPERATION_NAME;
     use crate::graphql;
+    use crate::plugins::cache::entity::CacheHitMiss;
+    use crate::plugins::cache::entity::CacheSubgraph;
+    use crate::plugins::cache::metrics::CacheMetricContextKey;
     use crate::plugins::telemetry::config::AttributeValue;
+    use crate::plugins::telemetry::config_new::selectors::All;
+    use crate::plugins::telemetry::config_new::selectors::CacheKind;
+    use crate::plugins::telemetry::config_new::selectors::EntityType;
     use crate::plugins::telemetry::config_new::selectors::OperationKind;
     use crate::plugins::telemetry::config_new::selectors::OperationName;
     use crate::plugins::telemetry::config_new::selectors::Query;
@@ -2453,10 +2592,44 @@ mod test {
         assert_eq!(
             selector.on_request(
                 &crate::services::SubgraphRequest::fake_builder()
+                    .context(context.clone())
+                    .build(),
+            ),
+            Some("query".into())
+        );
+        assert_eq!(
+            selector.on_response(
+                &crate::services::SubgraphResponse::fake_builder()
                     .context(context)
                     .build(),
             ),
             Some("query".into())
+        );
+    }
+
+    #[test]
+    fn subgraph_name() {
+        let selector = SubgraphSelector::SubgraphName {
+            subgraph_name: true,
+        };
+        let context = crate::context::Context::new();
+        assert_eq!(
+            selector.on_request(
+                &crate::services::SubgraphRequest::fake_builder()
+                    .context(context.clone())
+                    .subgraph_name("test".to_string())
+                    .build(),
+            ),
+            Some("test".into())
+        );
+        assert_eq!(
+            selector.on_response(
+                &crate::services::SubgraphResponse::fake_builder()
+                    .context(context)
+                    .subgraph_name("test".to_string())
+                    .build(),
+            ),
+            Some("test".into())
         );
     }
 
@@ -2491,6 +2664,82 @@ mod test {
     }
 
     #[test]
+    fn subgraph_cache_hit_all_entities() {
+        let selector = SubgraphSelector::Cache {
+            cache: CacheKind::Hit,
+            entity_type: Some(EntityType::All(All::All)),
+        };
+        let context = crate::context::Context::new();
+        assert_eq!(
+            selector.on_response(
+                &crate::services::SubgraphResponse::fake_builder()
+                    .subgraph_name("test".to_string())
+                    .context(context.clone())
+                    .build(),
+            ),
+            None
+        );
+        let cache_info = CacheSubgraph(
+            [
+                ("Products".to_string(), CacheHitMiss { hit: 3, miss: 0 }),
+                ("Reviews".to_string(), CacheHitMiss { hit: 2, miss: 0 }),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let _ = context
+            .insert(CacheMetricContextKey::new("test".to_string()), cache_info)
+            .unwrap();
+        assert_eq!(
+            selector.on_response(
+                &crate::services::SubgraphResponse::fake_builder()
+                    .subgraph_name("test".to_string())
+                    .context(context.clone())
+                    .build(),
+            ),
+            Some(opentelemetry::Value::I64(5))
+        );
+    }
+
+    #[test]
+    fn subgraph_cache_hit_one_entity() {
+        let selector = SubgraphSelector::Cache {
+            cache: CacheKind::Hit,
+            entity_type: Some(EntityType::Named("Reviews".to_string())),
+        };
+        let context = crate::context::Context::new();
+        assert_eq!(
+            selector.on_response(
+                &crate::services::SubgraphResponse::fake_builder()
+                    .subgraph_name("test".to_string())
+                    .context(context.clone())
+                    .build(),
+            ),
+            None
+        );
+        let cache_info = CacheSubgraph(
+            [
+                ("Products".to_string(), CacheHitMiss { hit: 3, miss: 0 }),
+                ("Reviews".to_string(), CacheHitMiss { hit: 2, miss: 0 }),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let _ = context
+            .insert(CacheMetricContextKey::new("test".to_string()), cache_info)
+            .unwrap();
+        assert_eq!(
+            selector.on_response(
+                &crate::services::SubgraphResponse::fake_builder()
+                    .subgraph_name("test".to_string())
+                    .context(context.clone())
+                    .build(),
+            ),
+            Some(opentelemetry::Value::I64(2))
+        );
+    }
+
+    #[test]
     fn subgraph_supergraph_operation_name_string() {
         let selector = SubgraphSelector::SupergraphOperationName {
             supergraph_operation_name: OperationName::String,
@@ -2511,6 +2760,14 @@ mod test {
         assert_eq!(
             selector.on_request(
                 &crate::services::SubgraphRequest::fake_builder()
+                    .context(context.clone())
+                    .build(),
+            ),
+            Some("topProducts".into())
+        );
+        assert_eq!(
+            selector.on_response(
+                &crate::services::SubgraphResponse::fake_builder()
                     .context(context)
                     .build(),
             ),

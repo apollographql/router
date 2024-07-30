@@ -400,8 +400,9 @@ async fn private() {
             Subgraph {
                 redis: None,
                 private_id: Some("sub".to_string()),
-                enabled: Some(true),
+                enabled: true,
                 ttl: None,
+                ..Default::default()
             },
         ),
         (
@@ -409,8 +410,9 @@ async fn private() {
             Subgraph {
                 redis: None,
                 private_id: Some("sub".to_string()),
-                enabled: Some(true),
+                enabled: true,
                 ttl: None,
+                ..Default::default()
             },
         ),
     ]

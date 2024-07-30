@@ -5,6 +5,9 @@ expression: new_config
 ---
 preview_entity_cache:
   enabled: true
+  invalidation:
+    listen: "127.0.0.1:4000"
+    path: /invalidation
   subgraph:
     subgraphs:
       accounts:

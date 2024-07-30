@@ -9,6 +9,8 @@ use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
@@ -21,8 +23,6 @@ use apollo_compiler::ty;
 use apollo_compiler::InvalidNameError;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use indexmap::IndexMap;
-use indexmap::IndexSet;
 use lazy_static::lazy_static;
 use thiserror::Error;
 
@@ -48,6 +48,8 @@ pub const PROVIDES_DIRECTIVE_NAME: Name = name!("provides");
 pub const REQUIRES_DIRECTIVE_NAME: Name = name!("requires");
 pub const SHAREABLE_DIRECTIVE_NAME: Name = name!("shareable");
 pub const TAG_DIRECTIVE_NAME: Name = name!("tag");
+pub const CONTEXT_DIRECTIVE_NAME: Name = name!("context");
+pub const FROM_CONTEXT_DIRECTIVE_NAME: Name = name!("fromContext");
 pub const FIELDSET_SCALAR_NAME: Name = name!("FieldSet");
 
 // federated types
@@ -98,7 +100,7 @@ enum FederationDirectiveName {
 
 lazy_static! {
     static ref FEDERATION_DIRECTIVE_NAMES_TO_ENUM: IndexMap<Name, FederationDirectiveName> = {
-        IndexMap::from([
+        IndexMap::from_iter([
             (COMPOSE_DIRECTIVE_NAME, FederationDirectiveName::Compose),
             (KEY_DIRECTIVE_NAME, FederationDirectiveName::Key),
             (EXTENDS_DIRECTIVE_NAME, FederationDirectiveName::Extends),
@@ -135,13 +137,13 @@ pub enum FederationSpecError {
     },
     #[error("Unsupported federation directive import {0}")]
     UnsupportedFederationDirective(String),
-    #[error("Invalid GraphQL name {0}")]
-    InvalidGraphQLName(String),
+    #[error(transparent)]
+    InvalidGraphQLName(InvalidNameError),
 }
 
 impl From<InvalidNameError> for FederationSpecError {
     fn from(err: InvalidNameError) -> Self {
-        FederationSpecError::InvalidGraphQLName(format!("Invalid GraphQL name \"{}\"", err.name))
+        FederationSpecError::InvalidGraphQLName(err)
     }
 }
 
@@ -554,8 +556,8 @@ impl FederationSpecDefinitions {
             description: None,
             name: SERVICE_TYPE,
             directives: Default::default(),
-            fields: IndexMap::new(),
-            implements_interfaces: IndexSet::new(),
+            fields: IndexMap::default(),
+            implements_interfaces: IndexSet::default(),
         };
         service_type.fields.insert(
             name!("_sdl"),
@@ -648,7 +650,8 @@ impl LinkSpecDefinitions {
                     .into(),
                 ),
             ]
-            .into(),
+            .into_iter()
+            .collect(),
         }
     }
 

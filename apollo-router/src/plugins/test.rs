@@ -18,6 +18,7 @@ use crate::services::http;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
+use crate::spec::Schema;
 use crate::Configuration;
 use crate::Notify;
 
@@ -88,17 +89,16 @@ impl<T: Plugin> PluginTestHarness<T> {
             .unwrap_or(Value::Object(Default::default()));
 
         let (supergraph_sdl, parsed_schema, subgraph_schemas) = if let Some(schema) = schema {
-            let planner = BridgeQueryPlanner::new(schema.to_string(), Arc::new(config), None)
+            let schema = Schema::parse(schema, &config).unwrap();
+            let sdl = schema.raw_sdl.clone();
+            let supergraph = schema.supergraph_schema().clone();
+            let planner = BridgeQueryPlanner::new(schema.into(), Arc::new(config), None)
                 .await
                 .unwrap();
-            (
-                schema.to_string(),
-                planner.schema().supergraph_schema().clone(),
-                planner.subgraph_schemas(),
-            )
+            (sdl, supergraph, planner.subgraph_schemas())
         } else {
             (
-                "".to_string(),
+                "".to_string().into(),
                 Valid::assume_valid(apollo_compiler::Schema::new()),
                 Default::default(),
             )
@@ -106,7 +106,7 @@ impl<T: Plugin> PluginTestHarness<T> {
 
         let plugin_init = PluginInit::builder()
             .config(config_for_plugin.clone())
-            .supergraph_sdl(Arc::new(supergraph_sdl))
+            .supergraph_sdl(supergraph_sdl)
             .supergraph_schema(Arc::new(parsed_schema))
             .subgraph_schemas(subgraph_schemas)
             .notify(Notify::default())
