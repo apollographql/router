@@ -7,8 +7,7 @@ use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::Context;
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(PartialEq))]
+#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum Condition<T> {
     /// A condition to check a selection against a value.
@@ -43,8 +42,7 @@ impl Condition<()> {
     }
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(PartialEq))]
+#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
 pub(crate) enum SelectorOrValue<T> {
     /// A constant value.
@@ -848,9 +846,11 @@ where {
         }
         fn field(&mut self, value: Option<i64>) -> bool {
             match value {
-                None => self.evaluate_response_field(ty(), field(), &json!(false), &Context::new()),
+                None => {
+                    self.evaluate_response_field(&ty(), field(), &json!(false), &Context::new())
+                }
                 Some(value) => {
-                    self.evaluate_response_field(ty(), field(), &json!(value), &Context::new())
+                    self.evaluate_response_field(&ty(), field(), &json!(value), &Context::new())
                 }
             }
         }

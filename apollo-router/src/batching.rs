@@ -533,7 +533,7 @@ mod tests {
 
         // We should see the aggregation of all of the requests
         let actual: Vec<graphql::Request> = serde_json::from_str(
-            &String::from_utf8(request.into_body().to_bytes().await.unwrap().to_vec()).unwrap(),
+            std::str::from_utf8(&request.into_body().to_bytes().await.unwrap()).unwrap(),
         )
         .unwrap();
 
@@ -561,6 +561,7 @@ mod tests {
                     .body(graphql::Response::builder().data(data.clone()).build())
                     .unwrap(),
                 context: Context::new(),
+                subgraph_name: None,
             };
 
             tx.send(Ok(response)).unwrap();

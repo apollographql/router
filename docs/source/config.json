@@ -1,36 +1,18 @@
 {
   "title": "Self-Hosted Router",
-  "algoliaFilters": [
-    "docset:router"
-  ],
+  "algoliaFilters": ["docset:router"],
   "sidebar": {
     "Introduction": "/",
     "Quickstart": "/quickstart",
     "Moving from @apollo/gateway": "/migrating-from-gateway",
     "Federation Version Support": "/federation-version-support",
-    "Enterprise Features": [
-      "/enterprise-features",
-      [
-        "enterprise"
-      ]
-    ],
+    "Enterprise Features": ["/enterprise-features", ["enterprise"]],
     "Configuring the Router": {
       "Overview": "/configuration/overview",
       "Caching": {
         "In-Memory Caching": "/configuration/in-memory-caching",
-        "Distributed Caching": [
-          "/configuration/distributed-caching",
-          [
-            "enterprise"
-          ]
-        ],
-        "Entity Caching": [
-          "/configuration/entity-caching",
-          [
-            "enterprise",
-            "preview"
-          ]
-        ]
+        "Distributed Caching": ["/configuration/distributed-caching", ["enterprise"]],
+        "Entity Caching": ["/configuration/entity-caching", ["enterprise", "preview"]]
       },
       "Debugging": {
         "Errors": "/errors",
@@ -44,18 +26,8 @@
       "Security": {
         "CORS": "/configuration/cors",
         "CSRF Prevention": "/configuration/csrf",
-        "JWT Authentication": [
-          "/configuration/authn-jwt",
-          [
-            "enterprise"
-          ]
-        ],
-        "Authorization": [
-          "/configuration/authorization",
-          [
-            "enterprise"
-          ]
-        ],
+        "JWT Authentication": ["/configuration/authn-jwt", ["enterprise"]],
+        "Authorization": ["/configuration/authorization", ["enterprise"]],
         "Subgraph Authentication": "/configuration/authn-subgraph",
         "Operation Limits": [
           "/configuration/operation-limits",
@@ -67,6 +39,13 @@
           "/configuration/persisted-queries",
           [
             "enterprise"
+          ]
+        ],
+        "Demand Control" : [
+          "/executing-operations/demand-control",
+          [
+            "enterprise",
+            "preview"
           ]
         ],
         "Privacy and Data Collection": "/privacy"
@@ -82,41 +61,15 @@
           "enterprise"
         ]
       ],
-      "Demand Control" : [
-        "/executing-operations/demand-control",
-        [
-          "enterprise",
-          "preview"
-        ]
-      ],
       "GraphQL Subscriptions": {
-        "Subscriptions Setup": [
-          "/executing-operations/subscription-support",
-          [
-            "enterprise"
-          ]
-        ],
+        "Subscriptions Setup": ["/executing-operations/subscription-support", ["enterprise"]],
         "Subgraph Protocol: HTTP Callback": [
           "/executing-operations/subscription-callback-protocol",
-          [
-            "enterprise",
-            "preview"
-          ]
+          ["enterprise", "preview"]
         ],
-        "Client Protocol: HTTP Multipart": [
-          "/executing-operations/subscription-multipart-protocol",
-          [
-            "enterprise"
-          ]
-        ]
+        "Client Protocol: HTTP Multipart": ["/executing-operations/subscription-multipart-protocol", ["enterprise"]]
       },
-      "Demand Control" : [
-        "/executing-operations/demand-control",
-        [
-          "enterprise",
-          "preview"
-        ]
-      ]
+      "Demand Control": ["/executing-operations/demand-control", ["enterprise", "preview"]]
     },
     "Telemetry and Monitoring": {
       "Overview": "/configuration/telemetry/overview",
@@ -129,6 +82,7 @@
       "Metrics Exporters": {
         "Configuration": "/configuration/telemetry/exporters/metrics/overview",
         "Datadog": "/configuration/telemetry/exporters/metrics/datadog",
+        "Dynatrace": "/configuration/telemetry/exporters/metrics/dynatrace",
         "New Relic": "/configuration/telemetry/exporters/metrics/new-relic",
         "OTLP": "/configuration/telemetry/exporters/metrics/otlp",
         "Prometheus": "/configuration/telemetry/exporters/metrics/prometheus"
@@ -136,6 +90,7 @@
       "Trace exporters": {
         "Configuration": "/configuration/telemetry/exporters/tracing/overview",
         "Datadog": "/configuration/telemetry/exporters/tracing/datadog",
+        "Dynatrace": "/configuration/telemetry/exporters/tracing/dynatrace",
         "Jaeger": "/configuration/telemetry/exporters/tracing/jaeger",
         "New Relic": "/configuration/telemetry/exporters/tracing/new-relic",
         "OTLP": "/configuration/telemetry/exporters/tracing/otlp",
@@ -166,12 +121,7 @@
       "Overview": "/customizations/overview",
       "Rhai Scripts": "/customizations/rhai",
       "Rhai API Reference": "/customizations/rhai-api",
-      "External Coprocessing": [
-        "/customizations/coprocessor",
-        [
-          "enterprise"
-        ]
-      ],
+      "External Coprocessing": ["/customizations/coprocessor", ["enterprise"]],
       "Native Rust Plugins": "/customizations/native",
       "Custom Router Binary": "/customizations/custom-binary"
     },

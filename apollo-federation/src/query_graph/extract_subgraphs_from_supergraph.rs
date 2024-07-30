@@ -2,8 +2,13 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::fmt::Write;
 use std::ops::Deref;
+use std::sync::Arc;
 
+use apollo_compiler::ast::Argument;
+use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::FieldDefinition;
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
@@ -19,7 +24,6 @@ use apollo_compiler::schema::ExtensionId;
 use apollo_compiler::schema::InputObjectType;
 use apollo_compiler::schema::InputValueDefinition;
 use apollo_compiler::schema::InterfaceType;
-use apollo_compiler::schema::Name;
 use apollo_compiler::schema::NamedType;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::schema::ScalarType;
@@ -27,10 +31,9 @@ use apollo_compiler::schema::SchemaBuilder;
 use apollo_compiler::schema::Type;
 use apollo_compiler::schema::UnionType;
 use apollo_compiler::validation::Valid;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::NodeStr;
-use indexmap::IndexMap;
-use indexmap::IndexSet;
+use itertools::Itertools;
 use lazy_static::lazy_static;
 use time::OffsetDateTime;
 
@@ -46,6 +49,7 @@ use crate::link::join_spec_definition::TypeDirectiveArguments;
 use crate::link::spec::Identity;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
+use crate::link::DEFAULT_LINK_NAME;
 use crate::schema::field_set::parse_field_set_without_normalization;
 use crate::schema::position::is_graphql_reserved_name;
 use crate::schema::position::CompositeTypeDefinitionPosition;
@@ -169,7 +173,7 @@ pub(crate) fn extract_subgraphs_from_supergraph(
 type CollectEmptySubgraphsOk = (
     FederationSubgraphs,
     IndexMap<Name, &'static FederationSpecDefinition>,
-    IndexMap<Name, NodeStr>,
+    IndexMap<Name, Arc<str>>,
 );
 fn collect_empty_subgraphs(
     supergraph_schema: &FederationSchema,
@@ -179,8 +183,8 @@ fn collect_empty_subgraphs(
     let graph_directive_definition =
         join_spec_definition.graph_directive_definition(supergraph_schema)?;
     let graph_enum = join_spec_definition.graph_enum_definition(supergraph_schema)?;
-    let mut federation_spec_definitions = IndexMap::new();
-    let mut graph_enum_value_name_to_subgraph_name = IndexMap::new();
+    let mut federation_spec_definitions = IndexMap::default();
+    let mut graph_enum_value_name_to_subgraph_name = IndexMap::default();
     for (enum_value_name, enum_value_definition) in graph_enum.values.iter() {
         let graph_application = enum_value_definition
             .directives
@@ -193,8 +197,8 @@ fn collect_empty_subgraphs(
             })?;
         let graph_arguments = join_spec_definition.graph_directive_arguments(graph_application)?;
         let subgraph = FederationSubgraph {
-            name: graph_arguments.name.as_str().to_owned(),
-            url: graph_arguments.url.as_str().to_owned(),
+            name: graph_arguments.name.to_owned(),
+            url: graph_arguments.url.to_owned(),
             schema: new_empty_fed_2_subgraph_schema()?,
         };
         let federation_link = &subgraph
@@ -213,7 +217,7 @@ fn collect_empty_subgraphs(
             })?;
         subgraphs.add(subgraph)?;
         graph_enum_value_name_to_subgraph_name
-            .insert(enum_value_name.clone(), graph_arguments.name);
+            .insert(enum_value_name.clone(), graph_arguments.name.into());
         federation_spec_definitions.insert(enum_value_name.clone(), federation_spec_definition);
     }
     Ok((
@@ -264,7 +268,7 @@ pub(crate) fn new_empty_fed_2_subgraph_schema() -> Result<FederationSchema, Fede
 
     directive @federation__inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
 
-    directive @federation__override(from: String!) on FIELD_DEFINITION
+    directive @federation__override(from: String!, label: String) on FIELD_DEFINITION
 
     directive @federation__composeDirective(name: String) repeatable on SCHEMA
 
@@ -300,7 +304,7 @@ struct TypeInfos {
 fn extract_subgraphs_from_fed_2_supergraph(
     supergraph_schema: &FederationSchema,
     subgraphs: &mut FederationSubgraphs,
-    graph_enum_value_name_to_subgraph_name: &IndexMap<Name, NodeStr>,
+    graph_enum_value_name_to_subgraph_name: &IndexMap<Name, Arc<str>>,
     federation_spec_definitions: &IndexMap<Name, &'static FederationSpecDefinition>,
     join_spec_definition: &'static JoinSpecDefinition,
     filtered_types: &Vec<TypeDefinitionPosition>,
@@ -356,6 +360,12 @@ fn extract_subgraphs_from_fed_2_supergraph(
         graph_enum_value_name_to_subgraph_name,
         join_spec_definition,
         &input_object_types,
+    )?;
+
+    extract_join_directives(
+        supergraph_schema,
+        subgraphs,
+        graph_enum_value_name_to_subgraph_name,
     )?;
 
     // We add all the "executable" directive definitions from the supergraph to each subgraphs, as
@@ -418,7 +428,7 @@ fn extract_subgraphs_from_fed_2_supergraph(
 fn add_all_empty_subgraph_types(
     supergraph_schema: &FederationSchema,
     subgraphs: &mut FederationSubgraphs,
-    graph_enum_value_name_to_subgraph_name: &IndexMap<Name, NodeStr>,
+    graph_enum_value_name_to_subgraph_name: &IndexMap<Name, Arc<str>>,
     federation_spec_definitions: &IndexMap<Name, &'static FederationSpecDefinition>,
     join_spec_definition: &'static JoinSpecDefinition,
     filtered_types: &Vec<TypeDefinitionPosition>,
@@ -493,7 +503,7 @@ fn add_empty_type(
     type_definition_position: TypeDefinitionPosition,
     type_directive_applications: &Vec<TypeDirectiveArguments>,
     subgraphs: &mut FederationSubgraphs,
-    graph_enum_value_name_to_subgraph_name: &IndexMap<Name, NodeStr>,
+    graph_enum_value_name_to_subgraph_name: &IndexMap<Name, Arc<str>>,
     federation_spec_definitions: &IndexMap<Name, &'static FederationSpecDefinition>,
 ) -> Result<TypeInfo, FederationError> {
     // In fed2, we always mark all types with `@join__type` but making sure.
@@ -505,7 +515,7 @@ fn add_empty_type(
     }
     let mut type_info = TypeInfo {
         name: type_definition_position.type_name().clone(),
-        subgraph_info: IndexMap::new(),
+        subgraph_info: IndexMap::default(),
     };
     for type_directive_application in type_directive_applications {
         let subgraph = get_subgraph(
@@ -659,7 +669,7 @@ fn add_empty_type(
         if let Some(key) = &type_directive_application.key {
             let mut key_directive = Component::new(federation_spec_definition.key_directive(
                 &subgraph.schema,
-                key.clone(),
+                key,
                 type_directive_application.resolvable,
             )?);
             if type_directive_application.extension {
@@ -701,7 +711,7 @@ fn add_empty_type(
 fn extract_object_type_content(
     supergraph_schema: &FederationSchema,
     subgraphs: &mut FederationSubgraphs,
-    graph_enum_value_name_to_subgraph_name: &IndexMap<Name, NodeStr>,
+    graph_enum_value_name_to_subgraph_name: &IndexMap<Name, Arc<str>>,
     federation_spec_definitions: &IndexMap<Name, &'static FederationSpecDefinition>,
     join_spec_definition: &JoinSpecDefinition,
     info: &[TypeInfo],
@@ -845,7 +855,7 @@ fn extract_object_type_content(
 fn extract_interface_type_content(
     supergraph_schema: &FederationSchema,
     subgraphs: &mut FederationSubgraphs,
-    graph_enum_value_name_to_subgraph_name: &IndexMap<Name, NodeStr>,
+    graph_enum_value_name_to_subgraph_name: &IndexMap<Name, Arc<str>>,
     federation_spec_definitions: &IndexMap<Name, &'static FederationSpecDefinition>,
     join_spec_definition: &JoinSpecDefinition,
     info: &[TypeInfo],
@@ -936,17 +946,13 @@ fn extract_interface_type_content(
                 ObjectOrInterfaceTypeDefinitionPosition::Object(pos) => {
                     pos.insert_implements_interface(
                         &mut subgraph.schema,
-                        ComponentName::from(Name::new(
-                            &implements_directive_application.interface,
-                        )?),
+                        ComponentName::from(Name::new(implements_directive_application.interface)?),
                     )?;
                 }
                 ObjectOrInterfaceTypeDefinitionPosition::Interface(pos) => {
                     pos.insert_implements_interface(
                         &mut subgraph.schema,
-                        ComponentName::from(Name::new(
-                            &implements_directive_application.interface,
-                        )?),
+                        ComponentName::from(Name::new(implements_directive_application.interface)?),
                     )?;
                 }
             }
@@ -1036,7 +1042,7 @@ fn extract_interface_type_content(
 fn extract_union_type_content(
     supergraph_schema: &FederationSchema,
     subgraphs: &mut FederationSubgraphs,
-    graph_enum_value_name_to_subgraph_name: &IndexMap<Name, NodeStr>,
+    graph_enum_value_name_to_subgraph_name: &IndexMap<Name, Arc<str>>,
     join_spec_definition: &JoinSpecDefinition,
     info: &[TypeInfo],
 ) -> Result<(), FederationError> {
@@ -1116,7 +1122,7 @@ fn extract_union_type_content(
                 // broken @join__unionMember).
                 pos.insert_member(
                     &mut subgraph.schema,
-                    ComponentName::from(Name::new(&union_member_directive_application.member)?),
+                    ComponentName::from(Name::new(union_member_directive_application.member)?),
                 )?;
             }
         }
@@ -1128,7 +1134,7 @@ fn extract_union_type_content(
 fn extract_enum_type_content(
     supergraph_schema: &FederationSchema,
     subgraphs: &mut FederationSubgraphs,
-    graph_enum_value_name_to_subgraph_name: &IndexMap<Name, NodeStr>,
+    graph_enum_value_name_to_subgraph_name: &IndexMap<Name, Arc<str>>,
     join_spec_definition: &JoinSpecDefinition,
     info: &[TypeInfo],
 ) -> Result<(), FederationError> {
@@ -1212,7 +1218,7 @@ fn extract_enum_type_content(
 fn extract_input_object_type_content(
     supergraph_schema: &FederationSchema,
     subgraphs: &mut FederationSubgraphs,
-    graph_enum_value_name_to_subgraph_name: &IndexMap<Name, NodeStr>,
+    graph_enum_value_name_to_subgraph_name: &IndexMap<Name, Arc<str>>,
     join_spec_definition: &JoinSpecDefinition,
     info: &[TypeInfo],
 ) -> Result<(), FederationError> {
@@ -1303,6 +1309,7 @@ fn add_subgraph_field(
             type_: None,
             external: None,
             override_: None,
+            override_label: None,
             user_overridden: None,
         });
     let subgraph_field_type = match &field_directive_application.type_ {
@@ -1332,12 +1339,14 @@ fn add_subgraph_field(
     }
     if let Some(requires) = &field_directive_application.requires {
         subgraph_field.directives.push(Node::new(
-            federation_spec_definition.requires_directive(&subgraph.schema, requires.clone())?,
+            federation_spec_definition
+                .requires_directive(&subgraph.schema, requires.to_string())?,
         ));
     }
     if let Some(provides) = &field_directive_application.provides {
         subgraph_field.directives.push(Node::new(
-            federation_spec_definition.provides_directive(&subgraph.schema, provides.clone())?,
+            federation_spec_definition
+                .provides_directive(&subgraph.schema, provides.to_string())?,
         ));
     }
     let external = field_directive_application.external.unwrap_or(false);
@@ -1350,13 +1359,17 @@ fn add_subgraph_field(
     if user_overridden {
         subgraph_field.directives.push(Node::new(
             federation_spec_definition
-                .external_directive(&subgraph.schema, Some(NodeStr::new("[overridden]")))?,
+                .external_directive(&subgraph.schema, Some("[overridden]".to_string()))?,
         ));
     }
     if let Some(override_) = &field_directive_application.override_ {
-        subgraph_field.directives.push(Node::new(
-            federation_spec_definition.override_directive(&subgraph.schema, override_.clone())?,
-        ));
+        subgraph_field
+            .directives
+            .push(Node::new(federation_spec_definition.override_directive(
+                &subgraph.schema,
+                override_.to_string(),
+                &field_directive_application.override_label,
+            )?));
     }
     if is_shareable && !external && !user_overridden {
         subgraph_field.directives.push(Node::new(
@@ -1390,6 +1403,7 @@ fn add_subgraph_input_field(
             type_: None,
             external: None,
             override_: None,
+            override_label: None,
             user_overridden: None,
         });
     let subgraph_input_field_type = match &field_directive_application.type_ {
@@ -1412,17 +1426,12 @@ fn add_subgraph_input_field(
 
 /// Parse a string encoding a type reference.
 fn decode_type(type_: &str) -> Result<Type, FederationError> {
-    Type::parse(type_, "").map_err(|_| {
-        SingleFederationError::InvalidGraphQL {
-            message: format!("Cannot parse type \"{}\"", type_),
-        }
-        .into()
-    })
+    Ok(Type::parse(type_, "")?)
 }
 
 fn get_subgraph<'subgraph>(
     subgraphs: &'subgraph mut FederationSubgraphs,
-    graph_enum_value_name_to_subgraph_name: &IndexMap<Name, NodeStr>,
+    graph_enum_value_name_to_subgraph_name: &IndexMap<Name, Arc<str>>,
     graph_enum_value: &Name,
 ) -> Result<&'subgraph mut FederationSubgraph, FederationError> {
     let subgraph_name = graph_enum_value_name_to_subgraph_name
@@ -1492,7 +1501,7 @@ impl IntoIterator for FederationSubgraphs {
 
 // TODO(@goto-bus-stop): consider an appropriate name for this in the public API
 // TODO(@goto-bus-stop): should this exist separately from the `crate::subgraph::Subgraph` type?
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ValidFederationSubgraph {
     pub name: String,
     pub url: String,
@@ -1500,7 +1509,7 @@ pub struct ValidFederationSubgraph {
 }
 
 pub struct ValidFederationSubgraphs {
-    subgraphs: BTreeMap<String, ValidFederationSubgraph>,
+    subgraphs: BTreeMap<Arc<str>, ValidFederationSubgraph>,
 }
 
 impl fmt::Debug for ValidFederationSubgraphs {
@@ -1518,13 +1527,14 @@ impl ValidFederationSubgraphs {
     }
 
     pub(crate) fn add(&mut self, subgraph: ValidFederationSubgraph) -> Result<(), FederationError> {
-        if self.subgraphs.contains_key(&subgraph.name) {
+        if self.subgraphs.contains_key(subgraph.name.as_str()) {
             return Err(SingleFederationError::InvalidFederationSupergraph {
                 message: format!("A subgraph named \"{}\" already exists", subgraph.name),
             }
             .into());
         }
-        self.subgraphs.insert(subgraph.name.clone(), subgraph);
+        self.subgraphs
+            .insert(subgraph.name.as_str().into(), subgraph);
         Ok(())
     }
 
@@ -1534,8 +1544,8 @@ impl ValidFederationSubgraphs {
 }
 
 impl IntoIterator for ValidFederationSubgraphs {
-    type Item = <BTreeMap<String, ValidFederationSubgraph> as IntoIterator>::Item;
-    type IntoIter = <BTreeMap<String, ValidFederationSubgraph> as IntoIterator>::IntoIter;
+    type Item = <BTreeMap<Arc<str>, ValidFederationSubgraph> as IntoIterator>::Item;
+    type IntoIter = <BTreeMap<Arc<str>, ValidFederationSubgraph> as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
         self.subgraphs.into_iter()
@@ -1544,7 +1554,7 @@ impl IntoIterator for ValidFederationSubgraphs {
 
 lazy_static! {
     static ref EXECUTABLE_DIRECTIVE_LOCATIONS: IndexSet<DirectiveLocation> = {
-        IndexSet::from([
+        [
             DirectiveLocation::Query,
             DirectiveLocation::Mutation,
             DirectiveLocation::Subscription,
@@ -1553,7 +1563,9 @@ lazy_static! {
             DirectiveLocation::FragmentSpread,
             DirectiveLocation::InlineFragment,
             DirectiveLocation::VariableDefinition,
-        ])
+        ]
+        .into_iter()
+        .collect()
     };
 }
 
@@ -1907,14 +1919,14 @@ fn remove_inactive_applications(
         let mut fields = parse_field_set_without_normalization(
             valid_schema,
             parent_type_pos.type_name().clone(),
-            &fields,
+            fields,
         )?;
         let is_modified = remove_non_external_leaf_fields(schema, &mut fields)?;
         if is_modified {
             let replacement_directive = if fields.selections.is_empty() {
                 None
             } else {
-                let fields = NodeStr::from(fields.serialize().no_indent().to_string());
+                let fields = fields.serialize().no_indent().to_string();
                 Some(Node::new(match directive_kind {
                     FieldSetDirectiveKind::Provides => {
                         federation_spec_definition.provides_directive(schema, fields)?
@@ -2092,10 +2104,181 @@ fn maybe_dump_subgraph_schema(subgraph: FederationSubgraph, message: &mut String
     };
 }
 
+////////////////////////////////////////////////////////////////////////////////
+/// @join__directive extraction
+
+static JOIN_DIRECTIVE: &str = "join__directive";
+
+/// Converts `@join__directive(graphs: [A], name: "foo")` to `@foo` in the A subgraph.
+/// If the directive is a link directive on the schema definition, we also need
+/// to update the metadata and add the imported definitions.
+fn extract_join_directives(
+    supergraph_schema: &FederationSchema,
+    subgraphs: &mut FederationSubgraphs,
+    graph_enum_value_name_to_subgraph_name: &IndexMap<Name, Arc<str>>,
+) -> Result<(), FederationError> {
+    let join_directives = match supergraph_schema
+        .referencers()
+        .get_directive(JOIN_DIRECTIVE)
+    {
+        Ok(directives) => directives,
+        Err(_) => {
+            // No join directives found, nothing to do.
+            return Ok(());
+        }
+    };
+
+    if let Some(schema_def_pos) = &join_directives.schema {
+        let schema_def = schema_def_pos.get(supergraph_schema.schema());
+        let directives = schema_def
+            .directives
+            .iter()
+            .filter_map(|d| {
+                if d.name == JOIN_DIRECTIVE {
+                    Some(join_directive_to_real_directive(d))
+                } else {
+                    None
+                }
+            })
+            .collect_vec();
+
+        // TODO: Do we need to handle the link directive being renamed?
+        let (links, others) = directives
+            .into_iter()
+            .partition::<Vec<_>, _>(|(d, _)| d.name == DEFAULT_LINK_NAME);
+
+        // After adding links, we'll check the link against a safelist of
+        // specs and check_or_add the spec definitions if necessary.
+        for (link_directive, subgraph_enum_values) in links {
+            for subgraph_enum_value in subgraph_enum_values {
+                let subgraph = get_subgraph(
+                    subgraphs,
+                    graph_enum_value_name_to_subgraph_name,
+                    &subgraph_enum_value,
+                )?;
+
+                schema_def_pos.insert_directive(
+                    &mut subgraph.schema,
+                    Component::new(link_directive.clone()),
+                )?;
+
+                // TODO: add imported definitions from relevant specs
+            }
+        }
+
+        // Other directives are added normally.
+        for (directive, subgraph_enum_values) in others {
+            for subgraph_enum_value in subgraph_enum_values {
+                let subgraph = get_subgraph(
+                    subgraphs,
+                    graph_enum_value_name_to_subgraph_name,
+                    &subgraph_enum_value,
+                )?;
+
+                schema_def_pos
+                    .insert_directive(&mut subgraph.schema, Component::new(directive.clone()))?;
+            }
+        }
+    }
+
+    for object_field_pos in &join_directives.object_fields {
+        let object_field = object_field_pos.get(supergraph_schema.schema())?;
+        let directives = object_field
+            .directives
+            .iter()
+            .filter_map(|d| {
+                if d.name == JOIN_DIRECTIVE {
+                    Some(join_directive_to_real_directive(d))
+                } else {
+                    None
+                }
+            })
+            .collect_vec();
+
+        for (directive, subgraph_enum_values) in directives {
+            for subgraph_enum_value in subgraph_enum_values {
+                let subgraph = get_subgraph(
+                    subgraphs,
+                    graph_enum_value_name_to_subgraph_name,
+                    &subgraph_enum_value,
+                )?;
+
+                object_field_pos
+                    .insert_directive(&mut subgraph.schema, Node::new(directive.clone()))?;
+            }
+        }
+    }
+
+    // TODO
+    // - join_directives.directive_arguments
+    // - join_directives.enum_types
+    // - join_directives.enum_values
+    // - join_directives.input_object_fields
+    // - join_directives.input_object_types
+    // - join_directives.interface_field_arguments
+    // - join_directives.interface_fields
+    // - join_directives.interface_types
+    // - join_directives.object_field_arguments
+    // - join_directives.object_types
+    // - join_directives.scalar_types
+    // - join_directives.union_types
+
+    Ok(())
+}
+
+fn join_directive_to_real_directive(directive: &Node<Directive>) -> (Directive, Vec<Name>) {
+    let subgraph_enum_values = directive
+        .argument_by_name("graphs")
+        .and_then(|arg| arg.as_list())
+        .map(|list| {
+            list.iter()
+                .map(|node| {
+                    Name::new(
+                        node.as_enum()
+                            .expect("join__directive(graphs:) value is an enum")
+                            .as_str(),
+                    )
+                    .expect("join__directive(graphs:) value is a valid name")
+                })
+                .collect()
+        })
+        .expect("join__directive(graphs:) missing");
+
+    let name = directive
+        .argument_by_name("name")
+        .expect("join__directive(name:) is present")
+        .as_str()
+        .expect("join__directive(name:) is a string");
+
+    let arguments = directive
+        .argument_by_name("args")
+        .and_then(|a| a.as_object())
+        .map(|args| {
+            args.iter()
+                .map(|(k, v)| {
+                    Argument {
+                        name: k.clone(),
+                        value: v.clone(),
+                    }
+                    .into()
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let directive = Directive {
+        name: Name::new(name).expect("join__directive(name:) is a valid name"),
+        arguments,
+    };
+
+    (directive, subgraph_enum_values)
+}
+
 #[cfg(test)]
 mod tests {
     use apollo_compiler::name;
     use apollo_compiler::Schema;
+    use insta::assert_snapshot;
 
     use crate::schema::FederationSchema;
     use crate::ValidFederationSubgraphs;
@@ -2706,5 +2889,80 @@ mod tests {
         let subgraph = subgraphs.get("b").unwrap();
         let user_type = subgraph.schema.schema().get_object("User");
         assert!(user_type.is_none());
+    }
+
+    #[test]
+    fn test_join_directives() {
+        let supergraph = r###"schema
+                @link(url: "https://specs.apollo.dev/link/v1.0")
+                @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
+                @join__directive(graphs: [SUBGRAPH], name: "link", args: {url: "https://specs.apollo.dev/hello/v0.1", import: ["@hello"]})
+            {
+                query: Query
+            }
+
+            directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+            directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+            directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+            directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+            directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+            directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+            input join__ContextArgument {
+                name: String!
+                type: String!
+                context: String!
+                selection: join__FieldValue!
+            }
+
+            scalar join__DirectiveArguments
+
+            scalar join__FieldSet
+
+            scalar join__FieldValue
+
+            enum join__Graph {
+                SUBGRAPH @join__graph(name: "subgraph", url: "none")
+            }
+
+            scalar link__Import
+
+            enum link__Purpose {
+                """
+                `SECURITY` features provide metadata necessary to securely resolve fields.
+                """
+                SECURITY
+
+                """
+                `EXECUTION` features provide metadata necessary for operation execution.
+                """
+                EXECUTION
+            }
+
+            type Query
+                @join__type(graph: SUBGRAPH)
+            {
+                f: String
+            }
+        "###;
+
+        let schema = Schema::parse(supergraph, "supergraph.graphql").unwrap();
+        let ValidFederationSubgraphs { subgraphs } = super::extract_subgraphs_from_supergraph(
+            &FederationSchema::new(schema).unwrap(),
+            Some(true),
+        )
+        .unwrap();
+
+        let subgraph = subgraphs.get("subgraph").unwrap();
+        assert_snapshot!(subgraph.schema.schema().schema_definition.directives, @r###" @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.5") @link(url: "https://specs.apollo.dev/hello/v0.1", import: ["@hello"])"###);
     }
 }

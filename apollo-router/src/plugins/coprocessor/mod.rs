@@ -29,11 +29,17 @@ use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+use crate::configuration::shared::Client;
 use crate::error::Error;
+use crate::graphql;
 use crate::layers::async_checkpoint::OneShotAsyncCheckpointLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugins::telemetry::config_new::conditions::Condition;
+use crate::plugins::telemetry::config_new::selectors::RouterSelector;
+use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
+use crate::plugins::traffic_shaping::Http2Config;
 use crate::register_plugin;
 use crate::services;
 use crate::services::external::externalize_header_map;
@@ -82,18 +88,29 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
             .with_native_roots()
             .with_no_client_auth();
 
-        let connector = hyper_rustls::HttpsConnectorBuilder::new()
+        let builder = hyper_rustls::HttpsConnectorBuilder::new()
             .with_tls_config(tls_config)
             .https_or_http()
-            .enable_http1()
-            .enable_http2()
-            .wrap_connector(http_connector);
+            .enable_http1();
+
+        let connector = if init.config.client.is_none()
+            || init.config.client.as_ref().unwrap().experimental_http2 != Some(Http2Config::Disable)
+        {
+            builder.enable_http2().wrap_connector(http_connector)
+        } else {
+            builder.wrap_connector(http_connector)
+        };
 
         let http_client = RouterBodyConverter {
             inner: ServiceBuilder::new()
                 .layer(TimeoutLayer::new(init.config.timeout))
                 .service(
                     hyper::Client::builder()
+                        .http2_only(
+                            init.config.client.is_some()
+                                && init.config.client.as_ref().unwrap().experimental_http2
+                                    == Some(Http2Config::Http2Only),
+                        )
                         .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
                         .build(connector),
                 ),
@@ -220,6 +237,9 @@ where
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct RouterRequestConf {
+    /// Condition to trigger this stage
+    #[serde(skip_serializing)]
+    pub(super) condition: Option<Condition<RouterSelector>>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
@@ -238,6 +258,9 @@ pub(super) struct RouterRequestConf {
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct RouterResponseConf {
+    /// Condition to trigger this stage
+    #[serde(skip_serializing)]
+    pub(super) condition: Option<Condition<RouterSelector>>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
@@ -253,6 +276,9 @@ pub(super) struct RouterResponseConf {
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct SubgraphRequestConf {
+    /// Condition to trigger this stage
+    #[serde(skip_serializing)]
+    pub(super) condition: Option<Condition<SubgraphSelector>>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
@@ -271,6 +297,9 @@ pub(super) struct SubgraphRequestConf {
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct SubgraphResponseConf {
+    /// Condition to trigger this stage
+    #[serde(skip_serializing)]
+    pub(super) condition: Option<Condition<SubgraphSelector>>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
@@ -289,6 +318,7 @@ pub(super) struct SubgraphResponseConf {
 struct Conf {
     /// The url you'd like to offload processing to
     url: String,
+    client: Option<Client>,
     /// The timeout for external requests
     #[serde(deserialize_with = "humantime_serde::deserialize")]
     #[schemars(with = "String", default = "default_timeout")]
@@ -583,7 +613,7 @@ async fn process_router_request_stage<C>(
     coprocessor_url: String,
     sdl: Arc<String>,
     mut request: router::Request,
-    request_config: RouterRequestConf,
+    mut request_config: RouterRequestConf,
 ) -> Result<ControlFlow<router::Response, router::Request>, BoxError>
 where
     C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
@@ -593,6 +623,14 @@ where
         + 'static,
     <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
+    let should_be_executed = request_config
+        .condition
+        .as_mut()
+        .map(|c| c.evaluate_request(&request) == Some(true))
+        .unwrap_or(true);
+    if !should_be_executed {
+        return Ok(ControlFlow::Continue(request));
+    }
     // Call into our out of process processor with a body of our body
     // First, extract the data we need from our request and prepare our
     // external call. Use our configuration to figure out which data to send.
@@ -746,6 +784,14 @@ where
         + 'static,
     <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
+    let should_be_executed = response_config
+        .condition
+        .as_ref()
+        .map(|c| c.evaluate_response(&response))
+        .unwrap_or(true);
+    if !should_be_executed {
+        return Ok(response);
+    }
     // split the response into parts + body
     let (parts, body) = response.response.into_parts();
 
@@ -930,7 +976,7 @@ async fn process_subgraph_request_stage<C>(
     coprocessor_url: String,
     service_name: String,
     mut request: subgraph::Request,
-    request_config: SubgraphRequestConf,
+    mut request_config: SubgraphRequestConf,
 ) -> Result<ControlFlow<subgraph::Response, subgraph::Request>, BoxError>
 where
     C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
@@ -940,6 +986,14 @@ where
         + 'static,
     <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
+    let should_be_executed = request_config
+        .condition
+        .as_mut()
+        .map(|c| c.evaluate_request(&request) == Some(true))
+        .unwrap_or(true);
+    if !should_be_executed {
+        return Ok(ControlFlow::Continue(request));
+    }
     // Call into our out of process processor with a body of our body
     // First, extract the data we need from our request and prepare our
     // external call. Use our configuration to figure out which data to send.
@@ -956,6 +1010,7 @@ where
         .transpose()?;
     let context_to_send = request_config.context.then(|| request.context.clone());
     let uri = request_config.uri.then(|| parts.uri.to_string());
+    let subgraph_name = service_name.clone();
     let service_name = request_config.service_name.then_some(service_name);
 
     let payload = Externalizable::subgraph_builder()
@@ -1025,6 +1080,7 @@ where
             let subgraph_response = subgraph::Response {
                 response: http_response,
                 context: request.context,
+                subgraph_name: Some(subgraph_name),
             };
 
             if let Some(context) = co_processor_output.context {
@@ -1085,6 +1141,14 @@ where
         + 'static,
     <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
+    let should_be_executed = response_config
+        .condition
+        .as_ref()
+        .map(|c| c.evaluate_response(&response))
+        .unwrap_or(true);
+    if !should_be_executed {
+        return Ok(response);
+    }
     // Call into our out of process processor with a body of our body
     // First, extract the data we need from our response and prepare our
     // external call. Use our configuration to figure out which data to send.
@@ -1136,10 +1200,8 @@ where
     // are present in our co_processor_output. If they aren't present, just use the
     // bits that we sent to the co_processor.
 
-    let new_body: crate::graphql::Response = match co_processor_output.body {
-        Some(value) => serde_json::from_value(value)?,
-        None => body,
-    };
+    let new_body: crate::graphql::Response =
+        handle_graphql_response(body, co_processor_output.body)?;
 
     response.response = http::Response::from_parts(parts, new_body);
 
@@ -1206,4 +1268,31 @@ pub(super) fn internalize_header_map(
         }
     }
     Ok(output)
+}
+
+pub(super) fn handle_graphql_response(
+    original_response_body: graphql::Response,
+    copro_response_body: Option<serde_json::Value>,
+) -> Result<graphql::Response, BoxError> {
+    let new_body: graphql::Response = match copro_response_body {
+        Some(value) => {
+            let mut new_body: graphql::Response = serde_json::from_value(value)?;
+            // Needs to take back these 2 fields because it's skipped by serde
+            new_body.subscribed = original_response_body.subscribed;
+            new_body.created_at = original_response_body.created_at;
+            // Required because for subscription if data is Some(Null) it won't cut the subscription
+            // And in some languages they don't have any differences between Some(Null) and Null
+            if original_response_body.data == Some(serde_json_bytes::Value::Null)
+                && new_body.data.is_none()
+                && new_body.subscribed == Some(true)
+            {
+                new_body.data = Some(serde_json_bytes::Value::Null);
+            }
+
+            new_body
+        }
+        None => original_response_body,
+    };
+
+    Ok(new_body)
 }

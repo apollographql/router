@@ -1,6 +1,6 @@
 ---
-source: tests/composition_tests.rs
-expression: print_sdl(&supergraph.to_api_schema())
+source: apollo-federation/tests/composition_tests.rs
+expression: "print_sdl(supergraph.to_api_schema(Default::default()).unwrap().schema())"
 ---
 """A cool schema"""
 schema {
@@ -18,6 +18,8 @@ enum E {
   B
 }
 
+scalar Import
+
 """
 Available queries
 Not much yet
@@ -29,4 +31,3 @@ type Query {
     x: String!,
   ): String
 }
-

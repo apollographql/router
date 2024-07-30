@@ -1,24 +1,23 @@
 ---
 title: Deploy in Kubernetes
-subtitle: Self-hosted deployment of Apollo Router in Kubernetes
-description: Deploy the Apollo Router in Kubernetes using Helm charts. Customize configurations, enable metrics, and choose values for migration.
+subtitle: Self-hosted deployment of the router in Kubernetes
+description: Deploy the Apollo GraphOS Router or Apollo Router Core in Kubernetes using Helm charts. Customize configurations, enable metrics, and choose values for migration.
 ---
 
-import { Link } from 'gatsby';
 import ElasticNotice from '../../shared/elastic-notice.mdx';
 import HelmShowOutput from '../../shared/helm-show-router-output.mdx';
 import CoprocTypicalConfig from '../../shared/coproc-typical-config.mdx';
 
-Learn how to deploy a self-hosted Apollo Router in Kubernetes using Helm charts.
+Learn how to deploy a self-hosted router (GraphOS Router or Apollo Router Core) in Kubernetes using Helm charts.
 
 ```mermaid
 flowchart LR;
   clients(Clients);
   subgraph "Kubernetes cluster";
   lb(["<b>Load Balancer</b>"])
-  router_a(["<b>Apollo Router</b>"]);
+  router_a(["<b>Router</b>"]);
   coproc_a(["<b>Coprocessor</b>"]);
-  router_b(["<b>Apollo Router</b>"]);
+  router_b(["<b>Router</b>"]);
   coproc_b(["<b>Coprocessor</b>"]);
   router_a <-.-> coproc_a;
   router_b <-.-> coproc_b;
@@ -39,7 +38,7 @@ The following guides provide the steps to:
 
 ## About the router Helm chart
 
-[Helm](https://helm.sh) is a package manager for Kubernetes (k8s). Apollo provides an application Helm chart with each release of Apollo Router in GitHub. Since the router version 0.14.0, Apollo has released the router Helm chart as an [Open Container Initiative (OCI)](https://helm.sh/docs/topics/registries/) image in our GitHub container registry.
+[Helm](https://helm.sh) is a package manager for Kubernetes (k8s). Apollo provides an application Helm chart with each release of Apollo Router Core in GitHub. Since the router version 0.14.0, Apollo has released the router Helm chart as an [Open Container Initiative (OCI)](https://helm.sh/docs/topics/registries/) image in a GitHub container registry.
 
 <Note>
 
@@ -51,7 +50,7 @@ You customize a deployed router with the same [command-line options and YAML con
 
 ## Basic deployment
 
-Follow this guide to deploy the Apollo Router using Helm to install the basic chart provided with each router release. 
+Follow this guide to deploy the  Router using Helm to install the basic chart provided with each router release. 
 
 Each router chart has a `values.yaml` file with router and deployment settings. The released, unedited file has a few explicit settings, including:
 
@@ -61,7 +60,7 @@ Each router chart has a `values.yaml` file with router and deployment settings. 
 
 <ExpansionPanel title="Click to expand values.yaml for router v1.31.0">
 
-The values of the Helm chart for Apollo Router v1.31.0 in the GitHub container repository, as output by the `helm show` command:
+The values of the Helm chart for Apollo Router Core v1.31.0 in the GitHub container repository, as output by the `helm show` command:
 
 ```bash
 helm show values oci://ghcr.io/apollographql/helm-charts/router
@@ -73,7 +72,7 @@ helm show values oci://ghcr.io/apollographql/helm-charts/router
 
 ### Set up Helm
 
-1. Install [Helm](https://helm.sh/docs/intro/install/) **version 3.x**. The Apollo Router's Helm chart requires Helm v3.x.
+1. Install [Helm](https://helm.sh/docs/intro/install/) **version 3.x**. The router's Helm chart requires Helm v3.x.
 
     <Note>
 
@@ -101,13 +100,13 @@ helm show values oci://ghcr.io/apollographql/helm-charts/router
 
 Install the tools and provision the infrastructure for your Kubernetes cluster.
 
-For an example, see the [Setup from Apollo's Build a Supergraph tutorial](https://github.com/apollosolutions/build-a-supergraph/tree/main/01-setup#01---setup). It provides steps you can reference for gathering accounts and credentials for your cloud platform (GCP or AWS), provisioning resources, and deploying your subgraphs.
+For an example, see the [Setup from Apollo's Reference Architecture](https://github.com/apollosolutions/reference-architecture/blob/main/docs/setup.md). It provides steps you can reference for gathering accounts and credentials for your cloud platform (GCP or AWS), provisioning resources, and deploying your subgraphs.
 
 <Tip>
 
 To manage the system resources you need to deploy the router on Kubernetes:
 
-* Read [Managing Apollo Router resources in Kubernetes](/technotes/TN0016-router-resource-management/).
+* Read [Managing router resources in Kubernetes](/technotes/TN0016-router-resource-management/).
 * Use the [router resource estimator](/technotes/TN0045-router_resource_estimator/).
 
 </Tip>
@@ -239,9 +238,17 @@ For example, this command deploys with a `common_values.yaml` file applied first
 helm install --namespace <router-namespace> --set managedFederation.apiKey="<graph-api-key>" --set managedFederation.graphRef="<graph-ref>"  oci://ghcr.io/apollographql/helm-charts/router --version <router-version> --values router/values.yaml  --values common_values.yaml --values prod_values.yaml
 ```
 
+## Deploying in Kubernetes with Istio
+
+[Istio](https://istio.io/) is a service mesh for Kubernetes which is often installed on a cluster for its traffic-shaping abilities.  While we do not specifically recommend or support Istio, nor do we provide specific instructions for installing the Router in a cluster with Istio, there is a known consideration to make when configuring Istio.
+
+Consideration and additional configuration may be necessary as a consequence of how Istio does its sidecar injection.  Without additional configuration, Istio may attempt to reconfigure the network interface at the same time the router is starting, which will result in a failure to start.
+
+This is not specifically a router issue and Istio has instructions on how to manage the matter in a general sense in their [own documentation](https://istio.io/latest/docs/ops/common-problems/injection/#pod-or-containers-start-with-network-issues-if-istio-proxy-is-not-ready).  Their suggestion prevents the startup of all other containers in a pod until Istio itself is ready.  We recommend this approach when using Istio.
+
 ## Configure for migration from gateway
 
-When [migrating from `@apollo/gateway` to the Apollo Router](../migrating-from-gateway), consider the following tips to maximize the compatibility of your router deployment.
+When [migrating from `@apollo/gateway` to the router](../migrating-from-gateway), consider the following tips to maximize the compatibility of your router deployment.
 
 ### Increase maximum request bytes
 

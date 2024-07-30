@@ -1,5 +1,4 @@
 use apollo_router::plugin::test::MockSubgraph;
-use apollo_router::services::execution::QueryPlan;
 use apollo_router::services::router;
 use apollo_router::services::supergraph;
 use apollo_router::Context;
@@ -12,8 +11,6 @@ use futures::StreamExt;
 use http::header::CACHE_CONTROL;
 use http::HeaderValue;
 use http::Method;
-use serde::Deserialize;
-use serde::Serialize;
 use serde_json::json;
 use serde_json::Value;
 use tower::BoxError;
@@ -158,12 +155,6 @@ async fn query_planner_cache() -> Result<(), BoxError> {
     Ok(())
 }
 
-#[derive(Deserialize, Serialize)]
-
-struct QueryPlannerContent {
-    plan: QueryPlan,
-}
-
 #[tokio::test(flavor = "multi_thread")]
 async fn apq() -> Result<(), BoxError> {
     let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
@@ -233,7 +224,7 @@ async fn apq() -> Result<(), BoxError> {
         res.errors.first().unwrap().message,
         "PersistedQueryNotFound"
     );
-    let r: Option<String> = client.get(&format!("apq:{query_hash}")).await.unwrap();
+    let r: Option<String> = client.get(format!("apq:{query_hash}")).await.unwrap();
     assert!(r.is_none());
 
     // Now we register the query
@@ -261,7 +252,7 @@ async fn apq() -> Result<(), BoxError> {
     assert!(res.data.is_some());
     assert!(res.errors.is_empty());
 
-    let s: Option<String> = client.get(&format!("apq:{query_hash}")).await.unwrap();
+    let s: Option<String> = client.get(format!("apq:{query_hash}")).await.unwrap();
     insta::assert_snapshot!(s.unwrap());
 
     // we start a new router with the same config
@@ -368,19 +359,28 @@ async fn entity_cache() -> Result<(), BoxError> {
         .with_subgraph_network_requests()
         .configuration_json(json!({
             "preview_entity_cache": {
+                "enabled": true,
                 "redis": {
                     "urls": ["redis://127.0.0.1:6379"],
                     "ttl": "2s"
                 },
-                "enabled": false,
-                "subgraphs": {
-                    "products": {
-                        "enabled": true,
-                        "ttl": "60s"
+                "invalidation": {
+                    "listen": "127.0.0.1:4000",
+                    "path": "/invalidation"
+                },
+                "subgraph": {
+                    "all": {
+                        "enabled": false
                     },
-                    "reviews": {
-                        "enabled": true,
-                        "ttl": "10s"
+                    "subgraphs": {
+                        "products": {
+                            "enabled": true,
+                            "ttl": "60s"
+                        },
+                        "reviews": {
+                            "enabled": true,
+                            "ttl": "10s"
+                        }
                     }
                 }
             },
@@ -411,13 +411,13 @@ async fn entity_cache() -> Result<(), BoxError> {
     insta::assert_json_snapshot!(response);
 
     let s:String = client
-          .get("subgraph:products:Query:0df945dc1bc08f7fc02e8905b4c72aa9112f29bb7a214e4a38d199f0aa635b48:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .get("version:1.0:subgraph:products:type:Query:hash:0df945dc1bc08f7fc02e8905b4c72aa9112f29bb7a214e4a38d199f0aa635b48:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
     insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
-    let s: String = client.get("subgraph:reviews:Product:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:1de543dab57fde0f00247922ccc4f76d4c916ae26a89dd83cd1a62300d0cda20:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c").await.unwrap();
+    let s: String = client.get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:1de543dab57fde0f00247922ccc4f76d4c916ae26a89dd83cd1a62300d0cda20:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c").await.unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
     insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
@@ -473,19 +473,28 @@ async fn entity_cache() -> Result<(), BoxError> {
         .with_subgraph_network_requests()
         .configuration_json(json!({
             "preview_entity_cache": {
+                "enabled": true,
                 "redis": {
                     "urls": ["redis://127.0.0.1:6379"],
                     "ttl": "2s"
                 },
-                "enabled": false,
-                "subgraphs": {
-                    "products": {
-                        "enabled": true,
-                        "ttl": "60s"
+                "invalidation": {
+                    "listen": "127.0.0.1:4000",
+                    "path": "/invalidation"
+                },
+                "subgraph": {
+                    "all": {
+                        "enabled": false,
                     },
-                    "reviews": {
-                        "enabled": true,
-                        "ttl": "10s"
+                    "subgraphs": {
+                        "products": {
+                            "enabled": true,
+                            "ttl": "60s"
+                        },
+                        "reviews": {
+                            "enabled": true,
+                            "ttl": "10s"
+                        }
                     }
                 }
             },
@@ -516,7 +525,7 @@ async fn entity_cache() -> Result<(), BoxError> {
     insta::assert_json_snapshot!(response);
 
     let s:String = client
-        .get("subgraph:reviews:Product:d9a4cd73308dd13ca136390c10340823f94c335b9da198d2339c886c738abf0d:1de543dab57fde0f00247922ccc4f76d4c916ae26a89dd83cd1a62300d0cda20:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+        .get("version:1.0:subgraph:reviews:type:Product:entity:d9a4cd73308dd13ca136390c10340823f94c335b9da198d2339c886c738abf0d:hash:1de543dab57fde0f00247922ccc4f76d4c916ae26a89dd83cd1a62300d0cda20:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
         .await
         .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
@@ -671,19 +680,28 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
         .with_subgraph_network_requests()
         .configuration_json(json!({
             "preview_entity_cache": {
+                "enabled": true,
                 "redis": {
                     "urls": ["redis://127.0.0.1:6379"],
                     "ttl": "2s"
                 },
-                "enabled": false,
-                "subgraphs": {
-                    "products": {
-                        "enabled": true,
-                        "ttl": "60s"
+                "invalidation": {
+                    "listen": "127.0.0.1:4000",
+                    "path": "/invalidation"
+                },
+                "subgraph": {
+                    "all": {
+                        "enabled": false,
                     },
-                    "reviews": {
-                        "enabled": true,
-                        "ttl": "10s"
+                    "subgraphs": {
+                        "products": {
+                            "enabled": true,
+                            "ttl": "60s"
+                        },
+                        "reviews": {
+                            "enabled": true,
+                            "ttl": "10s"
+                        }
                     }
                 }
             },
@@ -728,7 +746,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
     insta::assert_json_snapshot!(response);
 
     let s:String = client
-          .get("subgraph:products:Query:0df945dc1bc08f7fc02e8905b4c72aa9112f29bb7a214e4a38d199f0aa635b48:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .get("version:1.0:subgraph:products:type:Query:hash:0df945dc1bc08f7fc02e8905b4c72aa9112f29bb7a214e4a38d199f0aa635b48:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
@@ -749,7 +767,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
     );
 
     let s: String = client
-        .get("subgraph:reviews:Product:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:1de543dab57fde0f00247922ccc4f76d4c916ae26a89dd83cd1a62300d0cda20:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+        .get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:1de543dab57fde0f00247922ccc4f76d4c916ae26a89dd83cd1a62300d0cda20:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
         .await
         .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
@@ -793,7 +811,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
     insta::assert_json_snapshot!(response);
 
     let s:String = client
-          .get("subgraph:reviews:Product:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:3b6ef3c8fd34c469d59f513942c5f4c8f91135e828712de2024e2cd4613c50ae:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:3b6ef3c8fd34c469d59f513942c5f4c8f91135e828712de2024e2cd4613c50ae:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();

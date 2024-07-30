@@ -13,23 +13,26 @@
 //! See [Router documentation](https://www.apollographql.com/docs/router/federation-version-support/)
 //! for which Federation versions are supported by which Router versions.
 
-#![allow(dead_code)] // TODO: This is fine while we're iterating, but should be removed later.
+// TODO: This is fine while we're iterating, but should be removed later.
+#![allow(dead_code)]
+// TODO: silence false positives (apollo_compiler::Name) and investigate the rest
+#![allow(clippy::mutable_key_type)]
 
 mod api_schema;
 mod compat;
+mod display_helpers;
 pub mod error;
-mod indented_display;
 pub mod link;
 pub mod merge;
 pub(crate) mod operation;
 pub mod query_graph;
 pub mod query_plan;
 pub mod schema;
-pub mod sources;
 pub mod subgraph;
+pub(crate) mod utils;
 
+use apollo_compiler::ast::NamedType;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::NodeStr;
 use apollo_compiler::Schema;
 use link::join_spec_definition::JOIN_VERSIONS;
 use schema::FederationSchema;
@@ -140,6 +143,6 @@ const _: () = {
 };
 
 /// Returns if the type of the node is a scalar or enum.
-pub(crate) fn is_leaf_type(schema: &Schema, ty: &NodeStr) -> bool {
+pub(crate) fn is_leaf_type(schema: &Schema, ty: &NamedType) -> bool {
     schema.get_scalar(ty).is_some() || schema.get_enum(ty).is_some()
 }

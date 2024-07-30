@@ -1,5 +1,7 @@
 use std::fmt;
 
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
@@ -9,11 +11,9 @@ use apollo_compiler::schema::DirectiveLocation;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::FieldDefinition;
 use apollo_compiler::schema::InputValueDefinition;
-use apollo_compiler::schema::Name;
 use apollo_compiler::schema::Value;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
-use indexmap::IndexMap;
-use indexmap::IndexSet;
 use lazy_static::lazy_static;
 
 use crate::error::FederationError;
@@ -294,13 +294,12 @@ fn validate_inaccessible_in_default_value(
         // expected.
         (Value::Enum(_) | Value::String(_), ExtendedType::Enum(type_)) => {
             let value = match default_value {
-                Value::Enum(name) => name.clone(),
-                // It's no problem if this name is invalid.
-                Value::String(node_str) => Name::new_unchecked(node_str.clone()),
+                Value::Enum(name) => name.as_str(),
+                Value::String(s) => s,
                 // Guaranteed to be enum or string by parent match branch.
                 _ => unreachable!(),
             };
-            let Some(enum_value) = type_.values.get(&value) else {
+            let Some(enum_value) = type_.values.get(value) else {
                 return Ok(());
             };
             let enum_value_position = EnumValueDefinitionPosition {
