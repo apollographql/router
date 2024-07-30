@@ -1,6 +1,8 @@
 ### Prevent Datadog timeout errors in logs ([Issue #2058](https://github.com/apollographql/router/issue/2058))
 
-The telemetry Datadog exporter uses connection pooling by default. However, these pools connections are frequently closed leading to errors in the router logs.
+The router's Datadog exporter has been updated to reduce the frequency of logged errors related to connection pools.
+
+Previously, the connection pools used by the Datadog exporter frequently timed out, and each timeout logged an error like the following:
 
 For example:
 ```
