@@ -10,6 +10,9 @@ use apollo_compiler::schema::Implementers;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_federation::schema::ValidFederationSchema;
+use apollo_federation::sources::connect::expand::expand_connectors;
+use apollo_federation::sources::connect::expand::Connectors;
+use apollo_federation::sources::connect::expand::ExpansionResult;
 use apollo_federation::ApiSchemaOptions;
 use apollo_federation::Supergraph;
 use http::Uri;
@@ -20,6 +23,7 @@ use sha2::Sha256;
 
 use crate::error::ParseErrors;
 use crate::error::SchemaError;
+use crate::plugins::connectors::configuration::apply_config;
 use crate::query_planner::OperationKind;
 use crate::Configuration;
 
@@ -31,6 +35,7 @@ pub(crate) struct Schema {
     pub(crate) implementers_map: apollo_compiler::collections::HashMap<Name, Implementers>,
     api_schema: ApiSchema,
     pub(crate) schema_id: Arc<String>,
+    pub(crate) connectors: Option<Connectors>,
 }
 
 /// Wrapper type to distinguish from `Schema::definitions` for the supergraph schema
@@ -63,36 +68,63 @@ impl Schema {
 
     pub(crate) fn parse(sdl: &str, config: &Configuration) -> Result<Self, SchemaError> {
         let start = Instant::now();
+
+        let expansion = expand_connectors(sdl).map_err(SchemaError::Connector)?;
+        let (sdl, api_schema, connectors) = match expansion {
+            ExpansionResult::Expanded {
+                ref raw_sdl,
+                api_schema: api,
+                connectors,
+            } => (
+                raw_sdl.as_str(),
+                Some(ValidFederationSchema::new(api).map_err(SchemaError::Connector)?),
+                Some(apply_config(config, connectors)),
+            ),
+            ExpansionResult::Unchanged => (sdl, None, None),
+        };
+
         let definitions = Self::parse_compiler_schema(sdl)?;
 
         let mut subgraphs = HashMap::new();
         // TODO: error if not found?
         if let Some(join_enum) = definitions.get_enum("join__Graph") {
-            for (name, url) in join_enum.values.iter().filter_map(|(_name, value)| {
-                let join_directive = value.directives.get("join__graph")?;
+            for (name, url) in join_enum.values.values().filter_map(|value| {
+                let join_directive = value
+                    .directives
+                    .iter()
+                    .find(|directive| directive.name.eq_ignore_ascii_case("join__graph"))?;
                 let name = join_directive.argument_by_name("name")?.as_str()?;
                 let url = join_directive.argument_by_name("url")?.as_str()?;
                 Some((name, url))
             }) {
-                if url.is_empty() {
-                    return Err(SchemaError::MissingSubgraphUrl(name.to_string()));
-                }
-                #[cfg(unix)]
-                // there is no standard for unix socket URLs apparently
-                let url = if let Some(path) = url.strip_prefix("unix://") {
-                    // there is no specified format for unix socket URLs (cf https://github.com/whatwg/url/issues/577)
-                    // so a unix:// URL will not be parsed by http::Uri
-                    // To fix that, hyperlocal came up with its own Uri type that can be converted to http::Uri.
-                    // It hides the socket path in a hex encoded authority that the unix socket connector will
-                    // know how to decode
-                    hyperlocal::Uri::new(path, "/").into()
+                let is_connector = connectors
+                    .as_ref()
+                    .map(|connectors| connectors.by_service_name.contains_key(name))
+                    .unwrap_or_default();
+
+                let url = if is_connector {
+                    Uri::from_static("http://unused")
                 } else {
+                    if url.is_empty() {
+                        return Err(SchemaError::MissingSubgraphUrl(name.to_string()));
+                    }
+                    #[cfg(unix)]
+                    // there is no standard for unix socket URLs apparently
+                    if let Some(path) = url.strip_prefix("unix://") {
+                        // there is no specified format for unix socket URLs (cf https://github.com/whatwg/url/issues/577)
+                        // so a unix:// URL will not be parsed by http::Uri
+                        // To fix that, hyperlocal came up with its own Uri type that can be converted to http::Uri.
+                        // It hides the socket path in a hex encoded authority that the unix socket connector will
+                        // know how to decode
+                        hyperlocal::Uri::new(path, "/").into()
+                    } else {
+                        Uri::from_str(url)
+                            .map_err(|err| SchemaError::UrlParse(name.to_string(), err))?
+                    }
+                    #[cfg(not(unix))]
                     Uri::from_str(url)
                         .map_err(|err| SchemaError::UrlParse(name.to_string(), err))?
                 };
-                #[cfg(not(unix))]
-                let url = Uri::from_str(url)
-                    .map_err(|err| SchemaError::UrlParse(name.to_string(), err))?;
 
                 if subgraphs.insert(name.to_string(), url).is_some() {
                     return Err(SchemaError::Api(format!(
@@ -113,16 +145,18 @@ impl Schema {
 
         let schema_id = Arc::new(Schema::schema_id(sdl));
 
-        let api_schema = supergraph
-            .to_api_schema(ApiSchemaOptions {
-                include_defer: config.supergraph.defer_support,
-                ..Default::default()
-            })
-            .map_err(|e| {
-                SchemaError::Api(format!(
-                    "The supergraph schema failed to produce a valid API schema: {e}"
-                ))
-            })?;
+        let api_schema = api_schema.map(Ok).unwrap_or_else(|| {
+            supergraph
+                .to_api_schema(ApiSchemaOptions {
+                    include_defer: config.supergraph.defer_support,
+                    ..Default::default()
+                })
+                .map_err(|e| {
+                    SchemaError::Api(format!(
+                        "The supergraph schema failed to produce a valid API schema: {e}"
+                    ))
+                })
+        })?;
 
         Ok(Schema {
             raw_sdl: Arc::new(sdl.to_owned()),
@@ -131,6 +165,7 @@ impl Schema {
             implementers_map,
             api_schema: ApiSchema(api_schema),
             schema_id,
+            connectors,
         })
     }
 
@@ -338,6 +373,7 @@ impl std::fmt::Debug for Schema {
             implementers_map,
             api_schema: _, // skip
             schema_id: _,
+            connectors: _,
         } = self;
         f.debug_struct("Schema")
             .field("raw_sdl", raw_sdl)
@@ -396,7 +432,7 @@ mod tests {
             type Baz {
               me: String
             }
-            
+
             union UnionType2 = Foo | Bar
             "#,
             );

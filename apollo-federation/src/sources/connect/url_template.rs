@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::fmt::Display;
+use std::str::FromStr;
 
 use apollo_compiler::collections::IndexMap;
 use itertools::Itertools;
@@ -18,13 +19,15 @@ use serde::Serialize;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value as JSON;
+use url::Url;
 
-/// A parser accepting URLPathTemplate syntax, which is useful both for
+/// A parser accepting URLTemplate syntax, which is useful both for
 /// generating new URL paths from provided variables and for extracting variable
 /// values from concrete URL paths.
-
 #[derive(Debug, PartialEq, Clone, Default)]
-pub struct URLPathTemplate {
+pub struct URLTemplate {
+    /// Scheme + host if this is an absolute URL
+    pub base: Option<Url>,
     path: Vec<ParameterValue>,
     query: IndexMap<String, ParameterValue>,
 }
@@ -48,7 +51,7 @@ pub struct VariableExpression {
     // Variable paths are often a single identifier, but may also consist of a
     // sequence of identifiers joined with the . character. We represent dotted
     // paths as a single string, rather than a Vec<String>, and these dotted
-    // path strings are expected for the input keys of generate_path and the
+    // path strings are expected for the input keys of generate and the
     // output keys of extract_vars, rather than a nested JSON object.
     var_path: String,
 
@@ -64,85 +67,12 @@ pub struct VariableExpression {
     required: bool,
 }
 
-impl URLPathTemplate {
-    // Top-level parsing entry point for URLPathTemplate syntax.
-    pub fn parse(input: &str) -> Result<URLPathTemplate, String> {
-        let mut prefix_suffix = input.splitn(2, '?');
-        let path_prefix = prefix_suffix.next();
-        let query_suffix = prefix_suffix.next();
-        let mut path = vec![];
-
-        if let Some(path_prefix) = path_prefix {
-            for path_part in path_prefix.split('/') {
-                if !path_part.is_empty() {
-                    path.push(ParameterValue::parse(path_part, true)?);
-                }
-            }
-        }
-
-        let mut query = IndexMap::default();
-
-        if let Some(query_suffix) = query_suffix {
-            for query_part in query_suffix.split('&') {
-                if let Some((key, value)) = query_part.split_once('=') {
-                    query.insert(key.to_string(), ParameterValue::parse(value, false)?);
-                }
-            }
-        }
-
-        Ok(URLPathTemplate { path, query })
-    }
-
-    // Given a URLPathTemplate and an IndexMap of variables to be interpolated
-    // into its {...} expressions, generate a new URL path String.
-    // Guaranteed to return a "/"-prefixed string to make appending to the
-    // base url easier.
-    pub fn generate_path(&self, vars: &JSON) -> Result<String, String> {
-        let mut path = String::new();
-        if let Some(var_map) = vars.as_object() {
-            for (path_position, param_value) in self.path.iter().enumerate() {
-                path.push('/');
-
-                if let Some(value) = param_value.interpolate(var_map)? {
-                    path.push_str(value.as_str());
-                } else {
-                    return Err(format!(
-                        "Incomplete path parameter {} at position {} with variables {}",
-                        param_value,
-                        path_position,
-                        JSON::Object(var_map.clone()),
-                    ));
-                }
-            }
-
-            let mut params = vec![];
-            for (key, param_value) in &self.query {
-                if let Some(value) = param_value.interpolate(var_map)? {
-                    params.push(format!("{}={}", key, value));
-                }
-            }
-            if !params.is_empty() {
-                path.push('?');
-                path.push_str(&params.join("&"));
-            }
-        } else {
-            return Err(format!("Expected object, got {}", vars));
-        }
-
-        if path.is_empty() {
-            Ok("/".to_string())
-        } else if path.starts_with('/') {
-            Ok(path)
-        } else {
-            Ok(format!("/{}", path))
-        }
-    }
-
-    // Given a URLPathTemplate and a concrete URL path, extract any named/nested
+impl URLTemplate {
+    // Given a URLTemplate and a concrete URL path, extract any named/nested
     // variables from the path and return them as a JSON object.
     #[allow(dead_code)]
     fn extract_vars(&self, path: &str) -> Result<JSON, String> {
-        let concrete_template = URLPathTemplate::parse(path)?;
+        let concrete_template = URLTemplate::from_str(path)?;
 
         if concrete_template.path.len() != self.path.len() {
             return Err(format!(
@@ -187,7 +117,7 @@ impl URLPathTemplate {
         Ok(JSON::Object(var_map))
     }
 
-    pub fn required_parameters(&self) -> Vec<String> {
+    pub fn required_parameters(&self) -> Vec<&str> {
         let mut parameters = HashSet::new();
         for param_value in &self.path {
             parameters.extend(param_value.required_parameters());
@@ -198,10 +128,98 @@ impl URLPathTemplate {
         // sorted for a stable SDL
         parameters.into_iter().sorted().collect()
     }
+
+    /// Return all parameters in the template by . delimited string
+    pub fn parameters(&self) -> Result<HashSet<Parameter<'_>>, String> {
+        let mut parameters = HashSet::new();
+        for param_value in &self.path {
+            parameters.extend(param_value.parameters()?);
+        }
+        for param_value in self.query.values() {
+            parameters.extend(param_value.parameters()?);
+        }
+
+        // sorted for a stable SDL
+        Ok(parameters.into_iter().sorted().collect())
+    }
+
+    pub fn interpolate_path(&self, vars: &Map<ByteString, JSON>) -> Result<Vec<String>, String> {
+        self.path.iter().enumerate().map(|(path_position, param_value)| {
+            param_value.interpolate(vars)?.ok_or_else(|| format!(
+                "Incomplete path parameter {param_value} at position {path_position} with variables {vars:?}",
+            ))
+        }).collect()
+    }
+
+    pub fn interpolate_query(
+        &self,
+        vars: &Map<ByteString, JSON>,
+    ) -> Result<Vec<(&String, String)>, String> {
+        self.query
+            .iter()
+            .filter_map(|(key, param_value)| {
+                param_value
+                    .interpolate(vars)
+                    .transpose()
+                    .map(|value| value.map(|value| (key, value)))
+            })
+            .collect()
+    }
 }
 
-impl Display for URLPathTemplate {
+impl FromStr for URLTemplate {
+    type Err = String;
+
+    /// Top-level parsing entry point for URLTemplate syntax.
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        let (base, path) = if let Some((scheme, rest)) = input.split_once("://") {
+            if let Some((host, path)) = rest.split_once('/') {
+                (
+                    Some(
+                        Url::parse(&format!("{}://{}", scheme, host))
+                            .map_err(|err| err.to_string())?,
+                    ),
+                    path,
+                )
+            } else {
+                (Some(Url::parse(input).map_err(|err| err.to_string())?), "")
+            }
+        } else {
+            (None, input)
+        };
+        let mut prefix_suffix = path.splitn(2, '?');
+        let path_prefix = prefix_suffix.next();
+        let query_suffix = prefix_suffix.next();
+        let mut path = vec![];
+
+        if let Some(path_prefix) = path_prefix {
+            for path_part in path_prefix.split('/') {
+                if !path_part.is_empty() {
+                    path.push(ParameterValue::parse(path_part, true)?);
+                }
+            }
+        }
+
+        let mut query = IndexMap::default();
+
+        if let Some(query_suffix) = query_suffix {
+            for query_part in query_suffix.split('&') {
+                if let Some((key, value)) = query_part.split_once('=') {
+                    query.insert(key.to_string(), ParameterValue::parse(value, false)?);
+                }
+            }
+        }
+
+        Ok(URLTemplate { base, path, query })
+    }
+}
+
+impl Display for URLTemplate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(base) = &self.base {
+            f.write_str(base.to_string().trim_end_matches('/'))?;
+        }
+
         for param_value in &self.path {
             f.write_str("/")?;
             param_value.fmt(f)?;
@@ -226,7 +244,7 @@ impl Display for URLPathTemplate {
     }
 }
 
-impl Serialize for URLPathTemplate {
+impl Serialize for URLTemplate {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.collect_str(self)
     }
@@ -411,20 +429,80 @@ impl ParameterValue {
         Ok(output)
     }
 
-    fn required_parameters(&self) -> Vec<String> {
+    fn required_parameters(&self) -> Vec<&str> {
         let mut parameters = vec![];
         for part in &self.parts {
             match part {
                 ValuePart::Text(_) => {}
                 ValuePart::Var(var) => {
                     if var.required {
-                        parameters.push(var.var_path.clone());
+                        parameters.push(var.var_path.as_str());
                     }
                 }
             }
         }
         parameters
     }
+
+    fn parameters(&self) -> Result<Vec<Parameter>, String> {
+        let mut parameters = Vec::new();
+        for part in &self.parts {
+            match part {
+                ValuePart::Text(_) => {}
+                ValuePart::Var(var) => {
+                    let mut parts = var.var_path.split('.');
+
+                    let var_type = parts
+                        .next()
+                        .ok_or("expecting variable parameter to not be empty".to_string())?;
+                    let name = parts.next().ok_or(
+                        "expecting variable parameter to have a named selection".to_string(),
+                    )?;
+
+                    parameters.push(match var_type {
+                        "$args" => Parameter::Argument {
+                            argument: name,
+                            paths: parts.collect(),
+                        },
+                        "$this" => Parameter::Sibling {
+                            field: name,
+                            paths: parts.collect(),
+                        },
+                        "$config" => continue,  // Config is valid, just not needed in this code path
+                        other => {
+                            return Err(format!("expected parameter variable to be $args, $this or $config, found: {other}"));
+                        }
+                    });
+                }
+            }
+        }
+
+        Ok(parameters)
+    }
+}
+
+/// A parameter to fill
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Parameter<'a> {
+    /// Arguments get their value from a variable marked by `$args`, which is
+    /// passed to the GraphQL operation.
+    Argument {
+        /// The name of the argument
+        argument: &'a str,
+
+        /// Any optional nested selections on the argument
+        paths: Vec<&'a str>,
+    },
+
+    /// Siblings get their value from a variable marked by `$this`, which is
+    /// fetched from the parent container by name.
+    Sibling {
+        /// The field of the parent container
+        field: &'a str,
+
+        /// Any optional nexted selection on the field
+        paths: Vec<&'a str>,
+    },
 }
 
 impl Display for ParameterValue {
@@ -512,11 +590,7 @@ impl VariableExpression {
             }
             Ok(Some(self.value_as_string(child_value)))
         } else if self.required {
-            return Err(format!(
-                "Missing required variable {} in {}",
-                self.var_path,
-                JSON::Object(vars.clone()),
-            ));
+            return Err(format!("Missing required variable {}", self.var_path,));
         } else {
             return Ok(None);
         }
@@ -548,7 +622,12 @@ impl Display for VariableExpression {
 }
 
 fn nom_parse_identifier_possible_namespace(input: &str) -> IResult<&str, &str> {
-    recognize(alt((tag("$this"), nom_parse_identifier)))(input)
+    recognize(alt((
+        tag("$args"),
+        tag("$this"),
+        tag("$config"),
+        nom_parse_identifier,
+    )))(input)
 }
 
 fn nom_parse_identifier(input: &str) -> IResult<&str, &str> {
@@ -569,8 +648,8 @@ fn nom_parse_identifier_path(input: &str) -> IResult<&str, String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use serde_json_bytes::json;
+mod test_parse {
+    use pretty_assertions::assert_eq;
 
     use super::*;
 
@@ -611,8 +690,8 @@ mod tests {
     #[test]
     fn test_path_list() {
         assert_eq!(
-            URLPathTemplate::parse("/abc"),
-            Ok(URLPathTemplate {
+            URLTemplate::from_str("/abc"),
+            Ok(URLTemplate {
                 path: vec![ParameterValue {
                     parts: vec![ValuePart::Text("abc".to_string())],
                 },],
@@ -621,8 +700,8 @@ mod tests {
         );
 
         assert_eq!(
-            URLPathTemplate::parse("/abc/def"),
-            Ok(URLPathTemplate {
+            URLTemplate::from_str("/abc/def"),
+            Ok(URLTemplate {
                 path: vec![
                     ParameterValue {
                         parts: vec![ValuePart::Text("abc".to_string())],
@@ -636,8 +715,8 @@ mod tests {
         );
 
         assert_eq!(
-            URLPathTemplate::parse("/abc/{def}"),
-            Ok(URLPathTemplate {
+            URLTemplate::from_str("/abc/{def}"),
+            Ok(URLTemplate {
                 path: vec![
                     ParameterValue {
                         parts: vec![ValuePart::Text("abc".to_string())],
@@ -655,8 +734,8 @@ mod tests {
         );
 
         assert_eq!(
-            URLPathTemplate::parse("/abc/{def}/ghi"),
-            Ok(URLPathTemplate {
+            URLTemplate::from_str("/abc/{def}/ghi"),
+            Ok(URLTemplate {
                 path: vec![
                     ParameterValue {
                         parts: vec![ValuePart::Text("abc".to_string())],
@@ -680,8 +759,9 @@ mod tests {
     #[test]
     fn test_url_path_template_parse() {
         assert_eq!(
-            URLPathTemplate::parse("/users/{user_id}?a=b"),
-            Ok(URLPathTemplate {
+            URLTemplate::from_str("/users/{user_id}?a=b"),
+            Ok(URLTemplate {
+                base: None,
                 path: vec![
                     ParameterValue {
                         parts: vec![ValuePart::Text("users".to_string())],
@@ -694,7 +774,7 @@ mod tests {
                         })],
                     },
                 ],
-                query: IndexMap::from([(
+                query: IndexMap::from_iter([(
                     "a".to_string(),
                     ParameterValue {
                         parts: vec![ValuePart::Text("b".to_string())],
@@ -704,8 +784,9 @@ mod tests {
         );
 
         assert_eq!(
-            URLPathTemplate::parse("/users/{user_id}?a={b}&c={d!}&e={f.g}"),
-            Ok(URLPathTemplate {
+            URLTemplate::from_str("/users/{user_id}?a={b}&c={d!}&e={f.g}"),
+            Ok(URLTemplate {
+                base: None,
                 path: vec![
                     ParameterValue {
                         parts: vec![ValuePart::Text("users".to_string())],
@@ -718,7 +799,7 @@ mod tests {
                         })],
                     },
                 ],
-                query: IndexMap::from([
+                query: IndexMap::from_iter([
                     (
                         "e".to_string(),
                         ParameterValue {
@@ -752,8 +833,9 @@ mod tests {
         );
 
         assert_eq!(
-            URLPathTemplate::parse("/users/{id}?a={b}#junk"),
-            Ok(URLPathTemplate {
+            URLTemplate::from_str("/users/{id}?a={b}#junk"),
+            Ok(URLTemplate {
+                base: None,
                 path: vec![
                     ParameterValue {
                         parts: vec![ValuePart::Text("users".to_string())],
@@ -766,7 +848,7 @@ mod tests {
                         })],
                     },
                 ],
-                query: IndexMap::from([(
+                query: IndexMap::from_iter([(
                     "a".to_string(),
                     ParameterValue {
                         parts: vec![
@@ -782,8 +864,8 @@ mod tests {
         );
 
         assert_eq!(
-            URLPathTemplate::parse("/location/{lat},{lon}"),
-            Ok(URLPathTemplate {
+            URLTemplate::from_str("/location/{lat},{lon}"),
+            Ok(URLTemplate {
                 path: vec![
                     ParameterValue {
                         parts: vec![ValuePart::Text("location".to_string())],
@@ -809,8 +891,9 @@ mod tests {
         );
 
         assert_eq!(
-            URLPathTemplate::parse("/point3/{x},{y},{z}?a={b}"),
-            Ok(URLPathTemplate {
+            URLTemplate::from_str("/point3/{x},{y},{z}?a={b}"),
+            Ok(URLTemplate {
+                base: None,
                 path: vec![
                     ParameterValue {
                         parts: vec![ValuePart::Text("point3".to_string())],
@@ -837,7 +920,7 @@ mod tests {
                         ],
                     },
                 ],
-                query: IndexMap::from([(
+                query: IndexMap::from_iter([(
                     "a".to_string(),
                     ParameterValue {
                         parts: vec![ValuePart::Var(VariableExpression {
@@ -851,135 +934,15 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_path() {
-        let template = URLPathTemplate::parse("/users/{user_id}?a={b}&c={d!}&e={f.g}").unwrap();
-
+    fn batch_expressions() {
         assert_eq!(
-            template.generate_path(&json!("not an object")),
-            Err(r#"Expected object, got "not an object""#.to_string()),
-        );
-
-        assert_eq!(
-            template.generate_path(&json!({
-                // A variables object without any properties
-            })),
-            Err("Missing required variable user_id in {}".to_string()),
-        );
-
-        assert_eq!(
-            template.generate_path(&json!({
-                "user_id": 123,
-                "b": "456",
-                "d": 789,
-                "f.g": "abc",
-            })),
-            Ok("/users/123?a=456&c=789&e=abc".to_string()),
-        );
-
-        assert_eq!(
-            template.generate_path(&json!({
-                "user_id": 123,
-                "d": 789,
-                "f": "not an object",
-            })),
-            Ok("/users/123?c=789".to_string()),
-        );
-
-        assert_eq!(
-            template.generate_path(&json!({
-                "b": "456",
-                "f.g": "abc",
-                "user_id": "123",
-            })),
-            Err(
-                r#"Missing required variable d in {"b":"456","f.g":"abc","user_id":"123"}"#
-                    .to_string()
-            ),
-        );
-
-        assert_eq!(
-            template.generate_path(&json!({
-                // The order of the variables should not matter.
-                "d": "789",
-                "b": "456",
-                "user_id": "123",
-            })),
-            Ok("/users/123?a=456&c=789".to_string()),
-        );
-
-        assert_eq!(
-            template.generate_path(&json!({
-                "user_id": "123",
-                "b": "a",
-                "d": "c",
-                "f.g": "e",
-                // Extra variables should be ignored.
-                "extra": "ignored",
-            })),
-            Ok("/users/123?a=a&c=c&e=e".to_string()),
-        );
-
-        let template_with_nested_required_var =
-            URLPathTemplate::parse("/repositories/{user.login}/{repo.name}?testing={a.b.c!}")
-                .unwrap();
-
-        assert_eq!(
-            template_with_nested_required_var.generate_path(&json!({
-                "repo.name": "repo",
-                "user.login": "user",
-            })),
-            Err(
-                r#"Missing required variable a.b.c in {"repo.name":"repo","user.login":"user"}"#
-                    .to_string()
-            ),
-        );
-
-        assert_eq!(
-            template_with_nested_required_var.generate_path(&json!({
-                "user.login": "user",
-                "repo.name": "repo",
-                "a.b.c": "value",
-            })),
-            Ok("/repositories/user/repo?testing=value".to_string()),
-        );
-    }
-
-    #[test]
-    fn test_generate_path_empty() {
-        assert_eq!(
-            URLPathTemplate::parse("")
-                .unwrap()
-                .generate_path(&json!({}))
-                .unwrap(),
-            "/".to_string()
-        );
-
-        assert_eq!(
-            URLPathTemplate::parse("/")
-                .unwrap()
-                .generate_path(&json!({}))
-                .unwrap(),
-            "/".to_string()
-        );
-
-        assert_eq!(
-            URLPathTemplate::parse("?foo=bar")
-                .unwrap()
-                .generate_path(&json!({}))
-                .unwrap(),
-            "/?foo=bar".to_string()
-        );
-    }
-
-    #[test]
-    fn test_batch_expressions() {
-        assert_eq!(
-            URLPathTemplate::parse("/users?ids={id,...}"),
-            Ok(URLPathTemplate {
+            URLTemplate::from_str("/users?ids={id,...}"),
+            Ok(URLTemplate {
+                base: None,
                 path: vec![ParameterValue {
                     parts: vec![ValuePart::Text("users".to_string())],
                 }],
-                query: IndexMap::from([(
+                query: IndexMap::from_iter([(
                     "ids".to_string(),
                     ParameterValue {
                         parts: vec![ValuePart::Var(VariableExpression {
@@ -993,8 +956,9 @@ mod tests {
         );
 
         assert_eq!(
-            URLPathTemplate::parse("/v1/products?ids={id ...}&names={name|...}"),
-            Ok(URLPathTemplate {
+            URLTemplate::from_str("/v1/products?ids={id ...}&names={name|...}"),
+            Ok(URLTemplate {
+                base: None,
                 path: vec![
                     ParameterValue {
                         parts: vec![ValuePart::Text("v1".to_string())]
@@ -1003,7 +967,7 @@ mod tests {
                         parts: vec![ValuePart::Text("products".to_string())]
                     },
                 ],
-                query: IndexMap::from([
+                query: IndexMap::from_iter([
                     (
                         "ids".to_string(),
                         ParameterValue {
@@ -1029,12 +993,13 @@ mod tests {
         );
 
         assert_eq!(
-            URLPathTemplate::parse("/people?ids={person.id,...}"),
-            Ok(URLPathTemplate {
+            URLTemplate::from_str("/people?ids={person.id,...}"),
+            Ok(URLTemplate {
+                base: None,
                 path: vec![ParameterValue {
                     parts: vec![ValuePart::Text("people".to_string())],
                 }],
-                query: IndexMap::from([(
+                query: IndexMap::from_iter([(
                     "ids".to_string(),
                     ParameterValue {
                         parts: vec![ValuePart::Var(VariableExpression {
@@ -1048,8 +1013,9 @@ mod tests {
         );
 
         assert_eq!(
-            URLPathTemplate::parse("/people/{uid}/notes?ids={note_id;...}"),
-            Ok(URLPathTemplate {
+            URLTemplate::from_str("/people/{uid}/notes?ids={note_id;...}"),
+            Ok(URLTemplate {
+                base: None,
                 path: vec![
                     ParameterValue {
                         parts: vec![ValuePart::Text("people".to_string())],
@@ -1065,7 +1031,7 @@ mod tests {
                         parts: vec![ValuePart::Text("notes".to_string())],
                     },
                 ],
-                query: IndexMap::from([(
+                query: IndexMap::from_iter([(
                     "ids".to_string(),
                     ParameterValue {
                         parts: vec![ValuePart::Var(VariableExpression {
@@ -1079,8 +1045,9 @@ mod tests {
         );
 
         assert_eq!(
-            URLPathTemplate::parse("/people/by_uid:{uid}/notes?ids=[{note_id;...}]"),
-            Ok(URLPathTemplate {
+            URLTemplate::from_str("/people/by_uid:{uid}/notes?ids=[{note_id;...}]"),
+            Ok(URLTemplate {
+                base: None,
                 path: vec![
                     ParameterValue {
                         parts: vec![ValuePart::Text("people".to_string())],
@@ -1100,7 +1067,7 @@ mod tests {
                     },
                 ],
 
-                query: IndexMap::from([(
+                query: IndexMap::from_iter([(
                     "ids".to_string(),
                     ParameterValue {
                         parts: vec![
@@ -1119,60 +1086,105 @@ mod tests {
     }
 
     #[test]
-    fn test_batch_generation() {
-        let template = URLPathTemplate::parse("/users?ids={id,...}").unwrap();
-
+    fn test_required_parameters() {
         assert_eq!(
-            template.generate_path(&json!({
-                "id": [1, 2, 3],
-            })),
-            Ok("/users?ids=1,2,3".to_string()),
+            URLTemplate::from_str("/users/{user_id}?a={b}&c={d.e!}&e={f.g}")
+                .unwrap()
+                .required_parameters(),
+            vec!["d.e", "user_id"],
         );
 
         assert_eq!(
-            template.generate_path(&json!({
-                "id": [1],
-            })),
-            Ok("/users?ids=1".to_string()),
+            URLTemplate::from_str("/users?ids={id,...}&names={name|...}")
+                .unwrap()
+                .required_parameters(),
+            Vec::<String>::new(),
         );
 
         assert_eq!(
-            template.generate_path(&json!({
-                "id": [],
-            })),
-            Ok("/users".to_string()),
+            URLTemplate::from_str("/users?ids={id!,...}&names={user.name|...}")
+                .unwrap()
+                .required_parameters(),
+            vec!["id"],
         );
 
         assert_eq!(
-            template.generate_path(&json!({
-                "id": [1, 2, 3],
-                "extra": "ignored",
-            })),
-            Ok("/users?ids=1,2,3".to_string()),
-        );
-
-        let template = URLPathTemplate::parse("/users?ids={id;...}&names={name|...}").unwrap();
-
-        assert_eq!(
-            template.generate_path(&json!({
-                "id": [1, 2, 3],
-                "name": ["a", "b", "c"],
-            })),
-            Ok("/users?ids=1;2;3&names=a|b|c".to_string()),
+            URLTemplate::from_str("/position/{x},{y}")
+                .unwrap()
+                .required_parameters(),
+            vec!["x", "y"],
         );
 
         assert_eq!(
-            template.generate_path(&json!({
-                "id": 123,
-                "name": "456",
-            })),
-            Ok("/users?ids=123&names=456".to_string()),
+            URLTemplate::from_str("/position/xyz({x},{y},{z})")
+                .unwrap()
+                .required_parameters(),
+            vec!["x", "y", "z"],
+        );
+
+        assert_eq!(
+            URLTemplate::from_str("/position?xyz=({x!},{y},{z!})")
+                .unwrap()
+                .required_parameters(),
+            vec!["x", "z"],
+        );
+
+        assert_eq!(
+            URLTemplate::from_str("/users/{id}?user_id={id}")
+                .unwrap()
+                .required_parameters(),
+            vec!["id"],
+        );
+
+        assert_eq!(
+            URLTemplate::from_str("/users/{$this.id}?foo={$this.bar!}")
+                .unwrap()
+                .required_parameters(),
+            vec!["$this.bar", "$this.id"],
+        );
+
+        assert_eq!(
+            URLTemplate::from_str("/users/{$args.id}?foo={$args.bar!}")
+                .unwrap()
+                .required_parameters(),
+            vec!["$args.bar", "$args.id"],
         );
     }
 
     #[test]
+    fn multi_variable_parameter_values() {
+        assert_eq!(
+            URLTemplate::from_str(
+                "/locations/xyz({x}{y}{z})?required={b},{c};{d!}&optional=[{e}{f},{g}]"
+            ),
+            Err("Ambiguous adjacent variable expressions in xyz({x}{y}{z})".to_string()),
+        );
+
+        assert_eq!(
+            URLTemplate::from_str(
+                "/locations/xyz({x},{y},{z})?required={b}{c};{d!}&optional=[{e}{f},{g}]"
+            ),
+            Err("Ambiguous adjacent variable expressions in {b}{c};{d!}".to_string()),
+        );
+
+        assert_eq!(
+            URLTemplate::from_str(
+                "/locations/xyz({x},{y},{z})?required={b},{c};{d!}&optional=[{e};{f}{g}]"
+            ),
+            Err("Ambiguous adjacent variable expressions in [{e};{f}{g}]".to_string()),
+        );
+    }
+}
+
+#[cfg(test)]
+mod test_extract_vars {
+    use pretty_assertions::assert_eq;
+    use serde_json_bytes::json;
+
+    use super::*;
+    #[test]
     fn test_extract_vars_from_url_path() {
-        let repo_template = URLPathTemplate::parse("/repository/{user.login}/{repo.name}").unwrap();
+        let repo_template = URLTemplate::from_str("/repository/{user.login}/{repo.name}").unwrap();
 
         assert_eq!(
             repo_template.extract_vars("/repository/user/repo"),
@@ -1182,7 +1194,7 @@ mod tests {
             })),
         );
 
-        let template_with_query_params = URLPathTemplate::parse(
+        let template_with_query_params = URLTemplate::from_str(
             "/contacts/{cid}/notes/{nid}?testing={a.b.c!}&testing2={a.b.d}&type={type}",
         )
         .unwrap();
@@ -1235,7 +1247,7 @@ mod tests {
         );
 
         let template_with_constant_query_param =
-            URLPathTemplate::parse("/contacts/{cid}?constant=asdf&required={a!}&optional={b}")
+            URLTemplate::from_str("/contacts/{cid}?constant=asdf&required={a!}&optional={b}")
                 .unwrap();
 
         assert_eq!(
@@ -1249,14 +1261,6 @@ mod tests {
                 "a": "456",
                 "b": "789",
             })),
-        );
-
-        assert_eq!(
-            template_with_constant_query_param.generate_path(&json!({
-                "cid": "123",
-                "a": "456",
-            })),
-            Ok("/contacts/123?constant=asdf&required=456".to_string()),
         );
 
         assert_eq!(
@@ -1279,7 +1283,7 @@ mod tests {
         );
 
         let template_with_constant_path_part =
-            URLPathTemplate::parse("/users/123/notes/{nid}").unwrap();
+            URLTemplate::from_str("/users/123/notes/{nid}").unwrap();
 
         assert_eq!(
             template_with_constant_path_part.extract_vars("/users/123/notes/456"),
@@ -1302,140 +1306,103 @@ mod tests {
     }
 
     #[test]
-    fn test_multi_variable_parameter_values() {
-        let template = URLPathTemplate::parse(
+    fn test_extract_batch_vars() {
+        let template_comma = URLTemplate::from_str("/users?ids=[{id,...}]").unwrap();
+
+        assert_eq!(
+            template_comma.extract_vars("/users?ids=[1,2,3]"),
+            Ok(json!({
+                "id": ["1", "2", "3"],
+            })),
+        );
+
+        assert_eq!(
+            template_comma.extract_vars("/users?ids=[]"),
+            Ok(json!({
+                "id": [],
+            })),
+        );
+
+        assert_eq!(
+            template_comma.extract_vars("/users?ids=[123]&extra=ignored"),
+            Ok(json!({
+                "id": ["123"],
+            })),
+        );
+
+        let template_semicolon = URLTemplate::from_str("/columns/{a,...};{b,...}").unwrap();
+
+        assert_eq!(
+            template_semicolon.extract_vars("/columns/1;2"),
+            Ok(json!({
+                "a": ["1"],
+                "b": ["2"],
+            })),
+        );
+
+        assert_eq!(
+            template_semicolon.extract_vars("/columns/1,2;3"),
+            Ok(json!({
+                "a": ["1", "2"],
+                "b": ["3"],
+            })),
+        );
+
+        assert_eq!(
+            template_semicolon.extract_vars("/columns/1;2,3"),
+            Ok(json!({
+                "a": ["1"],
+                "b": ["2", "3"],
+            })),
+        );
+
+        assert_eq!(
+            template_semicolon.extract_vars("/columns/1;2;3"),
+            Ok(json!({
+                "a": ["1"],
+                "b": ["2;3"],
+            })),
+        );
+
+        assert_eq!(
+            template_semicolon.extract_vars("/columns/;3,2,1?extra=ignored"),
+            Ok(json!({
+                "a": [],
+                "b": ["3", "2", "1"],
+            })),
+        );
+
+        assert_eq!(
+            template_semicolon.extract_vars("/columns/1,2,3;"),
+            Ok(json!({
+                "a": ["1", "2", "3"],
+                "b": [],
+            })),
+        );
+
+        assert_eq!(
+            template_semicolon.extract_vars("/columns/1,2,3;9,8,7,6"),
+            Ok(json!({
+                "a": ["1", "2", "3"],
+                "b": ["9", "8", "7", "6"],
+            })),
+        );
+
+        assert_eq!(
+            template_semicolon.extract_vars("/columns/;?extra=ignored"),
+            Ok(json!({
+                "a": [],
+                "b": [],
+            })),
+        );
+    }
+
+    #[test]
+    fn multi_variable_parameter_values() {
+        let template = URLTemplate::from_str(
             "/locations/xyz({x},{y},{z})?required={b},{c};{d!}&optional=[{e},{f}]",
         )
         .unwrap();
-
-        assert_eq!(
-            template.generate_path(&json!({
-                "x": 1,
-                "y": 2,
-                "z": 3,
-                "b": 4,
-                "c": 5,
-                "d": 6,
-                "e": 7,
-                "f": 8,
-            })),
-            Ok("/locations/xyz(1,2,3)?required=4,5;6&optional=[7,8]".to_string()),
-        );
-
-        assert_eq!(
-            template.generate_path(&json!({
-                "x": 1,
-                "y": 2,
-                "z": 3,
-                "b": 4,
-                "c": 5,
-                "d": 6,
-                "e": 7,
-                // "f": 8,
-            })),
-            Ok("/locations/xyz(1,2,3)?required=4,5;6".to_string()),
-        );
-
-        assert_eq!(
-            template.generate_path(&json!({
-                "x": 1,
-                "y": 2,
-                "z": 3,
-                "b": 4,
-                "c": 5,
-                "d": 6,
-                // "e": 7,
-                "f": 8,
-            })),
-            Ok("/locations/xyz(1,2,3)?required=4,5;6".to_string()),
-        );
-
-        assert_eq!(
-            template.generate_path(&json!({
-                "x": 1,
-                "y": 2,
-                "z": 3,
-                "b": 4,
-                "c": 5,
-                "d": 6,
-            })),
-            Ok("/locations/xyz(1,2,3)?required=4,5;6".to_string()),
-        );
-
-        assert_eq!(
-            template.generate_path(&json!({
-                // "x": 1,
-                "y": 2,
-                "z": 3,
-            })),
-            Err(r#"Missing required variable x in {"y":2,"z":3}"#.to_string()),
-        );
-
-        assert_eq!(
-            template.generate_path(&json!({
-                "x": 1,
-                "y": 2,
-                // "z": 3,
-            })),
-            Err(r#"Missing required variable z in {"x":1,"y":2}"#.to_string()),
-        );
-
-        assert_eq!(
-            template.generate_path(&json!({
-                "b": 4,
-                "c": 5,
-                "x": 1,
-                "y": 2,
-                "z": 3,
-                // "d": 6,
-            })),
-            Err(r#"Missing required variable d in {"b":4,"c":5,"x":1,"y":2,"z":3}"#.to_string()),
-        );
-
-        assert_eq!(
-            template.generate_path(&json!({
-                "b": 4,
-                // "c": 5,
-                "d": 6,
-                "x": 1,
-                "y": 2,
-                "z": 3,
-            })),
-            Err(r#"Missing variable c for required parameter {b},{c};{d!} given variables {"b":4,"d":6,"x":1,"y":2,"z":3}"#.to_string()),
-        );
-
-        assert_eq!(
-            template.generate_path(&json!({
-                // "b": 4,
-                // "c": 5,
-                "d": 6,
-                "x": 1,
-                "y": 2,
-                "z": 3,
-            })),
-            Err(r#"Missing variable b for required parameter {b},{c};{d!} given variables {"d":6,"x":1,"y":2,"z":3}"#.to_string()),
-        );
-
-        assert_eq!(
-            URLPathTemplate::parse(
-                "/locations/xyz({x}{y}{z})?required={b},{c};{d!}&optional=[{e}{f},{g}]"
-            ),
-            Err("Ambiguous adjacent variable expressions in xyz({x}{y}{z})".to_string()),
-        );
-
-        assert_eq!(
-            URLPathTemplate::parse(
-                "/locations/xyz({x},{y},{z})?required={b}{c};{d!}&optional=[{e}{f},{g}]"
-            ),
-            Err("Ambiguous adjacent variable expressions in {b}{c};{d!}".to_string()),
-        );
-
-        assert_eq!(
-            URLPathTemplate::parse(
-                "/locations/xyz({x},{y},{z})?required={b},{c};{d!}&optional=[{e};{f}{g}]"
-            ),
-            Err("Ambiguous adjacent variable expressions in [{e};{f}{g}]".to_string()),
-        );
 
         assert_eq!(
             template.extract_vars("/locations/xyz(1,2,3)?required=4,5;6&optional=[7,8]"),
@@ -1524,43 +1491,7 @@ mod tests {
         );
 
         let line_template =
-            URLPathTemplate::parse("/line/{p1.x},{p1.y},{p1.z}/{p2.x},{p2.y},{p2.z}").unwrap();
-
-        assert_eq!(
-            line_template.generate_path(&json!({
-                "p1.x": 1,
-                "p1.y": 2,
-                "p1.z": 3,
-                "p2.x": 4,
-                "p2.y": 5,
-                "p2.z": 6,
-            })),
-            Ok("/line/1,2,3/4,5,6".to_string()),
-        );
-
-        assert_eq!(
-            line_template.generate_path(&json!({
-                "p1.x": 1,
-                "p1.y": 2,
-                "p1.z": 3,
-                "p2.x": 4,
-                "p2.y": 5,
-                // "p2.z": 6,
-            })),
-            Err(r#"Missing required variable p2.z in {"p1.x":1,"p1.y":2,"p1.z":3,"p2.x":4,"p2.y":5}"#.to_string()),
-        );
-
-        assert_eq!(
-            line_template.generate_path(&json!({
-                "p1.x": 1,
-                // "p1.y": 2,
-                "p1.z": 3,
-                "p2.x": 4,
-                "p2.y": 5,
-                "p2.z": 6,
-            })),
-            Err(r#"Missing required variable p1.y in {"p1.x":1,"p1.z":3,"p2.x":4,"p2.y":5,"p2.z":6}"#.to_string()),
-        );
+            URLTemplate::from_str("/line/{p1.x},{p1.y},{p1.z}/{p2.x},{p2.y},{p2.z}").unwrap();
 
         assert_eq!(
             line_template.extract_vars("/line/6.6,5.5,4.4/3.3,2.2,1.1"),
@@ -1591,219 +1522,68 @@ mod tests {
             Err("Constant text , not found in 3.3,2.2".to_string()),
         );
     }
+}
 
-    #[test]
-    fn test_extract_batch_vars() {
-        let template_comma = URLPathTemplate::parse("/users?ids=[{id,...}]").unwrap();
+#[test]
+fn test_display_trait() {
+    assert_eq!(
+        format!(
+            "{}",
+            URLTemplate::from_str("/users/{user_id}?a={b}&c={d!}&e={f.g}").unwrap()
+        ),
+        "/users/{user_id!}?a={b}&c={d!}&e={f.g}".to_string(),
+    );
 
-        assert_eq!(
-            template_comma.extract_vars("/users?ids=[1,2,3]"),
-            Ok(json!({
-                "id": ["1", "2", "3"],
-            })),
-        );
+    assert_eq!(
+        format!(
+            "{}",
+            URLTemplate::from_str("/users/{user_id}?a={b}&c={d!}&e={f.g}").unwrap()
+        ),
+        "/users/{user_id!}?a={b}&c={d!}&e={f.g}".to_string(),
+    );
 
-        assert_eq!(
-            template_comma.extract_vars("/users?ids=[]"),
-            Ok(json!({
-                "id": [],
-            })),
-        );
+    assert_eq!(
+        format!(
+            "{}",
+            URLTemplate::from_str("/users/{user_id}?a={b}&c={d!}&e={f.g}").unwrap()
+        ),
+        "/users/{user_id!}?a={b}&c={d!}&e={f.g}".to_string(),
+    );
 
-        assert_eq!(
-            template_comma.extract_vars("/users?ids=[123]&extra=ignored"),
-            Ok(json!({
-                "id": ["123"],
-            })),
-        );
+    assert_eq!(
+        format!(
+            "{}",
+            URLTemplate::from_str("/users?ids={id,...}&names={name|...}").unwrap()
+        ),
+        "/users?ids={id,...}&names={name|...}".to_string(),
+    );
 
-        let template_semicolon = URLPathTemplate::parse("/columns/{a,...};{b,...}").unwrap();
+    assert_eq!(
+        format!(
+            "{}",
+            URLTemplate::from_str("/users?ids={id!,...}&names={user.name|...}").unwrap()
+        ),
+        "/users?ids={id!,...}&names={user.name|...}".to_string(),
+    );
 
-        assert_eq!(
-            template_semicolon.extract_vars("/columns/1;2"),
-            Ok(json!({
-                "a": ["1"],
-                "b": ["2"],
-            })),
-        );
+    assert_eq!(
+        format!("{}", URLTemplate::from_str("/position/{x},{y}").unwrap(),),
+        "/position/{x!},{y!}".to_string(),
+    );
 
-        assert_eq!(
-            template_semicolon.extract_vars("/columns/1,2;3"),
-            Ok(json!({
-                "a": ["1", "2"],
-                "b": ["3"],
-            })),
-        );
+    assert_eq!(
+        format!(
+            "{}",
+            URLTemplate::from_str("/position/xyz({x},{y},{z})").unwrap(),
+        ),
+        "/position/xyz({x!},{y!},{z!})".to_string(),
+    );
 
-        assert_eq!(
-            template_semicolon.extract_vars("/columns/1;2,3"),
-            Ok(json!({
-                "a": ["1"],
-                "b": ["2", "3"],
-            })),
-        );
-
-        assert_eq!(
-            template_semicolon.extract_vars("/columns/1;2;3"),
-            Ok(json!({
-                "a": ["1"],
-                "b": ["2;3"],
-            })),
-        );
-
-        assert_eq!(
-            template_semicolon.extract_vars("/columns/;3,2,1?extra=ignored"),
-            Ok(json!({
-                "a": [],
-                "b": ["3", "2", "1"],
-            })),
-        );
-
-        assert_eq!(
-            template_semicolon.extract_vars("/columns/1,2,3;"),
-            Ok(json!({
-                "a": ["1", "2", "3"],
-                "b": [],
-            })),
-        );
-
-        assert_eq!(
-            template_semicolon.extract_vars("/columns/1,2,3;9,8,7,6"),
-            Ok(json!({
-                "a": ["1", "2", "3"],
-                "b": ["9", "8", "7", "6"],
-            })),
-        );
-
-        assert_eq!(
-            template_semicolon.extract_vars("/columns/;?extra=ignored"),
-            Ok(json!({
-                "a": [],
-                "b": [],
-            })),
-        );
-    }
-
-    #[test]
-    fn test_display_trait() {
-        assert_eq!(
-            format!(
-                "{}",
-                URLPathTemplate::parse("/users/{user_id}?a={b}&c={d!}&e={f.g}").unwrap()
-            ),
-            "/users/{user_id!}?a={b}&c={d!}&e={f.g}".to_string(),
-        );
-
-        assert_eq!(
-            format!(
-                "{}",
-                URLPathTemplate::parse("/users/{user_id}?a={b}&c={d!}&e={f.g}").unwrap()
-            ),
-            "/users/{user_id!}?a={b}&c={d!}&e={f.g}".to_string(),
-        );
-
-        assert_eq!(
-            format!(
-                "{}",
-                URLPathTemplate::parse("/users/{user_id}?a={b}&c={d!}&e={f.g}").unwrap()
-            ),
-            "/users/{user_id!}?a={b}&c={d!}&e={f.g}".to_string(),
-        );
-
-        assert_eq!(
-            format!(
-                "{}",
-                URLPathTemplate::parse("/users?ids={id,...}&names={name|...}").unwrap()
-            ),
-            "/users?ids={id,...}&names={name|...}".to_string(),
-        );
-
-        assert_eq!(
-            format!(
-                "{}",
-                URLPathTemplate::parse("/users?ids={id!,...}&names={user.name|...}").unwrap()
-            ),
-            "/users?ids={id!,...}&names={user.name|...}".to_string(),
-        );
-
-        assert_eq!(
-            format!("{}", URLPathTemplate::parse("/position/{x},{y}").unwrap(),),
-            "/position/{x!},{y!}".to_string(),
-        );
-
-        assert_eq!(
-            format!(
-                "{}",
-                URLPathTemplate::parse("/position/xyz({x},{y},{z})").unwrap(),
-            ),
-            "/position/xyz({x!},{y!},{z!})".to_string(),
-        );
-
-        assert_eq!(
-            format!(
-                "{}",
-                URLPathTemplate::parse("/position?xyz=({x},{y},{z})").unwrap(),
-            ),
-            "/position?xyz=({x},{y},{z})".to_string(),
-        );
-    }
-
-    #[test]
-    fn test_required_parameters() {
-        assert_eq!(
-            URLPathTemplate::parse("/users/{user_id}?a={b}&c={d.e!}&e={f.g}")
-                .unwrap()
-                .required_parameters(),
-            vec!["d.e", "user_id"],
-        );
-
-        assert_eq!(
-            URLPathTemplate::parse("/users?ids={id,...}&names={name|...}")
-                .unwrap()
-                .required_parameters(),
-            Vec::<String>::new(),
-        );
-
-        assert_eq!(
-            URLPathTemplate::parse("/users?ids={id!,...}&names={user.name|...}")
-                .unwrap()
-                .required_parameters(),
-            vec!["id"],
-        );
-
-        assert_eq!(
-            URLPathTemplate::parse("/position/{x},{y}")
-                .unwrap()
-                .required_parameters(),
-            vec!["x", "y"],
-        );
-
-        assert_eq!(
-            URLPathTemplate::parse("/position/xyz({x},{y},{z})")
-                .unwrap()
-                .required_parameters(),
-            vec!["x", "y", "z"],
-        );
-
-        assert_eq!(
-            URLPathTemplate::parse("/position?xyz=({x!},{y},{z!})")
-                .unwrap()
-                .required_parameters(),
-            vec!["x", "z"],
-        );
-
-        assert_eq!(
-            URLPathTemplate::parse("/users/{id}?user_id={id}")
-                .unwrap()
-                .required_parameters(),
-            vec!["id"],
-        );
-
-        assert_eq!(
-            URLPathTemplate::parse("/users/{$this.id}?foo={$this.bar!}")
-                .unwrap()
-                .required_parameters(),
-            vec!["$this.bar", "$this.id"],
-        );
-    }
+    assert_eq!(
+        format!(
+            "{}",
+            URLTemplate::from_str("/position?xyz=({x},{y},{z})").unwrap(),
+        ),
+        "/position?xyz=({x},{y},{z})".to_string(),
+    );
 }

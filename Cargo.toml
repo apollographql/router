@@ -55,7 +55,7 @@ apollo-smith = { version = "0.5.0", features = ["parser-impl"] }
 async-trait = "0.1.77"
 hex = { version = "0.4.3", features = ["serde"] }
 http = "0.2.11"
-insta = { version = "1.38.0", features = ["json", "redactions", "yaml"] }
+insta = { version = "1.38.0", features = ["json", "redactions", "yaml", "glob"] }
 once_cell = "1.19.0"
 reqwest = { version = "0.11.24", default-features = false, features = [
     "rustls-tls",
@@ -66,7 +66,7 @@ reqwest = { version = "0.11.24", default-features = false, features = [
 ] }
 
 schemars = { version = "0.8.16", features = ["url"] }
-serde = { version = "1.0.197", features = ["derive", "rc"] }
+serde = { version = "1.0.198", features = ["derive", "rc"] }
 serde_json = { version = "1.0.114", features = [
     "preserve_order",
     "float_roundtrip",

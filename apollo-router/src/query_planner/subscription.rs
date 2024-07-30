@@ -205,7 +205,7 @@ impl SubscriptionNode {
             data,
             current_dir,
             // Needs the original request here
-            parameters.supergraph_request,
+            parameters.supergraph_request.body(),
             parameters.schema,
             &self.input_rewrites,
             &None,
@@ -249,10 +249,11 @@ impl SubscriptionNode {
             .and_connection_closed_signal(parameters.subscription_handle.as_ref().map(|s| s.closed_signal.resubscribe()))
             .build();
 
+        // TODO[igni]: refactor so it uses fetchservice
         let service = parameters
             .service_factory
-            .create(service_name)
-            .expect("we already checked that the service exists during planning; qed");
+            .subgraph_service_for_subscriptions(service_name)
+            .unwrap();
 
         let (_parts, response) = service
             .oneshot(subgraph_request)

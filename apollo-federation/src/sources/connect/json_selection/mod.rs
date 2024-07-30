@@ -3,6 +3,8 @@ mod graphql;
 mod helpers;
 mod parser;
 mod pretty;
+mod selection_set;
+mod visitor;
 
 pub use apply_to::*;
 pub use parser::*;
@@ -11,3 +13,4 @@ pub use parser::*;
 // remove the `#[cfg(test)]`.
 #[cfg(test)]
 pub use pretty::*;
+pub use visitor::*;

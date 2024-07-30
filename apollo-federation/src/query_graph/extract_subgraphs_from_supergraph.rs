@@ -74,6 +74,7 @@ use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecificati
 use crate::schema::type_and_directive_specification::UnionTypeSpecification;
 use crate::schema::FederationSchema;
 use crate::schema::ValidFederationSchema;
+use crate::sources::connect::ConnectSpecDefinition;
 
 /// Assumes the given schema has been validated.
 ///
@@ -2162,7 +2163,9 @@ fn extract_join_directives(
                     Component::new(link_directive.clone()),
                 )?;
 
-                // TODO: add imported definitions from relevant specs
+                if ConnectSpecDefinition::from_directive(&link_directive)?.is_some() {
+                    ConnectSpecDefinition::check_or_add(&mut subgraph.schema)?;
+                }
             }
         }
 

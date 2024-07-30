@@ -1742,6 +1742,26 @@ expression: "&schema"
       ],
       "type": "object"
     },
+    "ConnectorsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "debug_extensions": {
+          "default": false,
+          "description": "Enables connector debugging information on response extensions if the feature is enabled",
+          "type": "boolean"
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/SubgraphConnectorConfiguration",
+            "description": "#/definitions/SubgraphConnectorConfiguration"
+          },
+          "default": {},
+          "description": "A map of subgraph name to connectors config for that subgraph",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "ContextForward": {
       "additionalProperties": false,
       "description": "Configuration to forward context values in metric attributes/labels",
@@ -5346,6 +5366,20 @@ expression: "&schema"
         }
       ]
     },
+    "SourceConfiguration": {
+      "additionalProperties": false,
+      "description": "Configuration for a `@source` directive",
+      "properties": {
+        "override_url": {
+          "default": null,
+          "description": "Override the `@source(http: {baseURL:})`",
+          "format": "uri",
+          "nullable": true,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "SpanMode": {
       "description": "Span mode to create new or deprecated spans",
       "oneOf": [
@@ -5720,6 +5754,28 @@ expression: "&schema"
           },
           "default": {},
           "description": "per subgraph options",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "SubgraphConnectorConfiguration": {
+      "additionalProperties": false,
+      "description": "Configuration for a connector subgraph",
+      "properties": {
+        "$config": {
+          "additionalProperties": true,
+          "default": {},
+          "description": "Other values that can be used by connectors via `{$config.<key>}`",
+          "type": "object"
+        },
+        "sources": {
+          "additionalProperties": {
+            "$ref": "#/definitions/SourceConfiguration",
+            "description": "#/definitions/SourceConfiguration"
+          },
+          "default": {},
+          "description": "A map of `@source(name:)` to configuration for that source",
           "type": "object"
         }
       },
@@ -8289,6 +8345,10 @@ expression: "&schema"
     "plugins": {
       "$ref": "#/definitions/Plugins",
       "description": "#/definitions/Plugins"
+    },
+    "preview_connectors": {
+      "$ref": "#/definitions/ConnectorsConfig",
+      "description": "#/definitions/ConnectorsConfig"
     },
     "preview_demand_control": {
       "$ref": "#/definitions/DemandControlConfig",

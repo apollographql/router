@@ -7,6 +7,7 @@ use futures::prelude::*;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::BroadcastStream;
+use tower::ServiceExt;
 use tracing::Instrument;
 
 use super::log;
@@ -23,6 +24,7 @@ use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::plugins::subscription::SubscriptionConfig;
+use crate::query_planner::fetch::Variables;
 use crate::query_planner::FlattenNode;
 use crate::query_planner::Primary;
 use crate::query_planner::CONDITION_ELSE_SPAN_NAME;
@@ -31,12 +33,13 @@ use crate::query_planner::CONDITION_SPAN_NAME;
 use crate::query_planner::DEFER_DEFERRED_SPAN_NAME;
 use crate::query_planner::DEFER_PRIMARY_SPAN_NAME;
 use crate::query_planner::DEFER_SPAN_NAME;
-use crate::query_planner::FETCH_SPAN_NAME;
 use crate::query_planner::FLATTEN_SPAN_NAME;
 use crate::query_planner::PARALLEL_SPAN_NAME;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
 use crate::query_planner::SUBSCRIBE_SPAN_NAME;
-use crate::services::SubgraphServiceFactory;
+use crate::services::fetch_service::FetchServiceFactory;
+use crate::services::new_service::ServiceFactory;
+use crate::services::FetchRequest;
 use crate::spec::Query;
 use crate::spec::Schema;
 use crate::Context;
@@ -47,7 +50,7 @@ impl QueryPlan {
     pub(crate) async fn execute<'a>(
         &self,
         context: &'a Context,
-        service_factory: &'a Arc<SubgraphServiceFactory>,
+        service_factory: &'a Arc<FetchServiceFactory>,
         supergraph_request: &'a Arc<http::Request<Request>>,
         schema: &'a Arc<Schema>,
         subgraph_schemas: &'a Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
@@ -100,7 +103,7 @@ impl QueryPlan {
 // holds the query plan executon arguments that do not change between calls
 pub(crate) struct ExecutionParameters<'a> {
     pub(crate) context: &'a Context,
-    pub(crate) service_factory: &'a Arc<SubgraphServiceFactory>,
+    pub(crate) service_factory: &'a Arc<FetchServiceFactory>,
     pub(crate) schema: &'a Arc<Schema>,
     pub(crate) subgraph_schemas: &'a Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     pub(crate) supergraph_request: &'a Arc<http::Request<Request>>,
@@ -221,9 +224,6 @@ impl PlanNode {
                     value = Value::default();
                 }
                 PlanNode::Fetch(fetch_node) => {
-                    let fetch_time_offset =
-                        parameters.context.created_at.elapsed().as_nanos() as i64;
-
                     // The client closed the connection, we are still executing the request pipeline,
                     // but we won't send unused trafic to subgraph
                     if parameters
@@ -234,17 +234,42 @@ impl PlanNode {
                         value = Value::Object(Object::default());
                         errors = Vec::new();
                     } else {
-                        let (v, e) = fetch_node
-                            .fetch_node(parameters, parent_value, current_dir)
-                            .instrument(tracing::info_span!(
-                                FETCH_SPAN_NAME,
-                                "otel.kind" = "INTERNAL",
-                                "apollo.subgraph.name" = fetch_node.service_name.as_ref(),
-                                "apollo_private.sent_time_offset" = fetch_time_offset
-                            ))
-                            .await;
-                        value = v;
-                        errors = e;
+                        match Variables::new(
+                            &fetch_node.requires,
+                            &fetch_node.variable_usages,
+                            parent_value,
+                            current_dir,
+                            parameters.supergraph_request.body(),
+                            parameters.schema.as_ref(),
+                            &fetch_node.input_rewrites,
+                            &fetch_node.context_rewrites,
+                        ) {
+                            Some(variables) => {
+                                let service = parameters.service_factory.create();
+                                let request = FetchRequest::builder()
+                                    .context(parameters.context.clone())
+                                    .fetch_node(fetch_node.clone())
+                                    .supergraph_request(parameters.supergraph_request.clone())
+                                    .variables(variables)
+                                    .current_dir(current_dir.clone())
+                                    .deferred_fetches(parameters.deferred_fetches.clone())
+                                    .build();
+                                (value, errors) = match service.oneshot(request).await {
+                                    Ok(r) => r,
+                                    Err(e) => (
+                                        Value::Null,
+                                        vec![Error::builder()
+                                            .message(format!("{:?}", e))
+                                            .extension_code("FETCH_SERVICE")
+                                            .build()],
+                                    ),
+                                };
+                            }
+                            None => {
+                                value = Value::Object(Object::default());
+                                errors = Vec::new();
+                            }
+                        };
                     }
                 }
                 PlanNode::Defer {

@@ -1,0 +1,6 @@
+---
+source: apollo-federation/src/sources/connect/validation/mod.rs
+expression: "format!(\"{:?}\", errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/validation/invalid_connect_url.graphql
+---
+[Message { code: InvalidUrl, message: "The value \"127.0.0.1\" for `GET` in `@connect(http:)` on `Query.resources` is not a valid URL: relative URL without a base.", locations: [LineColumn { line: 9, column: 21 }..LineColumn { line: 9, column: 37 }] }]

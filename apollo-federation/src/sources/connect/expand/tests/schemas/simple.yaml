@@ -1,0 +1,42 @@
+federation_version: =2.9.0-connectors.0
+subgraphs:
+  connectors:
+    routing_url: none
+    schema:
+      sdl: |
+        extend schema
+          @link(
+            url: "https://specs.apollo.dev/federation/v2.7"
+            import: ["@key", "@external", "@requires"]
+          )
+          @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"])
+          @source(name: "example", http: { baseURL: "http://example" })
+
+        type Query {
+          users: [User] @connect(source: "example", http: { GET: "/" }, selection: "id a")
+
+          user(id: ID!): User
+            @connect(source: "example", http: { GET: "/{$$args.id}" }, selection: "id a b", entity: true)
+        }
+
+        type User @key(fields: "id") {
+          id: ID!
+          a: String
+          b: String
+          c: String @external
+          d: String
+            @requires(fields: "c")
+            @connect(source: "example", http: { GET: "/{$$this.c}/d" }, selection: "$")
+        }
+
+  graphql:
+    routing_url: https://graphql
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.7", import: ["@key"])
+
+        type User @key(fields: "id") {
+          id: ID!
+          c: String
+        }

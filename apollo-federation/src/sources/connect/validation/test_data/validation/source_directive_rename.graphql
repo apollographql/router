@@ -1,0 +1,11 @@
+extend schema
+@link(
+    url: "https://specs.apollo.dev/connect/v0.1"
+    import: ["@connect", { name: "@source", as: "@api" }]
+)
+@api(name: "users", http: {baseURL: "blahblahblah"})
+
+type Query {
+    resources: [String!]!
+    @connect(source: "users", http: {GET: "/resources"}, selection: "")
+}

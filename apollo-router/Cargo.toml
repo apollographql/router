@@ -314,6 +314,7 @@ opentelemetry-proto = { version = "0.5.0", features = [
 ] }
 opentelemetry-datadog = { version = "0.8.0", features = ["reqwest-client"] }
 p256 = "0.13.2"
+pretty_assertions = "1.4.0"
 rand_core = "0.6.4"
 reqwest = { version = "0.11.27", default-features = false, features = [
     "json",
@@ -337,6 +338,7 @@ tower-test = "0.4.0"
 
 # See note above in this file about `^tracing` packages which also applies to
 # these dev dependencies.
+tracing-fluent-assertions = "0.3.0"
 tracing-subscriber = { version = "0.3.18", default-features = false, features = [
     "env-filter",
     "fmt",

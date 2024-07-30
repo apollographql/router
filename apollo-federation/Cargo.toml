@@ -22,6 +22,8 @@ time = { version = "0.3.34", default-features = false, features = [
     "local-offset",
 ] }
 derive_more = "0.99.17"
+enum_dispatch = "0.3.13"
+http.workspace = true
 indexmap = { version = "2.2.6", features = ["serde"] }
 itertools = "0.13.0"
 lazy_static = "1.4.0"
@@ -35,6 +37,7 @@ strum = "0.26.0"
 strum_macros = "0.26.0"
 thiserror = "1.0"
 url = "2"
+either = "1.12"
 tracing = "0.1.40"
 ron = { version = "0.8.1", optional = true }
 
@@ -43,6 +46,7 @@ hex.workspace = true
 insta.workspace = true
 sha1.workspace = true
 tempfile.workspace = true
+pretty_assertions = "1.4.0"
 
 [[test]]
 name = "main"

@@ -1,0 +1,106 @@
+# rover supergraph compose --config apollo-router/src/plugins/connectors/testdata/steelthread.yaml > apollo-router/src/plugins/connectors/testdata/steelthread.graphql
+federation_version: =2.9.0-connectors.9
+subgraphs:
+  connectors:
+    routing_url: none
+    schema:
+      sdl: |
+        extend schema
+          @link(
+            url: "https://specs.apollo.dev/federation/v2.7"
+            import: ["@key", "@external", "@requires", "@shareable"]
+          )
+          @link(
+            url: "https://specs.apollo.dev/connect/v0.1"
+            import: ["@connect", "@source"]
+          )
+          @source(
+            name: "json"
+            http: {
+              baseURL: "https://jsonplaceholder.typicode.com/"
+              headers: [
+                { name: "x-new-name" from: "x-rename-source" }
+                { name: "x-forward" from: "x-forward" }
+                { name: "x-insert" value: "inserted" }
+              ]
+            }
+          )
+
+        type Query {
+          users: [User]
+            @connect(
+              source: "json"
+              http: {
+                GET: "/users"
+                headers: [
+                 {name: "x-new-name", from: "x-rename-connect"}
+                 {name: "x-insert-multi-value", value: "first,second"}
+                ]
+              }
+              selection: "id name"
+            )
+        
+          me: User @connect(
+              source: "json"
+              http: { GET: "/users/{$$config.id}" }
+              selection: """
+              id
+              name
+              username
+              """
+            )
+
+          user(id: ID!): User
+            @connect(
+              source: "json"
+              http: { GET: "/users/{$$args.id}" }
+              selection: """
+              id
+              name
+              username
+              """
+              entity: true
+            )
+
+          posts: [Post]
+            @connect(
+              source: "json"
+              http: { GET: "/posts" }
+              selection: "id title user: { id: userId }"
+            )
+        }
+
+        type User @key(fields: "id") {
+          id: ID!
+          name: String
+          username: String
+          c: String @external
+          d: String
+            @requires(fields: "c")
+            @connect(
+              source: "json"
+              http: { GET: "/users/{$$this.c}" }
+              selection: "$.phone"
+            )
+        }
+
+        type Post {
+          id: ID!
+          title: String
+          user: User
+        }
+
+  graphql:
+    routing_url: https://localhost:4001
+    schema:
+      sdl: |
+        extend schema
+          @link(
+            url: "https://specs.apollo.dev/federation/v2.7"
+            import: ["@key"]
+          )
+
+        type User @key(fields: "id") {
+          id: ID!
+          c: String
+        }

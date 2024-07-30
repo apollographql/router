@@ -2722,6 +2722,13 @@ impl Debug for ObjectFieldArgumentDefinitionPosition {
     }
 }
 
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub(crate) struct ObjectOrInterfaceFieldDirectivePosition {
+    pub(crate) field: ObjectOrInterfaceFieldDefinitionPosition,
+    pub(crate) directive_name: Name,
+    pub(crate) directive_index: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub(crate) struct InterfaceTypeDefinitionPosition {
     pub(crate) type_name: Name,

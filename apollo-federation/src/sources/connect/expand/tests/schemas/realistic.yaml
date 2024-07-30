@@ -1,0 +1,88 @@
+federation_version: =2.9.0-connectors.0
+subgraphs:
+  connectors:
+    routing_url: none
+    schema:
+      sdl: |
+        extend schema
+          @link(
+            url: "https://specs.apollo.dev/federation/v2.7"
+            import: ["@key"]
+          )
+          @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"])
+          @source(name: "example", http: { baseURL: "http://example" })
+
+        type Query {
+          usersByCompany(company: CompanyInput!): [User]
+            @connect(source: "example", http: { GET: "/by-company/{$$args.company.name}" }, selection: """
+              id
+              name
+              company {
+                name
+                catchPhrase
+                bs
+              }""")
+
+          user(id: ID!): User
+            @connect(source: "example", http: { GET: "/{$$args.id}" }, selection: """
+              id
+              name
+              username
+              email
+              address {
+                street
+                suite
+                city
+                zipcode
+                geo {
+                  lat
+                  lng
+                }
+              }
+              phone
+              website
+              company {
+                name
+                catchPhrase
+                bs
+                email
+              }""", entity: true)
+        }
+
+        type User @key(fields: "id") {
+          id: ID!
+          name: String
+          username: String
+          email: EmailAddress
+          address: Address
+          phone: String
+          website: String
+          company: CompanyInfo
+        }
+
+        type Address {
+          street: String
+          suite: String
+          city: String
+          zipcode: String
+          geo: AddressGeo
+        }
+
+        type AddressGeo {
+          lat: Float
+          lng: Float
+        }
+
+        type CompanyInfo {
+          name: String
+          catchPhrase: String
+          bs: String
+          email: EmailAddress
+        }
+
+        input CompanyInput {
+          name: String!
+          catchPhrase: String
+        }
+
+        scalar EmailAddress

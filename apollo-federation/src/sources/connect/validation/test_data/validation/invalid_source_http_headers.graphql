@@ -1,0 +1,31 @@
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.1"
+    import: ["@connect", "@source"]
+  )
+  @source(
+    name: "v1"
+    http: {
+      baseURL: "http://127.0.0.1"
+      headers: [
+        { name: "valid-with-value", value: "text/html" }
+        { name: "valid-with-from", from: "valid-with-from" }
+        { name: "no-from-or-value" }
+        { from: "x-missing-name"}
+        { name: "from-and-value", from: "from-and-value", value: "text/html" }
+        { name: "x-name-collision", value: "text/html" }
+        { name: "X-NAME-COLLISION", from: "x-name-collision" }
+        { name: "<Invalid-Header>", value: "invalid.header.name" }
+        { name: "x-invalid-from", from: "<Invalid-Header>" }
+        {
+          name: "x-invalid-value"
+          value: "  Value with 😊 emoji and newline  \n "
+        }
+      ]
+    }
+  )
+
+type Query {
+  resources: [String!]!
+    @connect(source: "v1", http: { GET: "/resources" }, selection: "")
+}
