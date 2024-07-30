@@ -72,6 +72,9 @@ impl StaticCostCalculator {
             return Ok(0.0);
         }
 
+        let definition = schema
+            .type_field(field.ty().inner_named_type(), &field.name)
+            .unwrap(); // TODO: Handle error conversion
         let ty = field.inner_type_def(schema).ok_or_else(|| {
             DemandControlError::QueryParseFailure(format!(
                 "Field {} was found in query, but its type is missing from the schema.",
@@ -79,7 +82,7 @@ impl StaticCostCalculator {
             ))
         })?;
 
-        let list_size_directive = ListSizeDirective::from_field(field)?;
+        let list_size_directive = ListSizeDirective::from_field(field, definition)?;
         let instance_count = if !field.ty().is_list() {
             1
         } else if let Some(value) = list_size_from_upstream {
@@ -96,7 +99,7 @@ impl StaticCostCalculator {
         // Determine the cost for this particular field. Scalars are free, non-scalars are not.
         // For fields with selections, add in the cost of the selections as well.
         let mut type_cost = if let Some(cost_directive) =
-            CostDirective::from_field(&field.definition).or(CostDirective::from_type(ty))
+            CostDirective::from_field(&definition).or(CostDirective::from_type(ty))
         {
             cost_directive.weight()
         } else if ty.is_interface() || ty.is_object() || ty.is_union() {

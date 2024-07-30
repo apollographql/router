@@ -85,8 +85,9 @@ pub(in crate::plugins::demand_control) struct ListSizeDirective<'schema> {
 impl<'schema> ListSizeDirective<'schema> {
     pub(in crate::plugins::demand_control) fn from_field(
         field: &'schema Field,
+        definition: &'schema FieldDefinition,
     ) -> Result<Option<Self>, DemandControlError> {
-        let directive = field.definition.directives.get("listSize");
+        let directive = definition.directives.get("listSize");
 
         if let Some(directive) = directive {
             let assumed_size = directive
