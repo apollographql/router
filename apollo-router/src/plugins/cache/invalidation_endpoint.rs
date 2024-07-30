@@ -125,9 +125,8 @@ impl Service<router::Request> for InvalidationService {
                             .get(AUTHORIZATION)
                             .ok_or("cannot find authorization header")?
                             .to_str()
-                            .map_err(|err| {
+                            .inspect_err(|_err| {
                                 Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-                                err
                             })?;
                         match body {
                             Ok(body) => {
