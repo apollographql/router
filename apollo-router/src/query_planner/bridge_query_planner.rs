@@ -151,6 +151,7 @@ impl PlannerMode {
                 apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig {
                     enable_defer: configuration.supergraph.defer_support,
                 },
+            type_conditioned_fetching: configuration.experimental_type_conditioned_fetching,
             debug: Default::default(),
         };
         Ok(Arc::new(QueryPlanner::new(
