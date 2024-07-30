@@ -227,9 +227,7 @@ mod tests {
             .create_or_subscribe(InvalidationTopic, false)
             .await
             .unwrap();
-        let invalidation = Invalidation {
-            handle,
-        };
+        let invalidation = Invalidation { handle };
         let config = Arc::new(SubgraphConfiguration {
             all: Subgraph {
                 ttl: None,
@@ -422,9 +420,7 @@ mod tests {
             .create_or_subscribe(InvalidationTopic, false)
             .await
             .unwrap();
-        let invalidation = Invalidation {
-            handle,
-        };
+        let invalidation = Invalidation { handle };
         let config = Arc::new(SubgraphConfiguration {
             all: Subgraph {
                 ttl: None,
@@ -522,9 +518,7 @@ mod tests {
             assert!(called);
         });
 
-        let invalidation = Invalidation {
-            handle,
-        };
+        let invalidation = Invalidation { handle };
         let config = Arc::new(SubgraphConfiguration {
             all: Subgraph {
                 ttl: None,
