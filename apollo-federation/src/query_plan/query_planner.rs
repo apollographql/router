@@ -91,14 +91,13 @@ pub struct QueryPlannerConfig {
     /// continued support (they may be removed without warning).
     pub debug: QueryPlannerDebugConfig,
 
-     
-   /// Enables type conditioned fetching.
-   /// This flag is a workaround, which may yield significant
-   /// performance degradation when computing query plans,
-   /// and increase query plan size.
-   ///
-   /// If you aren't aware of this flag, you probably don't need it.
-   pub type_conditioned_fetching: bool,
+    /// Enables type conditioned fetching.
+    /// This flag is a workaround, which may yield significant
+    /// performance degradation when computing query plans,
+    /// and increase query plan size.
+    ///
+    /// If you aren't aware of this flag, you probably don't need it.
+    pub type_conditioned_fetching: bool,
 }
 
 impl Default for QueryPlannerConfig {
@@ -109,7 +108,7 @@ impl Default for QueryPlannerConfig {
             generate_query_fragments: false,
             incremental_delivery: Default::default(),
             debug: Default::default(),
-            type_conditioned_fetching: Default::default()
+            type_conditioned_fetching: Default::default(),
         }
     }
 }
