@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use http::header;
 use http::header::CACHE_CONTROL;
+use multimap::MultiMap;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -26,6 +27,9 @@ use tracing::Level;
 use super::cache_control::CacheControl;
 use super::invalidation::Invalidation;
 use super::invalidation::InvalidationOrigin;
+use super::invalidation_endpoint::InvalidationEndpointConfig;
+use super::invalidation_endpoint::InvalidationService;
+use super::invalidation_endpoint::SubgraphInvalidationConfig;
 use super::metrics::CacheMetricContextKey;
 use super::metrics::CacheMetricsService;
 use crate::batching::BatchQuery;
@@ -49,6 +53,8 @@ use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::TYPENAME;
 use crate::Context;
+use crate::Endpoint;
+use crate::ListenAddr;
 
 /// Change this key if you introduce a breaking change in entity caching algorithm to make sure it won't take the previous entries
 pub(crate) const ENTITY_CACHE_VERSION: &str = "1.0";
@@ -61,6 +67,7 @@ register_plugin!("apollo", "preview_entity_cache", EntityCache);
 #[derive(Clone)]
 pub(crate) struct EntityCache {
     storage: Option<RedisCacheStorage>,
+    endpoint_config: Option<Arc<InvalidationEndpointConfig>>,
     subgraphs: Arc<SubgraphConfiguration<Subgraph>>,
     entity_type: Option<String>,
     enabled: bool,
@@ -78,7 +85,11 @@ pub(crate) struct Config {
     #[serde(default)]
     enabled: bool,
 
+    /// Configure invalidation per subgraph
     subgraph: SubgraphConfiguration<Subgraph>,
+
+    /// Global invalidation configuration
+    invalidation: Option<InvalidationEndpointConfig>,
 
     /// Entity caching evaluation metrics
     #[serde(default)]
@@ -86,17 +97,31 @@ pub(crate) struct Config {
 }
 
 /// Per subgraph configuration for entity caching
-#[derive(Clone, Debug, Default, JsonSchema, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[derive(Clone, Debug, JsonSchema, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 pub(crate) struct Subgraph {
     /// expiration for all keys for this subgraph, unless overriden by the `Cache-Control` header in subgraph responses
     pub(crate) ttl: Option<Ttl>,
 
     /// activates caching for this subgraph, overrides the global configuration
-    pub(crate) enabled: Option<bool>,
+    pub(crate) enabled: bool,
 
     /// Context key used to separate cache sections per user
     pub(crate) private_id: Option<String>,
+
+    /// Invalidation configuration
+    pub(crate) invalidation: Option<SubgraphInvalidationConfig>,
+}
+
+impl Default for Subgraph {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            ttl: Default::default(),
+            private_id: Default::default(),
+            invalidation: Default::default(),
+        }
+    }
 }
 
 /// Per subgraph configuration for entity caching
@@ -179,12 +204,29 @@ impl Plugin for EntityCache {
                 .into());
         }
 
+        if init
+            .config
+            .subgraph
+            .all
+            .invalidation
+            .as_ref()
+            .map(|i| i.shared_key.is_empty())
+            .unwrap_or_default()
+        {
+            return Err(
+                "you must set a default shared_key invalidation for all subgraphs"
+                    .to_string()
+                    .into(),
+            );
+        }
+
         let invalidation = Invalidation::new(storage.clone()).await?;
 
         Ok(Self {
             storage,
             entity_type,
             enabled: init.config.enabled,
+            endpoint_config: init.config.invalidation.clone().map(Arc::new),
             subgraphs: Arc::new(init.config.subgraph),
             metrics: init.config.metrics,
             private_queries: Arc::new(RwLock::new(HashSet::new())),
@@ -240,13 +282,8 @@ impl Plugin for EntityCache {
             .clone()
             .map(|t| t.0)
             .or_else(|| storage.ttl());
-        let subgraph_enabled = self.enabled
-            && self
-                .subgraphs
-                .get(name)
-                .enabled
-                // if the top level `enabled` is true but there is no other configuration, caching is enabled for this plugin
-                .unwrap_or(true);
+        let subgraph_enabled =
+            self.enabled && (self.subgraphs.all.enabled || self.subgraphs.get(name).enabled);
         let private_id = self.subgraphs.get(name).private_id.clone();
 
         let name = name.to_string();
@@ -300,6 +337,40 @@ impl Plugin for EntityCache {
                 .boxed()
         }
     }
+
+    fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
+        let mut map = MultiMap::new();
+        if self.enabled
+            && self
+                .subgraphs
+                .all
+                .invalidation
+                .as_ref()
+                .map(|i| i.enabled)
+                .unwrap_or_default()
+        {
+            match &self.endpoint_config {
+                Some(endpoint_config) => {
+                    let endpoint = Endpoint::from_router_service(
+                        endpoint_config.path.clone(),
+                        InvalidationService::new(self.subgraphs.clone(), self.invalidation.clone())
+                            .boxed(),
+                    );
+                    tracing::info!(
+                        "Entity caching invalidation endpoint listening on: {}{}",
+                        endpoint_config.listen,
+                        endpoint_config.path
+                    );
+                    map.insert(endpoint_config.listen.clone(), endpoint);
+                }
+                None => {
+                    tracing::warn!("Cannot start entity caching invalidation endpoint because the listen address and endpoint is not configured");
+                }
+            }
+        }
+
+        map
+    }
 }
 
 impl EntityCache {
@@ -311,6 +382,10 @@ impl EntityCache {
     where
         Self: Sized,
     {
+        use std::net::IpAddr;
+        use std::net::Ipv4Addr;
+        use std::net::SocketAddr;
+
         let invalidation = Invalidation::new(Some(storage.clone())).await?;
         Ok(Self {
             storage: Some(storage),
@@ -322,6 +397,13 @@ impl EntityCache {
             }),
             metrics: Metrics::default(),
             private_queries: Default::default(),
+            endpoint_config: Some(Arc::new(InvalidationEndpointConfig {
+                path: String::from("/invalidation"),
+                listen: ListenAddr::SocketAddr(SocketAddr::new(
+                    IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                    4000,
+                )),
+            })),
             invalidation,
         })
     }

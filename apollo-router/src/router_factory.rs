@@ -602,7 +602,6 @@ pub(crate) async fn create_plugins(
         ($name: literal, $opt_plugin_config: expr) => {{
             let name = concat!("apollo.", $name);
             let span = tracing::info_span!(concat!("plugin: ", "apollo.", $name));
-
             async {
                 let factory = apollo_plugin_factories
                     .remove(name)
