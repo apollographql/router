@@ -17,7 +17,6 @@ use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
 use hyper::client::HttpConnector;
-use hyper::Body;
 use hyper_rustls::ConfigBuilderExt;
 use hyper_rustls::HttpsConnector;
 use schemars::JsonSchema;
@@ -31,11 +30,17 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 use url::Url;
 
+use crate::configuration::shared::Client;
 use crate::error::Error;
+use crate::graphql;
 use crate::layers::async_checkpoint::OneShotAsyncCheckpointLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugins::telemetry::config_new::conditions::Condition;
+use crate::plugins::telemetry::config_new::selectors::RouterSelector;
+use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
+use crate::plugins::traffic_shaping::Http2Config;
 use crate::register_plugin;
 use crate::services;
 use crate::services::external::externalize_header_map;
@@ -45,6 +50,9 @@ use crate::services::external::PipelineStep;
 use crate::services::external::DEFAULT_EXTERNALIZATION_TIMEOUT;
 use crate::services::external::EXTERNALIZABLE_VERSION;
 use crate::services::router;
+use crate::services::router::body::get_body_bytes;
+use crate::services::router::body::RouterBody;
+use crate::services::router::body::RouterBodyConverter;
 use crate::services::subgraph;
 use crate::services::trust_dns_connector::new_async_http_connector;
 use crate::services::trust_dns_connector::AsyncHyperResolver;
@@ -60,8 +68,11 @@ const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5)
 const COPROCESSOR_ERROR_EXTENSION: &str = "ERROR";
 const COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION: &str = "EXTERNAL_DESERIALIZATION_ERROR";
 
-type HTTPClientService =
-    tower::timeout::Timeout<hyper::Client<HttpsConnector<HttpConnector<AsyncHyperResolver>>, Body>>;
+type HTTPClientService = RouterBodyConverter<
+    tower::timeout::Timeout<
+        hyper::Client<HttpsConnector<HttpConnector<AsyncHyperResolver>>, RouterBody>,
+    >,
+>;
 
 #[async_trait::async_trait]
 impl Plugin for CoprocessorPlugin<HTTPClientService> {
@@ -78,20 +89,33 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
             .with_native_roots()
             .with_no_client_auth();
 
-        let connector = hyper_rustls::HttpsConnectorBuilder::new()
+        let builder = hyper_rustls::HttpsConnectorBuilder::new()
             .with_tls_config(tls_config)
             .https_or_http()
-            .enable_http1()
-            .enable_http2()
-            .wrap_connector(http_connector);
+            .enable_http1();
 
-        let http_client = ServiceBuilder::new()
-            .layer(TimeoutLayer::new(init.config.timeout))
-            .service(
-                hyper::Client::builder()
-                    .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
-                    .build(connector),
-            );
+        let connector = if init.config.client.is_none()
+            || init.config.client.as_ref().unwrap().experimental_http2 != Some(Http2Config::Disable)
+        {
+            builder.enable_http2().wrap_connector(http_connector)
+        } else {
+            builder.wrap_connector(http_connector)
+        };
+
+        let http_client = RouterBodyConverter {
+            inner: ServiceBuilder::new()
+                .layer(TimeoutLayer::new(init.config.timeout))
+                .service(
+                    hyper::Client::builder()
+                        .http2_only(
+                            init.config.client.is_some()
+                                && init.config.client.as_ref().unwrap().experimental_http2
+                                    == Some(Http2Config::Http2Only),
+                        )
+                        .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
+                        .build(connector),
+                ),
+        };
 
         CoprocessorPlugin::new(http_client, init.config, init.supergraph_sdl)
     }
@@ -139,12 +163,12 @@ register_plugin!(
 #[derive(Debug)]
 struct CoprocessorPlugin<C>
 where
-    C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
+    C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<Body>>>::Future: Send + Sync + 'static,
+    <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
     http_client: C,
     configuration: Conf,
@@ -153,12 +177,12 @@ where
 
 impl<C> CoprocessorPlugin<C>
 where
-    C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
+    C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<Body>>>::Future: Send + Sync + 'static,
+    <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
     fn new(http_client: C, configuration: Conf, sdl: Arc<String>) -> Result<Self, BoxError> {
         Ok(Self {
@@ -214,6 +238,9 @@ where
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct RouterRequestConf {
+    /// Condition to trigger this stage
+    #[serde(skip_serializing)]
+    pub(super) condition: Option<Condition<RouterSelector>>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
@@ -235,6 +262,9 @@ pub(super) struct RouterRequestConf {
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct RouterResponseConf {
+    /// Condition to trigger this stage
+    #[serde(skip_serializing)]
+    pub(super) condition: Option<Condition<RouterSelector>>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
@@ -254,6 +284,9 @@ pub(super) struct RouterResponseConf {
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct SubgraphRequestConf {
+    /// Condition to trigger this stage
+    #[serde(skip_serializing)]
+    pub(super) condition: Option<Condition<SubgraphSelector>>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
@@ -275,6 +308,9 @@ pub(super) struct SubgraphRequestConf {
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct SubgraphResponseConf {
+    /// Condition to trigger this stage
+    #[serde(skip_serializing)]
+    pub(super) condition: Option<Condition<SubgraphSelector>>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
@@ -297,6 +333,7 @@ struct Conf {
     /// The url you'd like to offload processing to
     #[schemars(with = "String")]
     url: Url,
+    client: Option<Client>,
     /// The timeout for external requests
     #[serde(deserialize_with = "humantime_serde::deserialize")]
     #[schemars(with = "String", default = "default_timeout")]
@@ -338,12 +375,15 @@ impl RouterStage {
         sdl: Arc<String>,
     ) -> router::BoxService
     where
-        C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
-            + Clone
+        C: Service<
+                http::Request<RouterBody>,
+                Response = http::Response<RouterBody>,
+                Error = BoxError,
+            > + Clone
             + Send
             + Sync
             + 'static,
-        <C as tower::Service<http::Request<Body>>>::Future: Send + 'static,
+        <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
     {
         let request_layer = (self.request != Default::default()).then_some({
             let request_config = self.request.clone();
@@ -479,12 +519,15 @@ impl SubgraphStage {
         service_name: String,
     ) -> subgraph::BoxService
     where
-        C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
-            + Clone
+        C: Service<
+                http::Request<RouterBody>,
+                Response = http::Response<RouterBody>,
+                Error = BoxError,
+            > + Clone
             + Send
             + Sync
             + 'static,
-        <C as tower::Service<http::Request<Body>>>::Future: Send + 'static,
+        <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
     {
         let request_layer = (self.request != Default::default()).then_some({
             let request_config = self.request.clone();
@@ -597,21 +640,29 @@ async fn process_router_request_stage<C>(
     coprocessor_url: Url,
     sdl: Arc<String>,
     mut request: router::Request,
-    request_config: RouterRequestConf,
+    mut request_config: RouterRequestConf,
 ) -> Result<ControlFlow<router::Response, router::Request>, BoxError>
 where
-    C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
+    C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<Body>>>::Future: Send + 'static,
+    <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
+    let should_be_executed = request_config
+        .condition
+        .as_mut()
+        .map(|c| c.evaluate_request(&request) == Some(true))
+        .unwrap_or(true);
+    if !should_be_executed {
+        return Ok(ControlFlow::Continue(request));
+    }
     // Call into our out of process processor with a body of our body
     // First, extract the data we need from our request and prepare our
     // external call. Use our configuration to figure out which data to send.
     let (parts, body) = request.router_request.into_parts();
-    let bytes = hyper::body::to_bytes(body).await?;
+    let bytes = get_body_bytes(body).await?;
 
     let headers_to_send = request_config
         .headers
@@ -724,11 +775,11 @@ where
     // are present in our co_processor_output.
 
     let new_body = match co_processor_output.body {
-        Some(bytes) => Body::from(bytes),
-        None => Body::from(bytes),
+        Some(bytes) => RouterBody::from(bytes),
+        None => RouterBody::from(bytes),
     };
 
-    request.router_request = http::Request::from_parts(parts, new_body);
+    request.router_request = http::Request::from_parts(parts, new_body.into_inner());
 
     if let Some(context) = co_processor_output.context {
         for (key, value) in context.try_into_iter()? {
@@ -753,19 +804,30 @@ async fn process_router_response_stage<C>(
     response_config: RouterResponseConf,
 ) -> Result<router::Response, BoxError>
 where
-    C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
+    C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<Body>>>::Future: Send + 'static,
+    <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
+    let should_be_executed = response_config
+        .condition
+        .as_ref()
+        .map(|c| c.evaluate_response(&response))
+        .unwrap_or(true);
+    if !should_be_executed {
+        return Ok(response);
+    }
     // split the response into parts + body
     let (parts, body) = response.response.into_parts();
 
     // we split the body (which is a stream) into first response + rest of responses,
     // for which we will implement mapping later
-    let (first, rest): (Option<Result<Bytes, hyper::Error>>, Body) = body.into_future().await;
+    let (first, rest): (
+        Option<Result<Bytes, hyper::Error>>,
+        crate::services::router::Body,
+    ) = body.into_future().await;
 
     // If first is None, or contains an error we return an error
     let opt_first: Option<Bytes> = first.and_then(|f| f.ok());
@@ -828,11 +890,11 @@ where
     // bits that we sent to the co_processor.
 
     let new_body = match co_processor_output.body {
-        Some(bytes) => Body::from(bytes),
-        None => Body::from(bytes),
+        Some(bytes) => RouterBody::from(bytes),
+        None => RouterBody::from(bytes),
     };
 
-    response.response = http::Response::from_parts(parts, new_body);
+    response.response = http::Response::from_parts(parts, new_body.into_inner());
 
     if let Some(control) = co_processor_output.control {
         *response.response.status_mut() = control.get_http_status()?
@@ -922,13 +984,16 @@ where
 
     // Create our response stream which consists of the bytes from our first body chained with the
     // rest of the responses in our mapped stream.
-    let bytes = hyper::body::to_bytes(body).await.map_err(BoxError::from);
+    let bytes = get_body_bytes(body).await.map_err(BoxError::from);
     let final_stream = once(ready(bytes)).chain(mapped_stream).boxed();
 
     // Finally, return a response which has a Body that wraps our stream of response chunks.
     Ok(router::Response {
         context,
-        response: http::Response::from_parts(parts, Body::wrap_stream(final_stream)),
+        response: http::Response::from_parts(
+            parts,
+            RouterBody::wrap_stream(final_stream).into_inner(),
+        ),
     })
 }
 // -----------------------------------------------------------------------------------------------------
@@ -938,16 +1003,24 @@ async fn process_subgraph_request_stage<C>(
     coprocessor_url: Url,
     service_name: String,
     mut request: subgraph::Request,
-    request_config: SubgraphRequestConf,
+    mut request_config: SubgraphRequestConf,
 ) -> Result<ControlFlow<subgraph::Response, subgraph::Request>, BoxError>
 where
-    C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
+    C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<Body>>>::Future: Send + 'static,
+    <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
+    let should_be_executed = request_config
+        .condition
+        .as_mut()
+        .map(|c| c.evaluate_request(&request) == Some(true))
+        .unwrap_or(true);
+    if !should_be_executed {
+        return Ok(ControlFlow::Continue(request));
+    }
     // Call into our out of process processor with a body of our body
     // First, extract the data we need from our request and prepare our
     // external call. Use our configuration to figure out which data to send.
@@ -964,6 +1037,7 @@ where
         .transpose()?;
     let context_to_send = request_config.context.then(|| request.context.clone());
     let uri = request_config.uri.then(|| parts.uri.to_string());
+    let subgraph_name = service_name.clone();
     let service_name = request_config.service_name.then_some(service_name);
 
     let payload = Externalizable::subgraph_builder()
@@ -1033,6 +1107,7 @@ where
             let subgraph_response = subgraph::Response {
                 response: http_response,
                 context: request.context,
+                subgraph_name: Some(subgraph_name),
             };
 
             if let Some(context) = co_processor_output.context {
@@ -1086,13 +1161,21 @@ async fn process_subgraph_response_stage<C>(
     response_config: SubgraphResponseConf,
 ) -> Result<subgraph::Response, BoxError>
 where
-    C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
+    C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<Body>>>::Future: Send + 'static,
+    <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
+    let should_be_executed = response_config
+        .condition
+        .as_ref()
+        .map(|c| c.evaluate_response(&response))
+        .unwrap_or(true);
+    if !should_be_executed {
+        return Ok(response);
+    }
     // Call into our out of process processor with a body of our body
     // First, extract the data we need from our response and prepare our
     // external call. Use our configuration to figure out which data to send.
@@ -1144,10 +1227,8 @@ where
     // are present in our co_processor_output. If they aren't present, just use the
     // bits that we sent to the co_processor.
 
-    let new_body: crate::graphql::Response = match co_processor_output.body {
-        Some(value) => serde_json::from_value(value)?,
-        None => body,
-    };
+    let new_body: crate::graphql::Response =
+        handle_graphql_response(body, co_processor_output.body)?;
 
     response.response = http::Response::from_parts(parts, new_body);
 
@@ -1214,4 +1295,31 @@ pub(super) fn internalize_header_map(
         }
     }
     Ok(output)
+}
+
+pub(super) fn handle_graphql_response(
+    original_response_body: graphql::Response,
+    copro_response_body: Option<serde_json::Value>,
+) -> Result<graphql::Response, BoxError> {
+    let new_body: graphql::Response = match copro_response_body {
+        Some(value) => {
+            let mut new_body: graphql::Response = serde_json::from_value(value)?;
+            // Needs to take back these 2 fields because it's skipped by serde
+            new_body.subscribed = original_response_body.subscribed;
+            new_body.created_at = original_response_body.created_at;
+            // Required because for subscription if data is Some(Null) it won't cut the subscription
+            // And in some languages they don't have any differences between Some(Null) and Null
+            if original_response_body.data == Some(serde_json_bytes::Value::Null)
+                && new_body.data.is_none()
+                && new_body.subscribed == Some(true)
+            {
+                new_body.data = Some(serde_json_bytes::Value::Null);
+            }
+
+            new_body
+        }
+        None => original_response_body,
+    };
+
+    Ok(new_body)
 }

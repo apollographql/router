@@ -45,6 +45,7 @@ impl TracingConfigurator for Config {
             .batch_config(&self.batch_processor)
             .errors_configuration(&self.errors)
             .use_legacy_request_span(matches!(spans_config.mode, SpanMode::Deprecated))
+            .metrics_reference_mode(self.experimental_apollo_metrics_reference_mode)
             .build()?;
         Ok(builder.with_span_processor(
             BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)

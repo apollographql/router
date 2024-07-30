@@ -1,5 +1,5 @@
-use apollo_compiler::ast::Name;
 use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::Name;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
@@ -23,6 +23,17 @@ pub(crate) enum Selection {
     InlineFragment(InlineFragment),
 }
 
+impl Selection {
+    pub(crate) fn selection_set(&self) -> Option<&[Selection]> {
+        match self {
+            Selection::Field(Field { selections, .. }) => selections.as_deref(),
+            Selection::InlineFragment(InlineFragment { selections, .. }) => {
+                Some(selections.as_slice())
+            }
+        }
+    }
+}
+
 /// The field that is used
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,6 +48,13 @@ pub(crate) struct Field {
     /// The selections for the field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) selections: Option<Vec<Selection>>,
+}
+
+impl Field {
+    // Mirroring `apollo_compiler::Field::response_name`
+    pub(crate) fn response_name(&self) -> &Name {
+        self.alias.as_ref().unwrap_or(&self.name)
+    }
 }
 
 /// An inline fragment.
@@ -285,7 +303,7 @@ mod tests {
 
     macro_rules! select {
         ($schema:expr, $content:expr $(,)?) => {{
-            let schema = Schema::parse_test(&$schema, &Default::default()).unwrap();
+            let schema = Schema::parse(&$schema, &Default::default()).unwrap();
             let response = Response::builder()
                 .data($content)
                 .build();
@@ -386,7 +404,7 @@ mod tests {
             type MainObject { mainObjectList: [SubObject] }
             type SubObject { key: String name: String }",
         );
-        let schema = Schema::parse_test(&schema, &Default::default()).unwrap();
+        let schema = Schema::parse(&schema, &Default::default()).unwrap();
 
         let response = bjson!({
             "__typename": "MainObject",
@@ -483,7 +501,7 @@ mod tests {
               id: Int!
             }",
         );
-        let schema = Schema::parse_test(&schema, &Default::default()).unwrap();
+        let schema = Schema::parse(&schema, &Default::default()).unwrap();
 
         let response = bjson!({
           "__typename": "Entity",

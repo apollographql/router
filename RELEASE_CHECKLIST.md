@@ -12,6 +12,7 @@ Release Checklist
   - Verifying the release (TODO)
   - [Troubleshooting a release](#troubleshooting-a-release) - Something went wrong?
 - [Nightly releases](#nightly-releases)
+- [Using the new release automation](#using-the-new-release-automation)
 
 ## Building a Release
 
@@ -519,4 +520,208 @@ Make sure you also delete the local tag:
 
 ```console
 git tag --delete vX.X.X
+```
+
+# Using the new release automation
+
+The release process precedently described can be executed through `cargo xtask` commands that store the required environment variables, along with the current state of the process, in a file called `.release-state.json`.
+This can be executed by running `cargo xtask release start`, then calling `cargo xtask release continue` at each step.
+
+## Starting the process
+
+Run `cargo xtask release start` and it will prompt you for the version number you want, origin, github repository and the git ref to start from (branch, commit id or HEAD):
+
+```
+Starting release process
+Version?: 1.123.456
+Git origin?: origin
+Github repository?: apollographql/router
+Git ref?: HEAD
+Setting up the repository
+Switched to branch 'dev'
+[...]
+Creating draft pull request for dev into main in apollographql/router
+
+https://github.com/apollographql/router/pull/5519
+Success!
+```
+
+CLI output has ANSI escapes to put emphasis on xtask messages VS underlying command output.
+
+If you had already started a release, it will ask you if you want to start a new one:
+
+```
+Starting release process
+A release state file already exists, do you want to remove it and start a new one? [y/N]
+```
+
+
+## Create a pre release PR
+
+After the draft, continue the process with `cargo xtask release continue`:
+
+```
+Select next release step
+Next step?:
+> create a prerelease
+  create the final release PR
+```
+
+Select `create a prerelease` in the choice:
+
+```
+Select next release step
+Next step?: create a prerelease
+Creating the pre release PR
+prerelease suffix? 1.123.456-: rc.0
+Switched to branch '1.123.456'
+Your branch is up to date with 'origin/1.123.456'.
+From github.com:apollographql/router
+ * branch                1.123.456  -> FETCH_HEAD
+Already up to date.
+prerelease version:  1.123.456-rc.0
+updating Cargo.toml files
+    Upgraded apollo-federation from 1.49.1 to 1.123.456-rc.0
+[...]
+please check the changes and add them with `git add -up .`
+[...]
+```
+
+
+Now follow the `git add -up .` process. Then finish the prerelease PR.
+
+
+```
+Commit the changes and build the prerelease? yes
+[1.123.456 a83fb721f] prep release: v1.123.456-rc.0
+ 13 files changed, 21 insertions(+), 21 deletions(-)
+[...]
+To github.com:apollographql/router.git
+   544f8f619..a83fb721f  1.123.456 -> 1.123.456
+[...]
+To github.com:apollographql/router.git
+ * [new tag]             v1.123.456-rc.0 -> v1.123.456-rc.0
+publish the crates:
+cargo publish -p apollo-federation@1.123.456-rc.0
+cargo publish -p apollo-router@1.123.456-rc.0
+Success!
+```
+
+
+Publishing crates has to be done manually for now.
+
+## Creating the final release PR
+
+```
+Select next release step
+Next step?:
+  create a prerelease
+> create the final release PR
+```
+
+Then:
+
+```
+Creating the final release PR
+Already on '1.123.456'
+Your branch is up to date with 'origin/1.123.456'.
+From github.com:apollographql/router
+ * branch                1.123.456  -> FETCH_HEAD
+Already up to date.
+Switched to a new branch 'prep-1.123.456'
+updating Cargo.toml files
+    Upgraded apollo-federation from 1.123.456-rc.0 to 1.123.456
+[...]
+prep release branch created
+**MANUALLY CHECK AND UPDATE** the `federation-version-support.mdx` to make sure it shows the version of Federation which is included in the `router-bridge` that ships with this version of Router.
+ This can be obtained by looking at the version of `router-bridge` in `apollo-router/Cargo.toml` and taking the number after the `+` (e.g., `router-bridge@0.2.0+v2.4.3` means Federation v2.4.3).
+Make local edits to the newly rendered `CHANGELOG.md` entries to do some initial editoral.
+
+        These things should have *ALWAYS* been resolved earlier in the review process of the PRs that introduced the changes, but they must be double checked:
+    
+         - There are no breaking changes.
+         - Entries are in categories (e.g., Fixes vs Features) that make sense.
+         - Titles stand alone and work without their descriptions.
+         - You don't need to read the title for the description to make sense.
+         - Grammar is good.  (Or great! But don't let perfect be the enemy of good.)
+         - Formatting looks nice when rendered as markdown and follows common convention.
+Success!
+```
+
+next step is another round of `git add -up .`:
+
+```
+please check the changes and add them with `git add -up .`
+
+[prep-1.123.456 103bfe1cd] prep release: v1.123.456
+ 24 files changed, 190 insertions(+), 168 deletions(-)
+[...]
+Creating pull request for prep-1.123.456 into 1.123.456 in apollographql/router
+
+https://github.com/apollographql/router/pull/5520
+Success!
+```
+
+Get feedback from the team about the prep release PR.
+
+```
+Select next release step
+Next step?:
+  create a prerelease
+> finish the release process
+```
+
+Select "finish the release process", which will merge the prep release PR to he release branch:
+
+```
+Next step?: finish the release process
+Merging the final release PR
+Wait for the pre PR to merge into the release PR
+Success!
+```
+
+Now we can create the PR from the release branch to main:
+
+```
+Switched to branch '1.123.456'
+Your branch is up to date with 'origin/1.123.456'.
+From github.com:apollographql/router
+ * branch                1.123.456  -> FETCH_HEAD
+Already up to date.
+✓ Pull request apollographql/router#5519 is marked as "ready for review"
+release PR marked as ready
+✓ Pull request apollographql/router#5519 will be automatically merged when all requirements are met
+Wait for the release PR to merge into main
+Success!
+```
+
+Continue the process once the release PR has been merged to main, and create now the reconciliation PR:
+
+```
+Tagging and releasing
+Switched to branch 'main'
+Your branch is behind 'origin/main' by 328 commits, and can be fast-forwarded.
+  (use "git pull" to update your local branch)
+remote: Enumerating objects: 34, done.
+[...]
+Creating pull request for main into dev in apollographql/router
+
+https://github.com/apollographql/router/pull/5521
+dev reconciliation PR created
+reconciliation PR URL: : https://github.com/apollographql/router/pull/5521
+
+✓ Pull request apollographql/router#5521 will be automatically merged when all requirements are met
+🗣️ **Solicit approval from the Router team, wait for the reconciliation PR to pass CI and auto-merge into `dev`**
+⚠️ **Wait for `publish_github_release` on CircleCI to finish on this job before continuing.** ⚠️
+Success!
+```
+
+The last step will update the release notes and give you the command to publish the crates manually:
+
+```
+Updating release notes
+manually publish the crates:
+cargo publish -p apollo-federation@1.123.456
+cargo publish -p apollo-router@1.123.456
+Success!
 ```

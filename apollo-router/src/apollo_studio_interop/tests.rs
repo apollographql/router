@@ -5,6 +5,7 @@ use router_bridge::planner::QueryPlannerConfig;
 use test_log::test;
 
 use super::*;
+use crate::Configuration;
 
 macro_rules! assert_generated_report {
     ($actual:expr) => {
@@ -35,7 +36,7 @@ macro_rules! assert_bridge_results {
             .await
             .unwrap();
 
-         // Field names need sorting
+        // Field names need sorting
         for ty in plan.usage_reporting.referenced_fields_by_type.values_mut() {
             ty.field_names.sort();
         }
@@ -48,6 +49,28 @@ macro_rules! assert_bridge_results {
 
 fn assert_expected_signature(actual: &ComparableUsageReporting, expected_sig: &str) {
     assert_eq!(actual.result.stats_report_key, expected_sig);
+}
+
+macro_rules! assert_extended_references {
+    ($actual:expr) => {
+        insta::with_settings!({sort_maps => true}, {
+            insta::assert_yaml_snapshot!($actual, {
+                // sort referenced enum value sets
+                ".referenced_enums.*" => insta::sorted_redaction()
+            });
+        });
+    };
+}
+
+macro_rules! assert_enums_from_response {
+    ($actual:expr) => {
+        insta::with_settings!({sort_maps => true}, {
+            insta::assert_yaml_snapshot!($actual, {
+                // sort referenced enum value sets
+                ".*" => insta::sorted_redaction()
+            });
+        });
+    };
 }
 
 // Generate usage reporting with the same signature and refs doc, and with legacy normalization algorithm
@@ -80,10 +103,44 @@ fn generate_enhanced(
     )
 }
 
+// Generate extended references (input objects and enum values)
+fn generate_extended_refs(
+    doc: &Valid<ExecutableDocument>,
+    operation_name: Option<String>,
+    schema: &Valid<Schema>,
+    variables: Option<&Object>,
+) -> ExtendedReferenceStats {
+    let default_vars = Object::new();
+    generate_extended_references(
+        Arc::new(doc.clone()),
+        operation_name,
+        schema,
+        variables.unwrap_or(&default_vars),
+    )
+}
+
+fn enums_from_response(
+    query_str: &str,
+    operation_name: Option<&str>,
+    schema_str: &str,
+    response_body_str: &str,
+) -> ReferencedEnums {
+    let config = Configuration::default();
+    let schema = crate::spec::Schema::parse(schema_str, &config).unwrap();
+    let query = Query::parse(query_str, operation_name, &schema, &config).unwrap();
+    let response_body: Object = serde_json::from_str(response_body_str).unwrap();
+
+    extract_enums_from_response(
+        Arc::new(query),
+        operation_name,
+        schema.supergraph_schema(),
+        &response_body,
+    )
+}
+
 #[test(tokio::test)]
 async fn test_complex_query() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
-
     let query_str = include_str!("testdata/complex_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
@@ -102,7 +159,6 @@ async fn test_complex_query() {
 #[test(tokio::test)]
 async fn test_complex_references() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
-
     let query_str = include_str!("testdata/complex_references_query.graphql");
 
     let schema: Valid<Schema> = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
@@ -118,7 +174,6 @@ async fn test_complex_references() {
 #[test(tokio::test)]
 async fn test_basic_whitespace() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
-
     let query_str = include_str!("testdata/named_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
@@ -133,7 +188,6 @@ async fn test_basic_whitespace() {
 #[test(tokio::test)]
 async fn test_anonymous_query() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
-
     let query_str = include_str!("testdata/anonymous_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
@@ -148,7 +202,6 @@ async fn test_anonymous_query() {
 #[test(tokio::test)]
 async fn test_anonymous_mutation() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
-
     let query_str = include_str!("testdata/anonymous_mutation.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
@@ -163,7 +216,6 @@ async fn test_anonymous_mutation() {
 #[test(tokio::test)]
 async fn test_anonymous_subscription() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
-
     let query_str: &str = include_str!("testdata/subscription_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
@@ -178,7 +230,6 @@ async fn test_anonymous_subscription() {
 #[test(tokio::test)]
 async fn test_ordered_fields_and_variables() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
-
     let query_str = include_str!("testdata/ordered_fields_and_variables_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
@@ -193,7 +244,6 @@ async fn test_ordered_fields_and_variables() {
 #[test(tokio::test)]
 async fn test_fragments() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
-
     let query_str = include_str!("testdata/fragments_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
@@ -269,7 +319,6 @@ async fn test_fragments() {
 #[test(tokio::test)]
 async fn test_directives() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
-
     let query_str = include_str!("testdata/directives_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
@@ -284,7 +333,6 @@ async fn test_directives() {
 #[test(tokio::test)]
 async fn test_aliases() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
-
     let query_str = include_str!("testdata/aliases_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
@@ -299,8 +347,8 @@ async fn test_aliases() {
 #[test(tokio::test)]
 async fn test_inline_values() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
-
     let query_str = include_str!("testdata/inline_values_query.graphql");
+
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
@@ -313,8 +361,8 @@ async fn test_inline_values() {
 #[test(tokio::test)]
 async fn test_root_type_fragment() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
-
     let query_str = include_str!("testdata/root_type_fragment_query.graphql");
+
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
@@ -327,8 +375,8 @@ async fn test_root_type_fragment() {
 #[test(tokio::test)]
 async fn test_directive_arg_spacing() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
-
     let query_str = include_str!("testdata/directive_arg_spacing_query.graphql");
+
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
@@ -341,7 +389,6 @@ async fn test_directive_arg_spacing() {
 #[test(tokio::test)]
 async fn test_operation_with_single_variable() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
-
     let query_str = include_str!("testdata/operation_with_single_variable_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
@@ -356,7 +403,6 @@ async fn test_operation_with_single_variable() {
 #[test(tokio::test)]
 async fn test_operation_with_multiple_variables() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
-
     let query_str = include_str!("testdata/operation_with_multiple_variables_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
@@ -371,7 +417,6 @@ async fn test_operation_with_multiple_variables() {
 #[test(tokio::test)]
 async fn test_field_arg_comma_or_space() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
-
     let query_str = include_str!("testdata/field_arg_comma_or_space_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
@@ -389,7 +434,6 @@ async fn test_field_arg_comma_or_space() {
 #[test(tokio::test)]
 async fn test_operation_arg_always_commas() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
-
     let query_str = include_str!("testdata/operation_arg_always_commas_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
@@ -406,7 +450,6 @@ async fn test_operation_arg_always_commas() {
 #[test(tokio::test)]
 async fn test_comma_separator_always() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
-
     let query_str = include_str!("testdata/comma_separator_always_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
@@ -421,7 +464,6 @@ async fn test_comma_separator_always() {
 #[test(tokio::test)]
 async fn test_nested_fragments() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
-
     let query_str = include_str!("testdata/nested_fragments_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
@@ -436,7 +478,6 @@ async fn test_nested_fragments() {
 #[test(tokio::test)]
 async fn test_mutation_space() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
-
     let query_str = include_str!("testdata/mutation_space_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
@@ -451,7 +492,6 @@ async fn test_mutation_space() {
 #[test(tokio::test)]
 async fn test_mutation_comma() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
-
     let query_str = include_str!("testdata/mutation_comma_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
@@ -466,7 +506,6 @@ async fn test_mutation_comma() {
 #[test(tokio::test)]
 async fn test_comma_lower_bound() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
-
     let query_str = include_str!("testdata/comma_lower_bound_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
@@ -481,7 +520,6 @@ async fn test_comma_lower_bound() {
 #[test(tokio::test)]
 async fn test_comma_upper_bound() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
-
     let query_str = include_str!("testdata/comma_upper_bound_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
@@ -496,7 +534,6 @@ async fn test_comma_upper_bound() {
 #[test(tokio::test)]
 async fn test_underscore() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
-
     let query_str = include_str!("testdata/underscore_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
@@ -511,7 +548,6 @@ async fn test_underscore() {
 #[test(tokio::test)]
 async fn test_enhanced_uses_comma_always() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
-
     let query_str = include_str!("testdata/enhanced_uses_comma_always_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
@@ -525,7 +561,6 @@ async fn test_enhanced_uses_comma_always() {
 #[test(tokio::test)]
 async fn test_enhanced_sorts_fragments() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
-
     let query_str = include_str!("testdata/enhanced_sorts_fragments_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
@@ -539,7 +574,6 @@ async fn test_enhanced_sorts_fragments() {
 #[test(tokio::test)]
 async fn test_enhanced_sorts_directives() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
-
     let query_str = include_str!("testdata/enhanced_sorts_directives_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
@@ -553,7 +587,6 @@ async fn test_enhanced_sorts_directives() {
 #[test(tokio::test)]
 async fn test_enhanced_inline_input_object() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
-
     let query_str: &str = include_str!("testdata/enhanced_inline_input_object_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
@@ -567,7 +600,6 @@ async fn test_enhanced_inline_input_object() {
 #[test(tokio::test)]
 async fn test_enhanced_alias_preservation() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
-
     let query_str = include_str!("testdata/enhanced_alias_preservation_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
@@ -576,6 +608,159 @@ async fn test_enhanced_alias_preservation() {
     let generated = generate_enhanced(&doc, &Some("AliasQuery".into()), &schema);
     let expected_sig = "# AliasQuery\nquery AliasQuery{enumInputQuery(enumInput:SOME_VALUE_1){enumResponse nullableId aliasedId:id}ZZAlias:enumInputQuery(enumInput:SOME_VALUE_3){enumResponse}aaAlias:enumInputQuery(enumInput:SOME_VALUE_2){aliasedAgain:enumResponse}xxAlias:enumInputQuery(enumInput:SOME_VALUE_1){aliased:enumResponse}}";
     assert_expected_signature(&generated, expected_sig);
+}
+
+#[test(tokio::test)]
+async fn test_extended_references_inline_enums() {
+    let schema_str = include_str!("testdata/schema_interop.graphql");
+    let query_str = include_str!("testdata/extended_references_inline_enums.graphql");
+
+    let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
+    let doc = ExecutableDocument::parse_and_validate(&schema, query_str, "query.graphql").unwrap();
+
+    let generated = generate_extended_refs(&doc, Some("EnumInlineQuery".into()), &schema, None);
+    assert_extended_references!(&generated);
+}
+
+#[test(tokio::test)]
+async fn test_extended_references_var_enums() {
+    let schema_str = include_str!("testdata/schema_interop.graphql");
+    let query_str = include_str!("testdata/extended_references_var_enums.graphql");
+    let query_vars_str = include_str!("testdata/extended_references_var_enums.json");
+
+    let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
+    let doc = ExecutableDocument::parse_and_validate(&schema, query_str, "query.graphql").unwrap();
+    let vars: Object = serde_json::from_str(query_vars_str).unwrap();
+
+    let generated = generate_extended_refs(&doc, Some("EnumVarQuery".into()), &schema, Some(&vars));
+    assert_extended_references!(&generated);
+}
+
+#[test(tokio::test)]
+async fn test_extended_references_fragment_inline_enums() {
+    let schema_str = include_str!("testdata/schema_interop.graphql");
+    let query_str = include_str!("testdata/extended_references_fragment_inline_enums.graphql");
+
+    let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
+    let doc = ExecutableDocument::parse_and_validate(&schema, query_str, "query.graphql").unwrap();
+
+    let generated = generate_extended_refs(
+        &doc,
+        Some("EnumInlineQueryWithFragment".into()),
+        &schema,
+        None,
+    );
+    assert_extended_references!(&generated);
+}
+
+#[test(tokio::test)]
+async fn test_extended_references_fragment_var_enums() {
+    let schema_str = include_str!("testdata/schema_interop.graphql");
+    let query_str = include_str!("testdata/extended_references_fragment_var_enums.graphql");
+    let query_vars_str = include_str!("testdata/extended_references_fragment_var_enums.json");
+
+    let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
+    let doc = ExecutableDocument::parse_and_validate(&schema, query_str, "query.graphql").unwrap();
+    let vars: Object = serde_json::from_str(query_vars_str).unwrap();
+
+    let generated = generate_extended_refs(
+        &doc,
+        Some("EnumVarQueryWithFragment".into()),
+        &schema,
+        Some(&vars),
+    );
+    assert_extended_references!(&generated);
+}
+
+#[test(tokio::test)]
+async fn test_extended_references_inline_type() {
+    let schema_str = include_str!("testdata/schema_interop.graphql");
+    let query_str = include_str!("testdata/extended_references_inline_type.graphql");
+
+    let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
+    let doc = ExecutableDocument::parse_and_validate(&schema, query_str, "query.graphql").unwrap();
+
+    let generated =
+        generate_extended_refs(&doc, Some("InputTypeInlineQuery".into()), &schema, None);
+    assert_extended_references!(&generated);
+}
+
+#[test(tokio::test)]
+async fn test_extended_references_var_type() {
+    let schema_str = include_str!("testdata/schema_interop.graphql");
+    let query_str = include_str!("testdata/extended_references_var_type.graphql");
+    let query_vars_str = include_str!("testdata/extended_references_var_type.json");
+
+    let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
+    let doc = ExecutableDocument::parse_and_validate(&schema, query_str, "query.graphql").unwrap();
+    let vars: Object = serde_json::from_str(query_vars_str).unwrap();
+
+    let generated = generate_extended_refs(
+        &doc,
+        Some("InputTypeVariablesQuery".into()),
+        &schema,
+        Some(&vars),
+    );
+    assert_extended_references!(&generated);
+}
+
+#[test(tokio::test)]
+async fn test_extended_references_inline_nested_type() {
+    let schema_str = include_str!("testdata/schema_interop.graphql");
+    let query_str = include_str!("testdata/extended_references_inline_nested_type.graphql");
+
+    let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
+    let doc = ExecutableDocument::parse_and_validate(&schema, query_str, "query.graphql").unwrap();
+
+    let generated = generate_extended_refs(
+        &doc,
+        Some("NestedInputTypeInlineQuery".into()),
+        &schema,
+        None,
+    );
+    assert_extended_references!(&generated);
+}
+
+#[test(tokio::test)]
+async fn test_extended_references_var_nested_type() {
+    let schema_str = include_str!("testdata/schema_interop.graphql");
+    let query_str = include_str!("testdata/extended_references_var_nested_type.graphql");
+    let query_vars_str = include_str!("testdata/extended_references_var_nested_type.json");
+
+    let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
+    let doc = ExecutableDocument::parse_and_validate(&schema, query_str, "query.graphql").unwrap();
+    let vars: Object = serde_json::from_str(query_vars_str).unwrap();
+
+    let generated = generate_extended_refs(
+        &doc,
+        Some("NestedInputTypeVarsQuery".into()),
+        &schema,
+        Some(&vars),
+    );
+    assert_extended_references!(&generated);
+}
+
+#[test(tokio::test)]
+async fn test_enums_from_response_complex_response_type() {
+    let schema_str = include_str!("testdata/schema_interop.graphql");
+    let query_str = include_str!("testdata/enums_from_response_complex_response_type.graphql");
+    let response_str =
+        include_str!("testdata/enums_from_response_complex_response_type_response.json");
+    let op_name = Some("EnumResponseQuery");
+
+    let generated = enums_from_response(query_str, op_name, schema_str, response_str);
+    assert_enums_from_response!(&generated);
+}
+
+#[test(tokio::test)]
+async fn test_enums_from_response_fragments() {
+    let schema_str = include_str!("testdata/schema_interop.graphql");
+    let query_str = include_str!("testdata/enums_from_response_fragments.graphql");
+    let response_str = include_str!("testdata/enums_from_response_fragments_response.json");
+    let op_name = Some("EnumResponseQueryFragments");
+
+    let generated = enums_from_response(query_str, op_name, schema_str, response_str);
+    assert_enums_from_response!(&generated);
 }
 
 #[test(tokio::test)]

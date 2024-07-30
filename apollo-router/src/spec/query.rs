@@ -107,7 +107,7 @@ impl Query {
             defer_stats: DeferStats {
                 has_defer: false,
                 has_unconditional_defer: false,
-                conditional_defer_variable_names: IndexSet::new(),
+                conditional_defer_variable_names: IndexSet::default(),
             },
             is_original: true,
             schema_aware_hash: vec![],
@@ -275,7 +275,7 @@ impl Query {
         schema: &Schema,
         configuration: &Configuration,
     ) -> Result<ParsedDocument, SpecError> {
-        let parser = &mut apollo_compiler::Parser::new()
+        let parser = &mut apollo_compiler::parser::Parser::new()
             .recursion_limit(configuration.limits.parser_max_recursion)
             .token_limit(configuration.limits.parser_max_tokens);
         let ast = match parser.parse_ast(query, "query.graphql") {
@@ -346,11 +346,12 @@ impl Query {
         let mut defer_stats = DeferStats {
             has_defer: false,
             has_unconditional_defer: false,
-            conditional_defer_variable_names: IndexSet::new(),
+            conditional_defer_variable_names: IndexSet::default(),
         };
         let fragments = Fragments::from_hir(document, schema, &mut defer_stats)?;
         let operations = document
-            .all_operations()
+            .operations
+            .iter()
             .map(|operation| Operation::from_hir(operation, schema, &mut defer_stats, &fragments))
             .collect::<Result<Vec<_>, SpecError>>()?;
 
@@ -567,14 +568,8 @@ impl Query {
                         let typename = input_object
                             .get(TYPENAME)
                             .and_then(|val| val.as_str())
-                            .and_then(|s| {
-                                Some(apollo_compiler::ast::Type::Named(
-                                    apollo_compiler::ast::NamedType::new(
-                                        apollo_compiler::NodeStr::new(s),
-                                    )
-                                    .ok()?,
-                                ))
-                            });
+                            .and_then(|s| apollo_compiler::ast::NamedType::new(s).ok())
+                            .map(apollo_compiler::ast::Type::Named);
 
                         let current_type = if parameters
                             .schema

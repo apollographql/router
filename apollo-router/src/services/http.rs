@@ -1,11 +1,11 @@
 #![allow(dead_code)]
 use std::sync::Arc;
 
-use hyper::Body;
 use tower::BoxError;
 use tower::ServiceExt;
 use tower_service::Service;
 
+use super::router::body::RouterBody;
 use super::Plugins;
 use crate::Context;
 
@@ -21,13 +21,13 @@ pub(crate) type ServiceResult = Result<HttpResponse, BoxError>;
 
 #[non_exhaustive]
 pub(crate) struct HttpRequest {
-    pub(crate) http_request: http::Request<Body>,
+    pub(crate) http_request: http::Request<RouterBody>,
     pub(crate) context: Context,
 }
 
 #[non_exhaustive]
 pub(crate) struct HttpResponse {
-    pub(crate) http_response: http::Response<Body>,
+    pub(crate) http_response: http::Response<RouterBody>,
     pub(crate) context: Context,
 }
 
@@ -60,7 +60,7 @@ impl HttpClientServiceFactory {
 
         HttpClientServiceFactory {
             service: Arc::new(service),
-            plugins: Arc::new(IndexMap::new()),
+            plugins: Arc::new(IndexMap::default()),
         }
     }
 

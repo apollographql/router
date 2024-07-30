@@ -48,6 +48,7 @@ impl Clone for CloneSubgraphResponse {
         Self(SubgraphResponse {
             response: http_ext::Response::from(&self.0.response).inner,
             context: self.0.context.clone(),
+            subgraph_name: self.0.subgraph_name.clone(),
         })
     }
 }
@@ -103,6 +104,7 @@ where
                                     SubgraphResponse::new_from_response(
                                         response.0.response,
                                         request.context,
+                                        request.subgraph_name.unwrap_or_default(),
                                     )
                                 })
                                 .map_err(|e| e.into())
@@ -140,6 +142,9 @@ where
                     };
 
                     // Let our waiters know
+
+                    // Clippy is wrong, the suggestion adds a useless clone of the error
+                    #[allow(clippy::useless_asref)]
                     let broadcast_value = res
                         .as_ref()
                         .map(|response| response.clone())
@@ -153,7 +158,11 @@ where
                     .expect("can only fail if the task is aborted or if the internal code panics, neither is possible here; qed");
 
                     return res.map(|response| {
-                        SubgraphResponse::new_from_response(response.0.response, context)
+                        SubgraphResponse::new_from_response(
+                            response.0.response,
+                            context,
+                            response.0.subgraph_name.unwrap_or_default(),
+                        )
                     });
                 }
             }

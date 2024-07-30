@@ -10,21 +10,27 @@ mod tests {
     use http::HeaderValue;
     use http::Method;
     use http::StatusCode;
-    use hyper::Body;
     use mime::APPLICATION_JSON;
     use mime::TEXT_HTML;
+    use router::body::RouterBody;
     use serde_json::json;
+    use serde_json_bytes::Value;
     use tower::BoxError;
     use tower::ServiceExt;
     use url::Url;
 
     use super::super::*;
-    use crate::plugin::test::MockHttpClientService;
+    use crate::plugin::test::MockInternalHttpClientService;
     use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraphService;
+    use crate::plugin::test::MockSupergraphService;
+    use crate::plugins::coprocessor::supergraph::SupergraphResponseConf;
+    use crate::plugins::coprocessor::supergraph::SupergraphStage;
+    use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
     use crate::services::external::Externalizable;
     use crate::services::external::PipelineStep;
     use crate::services::external::EXTERNALIZABLE_VERSION;
+    use crate::services::router::body::get_body_bytes;
     use crate::services::subgraph;
     use crate::services::supergraph;
 
@@ -94,6 +100,7 @@ mod tests {
     async fn coprocessor_returning_the_wrong_version_should_fail() {
         let router_stage = RouterStage {
             request: RouterRequestConf {
+                condition: Default::default(),
                 headers: true,
                 context: true,
                 body: true,
@@ -106,7 +113,7 @@ mod tests {
         // This will never be called because we will fail at the coprocessor.
         let mock_router_service = MockRouterService::new();
 
-        let mock_http_client = mock_with_callback(move |_: hyper::Request<Body>| {
+        let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 // Wrong version!
                 let input = json!(
@@ -123,8 +130,8 @@ mod tests {
                   },
                   "sdl": "the sdl shouldnt change"
                 });
-                Ok(hyper::Response::builder()
-                    .body(Body::from(serde_json::to_string(&input).unwrap()))
+                Ok(http::Response::builder()
+                    .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
                     .unwrap())
             })
         });
@@ -152,6 +159,7 @@ mod tests {
     async fn coprocessor_returning_the_wrong_stage_should_fail() {
         let router_stage = RouterStage {
             request: RouterRequestConf {
+                condition: Default::default(),
                 headers: true,
                 context: true,
                 body: true,
@@ -164,7 +172,7 @@ mod tests {
         // This will never be called because we will fail at the coprocessor.
         let mock_router_service = MockRouterService::new();
 
-        let mock_http_client = mock_with_callback(move |_: hyper::Request<Body>| {
+        let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 // Wrong stage!
                 let input = json!(
@@ -181,8 +189,8 @@ mod tests {
                     },
                     "sdl": "the sdl shouldnt change"
                 });
-                Ok(hyper::Response::builder()
-                    .body(Body::from(serde_json::to_string(&input).unwrap()))
+                Ok(http::Response::builder()
+                    .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
                     .unwrap())
             })
         });
@@ -210,6 +218,7 @@ mod tests {
     async fn coprocessor_missing_request_control_should_fail() {
         let router_stage = RouterStage {
             request: RouterRequestConf {
+                condition: Default::default(),
                 headers: true,
                 context: true,
                 body: true,
@@ -222,7 +231,7 @@ mod tests {
         // This will never be called because we will fail at the coprocessor.
         let mock_router_service = MockRouterService::new();
 
-        let mock_http_client = mock_with_callback(move |_: hyper::Request<Body>| {
+        let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 // Wrong stage!
                 let input = json!(
@@ -238,8 +247,8 @@ mod tests {
                     },
                     "sdl": "the sdl shouldnt change"
                 });
-                Ok(hyper::Response::builder()
-                    .body(Body::from(serde_json::to_string(&input).unwrap()))
+                Ok(http::Response::builder()
+                    .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
                     .unwrap())
             })
         });
@@ -276,10 +285,10 @@ mod tests {
         // This will never be called because we will fail at the coprocessor.
         let mock_subgraph_service = MockSubgraphService::new();
 
-        let mock_http_client = mock_with_callback(move |_: hyper::Request<Body>| {
+        let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
-                Ok(hyper::Response::builder()
-                    .body(Body::from(
+                Ok(http::Response::builder()
+                    .body(RouterBody::from(
                         r#"{
                                 "version": 1,
                                 "stage": "SubgraphRequest",
@@ -371,10 +380,10 @@ mod tests {
                     .build())
             });
 
-        let mock_http_client = mock_with_callback(move |_: hyper::Request<Body>| {
+        let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
-                Ok(hyper::Response::builder()
-                    .body(Body::from(
+                Ok(http::Response::builder()
+                    .body(RouterBody::from(
                         r#"{
                                 "version": 1,
                                 "stage": "SubgraphRequest",
@@ -447,6 +456,88 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn external_plugin_subgraph_request_with_condition() {
+        let subgraph_stage = SubgraphStage {
+            request: SubgraphRequestConf {
+                condition: Condition::Eq([
+                    SelectorOrValue::Selector(SubgraphSelector::SubgraphRequestHeader {
+                        subgraph_request_header: String::from("another_header"),
+                        redact: None,
+                        default: None,
+                    }),
+                    SelectorOrValue::Value("value".to_string().into()),
+                ])
+                .into(),
+                headers: false,
+                context: false,
+                body: true,
+                uri: false,
+                method: false,
+                service_name: false,
+            },
+            response: Default::default(),
+        };
+
+        // This will never be called because we will fail at the coprocessor.
+        let mut mock_subgraph_service = MockSubgraphService::new();
+
+        mock_subgraph_service
+            .expect_call()
+            .returning(|req: subgraph::Request| {
+                assert_eq!("/", req.subgraph_request.uri().to_string());
+
+                Ok(subgraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .errors(Vec::new())
+                    .extensions(crate::json_ext::Object::new())
+                    .context(req.context)
+                    .build())
+            });
+
+        let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
+            Box::pin(async {
+                Ok(http::Response::builder()
+                    .body(RouterBody::from(
+                        r#"{
+                                "version": 1,
+                                "stage": "SubgraphRequest",
+                                "control": "continue",
+                                  "body": {
+                                    "query": "query Long {\n  me {\n  name\n}\n}"
+                                  },
+                                  "context": {
+                                  },
+                                  "serviceName": "service name shouldn't change",
+                                  "uri": "http://thisurihaschanged"
+                            }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = subgraph_stage.as_service(
+            mock_http_client,
+            mock_subgraph_service.boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+
+        assert_eq!(
+            serde_json_bytes::json!({ "test": 1234_u32 }),
+            service
+                .oneshot(request)
+                .await
+                .unwrap()
+                .response
+                .into_body()
+                .data
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
     async fn external_plugin_subgraph_request_controlflow_break() {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
@@ -459,10 +550,10 @@ mod tests {
         // This will never be called because we will fail at the coprocessor.
         let mock_subgraph_service = MockSubgraphService::new();
 
-        let mock_http_client = mock_with_callback(move |_: hyper::Request<Body>| {
+        let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
-                Ok(hyper::Response::builder()
-                    .body(Body::from(
+                Ok(http::Response::builder()
+                    .body(RouterBody::from(
                         r#"{
                                 "version": 1,
                                 "stage": "SubgraphRequest",
@@ -495,8 +586,9 @@ mod tests {
 
         let request = subgraph::Request::fake_builder().build();
 
-        let crate::services::subgraph::Response { response, context } =
-            service.oneshot(request).await.unwrap();
+        let crate::services::subgraph::Response {
+            response, context, ..
+        } = service.oneshot(request).await.unwrap();
 
         assert!(context.get::<_, bool>("testKey").unwrap().unwrap());
 
@@ -514,6 +606,7 @@ mod tests {
     async fn external_plugin_subgraph_request_controlflow_break_with_message_string() {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
+
                 body: true,
                 ..Default::default()
             },
@@ -523,10 +616,10 @@ mod tests {
         // This will never be called because we will fail at the coprocessor.
         let mock_subgraph_service = MockSubgraphService::new();
 
-        let mock_http_client = mock_with_callback(move |_: hyper::Request<Body>| {
+        let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
-                Ok(hyper::Response::builder()
-                    .body(Body::from(
+                Ok(http::Response::builder()
+                    .body(RouterBody::from(
                         r#"{
                                 "version": 1,
                                 "stage": "SubgraphRequest",
@@ -574,6 +667,7 @@ mod tests {
         let subgraph_stage = SubgraphStage {
             request: Default::default(),
             response: SubgraphResponseConf {
+
                 body: true,
                 ..Default::default()
             },
@@ -593,10 +687,10 @@ mod tests {
                     .build())
             });
 
-        let mock_http_client = mock_with_callback(move |_: hyper::Request<Body>| {
+        let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
-                Ok(hyper::Response::builder()
-                    .body(Body::from(
+                Ok(http::Response::builder()
+                    .body(RouterBody::from(
                         r#"{
                                 "version": 1,
                                 "stage": "SubgraphResponse",
@@ -678,9 +772,193 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn external_plugin_subgraph_response_with_condition() {
+        let subgraph_stage = SubgraphStage {
+            request: Default::default(),
+            response: SubgraphResponseConf {
+                // Will be satisfied
+                condition: Condition::Exists(SubgraphSelector::ResponseContext {
+                    response_context: String::from("context_value"),
+                    redact: None,
+                    default: None,
+                })
+                .into(),
+                headers: false,
+                context: false,
+                body: true,
+                service_name: false,
+                status_code: false,
+            },
+        };
+
+        // This will never be called because we will fail at the coprocessor.
+        let mut mock_subgraph_service = MockSubgraphService::new();
+
+        mock_subgraph_service
+            .expect_call()
+            .returning(|req: subgraph::Request| {
+                req.context
+                    .insert("context_value", "content".to_string())
+                    .unwrap();
+                Ok(subgraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .errors(Vec::new())
+                    .extensions(crate::json_ext::Object::new())
+                    .context(req.context)
+                    .build())
+            });
+
+        let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
+            Box::pin(async {
+                Ok(http::Response::builder()
+                    .body(RouterBody::from(
+                        r#"{
+                                "version": 1,
+                                "stage": "SubgraphResponse",
+                                "headers": {
+                                    "cookie": [
+                                      "tasty_cookie=strawberry"
+                                    ],
+                                    "content-type": [
+                                      "application/json"
+                                    ],
+                                    "host": [
+                                      "127.0.0.1:4000"
+                                    ],
+                                    "apollo-federation-include-trace": [
+                                      "ftv1"
+                                    ],
+                                    "apollographql-client-name": [
+                                      "manual"
+                                    ],
+                                    "accept": [
+                                      "*/*"
+                                    ],
+                                    "user-agent": [
+                                      "curl/7.79.1"
+                                    ],
+                                    "content-length": [
+                                      "46"
+                                    ]
+                                  },
+                                  "body": {
+                                    "data": {
+                                        "test": 5678
+                                    }
+                                  },
+                                  "context": {
+                                    "entries": {
+                                      "accepts-json": false,
+                                      "accepts-wildcard": true,
+                                      "accepts-multipart": false,
+                                      "this-is-a-test-context": 42
+                                    }
+                                  }
+                            }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = subgraph_stage.as_service(
+            mock_http_client,
+            mock_subgraph_service.boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+
+        let response = service.oneshot(request).await.unwrap();
+
+        // Let's assert that the subgraph response has been transformed as it should have.
+        assert_eq!(
+            response.response.headers().get("cookie").unwrap(),
+            "tasty_cookie=strawberry"
+        );
+
+        assert_eq!(
+            response
+                .context
+                .get::<&str, u8>("this-is-a-test-context")
+                .unwrap()
+                .unwrap(),
+            42
+        );
+
+        assert_eq!(
+            serde_json_bytes::json!({ "test": 5678_u32 }),
+            response.response.into_body().data.unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn external_plugin_supergraph_response() {
+        let supergraph_stage = SupergraphStage {
+            request: Default::default(),
+            response: SupergraphResponseConf {
+                condition: Default::default(),
+                headers: false,
+                context: false,
+                body: true,
+                status_code: false,
+                sdl: false,
+            },
+        };
+
+        // This will never be called because we will fail at the coprocessor.
+        let mut mock_supergraph_service = MockSupergraphService::new();
+
+        mock_supergraph_service
+            .expect_call()
+            .returning(|req: supergraph::Request| {
+                Ok(supergraph::Response::new_from_graphql_response(
+                    graphql::Response::builder()
+                        .data(Value::Null)
+                        .subscribed(true)
+                        .build(),
+                    req.context,
+                ))
+            });
+
+        let mock_http_client = mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
+            Box::pin(async {
+                Ok(http::Response::builder()
+                    .body(RouterBody::from(
+                        r#"{
+                                "version": 1,
+                                "stage": "SupergraphResponse",
+                                  "body": {
+                                    "data": null
+                                  }
+                            }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = supergraph_stage.as_service(
+            mock_http_client,
+            mock_supergraph_service.boxed(),
+            "http://test".to_string(),
+            Arc::default(),
+        );
+
+        let request = supergraph::Request::fake_builder().build().unwrap();
+
+        let mut response = service.oneshot(request).await.unwrap();
+
+        let gql_response = response.response.body_mut().next().await.unwrap();
+        // Let's assert that the supergraph response has been transformed as it should have.
+        assert_eq!(gql_response.subscribed, Some(true));
+        assert_eq!(gql_response.data, Some(Value::Null));
+    }
+
+    #[tokio::test]
     async fn external_plugin_router_request() {
         let router_stage = RouterStage {
             request: RouterRequestConf {
+                condition: Default::default(),
                 headers: true,
                 context: true,
                 body: true,
@@ -721,7 +999,7 @@ mod tests {
         })
         .await;
 
-        let mock_http_client = mock_with_callback(move |req: hyper::Request<Body>| {
+        let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
                 let deserialized_request: Externalizable<serde_json::Value> =
                     serde_json::from_slice(&hyper::body::to_bytes(req.into_body()).await.unwrap())
@@ -778,8 +1056,120 @@ mod tests {
                   },
                   "sdl": "the sdl shouldnt change"
                 });
-                Ok(hyper::Response::builder()
-                    .body(Body::from(serde_json::to_string(&input).unwrap()))
+                Ok(http::Response::builder()
+                    .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
+                    .unwrap())
+            })
+        });
+
+        let service = router_stage.as_service(
+            mock_http_client,
+            mock_router_service.boxed(),
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+        );
+
+        let request = supergraph::Request::canned_builder().build().unwrap();
+
+        service.oneshot(request.try_into().unwrap()).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn external_plugin_router_request_with_condition() {
+        let router_stage = RouterStage {
+            request: RouterRequestConf {
+                // Won't be satisfied
+                condition: Condition::Eq([
+                    SelectorOrValue::Selector(RouterSelector::RequestMethod {
+                        request_method: true,
+                    }),
+                    SelectorOrValue::Value("GET".to_string().into()),
+                ])
+                .into(),
+                headers: true,
+                context: true,
+                body: true,
+                sdl: true,
+                path: true,
+                method: true,
+            },
+            response: Default::default(),
+        };
+
+        let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
+            assert!(req
+                .context
+                .get::<&str, u8>("this-is-a-test-context")
+                .ok()
+                .flatten()
+                .is_none());
+            Ok(supergraph::Response::builder()
+                .data(json!({ "test": 1234_u32 }))
+                .context(req.context)
+                .build()
+                .unwrap())
+        })
+        .await;
+
+        let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
+            Box::pin(async {
+                let deserialized_request: Externalizable<serde_json::Value> =
+                    serde_json::from_slice(&hyper::body::to_bytes(req.into_body()).await.unwrap())
+                        .unwrap();
+
+                assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
+                assert_eq!(
+                    PipelineStep::RouterRequest.to_string(),
+                    deserialized_request.stage
+                );
+
+                let input = json!(
+                      {
+                  "version": 1,
+                  "stage": "RouterRequest",
+                  "control": "continue",
+                  "id": "1b19c05fdafc521016df33148ad63c1b",
+                  "headers": {
+                    "cookie": [
+                      "tasty_cookie=strawberry"
+                    ],
+                    "content-type": [
+                      "application/json"
+                    ],
+                    "host": [
+                      "127.0.0.1:4000"
+                    ],
+                    "apollo-federation-include-trace": [
+                      "ftv1"
+                    ],
+                    "apollographql-client-name": [
+                      "manual"
+                    ],
+                    "accept": [
+                      "*/*"
+                    ],
+                    "user-agent": [
+                      "curl/7.79.1"
+                    ],
+                    "content-length": [
+                      "46"
+                    ]
+                  },
+                  "body": "{
+                      \"query\": \"query Long {\n  me {\n  name\n}\n}\"
+                    }",
+                  "context": {
+                    "entries": {
+                      "accepts-json": false,
+                      "accepts-wildcard": true,
+                      "accepts-multipart": false,
+                      "this-is-a-test-context": 42
+                    }
+                  },
+                  "sdl": "the sdl shouldnt change"
+                });
+                Ok(http::Response::builder()
+                    .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
                     .unwrap())
             })
         });
@@ -800,6 +1190,7 @@ mod tests {
     async fn external_plugin_router_request_http_get() {
         let router_stage = RouterStage {
             request: RouterRequestConf {
+                condition: Default::default(),
                 headers: true,
                 context: true,
                 body: true,
@@ -845,7 +1236,7 @@ mod tests {
         })
         .await;
 
-        let mock_http_client = mock_with_callback(move |req: hyper::Request<Body>| {
+        let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
                 let deserialized_request: Externalizable<serde_json::Value> =
                     serde_json::from_slice(&hyper::body::to_bytes(req.into_body()).await.unwrap())
@@ -904,8 +1295,8 @@ mod tests {
                   },
                   "sdl": "the sdl shouldnt change"
                 });
-                Ok(hyper::Response::builder()
-                    .body(Body::from(serde_json::to_string(&input).unwrap()))
+                Ok(http::Response::builder()
+                    .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
                     .unwrap())
             })
         });
@@ -929,6 +1320,7 @@ mod tests {
     async fn external_plugin_router_request_controlflow_break() {
         let router_stage = RouterStage {
             request: RouterRequestConf {
+                condition: Default::default(),
                 headers: true,
                 context: true,
                 body: true,
@@ -942,10 +1334,10 @@ mod tests {
 
         let mock_router_service = MockRouterService::new();
 
-        let mock_http_client = mock_with_callback(move |req: hyper::Request<Body>| {
+        let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
                 let deserialized_request: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(&hyper::body::to_bytes(req.into_body()).await.unwrap())
+                    serde_json::from_slice(&get_body_bytes(req.into_body()).await.unwrap())
                         .unwrap();
 
                 assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
@@ -975,8 +1367,8 @@ mod tests {
                     }
                 }
                 );
-                Ok(hyper::Response::builder()
-                    .body(Body::from(serde_json::to_string(&input).unwrap()))
+                Ok(http::Response::builder()
+                    .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
                     .unwrap())
             })
         });
@@ -1018,6 +1410,7 @@ mod tests {
     async fn external_plugin_router_request_controlflow_break_with_message_string() {
         let router_stage = RouterStage {
             request: RouterRequestConf {
+                condition: Default::default(),
                 headers: true,
                 context: true,
                 body: true,
@@ -1031,7 +1424,7 @@ mod tests {
 
         let mock_router_service = MockRouterService::new();
 
-        let mock_http_client = mock_with_callback(move |req: hyper::Request<Body>| {
+        let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
                 let deserialized_request: Externalizable<serde_json::Value> =
                     serde_json::from_slice(&hyper::body::to_bytes(req.into_body()).await.unwrap())
@@ -1054,8 +1447,8 @@ mod tests {
                     "body": "this is a test error",
                 }
                 );
-                Ok(hyper::Response::builder()
-                    .body(Body::from(serde_json::to_string(&input).unwrap()))
+                Ok(http::Response::builder()
+                    .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
                     .unwrap())
             })
         });
@@ -1219,6 +1612,7 @@ mod tests {
     async fn external_plugin_router_response() {
         let router_stage = RouterStage {
             response: RouterResponseConf {
+                condition: Default::default(),
                 headers: true,
                 context: true,
                 body: true,
@@ -1237,75 +1631,78 @@ mod tests {
         })
         .await;
 
-        let mock_http_client = mock_with_deferred_callback(move |res: hyper::Request<Body>| {
-            Box::pin(async {
-                let deserialized_response: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(&hyper::body::to_bytes(res.into_body()).await.unwrap())
+        let mock_http_client =
+            mock_with_deferred_callback(move |res: http::Request<RouterBody>| {
+                Box::pin(async {
+                    let deserialized_response: Externalizable<serde_json::Value> =
+                        serde_json::from_slice(
+                            &hyper::body::to_bytes(res.into_body()).await.unwrap(),
+                        )
                         .unwrap();
 
-                assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
-                assert_eq!(
-                    PipelineStep::RouterResponse.to_string(),
-                    deserialized_response.stage
-                );
+                    assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
+                    assert_eq!(
+                        PipelineStep::RouterResponse.to_string(),
+                        deserialized_response.stage
+                    );
 
-                assert_eq!(
-                    json!("{\"data\":\"{ \\\"test\\\": 1234_u32 }\"}"),
-                    deserialized_response.body.unwrap()
-                );
+                    assert_eq!(
+                        json!("{\"data\":\"{ \\\"test\\\": 1234_u32 }\"}"),
+                        deserialized_response.body.unwrap()
+                    );
 
-                let input = json!(
-                      {
-                  "version": 1,
-                  "stage": "RouterResponse",
-                  "control": {
-                      "break": 400
-                  },
-                  "id": "1b19c05fdafc521016df33148ad63c1b",
-                  "headers": {
-                    "cookie": [
-                      "tasty_cookie=strawberry"
-                    ],
-                    "content-type": [
-                      "application/json"
-                    ],
-                    "host": [
-                      "127.0.0.1:4000"
-                    ],
-                    "apollo-federation-include-trace": [
-                      "ftv1"
-                    ],
-                    "apollographql-client-name": [
-                      "manual"
-                    ],
-                    "accept": [
-                      "*/*"
-                    ],
-                    "user-agent": [
-                      "curl/7.79.1"
-                    ],
-                    "content-length": [
-                      "46"
-                    ]
-                  },
-                  "body": "{
+                    let input = json!(
+                          {
+                      "version": 1,
+                      "stage": "RouterResponse",
+                      "control": {
+                          "break": 400
+                      },
+                      "id": "1b19c05fdafc521016df33148ad63c1b",
+                      "headers": {
+                        "cookie": [
+                          "tasty_cookie=strawberry"
+                        ],
+                        "content-type": [
+                          "application/json"
+                        ],
+                        "host": [
+                          "127.0.0.1:4000"
+                        ],
+                        "apollo-federation-include-trace": [
+                          "ftv1"
+                        ],
+                        "apollographql-client-name": [
+                          "manual"
+                        ],
+                        "accept": [
+                          "*/*"
+                        ],
+                        "user-agent": [
+                          "curl/7.79.1"
+                        ],
+                        "content-length": [
+                          "46"
+                        ]
+                      },
+                      "body": "{
                       \"data\": { \"test\": 42 }
                     }",
-                  "context": {
-                    "entries": {
-                      "accepts-json": false,
-                      "accepts-wildcard": true,
-                      "accepts-multipart": false,
-                      "this-is-a-test-context": 42
-                    }
-                  },
-                  "sdl": "the sdl shouldnt change"
-                });
-                Ok(hyper::Response::builder()
-                    .body(Body::from(serde_json::to_string(&input).unwrap()))
-                    .unwrap())
-            })
-        });
+                      "context": {
+                        "entries": {
+                          "accepts-json": false,
+                          "accepts-wildcard": true,
+                          "accepts-multipart": false,
+                          "this-is-a-test-context": 42
+                        }
+                      },
+                      "sdl": "the sdl shouldnt change"
+                    });
+                    Ok(http::Response::builder()
+                        .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
+                        .unwrap())
+                })
+            });
 
         let service = router_stage.as_service(
             mock_http_client,
@@ -1337,9 +1734,7 @@ mod tests {
         assert_eq!(
             json!({ "data": { "test": 42_u32 } }),
             serde_json::from_slice::<serde_json::Value>(
-                &hyper::body::to_bytes(res.response.into_body())
-                    .await
-                    .unwrap()
+                &get_body_bytes(res.response.into_body()).await.unwrap()
             )
             .unwrap()
         );
@@ -1415,14 +1810,14 @@ mod tests {
     #[allow(clippy::type_complexity)]
     fn mock_with_callback(
         callback: fn(
-            hyper::Request<Body>,
-        ) -> BoxFuture<'static, Result<hyper::Response<Body>, BoxError>>,
-    ) -> MockHttpClientService {
-        let mut mock_http_client = MockHttpClientService::new();
+            http::Request<RouterBody>,
+        ) -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>,
+    ) -> MockInternalHttpClientService {
+        let mut mock_http_client = MockInternalHttpClientService::new();
         mock_http_client.expect_clone().returning(move || {
-            let mut mock_http_client = MockHttpClientService::new();
+            let mut mock_http_client = MockInternalHttpClientService::new();
             mock_http_client.expect_clone().returning(move || {
-                let mut mock_http_client = MockHttpClientService::new();
+                let mut mock_http_client = MockInternalHttpClientService::new();
                 mock_http_client.expect_call().returning(callback);
                 mock_http_client
             });
@@ -1435,16 +1830,16 @@ mod tests {
     #[allow(clippy::type_complexity)]
     fn mock_with_deferred_callback(
         callback: fn(
-            hyper::Request<Body>,
-        ) -> BoxFuture<'static, Result<hyper::Response<Body>, BoxError>>,
-    ) -> MockHttpClientService {
-        let mut mock_http_client = MockHttpClientService::new();
+            http::Request<RouterBody>,
+        ) -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>,
+    ) -> MockInternalHttpClientService {
+        let mut mock_http_client = MockInternalHttpClientService::new();
         mock_http_client.expect_clone().returning(move || {
-            let mut mock_http_client = MockHttpClientService::new();
+            let mut mock_http_client = MockInternalHttpClientService::new();
             mock_http_client.expect_clone().returning(move || {
-                let mut mock_http_client = MockHttpClientService::new();
+                let mut mock_http_client = MockInternalHttpClientService::new();
                 mock_http_client.expect_clone().returning(move || {
-                    let mut mock_http_client = MockHttpClientService::new();
+                    let mut mock_http_client = MockInternalHttpClientService::new();
                     mock_http_client.expect_call().returning(callback);
                     mock_http_client
                 });

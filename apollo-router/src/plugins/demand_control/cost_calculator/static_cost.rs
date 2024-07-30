@@ -351,10 +351,10 @@ impl StaticCostCalculator {
         should_estimate_requires: bool,
     ) -> Result<f64, DemandControlError> {
         let mut cost = 0.0;
-        if let Some(op) = &query.anonymous_operation {
+        if let Some(op) = &query.operations.anonymous {
             cost += self.score_operation(op, schema, query, should_estimate_requires)?;
         }
-        for (_name, op) in query.named_operations.iter() {
+        for (_name, op) in query.operations.named.iter() {
             cost += self.score_operation(op, schema, query, should_estimate_requires)?;
         }
         Ok(cost)
@@ -431,7 +431,7 @@ mod tests {
         query_str: &str,
         config: &Configuration,
     ) -> (spec::Schema, ParsedDocument) {
-        let schema = spec::Schema::parse_test(schema_str, config).unwrap();
+        let schema = spec::Schema::parse(schema_str, config).unwrap();
         let query = Query::parse_document(query_str, None, &schema, config).unwrap();
         (schema, query)
     }
@@ -462,9 +462,9 @@ mod tests {
 
     async fn planned_cost(schema_str: &str, query_str: &str) -> f64 {
         let config: Arc<Configuration> = Arc::new(Default::default());
-        let (_schema, query) = parse_schema_and_operation(schema_str, query_str, &config);
+        let (schema, query) = parse_schema_and_operation(schema_str, query_str, &config);
 
-        let mut planner = BridgeQueryPlanner::new(schema_str.to_string(), config.clone(), None)
+        let mut planner = BridgeQueryPlanner::new(schema.into(), config.clone(), None)
             .await
             .unwrap();
 

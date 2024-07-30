@@ -27,6 +27,28 @@
         {
           "type": "object",
           "required": [
+            "extension"
+          ],
+          "properties": {
+            "extension": {
+              "type": "object",
+              "required": [
+                "map"
+              ],
+              "properties": {
+                "map": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
             "context"
           ],
           "properties": {
@@ -351,6 +373,12 @@
                   "type": "integer",
                   "format": "uint16",
                   "minimum": 0.0
+                },
+                "subgraph_name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 }
               },
               "additionalProperties": false

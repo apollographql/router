@@ -9,6 +9,9 @@ use std::time::Instant;
 use ::tracing::info_span;
 use ::tracing::Span;
 use axum::headers::HeaderName;
+use config_new::cache::CacheInstruments;
+use config_new::instruments::InstrumentsConfig;
+use config_new::instruments::StaticInstrument;
 use config_new::Selectors;
 use dashmap::DashMap;
 use futures::future::ready;
@@ -19,6 +22,8 @@ use http::header;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::StatusCode;
+use metrics::apollo::studio::SingleLimitsStats;
+use metrics::local_type_stats::LocalTypeStatRecorder;
 use multimap::MultiMap;
 use once_cell::sync::OnceCell;
 use opentelemetry::global::GlobalTracerProvider;
@@ -37,8 +42,10 @@ use opentelemetry::trace::TraceState;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
+use opentelemetry_api::trace::TraceId;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
+use parking_lot::RwLock;
 use rand::Rng;
 use router_bridge::planner::UsageReporting;
 use serde_json_bytes::json;
@@ -70,15 +77,16 @@ use self::config_new::spans::Spans;
 use self::metrics::apollo::studio::SingleTypeStat;
 use self::metrics::AttributesForwardConf;
 use self::reload::reload_fmt;
-use self::reload::SamplingFilter;
 pub(crate) use self::span_factory::SpanMode;
 use self::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use self::tracing::apollo_telemetry::CLIENT_NAME_KEY;
 use self::tracing::apollo_telemetry::CLIENT_VERSION_KEY;
-use crate::axum_factory::utils::REQUEST_SPAN_NAME;
+use crate::apollo_studio_interop::ExtendedReferenceStats;
+use crate::apollo_studio_interop::ReferencedEnums;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
+use crate::graphql::ResponseVisitor;
 use crate::layers::instrument::InstrumentLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::metrics::aggregation::MeterProviderType;
@@ -86,16 +94,29 @@ use crate::metrics::filter::FilterMeterProvider;
 use crate::metrics::meter_provider;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugins::demand_control;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::node::Id::ResponseName;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::TracingCommon;
+use crate::plugins::telemetry::config_new::cost::add_cost_attributes;
 use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
 use crate::plugins::telemetry::config_new::instruments::SupergraphInstruments;
+use crate::plugins::telemetry::config_new::trace_id;
+use crate::plugins::telemetry::config_new::DatadogId;
+use crate::plugins::telemetry::consts::EXECUTION_SPAN_NAME;
+use crate::plugins::telemetry::consts::OTEL_NAME;
+use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
+use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
+use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
+use crate::plugins::telemetry::consts::REQUEST_SPAN_NAME;
+use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::fmt_layer::create_fmt_layer;
+use crate::plugins::telemetry::metrics::apollo::histogram::ListLengthHistogram;
+use crate::plugins::telemetry::metrics::apollo::studio::LocalTypeStat;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SinglePathErrorStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleQueryLatencyStats;
@@ -125,7 +146,7 @@ use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
-use crate::tracer::TraceId;
+use crate::spec::operation_limits::OperationLimits;
 use crate::Context;
 use crate::ListenAddr;
 
@@ -134,6 +155,7 @@ pub(crate) mod apollo_exporter;
 pub(crate) mod apollo_otlp_exporter;
 pub(crate) mod config;
 pub(crate) mod config_new;
+pub(crate) mod consts;
 pub(crate) mod dynamic_attribute;
 mod endpoint;
 mod fmt_layer;
@@ -150,22 +172,12 @@ pub(crate) mod tracing;
 pub(crate) mod utils;
 
 // Tracing consts
-pub(crate) const SUPERGRAPH_SPAN_NAME: &str = "supergraph";
-pub(crate) const SUBGRAPH_SPAN_NAME: &str = "subgraph";
-pub(crate) const ROUTER_SPAN_NAME: &str = "router";
-pub(crate) const EXECUTION_SPAN_NAME: &str = "execution";
 const CLIENT_NAME: &str = "apollo_telemetry::client_name";
 const CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 const SUBGRAPH_FTV1: &str = "apollo_telemetry::subgraph_ftv1";
 pub(crate) const STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
 pub(crate) const LOGGING_DISPLAY_HEADERS: &str = "apollo_telemetry::logging::display_headers";
 pub(crate) const LOGGING_DISPLAY_BODY: &str = "apollo_telemetry::logging::display_body";
-
-pub(crate) const OTEL_STATUS_CODE: &str = "otel.status_code";
-#[allow(dead_code)]
-pub(crate) const OTEL_STATUS_DESCRIPTION: &str = "otel.status_description";
-pub(crate) const OTEL_STATUS_CODE_OK: &str = "OK";
-pub(crate) const OTEL_STATUS_CODE_ERROR: &str = "ERROR";
 const GLOBAL_TRACER_NAME: &str = "apollo-router";
 const DEFAULT_EXPOSE_TRACE_ID_HEADER: &str = "apollo-trace-id";
 static DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME: HeaderName =
@@ -173,14 +185,27 @@ static DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME: HeaderName =
 static FTV1_HEADER_NAME: HeaderName = HeaderName::from_static("apollo-federation-include-trace");
 static FTV1_HEADER_VALUE: HeaderValue = HeaderValue::from_static("ftv1");
 
+pub(crate) const APOLLO_PRIVATE_QUERY_ALIASES: Key =
+    Key::from_static_str("apollo_private.query.aliases");
+pub(crate) const APOLLO_PRIVATE_QUERY_DEPTH: Key =
+    Key::from_static_str("apollo_private.query.depth");
+pub(crate) const APOLLO_PRIVATE_QUERY_HEIGHT: Key =
+    Key::from_static_str("apollo_private.query.height");
+pub(crate) const APOLLO_PRIVATE_QUERY_ROOT_FIELDS: Key =
+    Key::from_static_str("apollo_private.query.root_fields");
+
 #[doc(hidden)] // Only public for integration tests
 pub(crate) struct Telemetry {
-    config: Arc<config::Conf>,
+    pub(crate) config: Arc<config::Conf>,
     custom_endpoints: MultiMap<ListenAddr, Endpoint>,
     apollo_metrics_sender: apollo_exporter::Sender,
     field_level_instrumentation_ratio: f64,
     sampling_filter_ratio: SamplerOption,
-
+    pub(crate) graphql_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
+    router_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
+    supergraph_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
+    subgraph_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
+    cache_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
     activation: Mutex<TelemetryActivation>,
 }
 
@@ -192,17 +217,6 @@ struct TelemetryActivation {
     private_meter_provider: Option<FilterMeterProvider>,
     is_active: bool,
 }
-
-#[derive(Debug)]
-struct ReportingError;
-
-impl fmt::Display for ReportingError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "ReportingError")
-    }
-}
-
-impl std::error::Error for ReportingError {}
 
 fn setup_tracing<T: TracingConfigurator>(
     mut builder: Builder,
@@ -245,6 +259,24 @@ impl Drop for Telemetry {
     }
 }
 
+struct BuiltinInstruments {
+    graphql_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
+    router_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
+    supergraph_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
+    subgraph_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
+    cache_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
+}
+
+fn create_builtin_instruments(config: &InstrumentsConfig) -> BuiltinInstruments {
+    BuiltinInstruments {
+        graphql_custom_instruments: Arc::new(config.new_builtin_graphql_instruments()),
+        router_custom_instruments: Arc::new(config.new_builtin_router_instruments()),
+        supergraph_custom_instruments: Arc::new(config.new_builtin_supergraph_instruments()),
+        subgraph_custom_instruments: Arc::new(config.new_builtin_subgraph_instruments()),
+        cache_custom_instruments: Arc::new(config.new_builtin_cache_instruments()),
+    }
+}
+
 #[async_trait::async_trait]
 impl Plugin for Telemetry {
     type Config = config::Conf;
@@ -268,6 +300,14 @@ impl Plugin for Telemetry {
             ::tracing::warn!("telemetry.instrumentation.spans.mode is currently set to 'deprecated', either explicitly or via defaulting. Set telemetry.instrumentation.spans.mode explicitly in your router.yaml to 'spec_compliant' for log and span attributes that follow OpenTelemetry semantic conventions. This option will be defaulted to 'spec_compliant' in a future release and eventually removed altogether");
         }
 
+        let BuiltinInstruments {
+            graphql_custom_instruments,
+            router_custom_instruments,
+            supergraph_custom_instruments,
+            subgraph_custom_instruments,
+            cache_custom_instruments,
+        } = create_builtin_instruments(&config.instrumentation.instruments);
+
         Ok(Telemetry {
             custom_endpoints: metrics_builder.custom_endpoints,
             apollo_metrics_sender: metrics_builder.apollo_metrics_sender,
@@ -285,6 +325,11 @@ impl Plugin for Telemetry {
                     .map(FilterMeterProvider::public),
                 is_active: false,
             }),
+            graphql_custom_instruments: RwLock::new(graphql_custom_instruments),
+            router_custom_instruments: RwLock::new(router_custom_instruments),
+            supergraph_custom_instruments: RwLock::new(supergraph_custom_instruments),
+            subgraph_custom_instruments: RwLock::new(subgraph_custom_instruments),
+            cache_custom_instruments: RwLock::new(cache_custom_instruments),
             sampling_filter_ratio,
             config: Arc::new(config),
         })
@@ -299,6 +344,7 @@ impl Plugin for Telemetry {
             matches!(config.instrumentation.spans.mode, SpanMode::Deprecated);
         let field_level_instrumentation_ratio = self.field_level_instrumentation_ratio;
         let metrics_sender = self.apollo_metrics_sender.clone();
+        let static_router_instruments = self.router_custom_instruments.read().clone();
 
         ServiceBuilder::new()
             .map_response(move |response: router::Response| {
@@ -319,11 +365,17 @@ impl Plugin for Telemetry {
                             span.record("graphql.operation.name", operation_name);
                         }
                         match (&operation_kind, &operation_name) {
-                            (Ok(Some(kind)), Ok(Some(name))) => {
-                                span.record("otel.name", format!("{kind} {name}"))
+                            (Ok(Some(kind)), Ok(Some(name))) => span.set_span_dyn_attribute(
+                                OTEL_NAME.into(),
+                                format!("{kind} {name}").into(),
+                            ),
+                            (Ok(Some(kind)), _) => {
+                                span.set_span_dyn_attribute(OTEL_NAME.into(), kind.clone().into())
                             }
-                            (Ok(Some(kind)), _) => span.record("otel.name", kind),
-                            _ => span.record("otel.name", "GraphQL Operation"),
+                            _ => span.set_span_dyn_attribute(
+                                OTEL_NAME.into(),
+                                "GraphQL Operation".into(),
+                            ),
                         };
                     }
                 }
@@ -387,7 +439,7 @@ impl Plugin for Telemetry {
                     let custom_instruments: RouterInstruments = config_request
                         .instrumentation
                         .instruments
-                        .new_router_instruments();
+                        .new_router_instruments(static_router_instruments.clone());
                     custom_instruments.on_request(request);
 
                     let custom_events: RouterEvents =
@@ -475,6 +527,7 @@ impl Plugin for Telemetry {
                                     // the query is invalid, we did not parse the operation kind
                                     OperationKind::Query,
                                     None,
+                                    Default::default(),
                                 );
                             }
 
@@ -513,6 +566,8 @@ impl Plugin for Telemetry {
         let config_map_res_first = config.clone();
         let config_map_res = config.clone();
         let field_level_instrumentation_ratio = self.field_level_instrumentation_ratio;
+        let static_supergraph_instruments = self.supergraph_custom_instruments.read().clone();
+        let static_graphql_instruments = self.graphql_custom_instruments.read().clone();
         ServiceBuilder::new()
             .instrument(move |supergraph_req: &SupergraphRequest| span_mode.create_supergraph(
                 &config_instrument.apollo,
@@ -537,17 +592,18 @@ impl Plugin for Telemetry {
                 });
 
                 // Append the trace ID with the right format, based on the config
-                let format_id = |trace: TraceId| {
+                let format_id = |trace_id: TraceId| {
                     let id = match config.exporters.tracing.response_trace_id.format {
-                        TraceIdFormat::Hexadecimal => format!("{:032x}", trace.to_u128()),
-                        TraceIdFormat::Decimal => format!("{}", trace.to_u128()),
+                        TraceIdFormat::Hexadecimal => format!("{:032x}", trace_id),
+                        TraceIdFormat::Decimal => format!("{}", u128::from_be_bytes(trace_id.to_bytes())),
+                        TraceIdFormat::Datadog => trace_id.to_datadog()
                     };
 
                     HeaderValue::from_str(&id).ok()
                 };
                 if let (Some(header_name), Some(trace_id)) = (
                     expose_trace_id_header,
-                    TraceId::maybe_new().and_then(format_id),
+                    trace_id().and_then(format_id),
                 ) {
                     resp.response.headers_mut().append(header_name, trace_id);
                 }
@@ -576,11 +632,11 @@ impl Plugin for Telemetry {
                     let custom_instruments = config
                         .instrumentation
                         .instruments
-                        .new_supergraph_instruments();
+                        .new_supergraph_instruments(static_supergraph_instruments.clone());
                     custom_instruments.on_request(req);
-                    let custom_graphql_instruments:GraphQLInstruments = (&config
+                    let custom_graphql_instruments: GraphQLInstruments = config
                         .instrumentation
-                        .instruments).into();
+                        .instruments.new_graphql_instruments(static_graphql_instruments.clone());
                     custom_graphql_instruments.on_request(req);
 
                     let supergraph_events = config.instrumentation.events.new_supergraph_events();
@@ -588,15 +644,17 @@ impl Plugin for Telemetry {
 
                     (req.context.clone(), custom_instruments, custom_attributes, supergraph_events, custom_graphql_instruments)
                 },
-                move |(ctx, custom_instruments, custom_attributes, supergraph_events, custom_graphql_instruments): (Context, SupergraphInstruments, Vec<KeyValue>, SupergraphEvents, GraphQLInstruments), fut| {
+                move |(ctx, custom_instruments, mut custom_attributes, supergraph_events, custom_graphql_instruments): (Context, SupergraphInstruments, Vec<KeyValue>, SupergraphEvents, GraphQLInstruments), fut| {
                     let config = config_map_res.clone();
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
 
                     async move {
                         let span = Span::current();
-                        span.set_span_dyn_attributes(custom_attributes);
                         let mut result: Result<SupergraphResponse, BoxError> = fut.await;
+                        add_query_attributes(&ctx, &mut custom_attributes);
+                        add_cost_attributes(&ctx, &mut custom_attributes);
+                        span.set_span_dyn_attributes(custom_attributes);
                         match &result {
                             Ok(resp) => {
                                 span.set_span_dyn_attributes(config.instrumentation.spans.supergraph.attributes.on_response(resp));
@@ -673,6 +731,8 @@ impl Plugin for Telemetry {
         let subgraph_metrics_conf_resp = subgraph_metrics_conf_req.clone();
         let subgraph_name = ByteString::from(name);
         let name = name.to_owned();
+        let static_subgraph_instruments = self.subgraph_custom_instruments.read().clone();
+        let static_cache_instruments = self.cache_custom_instruments.read().clone();
         ServiceBuilder::new()
             .instrument(move |req: &SubgraphRequest| span_mode.create_subgraph(name.as_str(), req))
             .map_request(move |req: SubgraphRequest| request_ftv1(req))
@@ -693,23 +753,37 @@ impl Plugin for Telemetry {
                     let custom_instruments = config
                         .instrumentation
                         .instruments
-                        .new_subgraph_instruments();
+                        .new_subgraph_instruments(static_subgraph_instruments.clone());
                     custom_instruments.on_request(sub_request);
                     let custom_events = config.instrumentation.events.new_subgraph_events();
                     custom_events.on_request(sub_request);
+
+                    let custom_cache_instruments: CacheInstruments = config
+                        .instrumentation
+                        .instruments
+                        .new_cache_instruments(static_cache_instruments.clone());
+                    custom_cache_instruments.on_request(sub_request);
 
                     (
                         sub_request.context.clone(),
                         custom_instruments,
                         custom_attributes,
                         custom_events,
+                        custom_cache_instruments,
                     )
                 },
-                move |(context, custom_instruments, custom_attributes, custom_events): (
+                move |(
+                    context,
+                    custom_instruments,
+                    custom_attributes,
+                    custom_events,
+                    custom_cache_instruments,
+                ): (
                     Context,
                     SubgraphInstruments,
                     Vec<KeyValue>,
                     SubgraphEvents,
+                    CacheInstruments,
                 ),
                       f: BoxFuture<'static, Result<SubgraphResponse, BoxError>>| {
                     let subgraph_attribute = subgraph_attribute.clone();
@@ -736,6 +810,7 @@ impl Plugin for Telemetry {
                                         .attributes
                                         .on_response(resp),
                                 );
+                                custom_cache_instruments.on_response(resp);
                                 custom_instruments.on_response(resp);
                                 custom_events.on_response(resp);
                             }
@@ -749,6 +824,7 @@ impl Plugin for Telemetry {
                                         .attributes
                                         .on_error(err, &context),
                                 );
+                                custom_cache_instruments.on_error(err, &context);
                                 custom_instruments.on_error(err, &context);
                                 custom_events.on_error(err, &context);
                             }
@@ -784,7 +860,7 @@ impl Telemetry {
         // Only apply things if we were executing in the context of a vanilla the Apollo executable.
         // Users that are rolling their own routers will need to set up telemetry themselves.
         if let Some(hot_tracer) = OPENTELEMETRY_TRACER_HANDLE.get() {
-            SamplingFilter::configure(&self.sampling_filter_ratio);
+            otel::layer::configure(&self.sampling_filter_ratio);
 
             // The reason that this has to happen here is that we are interacting with global state.
             // If we do this logic during plugin init then if a subsequent plugin fails to init then we
@@ -812,6 +888,20 @@ impl Telemetry {
 
         activation.reload_metrics();
 
+        let BuiltinInstruments {
+            graphql_custom_instruments,
+            router_custom_instruments,
+            supergraph_custom_instruments,
+            subgraph_custom_instruments,
+            cache_custom_instruments,
+        } = create_builtin_instruments(&self.config.instrumentation.instruments);
+
+        *self.graphql_custom_instruments.write() = graphql_custom_instruments;
+        *self.router_custom_instruments.write() = router_custom_instruments;
+        *self.supergraph_custom_instruments.write() = supergraph_custom_instruments;
+        *self.subgraph_custom_instruments.write() = subgraph_custom_instruments;
+        *self.cache_custom_instruments.write() = cache_custom_instruments;
+
         reload_fmt(create_fmt_layer(&self.config));
         activation.is_active = true;
     }
@@ -838,8 +928,8 @@ impl Telemetry {
         if propagation.zipkin || tracing.zipkin.enabled {
             propagators.push(Box::<opentelemetry_zipkin::Propagator>::default());
         }
-        if propagation.datadog || tracing.datadog.enabled {
-            propagators.push(Box::<opentelemetry_datadog::DatadogPropagator>::default());
+        if propagation.datadog || tracing.datadog.enabled() {
+            propagators.push(Box::<tracing::datadog_exporter::DatadogPropagator>::default());
         }
         if propagation.aws_xray {
             propagators.push(Box::<opentelemetry_aws::XrayPropagator>::default());
@@ -1249,6 +1339,7 @@ impl Telemetry {
                         start.elapsed(),
                         operation_kind,
                         operation_subtype,
+                        Default::default(),
                     );
                 }
                 let mut metric_attrs = Vec::new();
@@ -1288,18 +1379,33 @@ impl Telemetry {
                         start.elapsed(),
                         operation_kind,
                         Some(OperationSubType::SubscriptionRequest),
+                        Default::default(),
                     );
                 }
                 Ok(router_response.map(move |response_stream| {
                     let sender = sender.clone();
                     let ctx = ctx.clone();
 
+                    // Local field stats are recorded when enabled by the experimental configuration flag.
+                    // For subscriptions, metrics are sent to Studio after each event, otherwise the metrics
+                    // are sent to Studio after the last response. In the case of deferred responses, the last
+                    // response needs to submit an aggregation of metrics across the primary and incremental
+                    // responses. To avoid submitting duplicates, the recorder's contents are drained each time
+                    // metrics are submitted.
+                    let mut local_stat_recorder = LocalTypeStatRecorder::new();
+
                     response_stream
                         .enumerate()
                         .map(move |(idx, response)| {
                             let has_errors = !response.errors.is_empty();
-
                             if !matches!(sender, Sender::Noop) {
+                                if let (true, Some(query)) = (
+                                    config.apollo.experimental_local_field_metrics,
+                                    ctx.unsupported_executable_document(),
+                                ) {
+                                    local_stat_recorder.visit(&query, &response);
+                                }
+
                                 if operation_kind == OperationKind::Subscription {
                                     // The first empty response is always a heartbeat except if it's an error
                                     if idx == 0 {
@@ -1313,6 +1419,10 @@ impl Telemetry {
                                                 start.elapsed(),
                                                 operation_kind,
                                                 Some(OperationSubType::SubscriptionRequest),
+                                                local_stat_recorder
+                                                    .local_type_stats
+                                                    .drain()
+                                                    .collect(),
                                             );
                                         }
                                     } else {
@@ -1328,6 +1438,7 @@ impl Telemetry {
                                                 .unwrap_or_else(|| start.elapsed()),
                                             operation_kind,
                                             Some(OperationSubType::SubscriptionEvent),
+                                            local_stat_recorder.local_type_stats.drain().collect(),
                                         );
                                     }
                                 } else {
@@ -1341,6 +1452,7 @@ impl Telemetry {
                                             start.elapsed(),
                                             operation_kind,
                                             None,
+                                            local_stat_recorder.local_type_stats.drain().collect(),
                                         );
                                     }
                                 }
@@ -1354,6 +1466,7 @@ impl Telemetry {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn update_apollo_metrics(
         context: &Context,
         field_level_instrumentation_ratio: f64,
@@ -1362,6 +1475,7 @@ impl Telemetry {
         duration: Duration,
         operation_kind: OperationKind,
         operation_subtype: Option<OperationSubType>,
+        local_per_type_stat: HashMap<String, LocalTypeStat>,
     ) {
         let metrics = if let Some(usage_reporting) = context
             .extensions()
@@ -1392,6 +1506,33 @@ impl Telemetry {
                 let traces = Self::subgraph_ftv1_traces(context);
                 let per_type_stat = Self::per_type_stat(&traces, field_level_instrumentation_ratio);
                 let root_error_stats = Self::per_path_error_stats(&traces);
+                let limits_stats = context.extensions().with_lock(|guard| {
+                    let strategy = guard.get::<demand_control::strategy::Strategy>();
+                    let cost_ctx = guard.get::<demand_control::CostContext>();
+                    let query_limits = guard.get::<OperationLimits<u32>>();
+                    SingleLimitsStats {
+                        strategy: strategy.and_then(|s| serde_json::to_string(&s.mode).ok()),
+                        cost_estimated: cost_ctx.map(|ctx| ctx.estimated),
+                        cost_actual: cost_ctx.map(|ctx| ctx.actual),
+
+                        // These limits are related to the Traffic Shaping feature, unrelated to the Demand Control plugin
+                        depth: query_limits.map_or(0, |ql| ql.depth as u64),
+                        height: query_limits.map_or(0, |ql| ql.height as u64),
+                        alias_count: query_limits.map_or(0, |ql| ql.aliases as u64),
+                        root_field_count: query_limits.map_or(0, |ql| ql.root_fields as u64),
+                    }
+                });
+
+                // If extended references or enums from responses are populated, we want to add them to the SingleStatsReport
+                let extended_references = context
+                    .extensions()
+                    .with_lock(|lock| lock.get::<ExtendedReferenceStats>().cloned())
+                    .unwrap_or_default();
+                let enum_response_references = context
+                    .extensions()
+                    .with_lock(|lock| lock.get::<ReferencedEnums>().cloned())
+                    .unwrap_or_default();
+
                 SingleStatsReport {
                     request_id: uuid::Uuid::from_bytes(
                         Span::current()
@@ -1429,6 +1570,7 @@ impl Telemetry {
                                         .map(|op| op.to_string())
                                         .unwrap_or_default(),
                                 },
+                                limits_stats,
                                 query_latency_stats: SingleQueryLatencyStats {
                                     latency: duration,
                                     has_errors,
@@ -1437,6 +1579,9 @@ impl Telemetry {
                                     ..Default::default()
                                 },
                                 per_type_stat,
+                                extended_references,
+                                enum_response_references,
+                                local_per_type_stat,
                             },
                             referenced_fields_by_type: usage_reporting
                                 .referenced_fields_by_type
@@ -1522,13 +1667,15 @@ impl Telemetry {
                     latency: Default::default(),
                     observed_execution_count: 0,
                     requests_with_errors_count: 0,
+                    length: ListLengthHistogram::new(None),
                 });
             let latency = Duration::from_nanos(node.end_time.saturating_sub(node.start_time));
             field_stat
                 .latency
-                .increment_duration(Some(latency), field_execution_weight);
+                .record(Some(latency), field_execution_weight);
             field_stat.observed_execution_count += 1;
             field_stat.errors_count += node.error.len() as u64;
+
             if !node.error.is_empty() {
                 field_stat.requests_with_errors_count += 1;
             }
@@ -1929,6 +2076,29 @@ impl TextMapPropagator for CustomTraceIdPropagator {
     }
 }
 
+pub(crate) fn add_query_attributes(context: &Context, custom_attributes: &mut Vec<KeyValue>) {
+    context.extensions().with_lock(|c| {
+        if let Some(limits) = c.get::<OperationLimits<u32>>() {
+            custom_attributes.push(KeyValue::new(
+                APOLLO_PRIVATE_QUERY_ALIASES.clone(),
+                AttributeValue::I64(limits.aliases.into()),
+            ));
+            custom_attributes.push(KeyValue::new(
+                APOLLO_PRIVATE_QUERY_DEPTH.clone(),
+                AttributeValue::I64(limits.depth.into()),
+            ));
+            custom_attributes.push(KeyValue::new(
+                APOLLO_PRIVATE_QUERY_HEIGHT.clone(),
+                AttributeValue::I64(limits.height.into()),
+            ));
+            custom_attributes.push(KeyValue::new(
+                APOLLO_PRIVATE_QUERY_ROOT_FIELDS.clone(),
+                AttributeValue::I64(limits.root_fields.into()),
+            ));
+        }
+    });
+}
+
 #[derive(Clone)]
 struct MetricsAttributes(HashMap<String, AttributeValue>);
 
@@ -1986,6 +2156,7 @@ mod tests {
     use crate::plugin::test::MockSupergraphService;
     use crate::plugin::DynPlugin;
     use crate::plugins::telemetry::handle_error_internal;
+    use crate::services::router::body::get_body_bytes;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
     use crate::services::SubgraphRequest;
@@ -2037,9 +2208,8 @@ mod tests {
             .unwrap();
         let mut resp = web_endpoint.oneshot(http_req_prom).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let body = hyper::body::to_bytes(resp.body_mut()).await.unwrap();
+        let body = get_body_bytes(resp.body_mut()).await.unwrap();
         String::from_utf8_lossy(&body)
-            .to_string()
             .split('\n')
             .filter(|l| l.contains("bucket") && !l.contains("apollo_router_span_count"))
             .sorted()
@@ -2885,6 +3055,22 @@ mod tests {
             let prometheus_metrics = get_prometheus_metrics(plugin.as_ref()).await;
 
             assert_snapshot!(prometheus_metrics);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_test_prometheus_metrics_custom_view_drop() {
+        async {
+            let plugin = create_plugin_with_config(include_str!(
+                "testdata/prometheus_custom_view_drop.router.yaml"
+            ))
+            .await;
+            make_supergraph_request(plugin.as_ref()).await;
+            let prometheus_metrics = get_prometheus_metrics(plugin.as_ref()).await;
+
+            assert!(prometheus_metrics.is_empty());
         }
         .with_metrics()
         .await;

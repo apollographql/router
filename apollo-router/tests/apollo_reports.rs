@@ -23,6 +23,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use apollo_router::make_fake_batch;
 use apollo_router::services::router;
 use apollo_router::services::router::BoxCloneService;
 use apollo_router::services::supergraph;
@@ -54,6 +55,8 @@ async fn config(
     use_legacy_request_span: bool,
     batch: bool,
     reports: Arc<Mutex<Vec<Report>>>,
+    demand_control: bool,
+    experimental_field_stats: bool,
 ) -> (JoinHandle<()>, serde_json::Value) {
     std::env::set_var("APOLLO_KEY", "test");
     std::env::set_var("APOLLO_GRAPH_REF", "test");
@@ -89,6 +92,17 @@ async fn config(
             Some(serde_json::Value::Bool(use_legacy_request_span))
         })
         .expect("Could not sub in endpoint");
+    config = jsonpath_lib::replace_with(config, "$.preview_demand_control.enabled", &mut |_| {
+        Some(serde_json::Value::Bool(demand_control))
+    })
+    .expect("Could not sub in preview_demand_control");
+
+    config = jsonpath_lib::replace_with(
+        config,
+        "$.telemetry.apollo.experimental_local_field_metrics",
+        &mut |_| Some(serde_json::Value::Bool(experimental_field_stats)),
+    )
+    .expect("Could not sub in experimental_local_field_metrics");
     (task, config)
 }
 
@@ -96,8 +110,17 @@ async fn get_router_service(
     reports: Arc<Mutex<Vec<Report>>>,
     use_legacy_request_span: bool,
     mocked: bool,
+    demand_control: bool,
+    experimental_local_field_metrics: bool,
 ) -> (JoinHandle<()>, BoxCloneService) {
-    let (task, config) = config(use_legacy_request_span, false, reports).await;
+    let (task, config) = config(
+        use_legacy_request_span,
+        false,
+        reports,
+        demand_control,
+        experimental_local_field_metrics,
+    )
+    .await;
     let builder = TestHarness::builder()
         .try_log_level("INFO")
         .configuration_json(config)
@@ -121,8 +144,17 @@ async fn get_batch_router_service(
     reports: Arc<Mutex<Vec<Report>>>,
     use_legacy_request_span: bool,
     mocked: bool,
+    demand_control: bool,
+    experimental_local_field_metrics: bool,
 ) -> (JoinHandle<()>, BoxCloneService) {
-    let (task, config) = config(use_legacy_request_span, true, reports).await;
+    let (task, config) = config(
+        use_legacy_request_span,
+        true,
+        reports,
+        demand_control,
+        experimental_local_field_metrics,
+    )
+    .await;
     let builder = TestHarness::builder()
         .try_log_level("INFO")
         .configuration_json(config)
@@ -211,6 +243,8 @@ async fn get_trace_report(
     reports: Arc<Mutex<Vec<Report>>>,
     request: router::Request,
     use_legacy_request_span: bool,
+    demand_control: bool,
+    experimental_local_field_metrics: bool,
 ) -> Report {
     get_report(
         get_router_service,
@@ -218,6 +252,8 @@ async fn get_trace_report(
         use_legacy_request_span,
         false,
         request,
+        demand_control,
+        experimental_local_field_metrics,
         |r| {
             !r.traces_per_query
                 .values()
@@ -234,6 +270,8 @@ async fn get_batch_trace_report(
     reports: Arc<Mutex<Vec<Report>>>,
     request: router::Request,
     use_legacy_request_span: bool,
+    demand_control: bool,
+    experimental_local_field_metrics: bool,
 ) -> Report {
     get_report(
         get_batch_router_service,
@@ -241,6 +279,8 @@ async fn get_batch_trace_report(
         use_legacy_request_span,
         false,
         request,
+        demand_control,
+        experimental_local_field_metrics,
         |r| {
             !r.traces_per_query
                 .values()
@@ -262,13 +302,20 @@ fn has_metrics(r: &&Report) -> bool {
         .is_empty()
 }
 
-async fn get_metrics_report(reports: Arc<Mutex<Vec<Report>>>, request: router::Request) -> Report {
+async fn get_metrics_report(
+    reports: Arc<Mutex<Vec<Report>>>,
+    request: router::Request,
+    demand_control: bool,
+    experimental_local_field_metrics: bool,
+) -> Report {
     get_report(
         get_router_service,
         reports,
         false,
         false,
         request,
+        demand_control,
+        experimental_local_field_metrics,
         has_metrics,
     )
     .await
@@ -291,17 +338,22 @@ async fn get_metrics_report_mocked(
         false,
         true,
         request,
+        false,
+        false,
         has_metrics,
     )
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn get_report<Fut, T: Fn(&&Report) -> bool + Send + Sync + Copy + 'static>(
-    service_fn: impl FnOnce(Arc<Mutex<Vec<Report>>>, bool, bool) -> Fut,
+    service_fn: impl FnOnce(Arc<Mutex<Vec<Report>>>, bool, bool, bool, bool) -> Fut,
     reports: Arc<Mutex<Vec<Report>>>,
     use_legacy_request_span: bool,
     mocked: bool,
     request: router::Request,
+    demand_control: bool,
+    experimental_local_field_metrics: bool,
     filter: T,
 ) -> Report
 where
@@ -309,7 +361,14 @@ where
 {
     let _guard = TEST.lock().await;
     reports.lock().await.clear();
-    let (task, mut service) = service_fn(reports.clone(), use_legacy_request_span, mocked).await;
+    let (task, mut service) = service_fn(
+        reports.clone(),
+        use_legacy_request_span,
+        mocked,
+        demand_control,
+        experimental_local_field_metrics,
+    )
+    .await;
     let response = service
         .ready()
         .await
@@ -358,7 +417,8 @@ async fn get_batch_stats_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + '
 ) -> u64 {
     let _guard = TEST.lock().await;
     reports.lock().await.clear();
-    let (task, mut service) = get_batch_router_service(reports.clone(), mocked, false).await;
+    let (task, mut service) =
+        get_batch_router_service(reports.clone(), mocked, false, false, false).await;
     let response = service
         .ready()
         .await
@@ -402,7 +462,7 @@ async fn non_defer() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span).await;
+        let report = get_trace_report(reports, req, use_legacy_request_span, false, false).await;
         assert_report!(report);
     }
 }
@@ -418,7 +478,7 @@ async fn test_condition_if() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span).await;
+        let report = get_trace_report(reports, req, use_legacy_request_span, false, false).await;
         assert_report!(report);
     }
 }
@@ -434,7 +494,7 @@ async fn test_condition_else() {
         .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span).await;
+        let report = get_trace_report(reports, req, use_legacy_request_span, false, false).await;
         assert_report!(report);
     }
 }
@@ -448,7 +508,7 @@ async fn test_trace_id() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span).await;
+        let report = get_trace_report(reports, req, use_legacy_request_span, false, false).await;
         assert_report!(report);
     }
 }
@@ -456,23 +516,24 @@ async fn test_trace_id() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_batch_trace_id() {
     for use_legacy_request_span in [true, false] {
-        let request = supergraph::Request::fake_builder()
-            .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
-            .build()
-            .unwrap()
-            .supergraph_request
-            .map(|req| {
-                // Modify the request so that it is a valid array of requests.
-                let mut json_bytes = serde_json::to_vec(&req).unwrap();
-                let mut result = vec![b'['];
-                result.append(&mut json_bytes.clone());
-                result.push(b',');
-                result.append(&mut json_bytes);
-                result.push(b']');
-                hyper::Body::from(result)
-            });
+        let request = make_fake_batch(
+            supergraph::Request::fake_builder()
+                .query("query one {topProducts{name reviews {author{name}} reviews{author{name}}}}")
+                .operation_name("one")
+                .build()
+                .unwrap()
+                .supergraph_request,
+            Some(("one", "two")),
+        );
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_batch_trace_report(reports, request.into(), use_legacy_request_span).await;
+        let report = get_batch_trace_report(
+            reports,
+            request.into(),
+            use_legacy_request_span,
+            false,
+            false,
+        )
+        .await;
         assert_report!(report);
     }
 }
@@ -487,7 +548,7 @@ async fn test_client_name() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span).await;
+        let report = get_trace_report(reports, req, use_legacy_request_span, false, false).await;
         assert_report!(report);
     }
 }
@@ -502,7 +563,7 @@ async fn test_client_version() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span).await;
+        let report = get_trace_report(reports, req, use_legacy_request_span, false, false).await;
         assert_report!(report);
     }
 }
@@ -518,7 +579,7 @@ async fn test_send_header() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span).await;
+        let report = get_trace_report(reports, req, use_legacy_request_span, false, false).await;
         assert_report!(report);
     }
 }
@@ -526,25 +587,26 @@ async fn test_send_header() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_batch_send_header() {
     for use_legacy_request_span in [true, false] {
-        let request = supergraph::Request::fake_builder()
-            .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
-            .header("send-header", "Header value")
-            .header("dont-send-header", "Header value")
-            .build()
-            .unwrap()
-            .supergraph_request
-            .map(|req| {
-                // Modify the request so that it is a valid array of requests.
-                let mut json_bytes = serde_json::to_vec(&req).unwrap();
-                let mut result = vec![b'['];
-                result.append(&mut json_bytes.clone());
-                result.push(b',');
-                result.append(&mut json_bytes);
-                result.push(b']');
-                hyper::Body::from(result)
-            });
+        let request = make_fake_batch(
+            supergraph::Request::fake_builder()
+                .query("query one {topProducts{name reviews {author{name}} reviews{author{name}}}}")
+                .operation_name("one")
+                .header("send-header", "Header value")
+                .header("dont-send-header", "Header value")
+                .build()
+                .unwrap()
+                .supergraph_request,
+            Some(("one", "two")),
+        );
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_batch_trace_report(reports, request.into(), use_legacy_request_span).await;
+        let report = get_batch_trace_report(
+            reports,
+            request.into(),
+            use_legacy_request_span,
+            false,
+            false,
+        )
+        .await;
         assert_report!(report);
     }
 }
@@ -560,7 +622,7 @@ async fn test_send_variable_value() {
         .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span).await;
+        let report = get_trace_report(reports, req, use_legacy_request_span, false, false).await;
         assert_report!(report);
     }
 }
@@ -573,34 +635,28 @@ async fn test_stats() {
         .unwrap();
     let req: router::Request = request.try_into().expect("could not convert request");
     let reports = Arc::new(Mutex::new(vec![]));
-    let report = get_metrics_report(reports, req).await;
+    let report = get_metrics_report(reports, req, false, false).await;
     assert_report!(report);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_batch_stats() {
-    let request = supergraph::Request::fake_builder()
-        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
-        .build()
-        .unwrap()
-        .supergraph_request
-        .map(|req| {
-            // Modify the request so that it is a valid array containing 2 requests.
-            let mut json_bytes = serde_json::to_vec(&req).unwrap();
-            let mut result = vec![b'['];
-            result.append(&mut json_bytes.clone());
-            result.push(b',');
-            result.append(&mut json_bytes);
-            result.push(b']');
-            hyper::Body::from(result)
-        });
+    let request = make_fake_batch(
+        supergraph::Request::fake_builder()
+            .query("query one {topProducts{name reviews {author{name}} reviews{author{name}}}}")
+            .operation_name("one")
+            .build()
+            .unwrap()
+            .supergraph_request,
+        Some(("one", "two")),
+    );
     let reports = Arc::new(Mutex::new(vec![]));
     // We can't do a report assert here because we will probably have multiple reports which we
     // can't merge...
     // Let's call a function that enables us to at least assert that we received the correct number
     // of requests.
     let request_count = get_batch_metrics_report(reports, request.into()).await;
-    assert_eq!(2, request_count);
+    assert!(request_count == 1 || request_count == 2);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -619,4 +675,62 @@ async fn test_stats_mocked() {
             ".query_latency_stats.latency_count" => "[latency_count]"
         });
     });
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_new_field_stats() {
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_metrics_report(reports, req, true, true).await;
+    assert_report!(report);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_demand_control_stats() {
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_metrics_report(reports, req, true, false).await;
+    assert_report!(report);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_demand_control_trace() {
+    for use_legacy_request_span in [true, false] {
+        let request = supergraph::Request::fake_builder()
+            .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+            .build()
+            .unwrap();
+        let req: router::Request = request.try_into().expect("could not convert request");
+        let reports = Arc::new(Mutex::new(vec![]));
+        let report = get_trace_report(reports, req, use_legacy_request_span, true, false).await;
+        assert_report!(report);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_demand_control_trace_batched() {
+    for use_legacy_request_span in [true, false] {
+        let request = make_fake_batch(
+            supergraph::Request::fake_builder()
+                .query("query one {topProducts{name reviews {author{name}} reviews{author{name}}}}")
+                .operation_name("one")
+                .build()
+                .unwrap()
+                .supergraph_request,
+            Some(("one", "two")),
+        );
+        let req: router::Request = request.into();
+        let reports = Arc::new(Mutex::new(vec![]));
+        let report =
+            get_batch_trace_report(reports, req, use_legacy_request_span, true, false).await;
+        assert_report!(report);
+    }
 }

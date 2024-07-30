@@ -3,8 +3,8 @@ use std::fmt;
 use apollo_compiler::executable;
 
 use super::*;
-use crate::indented_display::write_indented_lines;
-use crate::indented_display::State;
+use crate::display_helpers::write_indented_lines;
+use crate::display_helpers::State;
 
 impl QueryPlan {
     fn write_indented(&self, state: &mut State<'_, '_>) -> fmt::Result {
@@ -314,7 +314,8 @@ fn write_operation(
     operation_document: &ExecutableDocument,
 ) -> fmt::Result {
     let operation = operation_document
-        .get_operation(None)
+        .operations
+        .get(None)
         .expect("expected a single-operation document");
     write_selections(state, &operation.selection_set.selections)?;
     for fragment in operation_document.fragments.values() {

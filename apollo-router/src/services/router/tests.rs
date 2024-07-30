@@ -15,6 +15,7 @@ use tower_service::Service;
 
 use crate::graphql;
 use crate::services::router;
+use crate::services::router::body::get_body_bytes;
 use crate::services::router::service::from_supergraph_mock_callback;
 use crate::services::router::service::process_vary_header;
 use crate::services::subgraph;
@@ -22,6 +23,7 @@ use crate::services::supergraph;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
+use crate::test_harness::make_fake_batch;
 use crate::Context;
 
 // Test Vary processing
@@ -228,8 +230,6 @@ async fn test_http_max_request_bytes() {
     assert_eq!(response.status(), http::StatusCode::PAYLOAD_TOO_LARGE);
 }
 
-//  Test query batching
-
 #[tokio::test]
 async fn it_only_accepts_batch_http_link_mode_for_query_batch() {
     let expected_response: serde_json::Value = serde_json::from_str(include_str!(
@@ -238,20 +238,13 @@ async fn it_only_accepts_batch_http_link_mode_for_query_batch() {
     .unwrap();
 
     async fn with_config() -> router::Response {
-        let http_request = supergraph::Request::canned_builder()
-            .build()
-            .unwrap()
-            .supergraph_request
-            .map(|req: graphql::Request| {
-                // Modify the request so that it is a valid array of requests.
-                let mut json_bytes = serde_json::to_vec(&req).unwrap();
-                let mut result = vec![b'['];
-                result.append(&mut json_bytes.clone());
-                result.push(b',');
-                result.append(&mut json_bytes);
-                result.push(b']');
-                hyper::Body::from(result)
-            });
+        let http_request = make_fake_batch(
+            supergraph::Request::canned_builder()
+                .build()
+                .unwrap()
+                .supergraph_request,
+            None,
+        );
         let config = serde_json::json!({});
         crate::TestHarness::builder()
             .configuration_json(config)
@@ -267,8 +260,7 @@ async fn it_only_accepts_batch_http_link_mode_for_query_batch() {
     let response = with_config().await.response;
     assert_eq!(response.status(), http::StatusCode::BAD_REQUEST);
     let data: serde_json::Value =
-        serde_json::from_slice(&hyper::body::to_bytes(response.into_body()).await.unwrap())
-            .unwrap();
+        serde_json::from_slice(&get_body_bytes(response.into_body()).await.unwrap()).unwrap();
     assert_eq!(expected_response, data);
 }
 
@@ -324,8 +316,7 @@ async fn it_processes_a_valid_query_batch() {
     let response = with_config().await.response;
     assert_eq!(response.status(), http::StatusCode::OK);
     let data: serde_json::Value =
-        serde_json::from_slice(&hyper::body::to_bytes(response.into_body()).await.unwrap())
-            .unwrap();
+        serde_json::from_slice(&get_body_bytes(response.into_body()).await.unwrap()).unwrap();
     assert_eq!(expected_response, data);
 }
 
@@ -337,20 +328,13 @@ async fn it_will_not_process_a_query_batch_without_enablement() {
     .unwrap();
 
     async fn with_config() -> router::Response {
-        let http_request = supergraph::Request::canned_builder()
-            .build()
-            .unwrap()
-            .supergraph_request
-            .map(|req: graphql::Request| {
-                // Modify the request so that it is a valid array of requests.
-                let mut json_bytes = serde_json::to_vec(&req).unwrap();
-                let mut result = vec![b'['];
-                result.append(&mut json_bytes.clone());
-                result.push(b',');
-                result.append(&mut json_bytes);
-                result.push(b']');
-                hyper::Body::from(result)
-            });
+        let http_request = make_fake_batch(
+            supergraph::Request::canned_builder()
+                .build()
+                .unwrap()
+                .supergraph_request,
+            None,
+        );
         let config = serde_json::json!({});
         crate::TestHarness::builder()
             .configuration_json(config)
@@ -366,8 +350,7 @@ async fn it_will_not_process_a_query_batch_without_enablement() {
     let response = with_config().await.response;
     assert_eq!(response.status(), http::StatusCode::BAD_REQUEST);
     let data: serde_json::Value =
-        serde_json::from_slice(&hyper::body::to_bytes(response.into_body()).await.unwrap())
-            .unwrap();
+        serde_json::from_slice(&get_body_bytes(response.into_body()).await.unwrap()).unwrap();
     assert_eq!(expected_response, data);
 }
 
@@ -384,7 +367,7 @@ async fn it_will_not_process_a_poorly_formatted_query_batch() {
             .unwrap()
             .supergraph_request
             .map(|req: graphql::Request| {
-                // Modify the request so that it is a valid array of requests.
+                // Modify the request so that it is an invalid array of requests.
                 let mut json_bytes = serde_json::to_vec(&req).unwrap();
                 let mut result = vec![b'['];
                 result.append(&mut json_bytes.clone());
@@ -413,8 +396,7 @@ async fn it_will_not_process_a_poorly_formatted_query_batch() {
     let response = with_config().await.response;
     assert_eq!(response.status(), http::StatusCode::BAD_REQUEST);
     let data: serde_json::Value =
-        serde_json::from_slice(&hyper::body::to_bytes(response.into_body()).await.unwrap())
-            .unwrap();
+        serde_json::from_slice(&get_body_bytes(response.into_body()).await.unwrap()).unwrap();
     assert_eq!(expected_response, data);
 }
 
@@ -466,7 +448,7 @@ async fn it_will_process_a_non_batched_defered_query() {
     // Send a request
     let response = with_config().await.response;
     assert_eq!(response.status(), http::StatusCode::OK);
-    let bytes = hyper::body::to_bytes(response.into_body()).await.unwrap();
+    let bytes = get_body_bytes(response.into_body()).await.unwrap();
     let data = String::from_utf8_lossy(&bytes);
     assert_eq!(expected_response, data);
 }
@@ -491,22 +473,15 @@ async fn it_will_not_process_a_batched_deferred_query() {
                 }
             }
         ";
-        let http_request = supergraph::Request::canned_builder()
-            .header(http::header::ACCEPT, MULTIPART_DEFER_CONTENT_TYPE)
-            .query(query)
-            .build()
-            .unwrap()
-            .supergraph_request
-            .map(|req: graphql::Request| {
-                // Modify the request so that it is a valid array of requests.
-                let mut json_bytes = serde_json::to_vec(&req).unwrap();
-                let mut result = vec![b'['];
-                result.append(&mut json_bytes.clone());
-                result.push(b',');
-                result.append(&mut json_bytes);
-                result.push(b']');
-                hyper::Body::from(result)
-            });
+        let http_request = make_fake_batch(
+            supergraph::Request::canned_builder()
+                .header(http::header::ACCEPT, MULTIPART_DEFER_CONTENT_TYPE)
+                .query(query)
+                .build()
+                .unwrap()
+                .supergraph_request,
+            None,
+        );
         let config = serde_json::json!({
             "batching": {
                 "enabled": true,
@@ -526,7 +501,7 @@ async fn it_will_not_process_a_batched_deferred_query() {
     // Send a request
     let response = with_config().await.response;
     assert_eq!(response.status(), http::StatusCode::NOT_ACCEPTABLE);
-    let bytes = hyper::body::to_bytes(response.into_body()).await.unwrap();
+    let bytes = get_body_bytes(response.into_body()).await.unwrap();
     let data = String::from_utf8_lossy(&bytes);
     assert_eq!(expected_response, data);
 }

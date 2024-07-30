@@ -5,10 +5,10 @@
 use std::sync::Arc;
 
 use futures::Future;
-use hyper::Body;
-use hyper::Request as HyperRequest;
-use hyper::Response as HyperResponse;
+use http::Request as HyperRequest;
+use http::Response as HyperResponse;
 
+use crate::services::router::Body;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
 #[cfg(test)]
@@ -95,7 +95,7 @@ macro_rules! mock_async_service {
 impl HasSchema for MockSupergraphService {
     fn schema(&self) -> Arc<crate::spec::Schema> {
         Arc::new(
-            Schema::parse_test(
+            Schema::parse(
                 include_str!("../../testdata/supergraph.graphql"),
                 &Default::default(),
             )
@@ -109,3 +109,23 @@ mock_service!(Supergraph, SupergraphRequest, SupergraphResponse);
 mock_service!(Execution, ExecutionRequest, ExecutionResponse);
 mock_service!(Subgraph, SubgraphRequest, SubgraphResponse);
 mock_async_service!(HttpClient, HyperRequest<Body>, HyperResponse<Body>);
+
+// This type is introduced to update internal uses of mocked http services, because the HttpClientService
+// defined above is part of the public API
+// TODO Router 2: remove this type and replace HttpClientService
+#[cfg(test)]
+pub(crate) use internal::MockInternalHttpClientService;
+#[cfg(test)]
+mod internal {
+    use futures::Future;
+    use http::Request as HyperRequest;
+    use http::Response as HyperResponse;
+
+    use crate::services::router::body::RouterBody;
+
+    mock_async_service!(
+        InternalHttpClient,
+        HyperRequest<RouterBody>,
+        HyperResponse<RouterBody>
+    );
+}

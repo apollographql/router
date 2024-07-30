@@ -1,6 +1,8 @@
 use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::Value;
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
 use apollo_compiler::schema::DirectiveDefinition;
@@ -8,14 +10,12 @@ use apollo_compiler::schema::EnumType;
 use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::InputValueDefinition;
-use apollo_compiler::schema::Name;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::schema::ScalarType;
 use apollo_compiler::schema::Type;
 use apollo_compiler::schema::UnionType;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
-use indexmap::IndexMap;
-use indexmap::IndexSet;
 
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
@@ -147,7 +147,7 @@ impl TypeAndDirectiveSpecification for ObjectTypeSpecification {
             return MultipleFederationErrors::from_iter(errors).into_result();
         }
 
-        let mut field_map = IndexMap::new();
+        let mut field_map = IndexMap::default();
         for ref field_spec in field_specs {
             let field_def: FieldDefinition = field_spec.into();
             field_map.insert(field_spec.name.clone(), Component::new(field_def));
