@@ -1,11 +1,15 @@
 use std::time::Instant;
 
+use fred::error::RedisError;
 use fred::types::Scanner;
 use futures::SinkExt;
 use futures::StreamExt;
+use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::Value;
+use thiserror::Error;
+use tokio::sync::broadcast;
 use tower::BoxError;
 use tracing::Instrument;
 
@@ -13,19 +17,54 @@ use crate::cache::redis::RedisCacheStorage;
 use crate::cache::redis::RedisKey;
 use crate::notification::Handle;
 use crate::notification::HandleStream;
+use crate::plugins::cache::entity::hash_entity_key;
+use crate::plugins::cache::entity::ENTITY_CACHE_VERSION;
 use crate::Notify;
 
 #[derive(Clone)]
 pub(crate) struct Invalidation {
-    enabled: bool,
-    handle: Handle<InvalidationTopic, (InvalidationOrigin, Vec<InvalidationRequest>)>,
+    pub(super) enabled: bool,
+    #[allow(clippy::type_complexity)]
+    pub(super) handle: Handle<
+        InvalidationTopic,
+        (
+            Vec<InvalidationRequest>,
+            InvalidationOrigin,
+            broadcast::Sender<Result<u64, InvalidationError>>,
+        ),
+    >,
 }
+
+#[derive(Error, Debug, Clone)]
+pub(crate) enum InvalidationError {
+    #[error("redis error")]
+    RedisError(#[from] RedisError),
+    #[error("several errors")]
+    Errors(#[from] InvalidationErrors),
+    #[cfg(test)]
+    #[error("custom error: {0}")]
+    Custom(String),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct InvalidationErrors(Vec<InvalidationError>);
+
+impl std::fmt::Display for InvalidationErrors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "invalidation errors: [{}]",
+            self.0.iter().map(|e| e.to_string()).join("; ")
+        )
+    }
+}
+
+impl std::error::Error for InvalidationErrors {}
 
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub(crate) struct InvalidationTopic;
 
-#[derive(Clone, Debug)]
-#[allow(dead_code)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum InvalidationOrigin {
     Endpoint,
     Extensions,
@@ -36,10 +75,12 @@ impl Invalidation {
         let mut notify = Notify::new(None, None, None);
         let (handle, _b) = notify.create_or_subscribe(InvalidationTopic, false).await?;
         let enabled = storage.is_some();
-        if let Some(storage) = storage {
+        if let Some(storage) = storage.clone() {
             let h = handle.clone();
 
-            tokio::task::spawn(async move { start(storage, h.into_stream()).await });
+            tokio::task::spawn(async move {
+                start(storage, h.into_stream()).await;
+            });
         }
         Ok(Self { enabled, handle })
     }
@@ -48,21 +89,46 @@ impl Invalidation {
         &mut self,
         origin: InvalidationOrigin,
         requests: Vec<InvalidationRequest>,
-    ) -> Result<(), BoxError> {
+    ) -> Result<u64, BoxError> {
         if self.enabled {
             let mut sink = self.handle.clone().into_sink();
-            sink.send((origin, requests)).await.map_err(|e| e.message)?;
-        }
+            let (response_tx, mut response_rx) = broadcast::channel(2);
+            sink.send((requests, origin, response_tx.clone()))
+                .await
+                .map_err(|e| format!("cannot send invalidation request: {}", e.message))?;
 
-        Ok(())
+            let result = response_rx
+                .recv()
+                .await
+                .map_err(|err| {
+                    format!(
+                        "cannot receive response for invalidation request: {:?}",
+                        err
+                    )
+                })?
+                .map_err(|err| format!("received an invalidation error: {:?}", err))?;
+
+            Ok(result)
+        } else {
+            Ok(0)
+        }
     }
 }
 
+// TODO refactor
+#[allow(clippy::type_complexity)]
 async fn start(
     storage: RedisCacheStorage,
-    mut handle: HandleStream<InvalidationTopic, (InvalidationOrigin, Vec<InvalidationRequest>)>,
+    mut handle: HandleStream<
+        InvalidationTopic,
+        (
+            Vec<InvalidationRequest>,
+            InvalidationOrigin,
+            broadcast::Sender<Result<u64, InvalidationError>>,
+        ),
+    >,
 ) {
-    while let Some((origin, requests)) = handle.next().await {
+    while let Some((requests, origin, response_tx)) = handle.next().await {
         let origin = match origin {
             InvalidationOrigin::Endpoint => "endpoint",
             InvalidationOrigin::Extensions => "extensions",
@@ -73,30 +139,16 @@ async fn start(
             1u64,
             "origin" = origin
         );
-        handle_request_batch(&storage, origin, requests)
-            .instrument(tracing::info_span!(
-                "cache.invalidation.batch",
-                "origin" = origin
-            ))
-            .await
-    }
-}
-
-async fn handle_request_batch(
-    storage: &RedisCacheStorage,
-    origin: &'static str,
-    requests: Vec<InvalidationRequest>,
-) {
-    for request in requests {
-        let start = Instant::now();
-        handle_request(storage, origin, &request)
-            .instrument(tracing::info_span!("cache.invalidation.request"))
-            .await;
-        f64_histogram!(
-            "apollo.router.cache.invalidation.duration",
-            "Duration of the invalidation event execution.",
-            start.elapsed().as_secs_f64()
-        );
+        if let Err(err) = response_tx.send(
+            handle_request_batch(&storage, origin, requests)
+                .instrument(tracing::info_span!(
+                    "cache.invalidation.batch",
+                    "origin" = origin
+                ))
+                .await,
+        ) {
+            ::tracing::error!("cannot send answer to invalidation request in the channel: {err}");
+        }
     }
 }
 
@@ -104,9 +156,9 @@ async fn handle_request(
     storage: &RedisCacheStorage,
     origin: &'static str,
     request: &InvalidationRequest,
-) {
+) -> Result<u64, InvalidationError> {
     let key_prefix = request.key_prefix();
-    let subgraph = request.subgraph();
+    let subgraph = request.subgraph_name();
     tracing::debug!(
         "got invalidation request: {request:?}, will scan for: {}",
         key_prefix
@@ -115,6 +167,7 @@ async fn handle_request(
     // FIXME: configurable batch size
     let mut stream = storage.scan(key_prefix.clone(), Some(10));
     let mut count = 0u64;
+    let mut error = None;
 
     while let Some(res) = stream.next().await {
         match res {
@@ -124,6 +177,7 @@ async fn handle_request(
                     error = %e,
                     message = "error scanning for key",
                 );
+                error = Some(e);
                 break;
             }
             Ok(scan_res) => {
@@ -156,9 +210,46 @@ async fn handle_request(
         "Number of invalidated keys.",
         count
     );
+
+    match error {
+        Some(err) => Err(err.into()),
+        None => Ok(count),
+    }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+async fn handle_request_batch(
+    storage: &RedisCacheStorage,
+    origin: &'static str,
+    requests: Vec<InvalidationRequest>,
+) -> Result<u64, InvalidationError> {
+    let mut count = 0;
+    let mut errors = Vec::new();
+    for request in requests {
+        let start = Instant::now();
+        match handle_request(storage, origin, &request)
+            .instrument(tracing::info_span!("cache.invalidation.request"))
+            .await
+        {
+            Ok(c) => count += c,
+            Err(err) => {
+                errors.push(err);
+            }
+        }
+        f64_histogram!(
+            "apollo.router.cache.invalidation.duration",
+            "Duration of the invalidation event execution.",
+            start.elapsed().as_secs_f64()
+        );
+    }
+
+    if !errors.is_empty() {
+        Err(InvalidationErrors(errors).into())
+    } else {
+        Ok(count)
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub(crate) enum InvalidationRequest {
     Subgraph {
@@ -179,23 +270,27 @@ impl InvalidationRequest {
     fn key_prefix(&self) -> String {
         match self {
             InvalidationRequest::Subgraph { subgraph } => {
-                format!("subgraph:{subgraph}*",)
+                format!("version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph}*",)
             }
             InvalidationRequest::Type { subgraph, r#type } => {
-                format!("subgraph:{subgraph}:type:{type}*",)
+                format!("version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph}:type:{type}*",)
             }
-            _ => {
-                todo!()
+            InvalidationRequest::Entity {
+                subgraph,
+                r#type,
+                key,
+            } => {
+                let entity_key = hash_entity_key(key);
+                format!("version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph}:type:{type}:entity:{entity_key}*")
             }
         }
     }
 
-    fn subgraph(&self) -> String {
+    pub(super) fn subgraph_name(&self) -> &String {
         match self {
-            InvalidationRequest::Subgraph { subgraph } => subgraph.clone(),
-            _ => {
-                todo!()
-            }
+            InvalidationRequest::Subgraph { subgraph }
+            | InvalidationRequest::Type { subgraph, .. }
+            | InvalidationRequest::Entity { subgraph, .. } => subgraph,
         }
     }
 }

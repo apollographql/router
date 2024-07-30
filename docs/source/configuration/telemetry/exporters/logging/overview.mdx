@@ -1,16 +1,16 @@
 ---
 title: Router Logging
-subtitle: Configure logging in the Apollo Router
-description: Configure logging in the Apollo Router. Set the log level and output format.
+subtitle: Configure logging in the router
+description: Configure logging in the Apollo GraphOS Router or Apollo Router Core. Set the log level and output format.
 ---
 
-The Apollo Router provides built-in logging to capture records about the router's activity.
+GraphOS Router and Apollo Router Core provide built-in logging to capture records about their activity.
 
-The router supports [configurable log levels](#log-level) and [stdout output](./stdout) of log  messages (with [configurable output formats](./stdout/#logging-output-format)).
+The router supports [configurable log levels](#log-level) and [stdout output](./stdout) of log messages (with [configurable output formats](./stdout/#logging-output-format)).
 
 ## Log level
 
-The Apollo Router accepts a command-line argument to set its log level:
+The router accepts a command-line argument to set its log level:
 
 <table class="field-table api-ref">
   <thead>
@@ -66,7 +66,7 @@ APOLLO_ROUTER_LOG=hyper=debug,info,h2=trace
 
 In both examples, the actual filter used by the router the value defined by `RUST_LOG`.
 
-For more information about specifying filters for more granular control over Apollo Router logging, see the [Env Logger documentation](https://docs.rs/env_logger/latest/env_logger/).
+For more information about specifying filters for more granular control over router logging, see the [Env Logger documentation](https://docs.rs/env_logger/latest/env_logger/).
 
 
 ## Logging common configuration

@@ -178,6 +178,9 @@ impl TestExecution {
                 )
                 .await
             }
+            Action::EndpointRequest { url, request } => {
+                self.endpoint_request(url, request.clone(), out).await
+            }
             Action::Stop => self.stop(out).await,
         }
     }
@@ -484,6 +487,43 @@ impl TestExecution {
 
         Ok(())
     }
+
+    async fn endpoint_request(
+        &mut self,
+        url: &url::Url,
+        request: HttpRequest,
+        out: &mut String,
+    ) -> Result<(), Failed> {
+        let client = reqwest::Client::new();
+
+        let mut builder = client.request(
+            request
+                .method
+                .as_deref()
+                .unwrap_or("POST")
+                .try_into()
+                .unwrap(),
+            url.clone(),
+        );
+        for (name, value) in request.headers {
+            builder = builder.header(name, value);
+        }
+
+        let request = builder.json(&request.body).build().unwrap();
+        let response = client.execute(request).await.map_err(|e| {
+            writeln!(
+                out,
+                "could not send request to Router endpoint at {url}: {e}"
+            )
+            .unwrap();
+            let f: Failed = out.clone().into();
+            f
+        })?;
+
+        writeln!(out, "Endpoint returned: {response:?}").unwrap();
+
+        Ok(())
+    }
 }
 
 fn open_file(path: &Path, out: &mut String) -> Result<String, Failed> {
@@ -544,6 +584,10 @@ enum Action {
         headers: HashMap<String, String>,
         expected_response: Value,
     },
+    EndpointRequest {
+        url: url::Url,
+        request: HttpRequest,
+    },
     Stop,
 }
 
@@ -554,12 +598,12 @@ struct Subgraph {
 
 #[derive(Clone, Debug, Deserialize)]
 struct SubgraphRequestMock {
-    request: SubgraphRequest,
-    response: SubgraphResponse,
+    request: HttpRequest,
+    response: HttpResponse,
 }
 
 #[derive(Clone, Debug, Deserialize)]
-struct SubgraphRequest {
+struct HttpRequest {
     method: Option<String>,
     path: Option<String>,
     #[serde(default)]
@@ -568,7 +612,7 @@ struct SubgraphRequest {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-struct SubgraphResponse {
+struct HttpResponse {
     status: Option<u16>,
     #[serde(default)]
     headers: HashMap<String, String>,

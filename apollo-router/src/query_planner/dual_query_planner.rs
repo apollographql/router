@@ -25,6 +25,8 @@ use crate::query_planner::bridge_query_planner::metric_query_planning_plan_durat
 use crate::query_planner::bridge_query_planner::RUST_QP_MODE;
 use crate::query_planner::convert::convert_root_query_plan_node;
 use crate::query_planner::render_diff;
+use crate::query_planner::rewrites::DataRewrite;
+use crate::query_planner::selection::Selection;
 use crate::query_planner::DeferredNode;
 use crate::query_planner::PlanNode;
 use crate::query_planner::Primary;
@@ -143,12 +145,10 @@ impl BothModeComparisonJob {
                     tracing::debug!("JS and Rust query plans match{operation_desc}! 🎉");
                 } else {
                     tracing::debug!("JS v.s. Rust query plan mismatch{operation_desc}");
-                    if let Some(formatted) = &js_plan.formatted_query_plan {
-                        tracing::debug!(
-                            "Diff of formatted plans:\n{}",
-                            render_diff(&diff::lines(formatted, &rust_plan.to_string()))
-                        );
-                    }
+                    tracing::debug!(
+                        "Diff of formatted plans:\n{}",
+                        diff_plan(js_plan, rust_plan)
+                    );
                     tracing::trace!("JS query plan Debug: {js_root_node:#?}");
                     tracing::trace!("Rust query plan Debug: {rust_root_node:#?}");
                 }
@@ -184,13 +184,13 @@ fn fetch_node_matches(this: &FetchNode, other: &FetchNode) -> bool {
         authorization,
     } = this;
     *service_name == other.service_name
-        && *requires == other.requires
+        && same_selection_set_sorted(requires, &other.requires)
         && vec_matches_sorted(variable_usages, &other.variable_usages)
         && *operation_kind == other.operation_kind
         && *id == other.id
-        && *input_rewrites == other.input_rewrites
-        && *output_rewrites == other.output_rewrites
-        && *context_rewrites == other.context_rewrites
+        && same_rewrites(input_rewrites, &other.input_rewrites)
+        && same_rewrites(output_rewrites, &other.output_rewrites)
+        && same_rewrites(context_rewrites, &other.context_rewrites)
         && *authorization == other.authorization
         && operation_matches(operation, &other.operation)
 }
@@ -235,11 +235,36 @@ fn operation_matches(this: &SubgraphOperation, other: &SubgraphOperation) -> boo
 // The rest is calling the comparison functions above instead of `PartialEq`,
 // but otherwise behave just like `PartialEq`:
 
-// Note: Reexported under `apollo_compiler::_private`
+// Note: Reexported under `apollo_router::_private`
 pub fn plan_matches(js_plan: &QueryPlanResult, rust_plan: &QueryPlan) -> bool {
     let js_root_node = &js_plan.query_plan.node;
     let rust_root_node = convert_root_query_plan_node(rust_plan);
     opt_plan_node_matches(js_root_node, &rust_root_node)
+}
+
+pub fn diff_plan(js_plan: &QueryPlanResult, rust_plan: &QueryPlan) -> String {
+    let js_root_node = &js_plan.query_plan.node;
+    let rust_root_node = convert_root_query_plan_node(rust_plan);
+
+    match (js_root_node, rust_root_node) {
+        (None, None) => String::from(""),
+        (None, Some(rust)) => {
+            let rust = &format!("{rust:#?}");
+            let differences = diff::lines("", rust);
+            render_diff(&differences)
+        }
+        (Some(js), None) => {
+            let js = &format!("{js:#?}");
+            let differences = diff::lines(js, "");
+            render_diff(&differences)
+        }
+        (Some(js), Some(rust)) => {
+            let rust = &format!("{rust:#?}");
+            let js = &format!("{js:#?}");
+            let differences = diff::lines(js, rust);
+            render_diff(&differences)
+        }
+    }
 }
 
 fn opt_plan_node_matches(
@@ -368,6 +393,88 @@ fn flatten_node_matches(this: &FlattenNode, other: &FlattenNode) -> bool {
     *path == other.path && plan_node_matches(node, &other.node)
 }
 
+// Copied and modified from `apollo_federation::operation::SelectionKey`
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum SelectionKey {
+    Field {
+        /// The field alias (if specified) or field name in the resulting selection set.
+        response_name: Name,
+        directives: ast::DirectiveList,
+    },
+    FragmentSpread {
+        /// The name of the fragment.
+        fragment_name: Name,
+        directives: ast::DirectiveList,
+    },
+    InlineFragment {
+        /// The optional type condition of the fragment.
+        type_condition: Option<Name>,
+        directives: ast::DirectiveList,
+    },
+}
+
+fn get_selection_key(selection: &Selection) -> SelectionKey {
+    match selection {
+        Selection::Field(field) => SelectionKey::Field {
+            response_name: field.response_name().clone(),
+            directives: Default::default(),
+        },
+        Selection::InlineFragment(fragment) => SelectionKey::InlineFragment {
+            type_condition: fragment.type_condition.clone(),
+            directives: Default::default(),
+        },
+    }
+}
+
+fn hash_value<T: Hash>(x: &T) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    x.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn hash_selection_key(selection: &Selection) -> u64 {
+    hash_value(&get_selection_key(selection))
+}
+
+fn same_selection(x: &Selection, y: &Selection) -> bool {
+    let x_key = get_selection_key(x);
+    let y_key = get_selection_key(y);
+    if x_key != y_key {
+        return false;
+    }
+    let x_selections = x.selection_set();
+    let y_selections = y.selection_set();
+    match (x_selections, y_selections) {
+        (Some(x), Some(y)) => same_selection_set_sorted(x, y),
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+fn same_selection_set_sorted(x: &[Selection], y: &[Selection]) -> bool {
+    fn sorted_by_selection_key(s: &[Selection]) -> Vec<&Selection> {
+        let mut sorted: Vec<&Selection> = s.iter().collect();
+        sorted.sort_by_key(|x| hash_selection_key(x));
+        sorted
+    }
+
+    if x.len() != y.len() {
+        return false;
+    }
+    sorted_by_selection_key(x)
+        .into_iter()
+        .zip(sorted_by_selection_key(y))
+        .all(|(x, y)| same_selection(x, y))
+}
+
+fn same_rewrites(x: &Option<Vec<DataRewrite>>, y: &Option<Vec<DataRewrite>>) -> bool {
+    match (x, y) {
+        (None, None) => true,
+        (Some(x), Some(y)) => vec_matches_as_set(x, y, |a, b| a == b),
+        _ => false,
+    }
+}
+
 //==================================================================================================
 // AST comparison functions
 
@@ -433,27 +540,7 @@ fn same_ast_fragment_definition(x: &ast::FragmentDefinition, y: &ast::FragmentDe
         && same_ast_selection_set_sorted(&x.selection_set, &y.selection_set)
 }
 
-// Copied and modified from `apollo_federation::operation::SelectionKey`
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) enum SelectionKey {
-    Field {
-        /// The field alias (if specified) or field name in the resulting selection set.
-        response_name: Name,
-        directives: ast::DirectiveList,
-    },
-    FragmentSpread {
-        /// The name of the fragment.
-        fragment_name: Name,
-        directives: ast::DirectiveList,
-    },
-    InlineFragment {
-        /// The optional type condition of the fragment.
-        type_condition: Option<Name>,
-        directives: ast::DirectiveList,
-    },
-}
-
-fn get_selection_key(selection: &ast::Selection) -> SelectionKey {
+fn get_ast_selection_key(selection: &ast::Selection) -> SelectionKey {
     match selection {
         ast::Selection::Field(field) => SelectionKey::Field {
             response_name: field.response_name().clone(),
@@ -473,7 +560,7 @@ fn get_selection_key(selection: &ast::Selection) -> SelectionKey {
 use std::ops::Not;
 
 /// Get the sub-selections of a selection.
-fn get_selection_set(selection: &ast::Selection) -> Option<&Vec<ast::Selection>> {
+fn get_ast_selection_set(selection: &ast::Selection) -> Option<&Vec<ast::Selection>> {
     match selection {
         ast::Selection::Field(field) => field
             .selection_set
@@ -486,13 +573,13 @@ fn get_selection_set(selection: &ast::Selection) -> Option<&Vec<ast::Selection>>
 }
 
 fn same_ast_selection(x: &ast::Selection, y: &ast::Selection) -> bool {
-    let x_key = get_selection_key(x);
-    let y_key = get_selection_key(y);
+    let x_key = get_ast_selection_key(x);
+    let y_key = get_ast_selection_key(y);
     if x_key != y_key {
         return false;
     }
-    let x_selections = get_selection_set(x);
-    let y_selections = get_selection_set(y);
+    let x_selections = get_ast_selection_set(x);
+    let y_selections = get_ast_selection_set(y);
     match (x_selections, y_selections) {
         (Some(x), Some(y)) => same_ast_selection_set_sorted(x, y),
         (None, None) => true,
@@ -500,20 +587,14 @@ fn same_ast_selection(x: &ast::Selection, y: &ast::Selection) -> bool {
     }
 }
 
-fn hash_value<T: Hash>(x: &T) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    x.hash(&mut hasher);
-    hasher.finish()
-}
-
-fn hash_selection_key(selection: &ast::Selection) -> u64 {
-    hash_value(&get_selection_key(selection))
+fn hash_ast_selection_key(selection: &ast::Selection) -> u64 {
+    hash_value(&get_ast_selection_key(selection))
 }
 
 fn same_ast_selection_set_sorted(x: &[ast::Selection], y: &[ast::Selection]) -> bool {
     fn sorted_by_selection_key(s: &[ast::Selection]) -> Vec<&ast::Selection> {
         let mut sorted: Vec<&ast::Selection> = s.iter().collect();
-        sorted.sort_by_key(|x| hash_selection_key(x));
+        sorted.sort_by_key(|x| hash_ast_selection_key(x));
         sorted
     }
 

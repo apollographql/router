@@ -11,6 +11,7 @@ info:
           list.length: true
 ---
 - name: graphql.field.list.length
+  description: Length of a selected field in the GraphQL response
   data:
     datapoints:
       - sum: 3
