@@ -1,9 +1,7 @@
-### Provide support to control of the key name used to retrieve the secret used for APOLLO_KEY ([Issue #5661](https://github.com/apollographql/router/issues/5661))
+### Helm: Support renaming key for retrieving APOLLO_KEY secret ([Issue #5661](https://github.com/apollographql/router/issues/5661))
 
-The Router Helm chart currently is hardcoded to use managedFederationApiKey as the key name to use to retrieve the value 
-out of the referenced secretkey.   Some kubernetes customers require the use of a secretStore / externalSecret,
-and may be required to use a specific key name when obtaining secrets from these sources.
+A user of the router Helm chart can now rename the key used to retrieve the value of the secret key referenced by `APOLLO_KEY`.
 
-This change provides the user the ability to control the name of the key to use in retrieving that value.
+Previously, the router Helm chart hardcoded the key name to `managedFederationApiKey`. This didn't support users whose infrastructure required custom key names when getting secrets, such as Kubernetes users who need to use specific key names to access a `secretStore` or `externalSecret`. This change provides a user the ability to control the name of the key to use in retrieving that value.
 
 By [Jon Christiansen](https://github.com/theJC) in https://github.com/apollographql/router/pull/5662
