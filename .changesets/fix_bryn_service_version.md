@@ -1,4 +1,4 @@
-### Allow overriding of service version ([PR #5689](https://github.com/apollographql/router/pull/5689))
+### Allow service version overrides ([PR #5689](https://github.com/apollographql/router/pull/5689))
 
 The router now supports configuration of `service.version` via YAML file configuration. This enables users to produce custom versioned builds of the router.
 
