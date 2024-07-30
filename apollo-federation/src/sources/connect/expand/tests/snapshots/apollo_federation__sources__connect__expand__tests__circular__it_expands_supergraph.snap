@@ -1,0 +1,14 @@
+---
+source: apollo-federation/src/sources/connect/expand/tests/mod.rs
+expression: api_schema
+---
+directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+type Query {
+  t(id: ID): T
+}
+
+type T {
+  id: ID!
+  ts: [T]
+}
