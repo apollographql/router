@@ -116,7 +116,10 @@ impl Service<router::Request> for InvalidationService {
                             .headers
                             .get(AUTHORIZATION)
                             .ok_or("cannot find authorization header")?
-                            .to_str()?;
+                            .to_str()
+                            .inspect_err(|_err| {
+                                Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+                            })?;
                         match body {
                             Ok(body) => {
                                 let valid_shared_key =
