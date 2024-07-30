@@ -11,6 +11,28 @@ use crate::plugins::telemetry::config::AttributeValue;
 const UNKNOWN_SERVICE: &str = "unknown_service";
 const OTEL_SERVICE_NAME: &str = "OTEL_SERVICE_NAME";
 
+/// This resource detector fills out things like the default service version and executable name.
+/// Users can always override them via config.
+struct StaticResourceDetector;
+impl ResourceDetector for StaticResourceDetector {
+    fn detect(&self, _timeout: Duration) -> Resource {
+        let mut config_resources = vec![];
+        config_resources.push(KeyValue::new(
+            opentelemetry_semantic_conventions::resource::SERVICE_VERSION,
+            std::env!("CARGO_PKG_VERSION"),
+        ));
+
+        // Some other basic resources
+        if let Some(executable_name) = executable_name() {
+            config_resources.push(KeyValue::new(
+                opentelemetry_semantic_conventions::resource::PROCESS_EXECUTABLE_NAME,
+                executable_name,
+            ));
+        }
+        Resource::new(config_resources)
+    }
+}
+
 struct EnvServiceNameDetector;
 // Used instead of SdkProvidedResourceDetector
 impl ResourceDetector for EnvServiceNameDetector {
@@ -42,6 +64,7 @@ pub(crate) trait ConfigResource {
         let resource = Resource::from_detectors(
             Duration::from_secs(0),
             vec![
+                Box::new(StaticResourceDetector),
                 Box::new(config_resource_detector),
                 Box::new(EnvResourceDetector::new()),
                 Box::new(EnvServiceNameDetector),
@@ -84,22 +107,8 @@ impl ResourceDetector for ConfigResourceDetector {
         let mut config_resources = vec![];
 
         // For config resources last entry wins
-
-        // Add any other resources from config
         for (key, value) in self.resources.iter() {
             config_resources.push(KeyValue::new(key.clone(), value.clone()));
-        }
-
-        // Some other basic resources
-        config_resources.push(KeyValue::new(
-            opentelemetry_semantic_conventions::resource::SERVICE_VERSION,
-            std::env!("CARGO_PKG_VERSION"),
-        ));
-        if let Some(executable_name) = executable_name() {
-            config_resources.push(KeyValue::new(
-                opentelemetry_semantic_conventions::resource::PROCESS_EXECUTABLE_NAME,
-                executable_name,
-            ));
         }
 
         // Service namespace
