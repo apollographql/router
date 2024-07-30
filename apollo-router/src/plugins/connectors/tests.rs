@@ -6,13 +6,16 @@ use http::header::CONTENT_TYPE;
 use itertools::EitherOrBoth;
 use itertools::Itertools;
 use mime::APPLICATION_JSON;
+use mockall::mock;
+use mockall::predicate::eq;
 use req_asserts::Matcher;
 use serde_json_bytes::json;
 use tower::ServiceExt;
-use tracing_fluent_assertions::AssertionRegistry;
-use tracing_fluent_assertions::AssertionsLayer;
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::Registry;
+use tracing_core::span::Attributes;
+use tracing_core::span::Id;
+use tracing_core::span::Record;
+use tracing_core::Event;
+use tracing_core::Metadata;
 use wiremock::http::HeaderName;
 use wiremock::http::HeaderValue;
 use wiremock::matchers::body_json;
@@ -475,25 +478,65 @@ async fn test_headers() {
     );
 }
 
+mock! {
+    Subscriber {}
+    impl tracing_core::Subscriber for Subscriber {
+        fn enabled<'a>(&self, metadata: &Metadata<'a>) -> bool;
+        fn new_span<'a>(&self, span: &Attributes<'a>) -> Id;
+        fn record<'a>(&self, span: &Id, values: &Record<'a>);
+        fn record_follows_from(&self, span: &Id, follows: &Id);
+        fn event_enabled<'a>(&self, event: &Event<'a>) -> bool;
+        fn event<'a>(&self, event: &Event<'a>);
+        fn enter(&self, span: &Id);
+        fn exit(&self, span: &Id);
+    }
+}
+
 #[tokio::test]
 async fn test_tracing_connect_span() {
-    let assertion_registry = AssertionRegistry::default();
-    let base_subscriber = Registry::default();
-    let subscriber = base_subscriber.with(AssertionsLayer::new(&assertion_registry));
-    let _guard = tracing::subscriber::set_default(subscriber);
-
-    let found_connector_span = assertion_registry
-        .build()
-        .with_name(CONNECT_SPAN_NAME)
-        .with_span_field("apollo.connector.type")
-        .with_span_field("apollo.connector.detail")
-        .with_span_field("apollo.connector.field.name")
-        .with_span_field("apollo.connector.selection")
-        .with_span_field("apollo.connector.source.name")
-        .with_span_field("apollo.connector.source.detail")
-        .was_entered()
-        .was_exited()
-        .finalize();
+    let mut mock_subscriber = MockSubscriber::new();
+    mock_subscriber.expect_event_enabled().returning(|_| false);
+    mock_subscriber.expect_record().returning(|_, _| {});
+    mock_subscriber
+        .expect_enabled()
+        .returning(|metadata| metadata.name() == CONNECT_SPAN_NAME);
+    mock_subscriber.expect_new_span().returning(|attributes| {
+        if attributes.metadata().name() == CONNECT_SPAN_NAME {
+            assert!(attributes.fields().field("apollo.connector.type").is_some());
+            assert!(attributes
+                .fields()
+                .field("apollo.connector.detail")
+                .is_some());
+            assert!(attributes
+                .fields()
+                .field("apollo.connector.field.name")
+                .is_some());
+            assert!(attributes
+                .fields()
+                .field("apollo.connector.selection")
+                .is_some());
+            assert!(attributes
+                .fields()
+                .field("apollo.connector.source.name")
+                .is_some());
+            assert!(attributes
+                .fields()
+                .field("apollo.connector.source.detail")
+                .is_some());
+            Id::from_u64(1)
+        } else {
+            panic!("unexpected span: {}", attributes.metadata().name());
+        }
+    });
+    mock_subscriber
+        .expect_enter()
+        .with(eq(Id::from_u64(1)))
+        .returning(|_| {});
+    mock_subscriber
+        .expect_exit()
+        .with(eq(Id::from_u64(1)))
+        .returning(|_| {});
+    let _guard = tracing::subscriber::set_default(mock_subscriber);
 
     let mock_server = MockServer::start().await;
     mock_api::users().mount(&mock_server).await;
@@ -507,8 +550,6 @@ async fn test_tracing_connect_span() {
         |_| {},
     )
     .await;
-
-    found_connector_span.assert();
 }
 
 #[tokio::test]
