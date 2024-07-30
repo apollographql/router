@@ -4,7 +4,6 @@ The router's Datadog exporter has been updated to reduce the frequency of logged
 
 Previously, the connection pools used by the Datadog exporter frequently timed out, and each timeout logged an error like the following:
 
-For example:
 ```
 2024-07-19T15:28:22.970360Z ERROR  OpenTelemetry trace error occurred: error sending request for url (http://127.0.0.1:8126/v0.5/traces): connection error: Connection reset by peer (os error 54)
 ```
