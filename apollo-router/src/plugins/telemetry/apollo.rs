@@ -166,7 +166,7 @@ const fn default_field_level_instrumentation_sampler() -> SamplerOption {
 }
 
 const fn default_experimental_otlp_tracing_sampler() -> SamplerOption {
-    SamplerOption::Always(Sampler::AlwaysOff)
+    SamplerOption::Always(Sampler::AlwaysOn)
 }
 
 fn endpoint_default() -> Url {
