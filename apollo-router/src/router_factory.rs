@@ -179,7 +179,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                     .get("telemetry")
                     .cloned();
                 if let Some(plugin_config) = &mut telemetry_config {
-                    inject_schema_id(Some(&schema.hash), plugin_config);
+                    inject_schema_id(Some(&schema.hash.to_string()), plugin_config);
                     match factory
                         .create_instance(
                             PluginInit::builder()

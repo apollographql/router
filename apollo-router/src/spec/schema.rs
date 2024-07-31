@@ -108,8 +108,6 @@ impl Schema {
         let implementers_map = definitions.implementers_map();
         let supergraph = Supergraph::from_schema(definitions)?;
 
-        let schema_id = Arc::new(Schema::schema_id(&raw_sdl));
-
         let api_schema = supergraph
             .to_api_schema(ApiSchemaOptions {
                 include_defer: config.supergraph.defer_support,
