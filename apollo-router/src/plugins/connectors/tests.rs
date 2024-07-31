@@ -6,16 +6,13 @@ use http::header::CONTENT_TYPE;
 use itertools::EitherOrBoth;
 use itertools::Itertools;
 use mime::APPLICATION_JSON;
-use mockall::mock;
-use mockall::predicate::eq;
 use req_asserts::Matcher;
 use serde_json_bytes::json;
+use test_span::get_spans_for_root;
+use test_span::prelude::test_span;
+use test_span::Filter;
 use tower::ServiceExt;
-use tracing_core::span::Attributes;
-use tracing_core::span::Id;
-use tracing_core::span::Record;
-use tracing_core::Event;
-use tracing_core::Metadata;
+use tracing_core::Level;
 use wiremock::http::HeaderName;
 use wiremock::http::HeaderValue;
 use wiremock::matchers::body_json;
@@ -26,7 +23,6 @@ use wiremock::MockServer;
 use wiremock::ResponseTemplate;
 
 use crate::json_ext::ValueExt;
-use crate::plugins::connectors::tracing::CONNECT_SPAN_NAME;
 use crate::router_factory::RouterSuperServiceFactory;
 use crate::router_factory::YamlRouterFactory;
 use crate::services::new_service::ServiceFactory;
@@ -478,78 +474,42 @@ async fn test_headers() {
     );
 }
 
-mock! {
-    Subscriber {}
-    impl tracing_core::Subscriber for Subscriber {
-        fn enabled<'a>(&self, metadata: &Metadata<'a>) -> bool;
-        fn new_span<'a>(&self, span: &Attributes<'a>) -> Id;
-        fn record<'a>(&self, span: &Id, values: &Record<'a>);
-        fn record_follows_from(&self, span: &Id, follows: &Id);
-        fn event_enabled<'a>(&self, event: &Event<'a>) -> bool;
-        fn event<'a>(&self, event: &Event<'a>);
-        fn enter(&self, span: &Id);
-        fn exit(&self, span: &Id);
-    }
-}
-
-#[tokio::test]
+#[test_span(tokio::test)]
 async fn test_tracing_connect_span() {
-    let mut mock_subscriber = MockSubscriber::new();
-    mock_subscriber.expect_event_enabled().returning(|_| false);
-    mock_subscriber.expect_record().returning(|_, _| {});
-    mock_subscriber
-        .expect_enabled()
-        .returning(|metadata| metadata.name() == CONNECT_SPAN_NAME);
-    mock_subscriber.expect_new_span().returning(|attributes| {
-        if attributes.metadata().name() == CONNECT_SPAN_NAME {
-            assert!(attributes.fields().field("apollo.connector.type").is_some());
-            assert!(attributes
-                .fields()
-                .field("apollo.connector.detail")
-                .is_some());
-            assert!(attributes
-                .fields()
-                .field("apollo.connector.field.name")
-                .is_some());
-            assert!(attributes
-                .fields()
-                .field("apollo.connector.selection")
-                .is_some());
-            assert!(attributes
-                .fields()
-                .field("apollo.connector.source.name")
-                .is_some());
-            assert!(attributes
-                .fields()
-                .field("apollo.connector.source.detail")
-                .is_some());
-            Id::from_u64(1)
-        } else {
-            panic!("unexpected span: {}", attributes.metadata().name());
-        }
-    });
-    mock_subscriber
-        .expect_enter()
-        .with(eq(Id::from_u64(1)))
-        .returning(|_| {});
-    mock_subscriber
-        .expect_exit()
-        .with(eq(Id::from_u64(1)))
-        .returning(|_| {});
-    let _guard = tracing::subscriber::set_default(mock_subscriber);
-
     let mock_server = MockServer::start().await;
     mock_api::users().mount(&mock_server).await;
 
-    execute(
-        STEEL_THREAD_SCHEMA,
-        &mock_server.uri(),
-        "query { users { id } }",
-        Default::default(),
-        None,
-        |_| {},
-    )
-    .await;
+    let root_id = {
+        let root_span = test_span::reexports::tracing::span!(Level::ERROR, "root");
+
+        let root_id = root_span
+            .id()
+            .expect("couldn't get root span id; this cannot happen.");
+
+        execute(
+            STEEL_THREAD_SCHEMA,
+            &mock_server.uri(),
+            "query { users { id } }",
+            Default::default(),
+            None,
+            |_| {},
+        )
+        .instrument(root_span)
+        .await;
+        root_id
+    };
+
+    // Filter to just the connector service span
+    let filter = Filter::new(Level::ERROR).with_target(
+        String::from("apollo_router::services::connector_service"),
+        Level::INFO,
+    );
+
+    // Redact time offset and local port that change with every test run
+    insta::assert_json_snapshot!(get_spans_for_root(&root_id, &filter), {
+        ".children.*.record.entries[4][1]" => "[sent_time_offset_redacted]",
+        ".children.*.record.entries[7][1]" => "[source_detail_redacted]",
+    });
 }
 
 #[tokio::test]
