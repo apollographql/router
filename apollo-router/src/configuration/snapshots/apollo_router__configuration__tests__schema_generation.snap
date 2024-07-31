@@ -1606,13 +1606,14 @@ expression: "&schema"
           "description": "Enable or disable the entity caching feature",
           "type": "boolean"
         },
+        "invalidation": {
+          "$ref": "#/definitions/InvalidationEndpointConfig",
+          "description": "#/definitions/InvalidationEndpointConfig",
+          "nullable": true
+        },
         "metrics": {
           "$ref": "#/definitions/Metrics",
           "description": "#/definitions/Metrics"
-        },
-        "redis": {
-          "$ref": "#/definitions/RedisCache",
-          "description": "#/definitions/RedisCache"
         },
         "subgraph": {
           "$ref": "#/definitions/SubgraphConfiguration_for_Subgraph",
@@ -1620,7 +1621,6 @@ expression: "&schema"
         }
       },
       "required": [
-        "redis",
         "subgraph"
       ],
       "type": "object"
@@ -3516,6 +3516,24 @@ expression: "&schema"
           "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::SupergraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes, apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector, apollo_router::plugins::telemetry::config_new::selectors::SupergraphValue>"
         }
       },
+      "type": "object"
+    },
+    "InvalidationEndpointConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "listen": {
+          "$ref": "#/definitions/ListenAddr",
+          "description": "#/definitions/ListenAddr"
+        },
+        "path": {
+          "description": "Specify on which path you want to listen for invalidation endpoint.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "listen",
+        "path"
+      ],
       "type": "object"
     },
     "JWTConf": {
@@ -5571,14 +5589,25 @@ expression: "&schema"
       "description": "Per subgraph configuration for entity caching",
       "properties": {
         "enabled": {
+          "default": true,
           "description": "activates caching for this subgraph, overrides the global configuration",
-          "nullable": true,
           "type": "boolean"
         },
+        "invalidation": {
+          "$ref": "#/definitions/SubgraphInvalidationConfig",
+          "description": "#/definitions/SubgraphInvalidationConfig",
+          "nullable": true
+        },
         "private_id": {
+          "default": null,
           "description": "Context key used to separate cache sections per user",
           "nullable": true,
           "type": "string"
+        },
+        "redis": {
+          "$ref": "#/definitions/RedisCache",
+          "description": "#/definitions/RedisCache",
+          "nullable": true
         },
         "ttl": {
           "$ref": "#/definitions/Ttl",
@@ -5775,6 +5804,22 @@ expression: "&schema"
         "http.client.response.body.size": {
           "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector",
           "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector"
+        }
+      },
+      "type": "object"
+    },
+    "SubgraphInvalidationConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Enable the invalidation",
+          "type": "boolean"
+        },
+        "shared_key": {
+          "default": "",
+          "description": "Shared key needed to request the invalidation endpoint",
+          "type": "string"
         }
       },
       "type": "object"

@@ -1,12 +1,12 @@
 ---
-title: Apollo Router instruments
+title: Router Instruments
 subtitle: Standard metric instruments for the router's request lifecycle
-description: Reference of standard metric instruments for the Apollo Router's request lifecycle. Consumable via the router's metrics exporters.
+description: Reference of standard metric instruments for the request lifecycle of GraphOS Router and Apollo Router Core. Consumable via the router's metrics exporters. 
 ---
 
 ## Standard metric instruments
 
-The Apollo Router provides a set of non-configurable metric instruments that expose detailed information about the router's request lifecycle.
+GraphOS Router and Apollo Router Core provide a set of non-configurable metric instruments that expose detailed information about the router's request lifecycle.
 
 These instruments can be consumed by configuring a [metrics exporter](../exporters/metrics/overview).
 
@@ -109,7 +109,7 @@ The initial call to Uplink during router startup is not reflected in metrics.
 
 ### GraphOS Studio
 
-- `apollo.router.telemetry.studio.reports` - The number of reports submitted to GraphOS Studio by the Router.
+- `apollo.router.telemetry.studio.reports` - The number of reports submitted to GraphOS Studio by the router.
   - `report.type`: The type of report submitted: "traces" or "metrics"
   - `report.protocol`: Either "apollo" or "otlp", depending on the experimental_otlp_tracing_sampler configuration.
 
