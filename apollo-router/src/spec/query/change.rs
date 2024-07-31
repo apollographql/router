@@ -744,31 +744,83 @@ mod tests {
     #[test]
     fn directive() {
         let schema1: &str = r#"
-        directive @test on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+        directive @test on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM | UNION | INPUT_OBJECT
     
         type Query {
           me: User
           customer: User
+          s: S
+          u: U
+          e: E
+          inp(i: I): ID
         }
     
         type User {
           id: ID!
           name: String
         }
+
+        scalar S
+
+        type A {
+            a: ID
+        }
+
+        type B {
+            b: ID
+        }
+
+        union U = A | B
+
+        enum E {
+            A
+            B
+        }
+
+        input I {
+            a: Int = 0
+            b: Int
+        }
         "#;
 
         let schema2: &str = r#"
-        directive @test on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
-    
+        directive @test on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM | UNION | INPUT_OBJECT
+
         type Query {
           me: User
           customer: User @test
+          s: S
+          u: U
+          e: E
+          inp(i: I): ID
         }
-    
     
         type User {
           id: ID! @test
           name: String
+        }
+
+        scalar S @test
+
+        type A {
+            a: ID
+        }
+
+        type B {
+            b: ID
+        }
+
+        union U @test = A | B
+
+        enum E @test {
+            A
+            B
+        }
+
+
+        input I @test {
+            a: Int = 0
+            b: Int
         }
         "#;
         let query = "query { me { name } }";
@@ -778,6 +830,18 @@ mod tests {
         assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
 
         let query = "query { customer { id } }";
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
+
+        let query = "query { s }";
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
+
+        let query = "query { u { ...on A { a } ...on B { b } } }";
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
+
+        let query = "query { e }";
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
+
+        let query = "query { inp(i: { b: 0 }) }";
         assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
     }
 
@@ -833,12 +897,12 @@ mod tests {
     }
 
     #[test]
-    fn arguments() {
+    fn arguments_int() {
         let schema1: &str = r#"
         type Query {
           a(i: Int): Int
           b(i: Int = 1): Int
-          c(i: Int = 1, j: Int): Int
+          c(i: Int = 1, j: Int = null): Int
         }
         "#;
 
@@ -846,7 +910,7 @@ mod tests {
         type Query {
             a(i: Int!): Int
             b(i: Int = 2): Int
-            c(i: Int = 2, j: Int): Int
+            c(i: Int = 2, j: Int = null): Int
           }
         "#;
 
@@ -863,6 +927,110 @@ mod tests {
         assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
 
         let query = "query { c(i:0, j: 0)}";
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
+    }
+
+    #[test]
+    fn arguments_float() {
+        let schema1: &str = r#"
+        type Query {
+          a(i: Float): Int
+          b(i: Float = 1.0): Int
+          c(i: Float = 1.0, j: Int): Int
+        }
+        "#;
+
+        let schema2: &str = r#"
+        type Query {
+            a(i: Float!): Int
+            b(i: Float = 2.0): Int
+            c(i: Float = 2.0, j: Int): Int
+          }
+        "#;
+
+        let query = "query { a(i: 0) }";
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
+
+        let query = "query { b }";
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
+
+        let query = "query { b(i: 0)}";
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
+
+        let query = "query { c(j: 0)}";
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
+
+        let query = "query { c(i:0, j: 0)}";
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
+    }
+
+    #[test]
+    fn arguments_list() {
+        let schema1: &str = r#"
+        type Query {
+          a(i: [Float]): Int
+          b(i: [Float] = [1.0]): Int
+          c(i: [Float] = [1.0], j: Int): Int
+        }
+        "#;
+
+        let schema2: &str = r#"
+        type Query {
+            a(i: [Float!]): Int
+            b(i: [Float] = [2.0]): Int
+            c(i: [Float] = [2.0], j: Int): Int
+          }
+        "#;
+
+        let query = "query { a(i: [0]) }";
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
+
+        let query = "query { b }";
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
+
+        let query = "query { b(i: [0])}";
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
+
+        let query = "query { c(j: 0)}";
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
+
+        let query = "query { c(i: [0], j: 0)}";
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
+    }
+
+    #[test]
+    fn arguments_object() {
+        let schema1: &str = r#"
+        input T {
+          d: Int
+          e: String
+        }
+
+        type Query {
+          a(i: T): Int
+          b(i: T = { d: 1, e: "a" }): Int
+        }
+        "#;
+
+        let schema2: &str = r#"
+        input T {
+          d: Int
+          e: String
+        }
+        
+        type Query {
+            a(i: T!): Int
+            b(i: T = { d: 2, e: "b" }): Int
+          }
+        "#;
+
+        let query = "query { a(i: { d: 1, e: \"a\" }) }";
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
+
+        let query = "query { b }";
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
+
+        let query = "query { b(i: { d: 3, e: \"c\" })}";
         assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
     }
 
