@@ -1,3 +1,45 @@
+//! Schema aware query hashing algorithm
+//!
+//! This is a query visitor that calculates a hash of all fields, along with all
+//! the relevant types and directives in the schema. It is designed to generate
+//! the same hash for the same query across schema updates if the schema change
+//! would not affect that query. As an example, if a new type is added to the
+//! schema, we know that it will have no impact to an existing query that cannot
+//! be using it.
+//! This algorithm is used in 2 places:
+//! * in the query planner cache: generating query plans can be expensive, so the
+//! router has a warm up feature, where upon receving a new schema, it will take
+//! the most used queries and plan them, before switching traffic to the new
+//! schema. Generating all of those plans takes a lot of time. By using this
+//! hashing algorithm, we can detect that the schema change does not affect the
+//! query, which means that we can reuse the old query plan directly and avoid
+//! the expensive planning task
+//! * in entity caching: the responses returned by subgraphs can change depending
+//! on the schema (example: a field moving from String to Int), so we need to
+//! detect that. One way to do it was to add the schema hash to the cache key, but
+//! as a result it wipes the cache on every schema update, which will cause
+//! performance and reliability issues. With this hashing algorithm, cached entries
+//! can be kept across schema updates
+//!
+//! ## Technical details
+//!
+//! ### Query string hashing
+//! A full hash of the query string is added along with the schema level data. This
+//! is technically making the algorithm less useful, because the same query with
+//! different indentation would get a different hash, while there would be no difference
+//! in the query plan or the subgraph response. But this makes sure that if we forget
+//! something in the way we hash the query, we will avoid collisions.
+//!
+//! ### Prefixes and suffixes
+//! Across the entire visitor, we add prefixes and suffixes like this:
+//!
+//! ```rust
+//! "^SCHEMA".hash(self);
+//! ```
+//!
+//! This prevents possible collision while hashing multiple things in a sequence. The
+//! `^` character cannot be present in a GraphQL query or schema outside of comments
+//! or strings, so this is a good separator.
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::hash::Hash;
@@ -97,6 +139,7 @@ impl<'a> QueryHashVisitor<'a> {
     ) -> Result<Vec<u8>, BoxError> {
         let mut visitor = QueryHashVisitor::new(schema, schema_str, executable)?;
         traverse::document(&mut visitor, executable, operation_name)?;
+        // hash the entire query string to prevent collisions
         executable.to_string().hash(&mut visitor);
         Ok(visitor.finish())
     }
@@ -191,6 +234,7 @@ impl<'a> QueryHashVisitor<'a> {
 
         name.hash(self);
 
+        // we need this this to avoid an infinite loop when hashing types that refer to each other
         if self.hashed_types.contains(name) {
             return Ok(());
         }
@@ -216,6 +260,8 @@ impl<'a> QueryHashVisitor<'a> {
                     self.hash_directive(&directive.node);
                 }
             }
+            // this only hashes the type level info, not the fields, because those will be taken from the query
+            // we will still hash the fields using for the key
             ExtendedType::Object(o) => {
                 "^OBJECT".hash(self);
 
@@ -334,6 +380,8 @@ impl<'a> QueryHashVisitor<'a> {
             self.hash_directive(directive);
         }
 
+        // for every field, we also need to look at fields defined in `@requires` because
+        // they will affect the query plan
         self.hash_join_field(&parent_type, &field_def.directives)?;
 
         for directive in &node.directives {
@@ -454,10 +502,6 @@ impl<'a> Hasher for QueryHashVisitor<'a> {
     }
 
     fn write(&mut self, bytes: &[u8]) {
-        // FIXME: hack I used to debug my code, remove
-        // if bytes.len() != 1 || bytes[0] != 0xFF {
-        //     println!("{:?}", std::str::from_utf8(bytes).unwrap());
-        // }
         // byte separator between each part that is hashed
         self.hasher.update(&[0xFF][..]);
         self.hasher.update(bytes);
