@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use apollo_compiler::Schema;
 use tower::ServiceExt;
 
 use crate::metrics::FutureMetricsExt;
@@ -9,6 +10,9 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::progressive_override::Config;
 use crate::plugins::progressive_override::ProgressiveOverridePlugin;
+use crate::plugins::progressive_override::JOIN_FIELD_DIRECTIVE_NAME;
+use crate::plugins::progressive_override::JOIN_SPEC_BASE_URL;
+use crate::plugins::progressive_override::JOIN_SPEC_VERSION_RANGE;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::plugins::progressive_override::UNRESOLVED_LABELS_KEY;
 use crate::services::layers::query_analysis::ParsedDocument;
@@ -21,6 +25,40 @@ use crate::TestHarness;
 
 const SCHEMA: &str = include_str!("testdata/supergraph.graphql");
 const SCHEMA_NO_USAGES: &str = include_str!("testdata/supergraph_no_usages.graphql");
+
+#[test]
+fn test_progressive_overrides_are_recognised_vor_join_v0_4_and_above() {
+    let schema_for_version = |version| {
+        format!(
+            r#"schema
+                @link(url: "https://specs.apollo.dev/link/v1.0")
+                @link(url: "https://specs.apollo.dev/join/{}", for: EXECUTION)
+                @link(url: "https://specs.apollo.dev/context/v0.1", for: SECURITY)
+
+                directive @join__field repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION"#,
+            version
+        )
+    };
+
+    let join_v4_schema = Schema::parse(schema_for_version("v0.4"), "test").unwrap();
+    assert!(crate::spec::Schema::directive_name(
+        &join_v4_schema,
+        JOIN_SPEC_BASE_URL,
+        JOIN_SPEC_VERSION_RANGE,
+        JOIN_FIELD_DIRECTIVE_NAME,
+    )
+    .is_some());
+
+    let join_v5_schema = Schema::parse(schema_for_version("v0.5"), "test").unwrap();
+
+    assert!(crate::spec::Schema::directive_name(
+        &join_v5_schema,
+        JOIN_SPEC_BASE_URL,
+        JOIN_SPEC_VERSION_RANGE,
+        JOIN_FIELD_DIRECTIVE_NAME,
+    )
+    .is_some())
+}
 
 #[tokio::test]
 async fn plugin_disables_itself_with_no_progressive_override_usages() {
