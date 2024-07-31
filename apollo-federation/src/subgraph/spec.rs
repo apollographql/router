@@ -48,6 +48,8 @@ pub const PROVIDES_DIRECTIVE_NAME: Name = name!("provides");
 pub const REQUIRES_DIRECTIVE_NAME: Name = name!("requires");
 pub const SHAREABLE_DIRECTIVE_NAME: Name = name!("shareable");
 pub const TAG_DIRECTIVE_NAME: Name = name!("tag");
+pub const CONTEXT_DIRECTIVE_NAME: Name = name!("context");
+pub const FROM_CONTEXT_DIRECTIVE_NAME: Name = name!("fromContext");
 pub const FIELDSET_SCALAR_NAME: Name = name!("FieldSet");
 
 // federated types

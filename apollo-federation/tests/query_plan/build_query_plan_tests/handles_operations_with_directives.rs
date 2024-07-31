@@ -244,7 +244,7 @@ fn test_if_directives_with_arguments_applied_on_queries_are_ok() {
 }
 
 #[test]
-#[should_panic(expected = r#"unused variable: `$some_var`"#)]
+#[should_panic(expected = r#"snapshot assertion"#)]
 // TODO: investigate this failure
 fn subgraph_query_retains_the_query_variables_used_in_the_directives_applied_to_the_query() {
     let planner = planner!(

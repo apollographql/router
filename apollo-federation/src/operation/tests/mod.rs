@@ -1614,7 +1614,6 @@ fn used_variables() {
     let mut variables = operation
         .selection_set
         .used_variables()
-        .unwrap()
         .into_iter()
         .collect::<Vec<_>>();
     variables.sort();
@@ -1633,7 +1632,6 @@ fn used_variables() {
         .as_ref()
         .unwrap()
         .used_variables()
-        .unwrap()
         .into_iter()
         .collect::<Vec<_>>();
     variables.sort();

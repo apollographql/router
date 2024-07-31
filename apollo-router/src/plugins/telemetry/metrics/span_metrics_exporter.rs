@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 use std::time::Instant;
 
+use opentelemetry_api::KeyValue;
+use opentelemetry_api::Value;
 use tracing_core::field::Visit;
 use tracing_core::span;
 use tracing_core::Field;
@@ -70,14 +72,15 @@ where
             let idle: f64 = timings.idle as f64 / 1_000_000_000_f64;
             let busy: f64 = timings.busy as f64 / 1_000_000_000_f64;
             let name = span.metadata().name();
+
             if let Some(subgraph_name) = timings.subgraph.take() {
-                ::tracing::info!(histogram.apollo_router_span = duration, kind = %"duration", span = %name, subgraph = %subgraph_name);
-                ::tracing::info!(histogram.apollo_router_span = idle, kind = %"idle", span = %name, subgraph = %subgraph_name);
-                ::tracing::info!(histogram.apollo_router_span = busy, kind = %"busy", span = %name, subgraph = %subgraph_name);
+                record(duration, "duration", name, Some(&subgraph_name));
+                record(duration, "idle", name, Some(&subgraph_name));
+                record(duration, "busy", name, Some(&subgraph_name));
             } else {
-                ::tracing::info!(histogram.apollo_router_span = duration, kind = %"duration", span = %name);
-                ::tracing::info!(histogram.apollo_router_span = idle, kind = %"idle", span = %name);
-                ::tracing::info!(histogram.apollo_router_span = busy, kind = %"busy", span = %name);
+                record(duration, "duration", name, None);
+                record(idle, "idle", name, None);
+                record(busy, "busy", name, None);
             }
         }
     }
@@ -103,6 +106,29 @@ where
             timings.last = now;
         }
     }
+}
+
+fn record(duration: f64, kind: &'static str, name: &str, subgraph_name: Option<&str>) {
+    // Avoid a heap allocation for a vec by using a slice
+    let attrs = [
+        KeyValue::new("kind", kind),
+        KeyValue::new("span", Value::String(name.to_string().into())),
+        KeyValue::new(
+            "subgraph",
+            Value::String(
+                subgraph_name
+                    .map(|s| s.to_string().into())
+                    .unwrap_or_else(|| "".into()),
+            ),
+        ),
+    ];
+    let splice = if subgraph_name.is_some() {
+        &attrs
+    } else {
+        &attrs[0..2]
+    };
+
+    f64_histogram!("apollo_router_span", "Duration of span", duration, splice);
 }
 
 struct Timings {
