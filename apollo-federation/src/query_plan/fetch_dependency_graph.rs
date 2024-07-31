@@ -44,8 +44,8 @@ use crate::operation::Selection;
 use crate::operation::SelectionId;
 use crate::operation::SelectionMap;
 use crate::operation::SelectionSet;
-use crate::operation::TYPENAME_FIELD;
 use crate::operation::VariableCollector;
+use crate::operation::TYPENAME_FIELD;
 use crate::query_graph::extract_subgraphs_from_supergraph::FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME;
 use crate::query_graph::extract_subgraphs_from_supergraph::FEDERATION_REPRESENTATIONS_VAR_NAME;
 use crate::query_graph::graph_path::concat_op_paths;
@@ -2388,8 +2388,11 @@ impl FetchDependencyGraphNode {
         }
 
         let variable_usages = {
-            let mut list = operation.variables.iter()
-                .map(|variable| variable.name.clone()).collect::<Vec<_>>();
+            let mut list = operation
+                .variables
+                .iter()
+                .map(|variable| variable.name.clone())
+                .collect::<Vec<_>>();
             list.sort();
             list
         };

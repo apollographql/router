@@ -3677,7 +3677,9 @@ pub(crate) struct VariableCollector<'s> {
 
 impl<'s> VariableCollector<'s> {
     pub(crate) fn new() -> Self {
-        Self { variables: Default::default() }
+        Self {
+            variables: Default::default(),
+        }
     }
 
     fn visit_value(&mut self, value: &'s executable::Value) {
