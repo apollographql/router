@@ -1261,7 +1261,7 @@ type T {
             assert!(rebased_fragments.is_ok());
             let rebased_fragments = rebased_fragments.unwrap();
             // F1 reduces to nothing, and F2 reduces to just __typename so we shouldn't keep them.
-            assert_eq!(1, rebased_fragments.size());
+            assert_eq!(1, rebased_fragments.len());
             assert!(rebased_fragments.contains(&name!("F3")));
             let rebased_fragment = rebased_fragments.fragments.get("F3").unwrap();
 
@@ -1337,7 +1337,7 @@ type T {
             assert!(rebased_fragments.is_ok());
             let rebased_fragments = rebased_fragments.unwrap();
             // F1 reduces to nothing, and F2 reduces to just __typename so we shouldn't keep them.
-            assert_eq!(1, rebased_fragments.size());
+            assert_eq!(1, rebased_fragments.len());
             assert!(rebased_fragments.contains(&name!("TheQuery")));
             let rebased_fragment = rebased_fragments.fragments.get("TheQuery").unwrap();
 
@@ -1414,7 +1414,7 @@ type T {
             assert!(rebased_fragments.is_ok());
             let rebased_fragments = rebased_fragments.unwrap();
             // F1 reduces to nothing, and F2 reduces to just __typename so we shouldn't keep them.
-            assert_eq!(1, rebased_fragments.size());
+            assert_eq!(1, rebased_fragments.len());
             assert!(rebased_fragments.contains(&name!("TQuery")));
             let rebased_fragment = rebased_fragments.fragments.get("TQuery").unwrap();
 

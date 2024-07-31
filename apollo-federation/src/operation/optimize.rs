@@ -197,7 +197,7 @@ impl NamedFragments {
         // PORT_NOTE: The JS version asserts if `updated` is empty or not. But, we really want to
         // check the `updated` has the same set of fragments. To avoid performance hit, only the
         // size is checked here.
-        if updated.size() != self.size() {
+        if updated.len() != self.len() {
             return Err(FederationError::internal(
                 "Unexpected change in the number of fragments",
             ));
@@ -1135,14 +1135,14 @@ impl NamedFragments {
         // to further reduction.
         // - It is hard to avoid this chain reaction, since we need to account for the effects of
         //   normalization.
-        let mut last_size = self.size();
+        let mut last_size = self.len();
         let mut last_selection_set = selection_set.clone();
         while last_size > 0 {
             let new_selection_set =
                 self.reduce_inner(&last_selection_set, min_usage_to_optimize)?;
 
             // Reached a fix-point => stop
-            if self.size() == last_size {
+            if self.len() == last_size {
                 // Assumes that `new_selection_set` is the same as `last_selection_set` in this
                 // case.
                 break;
@@ -1161,7 +1161,7 @@ impl NamedFragments {
             // case without additional complexity.
 
             // Prepare the next iteration
-            last_size = self.size();
+            last_size = self.len();
             last_selection_set = new_selection_set;
         }
         Ok(last_selection_set)
@@ -1197,7 +1197,7 @@ impl NamedFragments {
         // - We take advantage of the fact that `NamedFragments` is already sorted in dependency
         //   order.
         // PORT_NOTE: The `computeFragmentsToKeep` function is implemented here.
-        let original_size = self.size();
+        let original_size = self.len();
         for fragment in self.iter_rev() {
             let usage_count = usages.get(&fragment.name).copied().unwrap_or_default();
             if usage_count >= min_usage_to_optimize {
@@ -1215,7 +1215,7 @@ impl NamedFragments {
         });
 
         // Short-circuiting: Nothing was dropped (fully used) => Nothing to change.
-        if self.size() == original_size {
+        if self.len() == original_size {
             return Ok(selection_set.clone());
         }
 

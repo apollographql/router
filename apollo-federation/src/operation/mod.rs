@@ -3390,7 +3390,7 @@ impl NamedFragments {
         self.fragments.len() == 0
     }
 
-    pub(crate) fn size(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.fragments.len()
     }
 
@@ -3427,11 +3427,11 @@ impl NamedFragments {
         }
     }
 
-    pub(crate) fn get(&self, name: &Name) -> Option<Node<Fragment>> {
-        self.fragments.get(name).cloned()
+    pub(crate) fn get(&self, name: &str) -> Option<&Node<Fragment>> {
+        self.fragments.get(name)
     }
 
-    pub(crate) fn contains(&self, name: &Name) -> bool {
+    pub(crate) fn contains(&self, name: &str) -> bool {
         self.fragments.contains_key(name)
     }
 
