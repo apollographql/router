@@ -1615,17 +1615,12 @@ expression: "&schema"
           "$ref": "#/definitions/Metrics",
           "description": "#/definitions/Metrics"
         },
-        "redis": {
-          "$ref": "#/definitions/RedisCache",
-          "description": "#/definitions/RedisCache"
-        },
         "subgraph": {
           "$ref": "#/definitions/SubgraphConfiguration_for_Subgraph",
           "description": "#/definitions/SubgraphConfiguration_for_Subgraph"
         }
       },
       "required": [
-        "redis",
         "subgraph"
       ],
       "type": "object"
@@ -5608,6 +5603,11 @@ expression: "&schema"
           "description": "Context key used to separate cache sections per user",
           "nullable": true,
           "type": "string"
+        },
+        "redis": {
+          "$ref": "#/definitions/RedisCache",
+          "description": "#/definitions/RedisCache",
+          "nullable": true
         },
         "ttl": {
           "$ref": "#/definitions/Ttl",

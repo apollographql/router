@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Instant;
 
 use fred::error::RedisError;
@@ -13,6 +14,7 @@ use tokio::sync::broadcast;
 use tower::BoxError;
 use tracing::Instrument;
 
+use super::entity::Storage as EntityStorage;
 use crate::cache::redis::RedisCacheStorage;
 use crate::cache::redis::RedisKey;
 use crate::notification::Handle;
@@ -23,7 +25,6 @@ use crate::Notify;
 
 #[derive(Clone)]
 pub(crate) struct Invalidation {
-    pub(super) enabled: bool,
     #[allow(clippy::type_complexity)]
     pub(super) handle: Handle<
         InvalidationTopic,
@@ -71,18 +72,16 @@ pub(crate) enum InvalidationOrigin {
 }
 
 impl Invalidation {
-    pub(crate) async fn new(storage: Option<RedisCacheStorage>) -> Result<Self, BoxError> {
+    pub(crate) async fn new(storage: Arc<EntityStorage>) -> Result<Self, BoxError> {
         let mut notify = Notify::new(None, None, None);
         let (handle, _b) = notify.create_or_subscribe(InvalidationTopic, false).await?;
-        let enabled = storage.is_some();
-        if let Some(storage) = storage.clone() {
-            let h = handle.clone();
 
-            tokio::task::spawn(async move {
-                start(storage, h.into_stream()).await;
-            });
-        }
-        Ok(Self { enabled, handle })
+        let h = handle.clone();
+
+        tokio::task::spawn(async move {
+            start(storage, h.into_stream()).await;
+        });
+        Ok(Self { handle })
     }
 
     pub(crate) async fn invalidate(
@@ -90,35 +89,31 @@ impl Invalidation {
         origin: InvalidationOrigin,
         requests: Vec<InvalidationRequest>,
     ) -> Result<u64, BoxError> {
-        if self.enabled {
-            let mut sink = self.handle.clone().into_sink();
-            let (response_tx, mut response_rx) = broadcast::channel(2);
-            sink.send((requests, origin, response_tx.clone()))
-                .await
-                .map_err(|e| format!("cannot send invalidation request: {}", e.message))?;
+        let mut sink = self.handle.clone().into_sink();
+        let (response_tx, mut response_rx) = broadcast::channel(2);
+        sink.send((requests, origin, response_tx.clone()))
+            .await
+            .map_err(|e| format!("cannot send invalidation request: {}", e.message))?;
 
-            let result = response_rx
-                .recv()
-                .await
-                .map_err(|err| {
-                    format!(
-                        "cannot receive response for invalidation request: {:?}",
-                        err
-                    )
-                })?
-                .map_err(|err| format!("received an invalidation error: {:?}", err))?;
+        let result = response_rx
+            .recv()
+            .await
+            .map_err(|err| {
+                format!(
+                    "cannot receive response for invalidation request: {:?}",
+                    err
+                )
+            })?
+            .map_err(|err| format!("received an invalidation error: {:?}", err))?;
 
-            Ok(result)
-        } else {
-            Ok(0)
-        }
+        Ok(result)
     }
 }
 
 // TODO refactor
 #[allow(clippy::type_complexity)]
 async fn start(
-    storage: RedisCacheStorage,
+    storage: Arc<EntityStorage>,
     mut handle: HandleStream<
         InvalidationTopic,
         (
@@ -139,6 +134,7 @@ async fn start(
             1u64,
             "origin" = origin
         );
+
         if let Err(err) = response_tx.send(
             handle_request_batch(&storage, origin, requests)
                 .instrument(tracing::info_span!(
@@ -218,7 +214,7 @@ async fn handle_request(
 }
 
 async fn handle_request_batch(
-    storage: &RedisCacheStorage,
+    storage: &EntityStorage,
     origin: &'static str,
     requests: Vec<InvalidationRequest>,
 ) -> Result<u64, InvalidationError> {
@@ -226,7 +222,11 @@ async fn handle_request_batch(
     let mut errors = Vec::new();
     for request in requests {
         let start = Instant::now();
-        match handle_request(storage, origin, &request)
+        let redis_storage = match storage.get(request.subgraph_name()) {
+            Some(s) => s,
+            None => continue,
+        };
+        match handle_request(redis_storage, origin, &request)
             .instrument(tracing::info_span!("cache.invalidation.request"))
             .await
         {
