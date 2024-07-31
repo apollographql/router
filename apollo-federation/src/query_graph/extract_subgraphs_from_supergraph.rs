@@ -39,7 +39,6 @@ use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
 use crate::link::cost_spec_definition::CostSpecDefinition;
-use crate::link::cost_spec_definition::COST_VERSIONS;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
@@ -811,7 +810,7 @@ fn extract_object_type_content(
                                 .to_owned(),
                         })?;
                     let cost_spec_definition =
-                        get_cost_spec_definition(&subgraph.schema, federation_spec_definition);
+                        federation_spec_definition.get_cost_spec_definition(&subgraph.schema);
                     add_subgraph_field(
                         field_pos.clone().into(),
                         field,
@@ -852,7 +851,7 @@ fn extract_object_type_content(
                                 .to_owned(),
                         })?;
                     let cost_spec_definition =
-                        get_cost_spec_definition(&subgraph.schema, federation_spec_definition);
+                        federation_spec_definition.get_cost_spec_definition(&subgraph.schema);
                     if !subgraph_info.contains_key(graph_enum_value) {
                         return Err(
                             SingleFederationError::InvalidFederationSupergraph {
@@ -1014,7 +1013,7 @@ fn extract_interface_type_content(
                                 .to_owned(),
                         })?;
                     let cost_spec_definition =
-                        get_cost_spec_definition(&subgraph.schema, federation_spec_definition);
+                        federation_spec_definition.get_cost_spec_definition(&subgraph.schema);
                     add_subgraph_field(
                         pos.field(field_name.clone()),
                         field,
@@ -1048,7 +1047,7 @@ fn extract_interface_type_content(
                                 .to_owned(),
                         })?;
                     let cost_spec_definition =
-                        get_cost_spec_definition(&subgraph.schema, federation_spec_definition);
+                        federation_spec_definition.get_cost_spec_definition(&subgraph.schema);
                     if !subgraph_info.contains_key(graph_enum_value) {
                         return Err(
                             SingleFederationError::InvalidFederationSupergraph {
@@ -1206,7 +1205,7 @@ fn extract_enum_type_content(
                     message: "Subgraph unexpectedly does not use federation spec".to_owned(),
                 })?;
             if let Some(cost_spec_definition) =
-                get_cost_spec_definition(&subgraph.schema, federation_spec_definition)
+                federation_spec_definition.get_cost_spec_definition(&subgraph.schema)
             {
                 cost_spec_definition.propagate_demand_control_directives_for_enum(
                     &mut subgraph.schema,
@@ -1326,7 +1325,7 @@ fn extract_input_object_type_content(
                                 .to_owned(),
                         })?;
                     let cost_spec_definition =
-                        get_cost_spec_definition(&subgraph.schema, federation_spec_definition);
+                        federation_spec_definition.get_cost_spec_definition(&subgraph.schema);
                     add_subgraph_input_field(
                         input_field_pos.clone(),
                         input_field,
@@ -1356,7 +1355,7 @@ fn extract_input_object_type_content(
                                 .to_owned(),
                         })?;
                     let cost_spec_definition =
-                        get_cost_spec_definition(&subgraph.schema, federation_spec_definition);
+                        federation_spec_definition.get_cost_spec_definition(&subgraph.schema);
                     if !subgraph_info.contains_key(graph_enum_value) {
                         return Err(
                             SingleFederationError::InvalidFederationSupergraph {
@@ -1576,17 +1575,6 @@ fn get_subgraph<'subgraph>(
         }
         .into()
     })
-}
-
-fn get_cost_spec_definition(
-    schema: &FederationSchema,
-    federation_spec_definition: &'static FederationSpecDefinition,
-) -> Option<&'static CostSpecDefinition> {
-    schema
-        .metadata()
-        .and_then(|metadata| metadata.for_identity(&Identity::cost_identity()))
-        .and_then(|link| COST_VERSIONS.find(&link.url.version))
-        .or_else(|| COST_VERSIONS.find_for_federation_version(federation_spec_definition.version()))
 }
 
 struct FederationSubgraph {
