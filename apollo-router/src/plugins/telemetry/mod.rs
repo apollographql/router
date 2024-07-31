@@ -1526,11 +1526,12 @@ impl Telemetry {
                 // If extended references or enums from responses are populated, we want to add them to the SingleStatsReport
                 let extended_references = context
                     .extensions()
-                    .with_lock(|lock| lock.get::<ExtendedReferenceStats>().cloned())
+                    .with_lock(|mut lock| lock.remove::<ExtendedReferenceStats>())
                     .unwrap_or_default();
+                // todo test extended references as well somehow
                 let enum_response_references = context
                     .extensions()
-                    .with_lock(|lock| lock.get::<ReferencedEnums>().cloned())
+                    .with_lock(|mut lock| lock.remove::<ReferencedEnums>())
                     .unwrap_or_default();
 
                 SingleStatsReport {
@@ -1594,6 +1595,7 @@ impl Telemetry {
                 }
             }
         } else {
+            // todo is the issue here?
             // Usage reporting was missing, so it counts as one operation.
             SingleStatsReport {
                 licensed_operation_count_by_type: LicensedOperationCountByType {
