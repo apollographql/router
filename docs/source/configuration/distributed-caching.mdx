@@ -1,14 +1,14 @@
 ---
-title: Distributed Caching for the Apollo Router
+title: Distributed Caching for the GraphOS Router
 subtitle: Configure Redis-backed caching for query plans and APQ
-description: Distributed caching for Apollo Router with GraphOS Enterprise. Configure a Redis-backed cache for query plans and automatic persisted queries (APQ).
+description: Distributed caching for GraphOS Router with GraphOS Enterprise. Configure a Redis-backed cache for query plans and automatic persisted queries (APQ).
 ---
 
 import RedisTLS from '../../shared/redis-tls.mdx'
 
 <EnterpriseFeature linkWithAnchor="https://www.apollographql.com/pricing#graphos-router" />
 
-If you have multiple Apollo Router instances, those instances can share a Redis-backed cache for their query plans and automatic persisted queries (APQ). This means that if _any_ of your router instances caches a particular value, _all_ of your instances can look up that value to significantly improve responsiveness. For more details on query plans and APQ, see the article on [in-memory caching](./in-memory-caching).
+If you have multiple GraphOS Router instances, those instances can share a Redis-backed cache for their query plans and automatic persisted queries (APQ). This means that if _any_ of your router instances caches a particular value, _all_ of your instances can look up that value to significantly improve responsiveness. For more details on query plans and APQ, see the article on [in-memory caching](./in-memory-caching).
 
 ## Prerequisites
 
@@ -150,7 +150,7 @@ The `ttl` option defines the default global expiration for Redis entries. For AP
 
 ### Namespace
 
-When using the same Redis instance for multiple puposes, the `namespace` option defines a prefix for all the keys defined by the router.
+When using the same Redis instance for multiple purposes, the `namespace` option defines a prefix for all the keys defined by the router.
 
 ### TLS
 
@@ -158,7 +158,7 @@ When using the same Redis instance for multiple puposes, the `namespace` option 
 
 ### Required to start
 
-When active, the `required_to_start` option will prevent the Router from starting if it cannot connect to Redis. By default, the Router will still start without a connection to Redis, which would result in only using the in-memory cache for APQ and query planning, and entity caching sending the requests to subgraphs undisturbed.
+When active, the `required_to_start` option will prevent the router from starting if it cannot connect to Redis. By default, the router will still start without a connection to Redis, which would result in only using the in-memory cache for APQ and query planning, and entity caching sending the requests to subgraphs undisturbed.
 
 ### Reset TTL
 

@@ -1,14 +1,14 @@
 ---
-title: External Coprocessing in the Apollo Router
+title: External Coprocessing
 subtitle: Customize your router's behavior in any language
-description: Customize the Apollo Router with external coprocessing. Write standalone code in any language, hook into request lifecycle, and modify request/response details.
+description: Customize the Apollo GraphOS Router with external coprocessing. Write standalone code in any language, hook into request lifecycle, and modify request/response details.
 ---
 
 import CoprocTypicalConfig from '../../shared/coproc-typical-config.mdx';
 
 <PremiumFeature linkWithAnchor="https://www.apollographql.com/pricing#graphos-router" />
 
-With **external coprocessing**, you can hook into the Apollo Router's request-handling lifecycle by writing standalone code in any language and framework. This code (i.e., your **coprocessor**) can run anywhere on your network that's accessible to the router over HTTP.
+With **external coprocessing**, you can hook into the GraphOS Router's request-handling lifecycle by writing standalone code in any language and framework. This code (i.e., your **coprocessor**) can run anywhere on your network that's accessible to the router over HTTP.
 
 You can configure your router to "call out" to your coprocessor at different **stages** throughout the request-handling lifecycle, enabling you to perform custom logic based on a client request's headers, query string, and other details. This logic can access disk and perform network requests, all while safely isolated from the critical router process.
 
@@ -91,6 +91,51 @@ coprocessor:
 ```
 
 In this case, the `RouterService` only sends a coprocessor request whenever it receives a client request. The coprocessor request body includes _no_ data related to the client request (only "control" data, which is [covered below](#coprocessor-request-format)).
+
+### Conditions
+
+You can define [conditions](../configuration/telemetry/instrumentation/conditions) for a stage of the request lifecycle that you want to run the coprocessor. You can set coprocessor conditions with [selectors](../configuration//telemetry//instrumentation/selectors) based on headers or context entries.
+
+<Note>
+
+The `Execution` stage doesn't support coprocessor conditions.
+
+</Note> 
+
+
+Example configurations:
+
+ - Run during the `SupergraphResponse` stage only for the first event of a supergraph response. Useful for handling only the first subscription event when a subscription is opened:
+ 
+
+```yaml title="router.yaml"
+coprocessor:
+  url: http://127.0.0.1:3000
+  supergraph:
+    response: 
+      condition:
+        eq:
+        - true
+        - is_primary_response: true # Will be true only for the first event received on a supergraph response (like classical queries and mutations for example)
+      body: true
+      headers: true
+```
+
+- Run during the `Request` stage only if the request contains a request header:
+
+
+```yaml title="router.yaml"
+coprocessor:
+  url: http://127.0.0.1:3000
+  router:
+    request: 
+      condition:
+        eq:
+        - request_header: should-execute-copro # Header name 
+        - "enabled" # Header value
+      body: true
+      headers: true
+```
 
 ### Client configuration
 
@@ -1074,7 +1119,7 @@ If you return a successful response, make sure the structure of the `data` prope
 
 ### Failed responses
 
-If a request to a coprocessor results in a **failed response**, which is seperate from a **control break**, the Router will return an error to the client making the supergraph request. The router considers all of the following scenarios to be a **failed response** from your coprocessor:
+If a request to a coprocessor results in a **failed response**, which is seperate from a **control break**, the router will return an error to the client making the supergraph request. The router considers all of the following scenarios to be a **failed response** from your coprocessor:
 
 - Your coprocessor doesn't respond within the amount of time specified by the `timeout` key in your [configuration](#typical-configuration) (default one second).
 - Your coprocessor responds with a non-`2xx` HTTP code.
@@ -1084,7 +1129,7 @@ If a request to a coprocessor results in a **failed response**, which is seperat
 
 ## Handling deferred query responses
 
-The Apollo Router supports the incremental delivery of query response data via [the `@defer` directive](../executing-operations/defer-support/):
+GraphOS Router and Apollo Router Core support the incremental delivery of query response data via [the `@defer` directive](../executing-operations/defer-support/):
 
 ```mermaid
 sequenceDiagram

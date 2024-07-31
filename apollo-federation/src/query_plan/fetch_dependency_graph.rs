@@ -11,14 +11,14 @@ use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::OperationType;
 use apollo_compiler::ast::Type;
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
 use apollo_compiler::executable::VariableDefinition;
 use apollo_compiler::name;
 use apollo_compiler::schema;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use indexmap::IndexMap;
-use indexmap::IndexSet;
 use itertools::Itertools;
 use multimap::MultiMap;
 use petgraph::stable_graph::EdgeIndex;
@@ -26,6 +26,7 @@ use petgraph::stable_graph::NodeIndex;
 use petgraph::stable_graph::StableDiGraph;
 use petgraph::visit::EdgeRef;
 use petgraph::visit::IntoNodeReferences;
+use serde::Serialize;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
@@ -73,6 +74,7 @@ use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
 use crate::subgraph::spec::ANY_SCALAR_NAME;
 use crate::subgraph::spec::ENTITIES_QUERY;
+use crate::utils::logging::snapshot;
 
 /// Represents the value of a `@defer(label:)` argument.
 type DeferRef = String;
@@ -86,7 +88,7 @@ type DeferredNodes = multimap::MultiMap<DeferRef, NodeIndex<u32>>;
 //
 // The JS codebase additionally has a property named `subgraphAndMergeAtKey` that was used as a
 // precomputed map key, but this isn't necessary in Rust since we can use `PartialEq`/`Eq`/`Hash`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub(crate) struct FetchDependencyGraphNode {
     /// The subgraph this fetch is queried against.
     pub(crate) subgraph_name: Arc<str>,
@@ -111,6 +113,7 @@ pub(crate) struct FetchDependencyGraphNode {
     /// The fetch ID generation, if one is necessary (used when handling `@defer`).
     ///
     /// This can be treated as an Option using `OnceLock::get()`.
+    #[serde(skip)]
     id: OnceLock<u64>,
     /// The label of the `@defer` block this fetch appears in, if any.
     defer_ref: Option<DeferRef>,
@@ -151,7 +154,7 @@ impl Clone for FetchIdGenerator {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub(crate) struct FetchSelectionSet {
     /// The selection set to be fetched from the subgraph.
     pub(crate) selection_set: Arc<SelectionSet>,
@@ -163,17 +166,18 @@ pub(crate) struct FetchSelectionSet {
 // PORT_NOTE: The JS codebase additionally has a property `onUpdateCallback`. This was only ever
 // used to update `isKnownUseful` in `FetchGroup`, and it's easier to handle this there than try
 // to pass in a callback in Rust.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct FetchInputs {
     /// The selection sets to be used as input to `_entities`, separated per parent type.
     selection_sets_per_parent_type: IndexMap<CompositeTypeDefinitionPosition, Arc<SelectionSet>>,
     /// The supergraph schema (primarily used for validation of added selection sets).
+    #[serde(skip)]
     supergraph_schema: ValidFederationSchema,
 }
 
 /// Represents a dependency between two subgraph fetches, namely that the tail/child depends on the
 /// head/parent executing first.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub(crate) struct FetchDependencyGraphEdge {
     /// The operation path of the tail/child _relative_ to the head/parent. This information is
     /// maintained in case we want/need to merge nodes into each other. This can roughly be thought
@@ -194,12 +198,14 @@ type FetchDependencyGraphPetgraph =
 ///
 /// In the graph, two fetches are connected if one of them (the parent/head) must be performed
 /// strictly before the other one (the child/tail).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub(crate) struct FetchDependencyGraph {
     /// The supergraph schema that generated the federated query graph.
+    #[serde(skip)]
     supergraph_schema: ValidFederationSchema,
     /// The federated query graph that generated the fetches. (This also contains the subgraph
     /// schemas.)
+    #[serde(skip)]
     federated_query_graph: Arc<QueryGraph>,
     /// The nodes/edges of the fetch dependency graph. Note that this must be a stable graph since
     /// we remove nodes/edges during optimizations.
@@ -208,10 +214,14 @@ pub(crate) struct FetchDependencyGraph {
     /// the subgraphs.
     root_nodes_by_subgraph: IndexMap<Arc<str>, NodeIndex>,
     /// Tracks metadata about deferred blocks and their dependencies on one another.
+    // TODO(@TylerBloom): Since defer is not supported yet. Once it is, having this field in the
+    // serialized output will be needed.
+    #[serde(skip)]
     pub(crate) defer_tracking: DeferTracking,
     /// The initial fetch ID generation (used when handling `@defer`).
     starting_id_generation: u64,
     /// The current fetch ID generation (used when handling `@defer`).
+    #[serde(skip)]
     fetch_id_generation: FetchIdGenerator,
     /// Whether this fetch dependency graph has undergone a transitive reduction.
     is_reduced: bool,
@@ -457,13 +467,9 @@ impl FetchDependencyGraphNodePath {
     ) -> Result<Vec<FetchDataPathElement>, FederationError> {
         let mut new_path = self.response_path.clone();
         if let OpPathElement::Field(field) = element {
-            new_path.push(FetchDataPathElement::Key(field.data().response_name()));
+            new_path.push(FetchDataPathElement::Key(field.response_name()));
             // TODO: is there a simpler we to find a field’s type from `&Field`?
-            let mut type_ = &field
-                .data()
-                .field_position
-                .get(field.data().schema.schema())?
-                .ty;
+            let mut type_ = &field.field_position.get(field.schema.schema())?.ty;
             loop {
                 match type_ {
                     schema::Type::Named(_) | schema::Type::NonNullNamed(_) => break,
@@ -475,6 +481,16 @@ impl FetchDependencyGraphNodePath {
             }
         };
         Ok(new_path)
+    }
+}
+
+/// If the `iter` yields a single element, return it. Else return `None`.
+fn iter_into_single_item<T>(mut iter: impl Iterator<Item = T>) -> Option<T> {
+    let item = iter.next()?;
+    if iter.next().is_none() {
+        Some(item)
+    } else {
+        None
     }
 }
 
@@ -652,8 +668,8 @@ impl FetchDependencyGraph {
         //    which is important for some case of @requires).
         for existing_id in self.children_of(parent.parent_node_id) {
             let existing = self.node_weight(existing_id)?;
-            if existing.subgraph_name == *subgraph_name
-                && existing.merge_at.as_deref() == Some(merge_at)
+            // we compare the subgraph names last because on average it improves performance
+            if existing.merge_at.as_deref() == Some(merge_at)
                 && existing
                     .selection_set
                     .selection_set
@@ -667,12 +683,13 @@ impl FetchDependencyGraph {
                         )
                     })
                 && !self.is_in_nodes_or_their_ancestors(existing_id, conditions_nodes)
-                && existing.defer_ref.as_ref() == defer_ref
                 && self
                     .parents_relations_of(existing_id)
                     .find(|rel| rel.parent_node_id == parent.parent_node_id)
                     .and_then(|rel| rel.path_in_parent)
                     == parent.path_in_parent
+                && existing.defer_ref.as_ref() == defer_ref
+                && existing.subgraph_name == *subgraph_name
             {
                 return Ok(existing_id);
             }
@@ -880,9 +897,10 @@ impl FetchDependencyGraph {
         &self,
         type_name: &Name,
     ) -> Result<CompositeTypeDefinitionPosition, FederationError> {
-        self.supergraph_schema
+        Ok(self
+            .supergraph_schema
             .get_type(type_name.clone())?
-            .try_into()
+            .try_into()?)
     }
 
     /// Find redundant edges coming out of a node. See `remove_redundant_edges`.
@@ -1135,14 +1153,12 @@ impl FetchDependencyGraph {
 
         let try_get_type_condition = |selection: &Selection| match selection {
             Selection::FragmentSpread(fragment) => {
-                Some(fragment.spread.data().type_condition_position.clone())
+                Some(fragment.spread.type_condition_position.clone())
             }
 
-            Selection::InlineFragment(inline) => inline
-                .inline_fragment
-                .data()
-                .type_condition_position
-                .clone(),
+            Selection::InlineFragment(inline) => {
+                inline.inline_fragment.type_condition_position.clone()
+            }
 
             _ => None,
         };
@@ -1150,7 +1166,7 @@ impl FetchDependencyGraph {
         let get_subgraph_schema = |subgraph_name: &Arc<str>| {
             self.federated_query_graph
                 .schema_by_source(subgraph_name)
-                .map(|schema| schema.clone())
+                .cloned()
         };
 
         // For nodes that fetches from an @interfaceObject, we can sometimes have something like
@@ -1280,7 +1296,7 @@ impl FetchDependencyGraph {
                     }
                 }
 
-                let Some(sub_selection_set) = selection.selection_set()? else {
+                let Some(sub_selection_set) = selection.selection_set() else {
                     // we're only here if `conditionInSupergraphIfInterfaceObject` returned something,
                     // we imply that selection is a fragment selection and so has a sub-selectionSet.
                     return Err(FederationError::internal(format!(
@@ -1295,14 +1311,14 @@ impl FetchDependencyGraph {
                 // case as a "safe" default).
                 if !interface_input_selections.is_empty() {
                     Ok(interface_input_selections.iter().any(|input| {
-                        let Ok(Some(input_selection_set)) = input.selection_set() else {
+                        let Some(input_selection_set) = input.selection_set() else {
                             return false;
                         };
                         input_selection_set.contains(sub_selection_set)
                     }))
                 } else if !implementation_input_selections.is_empty() {
                     Ok(interface_input_selections.iter().all(|input| {
-                        let Ok(Some(input_selection_set)) = input.selection_set() else {
+                        let Some(input_selection_set) = input.selection_set() else {
                             return false;
                         };
                         input_selection_set.contains(sub_selection_set)
@@ -1798,9 +1814,10 @@ impl FetchDependencyGraph {
         let child = self.node_weight(child_id)?;
         let parent_relation = self.parent_relation(child_id, node_id);
 
-        Ok(node.subgraph_name == child.subgraph_name
+        // we compare the subgraph names last because on average it improves performance
+        Ok(parent_relation.is_some_and(|r| r.path_in_parent.is_some())
             && node.defer_ref == child.defer_ref
-            && parent_relation.is_some_and(|r| r.path_in_parent.is_some()))
+            && node.subgraph_name == child.subgraph_name)
     }
 
     /// We only allow merging sibling on the same subgraph, same "merge_at" and when the common parent is their only parent:
@@ -1817,16 +1834,30 @@ impl FetchDependencyGraph {
         sibling_id: NodeIndex,
     ) -> Result<bool, FederationError> {
         let node = self.node_weight(node_id)?;
-        let own_parents: Vec<ParentRelation> = self.parents_relations_of(node_id).collect();
-
         let sibling = self.node_weight(sibling_id)?;
-        let sibling_parents: Vec<ParentRelation> = self.parents_relations_of(sibling_id).collect();
-        Ok(node.defer_ref == sibling.defer_ref
-            && node.subgraph_name == sibling.subgraph_name
-            && node.merge_at == sibling.merge_at
-            && own_parents.len() == 1
-            && sibling_parents.len() == 1
-            && own_parents[0].parent_node_id == sibling_parents[0].parent_node_id)
+
+        let own_parents_iter = self
+            .graph
+            .edges_directed(node_id, petgraph::Direction::Incoming);
+        let Some(own_parent_id) = iter_into_single_item(own_parents_iter).map(|node| node.source())
+        else {
+            return Ok(false);
+        };
+
+        let sibling_parents_iter = self
+            .graph
+            .edges_directed(sibling_id, petgraph::Direction::Incoming);
+        let Some(sibling_parent_id) =
+            iter_into_single_item(sibling_parents_iter).map(|node| node.source())
+        else {
+            return Ok(false);
+        };
+
+        // we compare the subgraph names last because on average it improves performance
+        Ok(node.merge_at == sibling.merge_at
+            && own_parent_id == sibling_parent_id
+            && node.defer_ref == sibling.defer_ref
+            && node.subgraph_name == sibling.subgraph_name)
     }
 
     fn can_merge_grand_child_in(
@@ -1850,12 +1881,13 @@ impl FetchDependencyGraph {
             return Ok(false);
         };
 
-        Ok(node.subgraph_name == grand_child.subgraph_name
-            && node.defer_ref == grand_child.defer_ref
-            && grand_child_parent_relations[0].path_in_parent.is_some()
+        // we compare the subgraph names last because on average it improves performance
+        Ok(grand_child_parent_relations[0].path_in_parent.is_some()
             && grand_child_parent_parent_relation.is_some_and(|r| r.path_in_parent.is_some())
             && node.merge_at == grand_child.merge_at
-            && node_inputs.contains(grand_child_inputs))
+            && node_inputs.contains(grand_child_inputs)
+            && node.defer_ref == grand_child.defer_ref
+            && node.subgraph_name == grand_child.subgraph_name)
     }
 
     /// Merges a child of parent node into it.
@@ -2121,7 +2153,7 @@ impl FetchDependencyGraph {
         for element in path.0.iter() {
             match &**element {
                 OpPathElement::Field(field) => {
-                    let field_position = type_.field(field.data().name().clone())?;
+                    let field_position = type_.field(field.name().clone())?;
                     let field_definition = field_position.get(schema.schema())?;
                     let field_type = field_definition.ty.inner_named_type();
                     type_ = schema
@@ -2138,8 +2170,7 @@ impl FetchDependencyGraph {
                         )?;
                 }
                 OpPathElement::InlineFragment(fragment) => {
-                    if let Some(type_condition_position) = &fragment.data().type_condition_position
-                    {
+                    if let Some(type_condition_position) = &fragment.type_condition_position {
                         type_ = schema
                             .get_type(type_condition_position.type_name().clone())?
                             .try_into()
@@ -2314,7 +2345,14 @@ impl FetchDependencyGraphNode {
             })
             .transpose()?;
         let subgraph_schema = query_graph.schema_by_source(&self.subgraph_name)?;
-        let variable_usages = selection.used_variables()?;
+
+        let variable_usages = {
+            let set = selection.used_variables();
+            let mut list = set.into_iter().cloned().collect::<Vec<_>>();
+            list.sort();
+            list
+        };
+
         let mut operation = if self.is_entity_fetch {
             operation_for_entities_fetch(
                 subgraph_schema,
@@ -2334,7 +2372,7 @@ impl FetchDependencyGraphNode {
         if let Some(fragments) = fragments
             .map(|rebased| rebased.for_subgraph(self.subgraph_name.clone(), subgraph_schema))
         {
-            operation.optimize(fragments)?;
+            operation.reuse_fragments(fragments)?;
         }
         let operation_document = operation.try_into()?;
 
@@ -2503,8 +2541,7 @@ fn operation_for_entities_fetch(
     let mut variable_definitions: Vec<Node<VariableDefinition>> =
         Vec::with_capacity(all_variable_definitions.len() + 1);
     variable_definitions.push(representations_variable_definition(subgraph_schema)?);
-    let mut used_variables = HashSet::new();
-    selection_set.collect_variables(&mut used_variables)?;
+    let used_variables = selection_set.used_variables();
     variable_definitions.extend(
         all_variable_definitions
             .iter()
@@ -2513,14 +2550,14 @@ fn operation_for_entities_fetch(
     );
 
     let query_type_name = subgraph_schema.schema().root_operation(OperationType::Query).ok_or_else(||
-    SingleFederationError::InvalidGraphQL {
+    SingleFederationError::InvalidSubgraph {
         message: "Subgraphs should always have a query root (they should at least provides _entities)".to_string()
     })?;
 
     let query_type = match subgraph_schema.get_type(query_type_name.clone())? {
         crate::schema::position::TypeDefinitionPosition::Object(o) => o,
         _ => {
-            return Err(SingleFederationError::InvalidGraphQL {
+            return Err(SingleFederationError::InvalidSubgraph {
                 message: "the root query type must be an object".to_string(),
             }
             .into())
@@ -2532,7 +2569,7 @@ fn operation_for_entities_fetch(
         .fields
         .contains_key(&ENTITIES_QUERY)
     {
-        return Err(SingleFederationError::InvalidGraphQL {
+        return Err(SingleFederationError::InvalidSubgraph {
             message: "Subgraphs should always have the _entities field".to_string(),
         }
         .into());
@@ -2587,8 +2624,7 @@ fn operation_for_query_fetch(
     variable_definitions: &[Node<VariableDefinition>],
     operation_name: &Option<Name>,
 ) -> Result<Operation, FederationError> {
-    let mut used_variables = HashSet::new();
-    selection_set.collect_variables(&mut used_variables)?;
+    let used_variables = selection_set.used_variables();
     let variable_definitions = variable_definitions
         .iter()
         .filter(|definition| used_variables.contains(&definition.name))
@@ -2933,6 +2969,10 @@ struct ComputeNodesStackItem<'a> {
     defer_context: DeferContext,
 }
 
+#[cfg_attr(
+    feature = "snapshot_tracing",
+    tracing::instrument(skip_all, level = "trace")
+)]
 pub(crate) fn compute_nodes_for_tree(
     dependency_graph: &mut FetchDependencyGraph,
     initial_tree: &OpPathTree,
@@ -2941,6 +2981,11 @@ pub(crate) fn compute_nodes_for_tree(
     initial_defer_context: DeferContext,
     initial_conditions: &OpGraphPathContext,
 ) -> Result<IndexSet<NodeIndex>, FederationError> {
+    snapshot!(
+        "OpPathTree",
+        serde_json_bytes::json!(initial_tree.to_string()).to_string(),
+        "path_tree"
+    );
     let mut stack = vec![ComputeNodesStackItem {
         tree: initial_tree,
         node_id: initial_node_id,
@@ -2948,7 +2993,7 @@ pub(crate) fn compute_nodes_for_tree(
         context: initial_conditions,
         defer_context: initial_defer_context,
     }];
-    let mut created_nodes = IndexSet::new();
+    let mut created_nodes = IndexSet::default();
     while let Some(stack_item) = stack.pop() {
         let node =
             FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, stack_item.node_id)?;
@@ -3027,9 +3072,14 @@ pub(crate) fn compute_nodes_for_tree(
             }
         }
     }
+    snapshot!(dependency_graph, "updated_dependency_graph");
     Ok(created_nodes)
 }
 
+#[cfg_attr(
+    feature = "snapshot_tracing",
+    tracing::instrument(skip_all, level = "trace")
+)]
 fn compute_nodes_for_key_resolution<'a>(
     dependency_graph: &mut FetchDependencyGraph,
     stack_item: &ComputeNodesStackItem<'a>,
@@ -3180,6 +3230,10 @@ fn compute_nodes_for_key_resolution<'a>(
     })
 }
 
+#[cfg_attr(
+    feature = "snapshot_tracing",
+    tracing::instrument(skip_all, level = "trace")
+)]
 fn compute_nodes_for_root_type_resolution<'a>(
     dependency_graph: &mut FetchDependencyGraph,
     stack_item: &ComputeNodesStackItem<'_>,
@@ -3277,6 +3331,7 @@ fn compute_nodes_for_root_type_resolution<'a>(
     })
 }
 
+#[cfg_attr(feature = "snapshot_tracing", tracing::instrument(skip_all, level = "trace", fields(label = operation.to_string())))]
 fn compute_nodes_for_op_path_element<'a>(
     dependency_graph: &mut FetchDependencyGraph,
     stack_item: &ComputeNodesStackItem<'a>,
@@ -3386,7 +3441,7 @@ fn compute_nodes_for_op_path_element<'a>(
         updated.node_path = require_path;
     }
     if let OpPathElement::Field(field) = &updated_operation {
-        if *field.data().name() == TYPENAME_FIELD {
+        if *field.name() == TYPENAME_FIELD {
             // Because of the optimization done in `QueryPlanner.optimizeSiblingTypenames`,
             // we will rarely get an explicit `__typename` edge here.
             // But one case where it can happen is where an @interfaceObject was involved,
@@ -3436,7 +3491,7 @@ fn compute_nodes_for_op_path_element<'a>(
                 "Unexpected operation {updated_operation} for edge {edge}"
             )));
         };
-        if !inline.data().directives.is_empty() {
+        if !inline.directives.is_empty() {
             // We want to keep the directives, but we clear the condition
             // since it's to a type that doesn't exists in the subgraph we're currently in.
             updated.node_path = updated
@@ -3529,7 +3584,7 @@ fn wrap_input_selections(
                    }
                }
             */
-            let parent_type_position = fragment.data().parent_type_position.clone();
+            let parent_type_position = fragment.parent_type_position.clone();
             let selection = InlineFragmentSelection::new(fragment, sub_selections);
             SelectionSet::from_selection(parent_type_position, selection.into())
         },
@@ -3548,8 +3603,8 @@ fn create_fetch_initial_path(
     // supergraph). Doing this make sure we can rely on things like checking subtyping between
     // the types of a given path.
     let rebased_type: CompositeTypeDefinitionPosition = supergraph_schema
-        .get_type(dest_type.type_name().clone())
-        .and_then(|res| res.try_into())?;
+        .get_type(dest_type.type_name().clone())?
+        .try_into()?;
     Ok(Arc::new(wrap_selection_with_type_and_conditions(
         supergraph_schema,
         &rebased_type,
@@ -3678,9 +3733,7 @@ fn handle_requires(
     // the edge `0 --- 2` is removed (since the dependency of 2 on 0 is already provide transitively through 1).
     dependency_graph.reduce();
 
-    let parents: Vec<ParentRelation> = dependency_graph
-        .parents_relations_of(fetch_node_id)
-        .collect();
+    let single_parent = iter_into_single_item(dependency_graph.parents_relations_of(fetch_node_id));
     // In general, we should do like for an edge, and create a new node _for the current subgraph_
     // that depends on the created_nodes and have the created nodes depend on the current one.
     // However, we can be more efficient in general (and this is expected by the user) because
@@ -3690,8 +3743,9 @@ fn handle_requires(
     // node we're coming from is our "direct parent", we can merge it to said direct parent (which
     // effectively means that the parent node will collect the provides before taking the edge
     // to our current node).
-    if parents.len() == 1 && fetch_node_path.path_in_node.has_only_fragments() {
-        let parent = &parents[0];
+    if single_parent.is_some() && fetch_node_path.path_in_node.has_only_fragments() {
+        // Should do `if let` but it requires extra indentation.
+        let parent = single_parent.unwrap();
 
         // We start by computing the nodes for the conditions. We do this using a copy of the current
         // node (with only the inputs) as that allows to modify this copy without modifying `node`.
@@ -3745,7 +3799,7 @@ fn handle_requires(
         // Note: it is to be sure this test is not polluted by other things in `node` that we created `new_node`.
         dependency_graph.remove_inputs_from_selection(new_node_id)?;
 
-        let new_node_is_not_needed = dependency_graph.is_node_unneeded(new_node_id, parent)?;
+        let new_node_is_not_needed = dependency_graph.is_node_unneeded(new_node_id, &parent)?;
         let mut unmerged_node_ids: Vec<NodeIndex> = Vec::new();
         if new_node_is_not_needed {
             // Up to this point, `new_node` had no parent, so let's first merge `new_node` to the parent, thus "rooting"

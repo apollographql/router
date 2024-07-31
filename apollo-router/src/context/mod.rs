@@ -450,7 +450,7 @@ mod test {
             @join__graph(name: "products" url: "http://localhost:4003/graphql")
             REVIEWS @join__graph(name: "reviews" url: "http://localhost:4002/graphql")
         }"#;
-        let schema = Schema::parse_test(schema, &Default::default()).unwrap();
+        let schema = Schema::parse(schema, &Default::default()).unwrap();
         let document =
             Query::parse_document("{ me }", None, &schema, &Configuration::default()).unwrap();
         assert!(c.unsupported_executable_document().is_none());

@@ -599,11 +599,11 @@ impl IntoGraphQLErrors for ParseErrors {
                     .message(diagnostic.error.to_string())
                     .locations(
                         diagnostic
-                            .get_line_column()
+                            .line_column_range()
                             .map(|location| {
                                 vec![ErrorLocation {
-                                    line: location.line as u32,
-                                    column: location.column as u32,
+                                    line: location.start.line as u32,
+                                    column: location.start.column as u32,
                                 }]
                             })
                             .unwrap_or_default(),

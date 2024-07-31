@@ -161,10 +161,6 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) experimental_chaos: Chaos,
 
-    /// Set the API schema generation implementation to use.
-    #[serde(default)]
-    pub(crate) experimental_api_schema_generation_mode: ApiSchemaMode,
-
     /// Set the Apollo usage report signature and referenced field generation implementation to use.
     #[serde(default)]
     pub(crate) experimental_apollo_metrics_generation_mode: ApolloMetricsGenerationMode,
@@ -202,21 +198,6 @@ impl PartialEq for Configuration {
     fn eq(&self, other: &Self) -> bool {
         self.validated_yaml == other.validated_yaml
     }
-}
-
-/// API schema generation modes.
-#[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
-#[derivative(Debug)]
-#[serde(rename_all = "lowercase")]
-pub(crate) enum ApiSchemaMode {
-    /// Use the new Rust-based implementation.
-    New,
-    /// Use the old JavaScript-based implementation.
-    Legacy,
-    /// Use Rust-based and Javascript-based implementations side by side, logging warnings if the
-    /// implementations disagree.
-    #[default]
-    Both,
 }
 
 /// Apollo usage report signature and referenced field generation modes.
@@ -275,7 +256,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             batching: Batching,
             experimental_type_conditioned_fetching: bool,
             experimental_apollo_metrics_generation_mode: ApolloMetricsGenerationMode,
-            experimental_api_schema_generation_mode: ApiSchemaMode,
             experimental_query_planner_mode: QueryPlannerMode,
         }
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
@@ -295,7 +275,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             persisted_queries: ad_hoc.persisted_queries,
             limits: ad_hoc.limits,
             experimental_chaos: ad_hoc.experimental_chaos,
-            experimental_api_schema_generation_mode: ad_hoc.experimental_api_schema_generation_mode,
             experimental_apollo_metrics_generation_mode: ad_hoc
                 .experimental_apollo_metrics_generation_mode,
             experimental_type_conditioned_fetching: ad_hoc.experimental_type_conditioned_fetching,
@@ -343,7 +322,6 @@ impl Configuration {
         operation_limits: Option<Limits>,
         chaos: Option<Chaos>,
         uplink: Option<UplinkConfig>,
-        experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
         experimental_type_conditioned_fetching: Option<bool>,
         batching: Option<Batching>,
         experimental_apollo_metrics_generation_mode: Option<ApolloMetricsGenerationMode>,
@@ -362,8 +340,6 @@ impl Configuration {
             persisted_queries: persisted_query.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
-            experimental_api_schema_generation_mode: experimental_api_schema_generation_mode
-                .unwrap_or_default(),
             experimental_apollo_metrics_generation_mode:
                 experimental_apollo_metrics_generation_mode.unwrap_or_default(),
             experimental_query_planner_mode: experimental_query_planner_mode.unwrap_or_default(),
@@ -482,7 +458,6 @@ impl Configuration {
         chaos: Option<Chaos>,
         uplink: Option<UplinkConfig>,
         batching: Option<Batching>,
-        experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
         experimental_type_conditioned_fetching: Option<bool>,
         experimental_apollo_metrics_generation_mode: Option<ApolloMetricsGenerationMode>,
         experimental_query_planner_mode: Option<QueryPlannerMode>,
@@ -496,8 +471,6 @@ impl Configuration {
             cors: cors.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
-            experimental_api_schema_generation_mode: experimental_api_schema_generation_mode
-                .unwrap_or_default(),
             experimental_apollo_metrics_generation_mode:
                 experimental_apollo_metrics_generation_mode.unwrap_or_default(),
             experimental_query_planner_mode: experimental_query_planner_mode.unwrap_or_default(),
@@ -1053,7 +1026,7 @@ impl Default for Apq {
 }
 
 /// Query planning cache configuration
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct QueryPlanning {
     /// Cache configuration
@@ -1062,7 +1035,6 @@ pub(crate) struct QueryPlanning {
     /// a list of the most used queries (from the in memory cache)
     /// Configures the number of queries warmed up. Defaults to 1/3 of
     /// the in memory cache
-    #[serde(default)]
     pub(crate) warmed_up_queries: Option<usize>,
 
     /// Sets a limit to the number of generated query plans.
@@ -1095,6 +1067,32 @@ pub(crate) struct QueryPlanning {
     /// Set the size of a pool of workers to enable query planning parallelism.
     /// Default: 1.
     pub(crate) experimental_parallelism: AvailableParallelism,
+
+    /// Activates introspection response caching
+    /// Historically, the Router has executed introspection queries in the query planner, and cached their
+    /// response in its cache because they were expensive. This will change soon as introspection will be
+    /// removed from the query planner. In the meantime, since storing introspection responses can fill up
+    /// the cache, this option can be used to deactivate it.
+    /// Default: true
+    pub(crate) legacy_introspection_caching: bool,
+}
+
+impl Default for QueryPlanning {
+    fn default() -> Self {
+        Self {
+            cache: QueryPlanCache::default(),
+            warmed_up_queries: Default::default(),
+            experimental_plans_limit: Default::default(),
+            experimental_parallelism: Default::default(),
+            experimental_paths_limit: Default::default(),
+            experimental_reuse_query_plans: Default::default(),
+            legacy_introspection_caching: default_legacy_introspection_caching(),
+        }
+    }
+}
+
+const fn default_legacy_introspection_caching() -> bool {
+    true
 }
 
 impl QueryPlanning {
