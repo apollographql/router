@@ -14,7 +14,8 @@ supergraph:
     experimental_reuse_query_plans: true
 ```
 
-There is a counter metric named `apollo.router.query.planning.warmup.reused` that can be used to track the hashing algorithm benefits:
+
+We've also introduced changes to our metrics to help track the impact of these changes. There is a counter metric named `apollo.router.query.planning.warmup.reused` that can be used to track the hashing algorithm benefits:
 - if the `experimental_reuse_query_plans` option is false, the `query_plan_reuse_active` metric attribute will be false. Cache warm up will not reuse query plans according to the algorithm, but it will evaluate if some of them could have been reused and report that in the metric
 - if the `experimental_reuse_query_plans` option is true, then the `query_plan_reuse_active` metric attribute will be true
 
