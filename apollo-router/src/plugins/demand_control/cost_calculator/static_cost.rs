@@ -72,9 +72,9 @@ impl StaticCostCalculator {
             return Ok(0.0);
         }
 
-        let definition = schema
-            .type_field(field.ty().inner_named_type(), &field.name)
-            .unwrap(); // TODO: Handle error conversion
+        // We need to look up the `FieldDefinition` from the supergraph schema instead of using `field.definition`
+        // because `field.definition` was generated from the API schema, which strips off the directives we need.
+        let definition = schema.type_field(parent_type, &field.name)?;
         let ty = field.inner_type_def(schema).ok_or_else(|| {
             DemandControlError::QueryParseFailure(format!(
                 "Field {} was found in query, but its type is missing from the schema.",
@@ -116,7 +116,7 @@ impl StaticCostCalculator {
             list_size_directive.as_ref(),
         )?;
 
-        for argument in &field.definition.arguments {
+        for argument in &definition.arguments {
             type_cost += Self::score_argument(argument, schema)?;
         }
 
@@ -156,6 +156,7 @@ impl StaticCostCalculator {
         argument: &InputValueDefinition,
         schema: &Valid<Schema>,
     ) -> Result<f64, DemandControlError> {
+        tracing::debug!("Scoring {:?}", argument);
         let cost_directive = CostDirective::from_argument(argument);
         if let Some(ty) = schema.types.get(argument.ty.inner_named_type().as_str()) {
             match ty {

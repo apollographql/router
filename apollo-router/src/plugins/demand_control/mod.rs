@@ -5,6 +5,7 @@ use std::future;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
+use apollo_compiler::schema::FieldLookupError;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
 use apollo_compiler::ExecutableDocument;
@@ -196,6 +197,22 @@ impl DemandControlError {
 impl<T> From<WithErrors<T>> for DemandControlError {
     fn from(value: WithErrors<T>) -> Self {
         DemandControlError::QueryParseFailure(format!("{}", value))
+    }
+}
+
+impl<'a> From<FieldLookupError<'a>> for DemandControlError {
+    fn from(value: FieldLookupError) -> Self {
+        match value {
+            FieldLookupError::NoSuchType => DemandControlError::QueryParseFailure(
+                "Attempted to look up a type which does not exist in the schema".to_string(),
+            ),
+            FieldLookupError::NoSuchField(type_name, _) => {
+                DemandControlError::QueryParseFailure(format!(
+                    "Attempted to look up a field on type {}, but the field does not exist",
+                    type_name
+                ))
+            }
+        }
     }
 }
 
