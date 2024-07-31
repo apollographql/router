@@ -259,7 +259,15 @@ fn subgraph_query_retains_the_query_variables_used_in_the_directives_applied_to_
             test
           }
         "#,
-      @r#""#
+      @r###"
+      QueryPlan {
+        Fetch(service: "Subgraph1") {
+          {
+            test
+          }
+        },
+      }
+      "###
     );
 
     let fetch_nodes = find_fetch_nodes_for_subgraph("Subgraph1", &plan);
