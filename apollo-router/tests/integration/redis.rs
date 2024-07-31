@@ -26,7 +26,7 @@ async fn query_planner_cache() -> Result<(), BoxError> {
     // 2. run `docker compose up -d` and connect to the redis container by running `docker-compose exec redis /bin/bash`.
     // 3. Run the `redis-cli` command from the shell and start the redis `monitor` command.
     // 4. Run this test and yank the updated cache key from the redis logs.
-    let known_cache_key = "plan:cache:1:federation:v2.8.1:schema:5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76:query:ff7e3b6ae2b7bd28b00641b22ff94aab8d18b6201a2d4598811d56d23a472460:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:664d923109135eee5e1f316e19f73a3db1a3fafadc7019cb9b8a9b13d70ac2a3";
+    let known_cache_key = "plan:cache:1:federation:v2.8.1:schema:5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76:query:ff7e3b6ae2b7bd28b00641b22ff94aab8d18b6201a2d4598811d56d23a472460:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:37c3131d1b214d56ba318dbd3fbe84645812515ce9f2742304df79d100d54dfb";
 
     let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
     let client = RedisClient::new(config, None, None, None);
