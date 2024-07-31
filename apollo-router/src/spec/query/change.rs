@@ -316,13 +316,12 @@ impl<'a> QueryHashVisitor<'a> {
                 }
 
                 for (name, ty) in &o.fields {
-                    "^KEY".hash(self);
+                    "^NAME".hash(self);
 
-                    //FIXME: always hash the name?
-                    if ty.default_value.is_some() {
-                        name.hash(self);
-                        self.hash_input_value_definition(&ty.node)?;
-                    }
+                    name.hash(self);
+
+                    "^ARGUMENT".hash(self);
+                    self.hash_input_value_definition(&ty.node)?;
                 }
             }
         }
@@ -1005,10 +1004,18 @@ mod tests {
           d: Int
           e: String
         }
+        input U {
+          c: Int
+        }
+        input V {
+          d: Int = 0
+        }
 
         type Query {
           a(i: T): Int
           b(i: T = { d: 1, e: "a" }): Int
+          c(c: U): Int
+          d(d: V): Int
         }
         "#;
 
@@ -1017,10 +1024,18 @@ mod tests {
           d: Int
           e: String
         }
+        input U {
+          c: Int!
+        }
+        input V {
+          d: Int = 1
+        }
         
         type Query {
             a(i: T!): Int
             b(i: T = { d: 2, e: "b" }): Int
+            c(c: U): Int
+            d(d: V): Int
           }
         "#;
 
@@ -1031,6 +1046,15 @@ mod tests {
         assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
 
         let query = "query { b(i: { d: 3, e: \"c\" })}";
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
+
+        let query = "query { c(c: { c: 0 }) }";
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
+
+        let query = "query { d(d: { }) }";
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
+
+        let query = "query { d(d: { d: 2 }) }";
         assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
     }
 
