@@ -40,6 +40,15 @@ fn test_progressive_overrides_are_recognised_vor_join_v0_4_and_above() {
         )
     };
 
+    let join_v3_schema = Schema::parse(schema_for_version("v0.3"), "test").unwrap();
+    assert!(crate::spec::Schema::directive_name(
+        &join_v3_schema,
+        JOIN_SPEC_BASE_URL,
+        JOIN_SPEC_VERSION_RANGE,
+        JOIN_FIELD_DIRECTIVE_NAME,
+    )
+    .is_none());
+
     let join_v4_schema = Schema::parse(schema_for_version("v0.4"), "test").unwrap();
     assert!(crate::spec::Schema::directive_name(
         &join_v4_schema,
