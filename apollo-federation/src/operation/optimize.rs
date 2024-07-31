@@ -59,6 +59,9 @@ use super::SelectionMapperReturn;
 use super::SelectionOrSet;
 use super::SelectionSet;
 use crate::error::FederationError;
+use crate::operation::FragmentSpread;
+use crate::operation::FragmentSpreadData;
+use crate::operation::SelectionValue;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 
 #[derive(Debug)]
@@ -1547,6 +1550,123 @@ impl Operation {
         fragments: &NamedFragments,
     ) -> Result<(), FederationError> {
         self.reuse_fragments_inner(fragments, Self::DEFAULT_MIN_USAGES_TO_OPTIMIZE)
+    }
+
+    pub(crate) fn generate_fragments(&mut self) -> Result<(), FederationError> {
+        #[derive(Debug, Default)]
+        struct FragmentGenerator {
+            fragments: NamedFragments,
+        }
+
+        impl FragmentGenerator {
+            fn next_name(&self) -> Name {
+                let len = self.fragments.len();
+                Name::new_unchecked(&format!("_generated{len}"))
+            }
+
+            fn is_worth_using(selection_set: &SelectionSet) -> bool {
+                let mut iter = selection_set.iter();
+                let Some(first) = iter.next() else {
+                    // An empty selection is not worth using (and invalid!)
+                    return false;
+                };
+                let Selection::Field(field) = first else {
+                    return true;
+                };
+                // If there's more than one selection, or one selection with a subselection,
+                // it's probably worth using
+                iter.next().is_some() || field.selection_set.is_some()
+            }
+
+            fn visit_selection_set(
+                &mut self,
+                selection_set: &mut SelectionSet,
+            ) -> Result<(), FederationError> {
+                let mut new_selection_set = SelectionSet::empty(
+                    selection_set.schema.clone(),
+                    selection_set.type_position.clone(),
+                );
+
+                for (_key, selection) in Arc::make_mut(&mut selection_set.selections).iter_mut() {
+                    match selection {
+                        SelectionValue::Field(mut field) => {
+                            if let Some(selection_set) = field.get_selection_set_mut() {
+                                self.visit_selection_set(selection_set)?;
+                            }
+                            new_selection_set
+                                .add_local_selection(&Selection::Field(Arc::clone(field.get())))?;
+                        }
+                        SelectionValue::FragmentSpread(frag) => {
+                            new_selection_set.add_local_selection(&Selection::FragmentSpread(
+                                Arc::clone(frag.get()),
+                            ))?;
+                        }
+                        SelectionValue::InlineFragment(frag) if !Self::is_worth_using(&frag.get().selection_set) => {
+                            new_selection_set.add_local_selection(&Selection::InlineFragment(
+                                Arc::clone(frag.get()),
+                            ))?;
+                        }
+                        SelectionValue::InlineFragment(mut candidate) => {
+                            self.visit_selection_set(candidate.get_selection_set_mut())?;
+
+                            let existing = self.fragments.iter().find(|existing| {
+                                existing.type_condition_position
+                                    == candidate.get().inline_fragment.casted_type()
+                                    && existing.selection_set == candidate.get().selection_set
+                            });
+
+                            let existing = if let Some(existing) = existing {
+                                existing
+                            } else {
+                                let name = self.next_name();
+                                self.fragments.insert(Fragment {
+                                    schema: selection_set.schema.clone(),
+                                    name: name.clone(),
+                                    type_condition_position: candidate
+                                        .get()
+                                        .inline_fragment
+                                        .casted_type(),
+                                    directives: Default::default(),
+                                    selection_set: candidate.get().selection_set.clone(),
+                                });
+                                self.fragments.get(&name).unwrap()
+                            };
+                            new_selection_set.add_local_selection(&Selection::from(
+                                FragmentSpreadSelection {
+                                    spread: FragmentSpread::new(FragmentSpreadData {
+                                        schema: selection_set.schema.clone(),
+                                        fragment_name: existing.name.clone(),
+                                        type_condition_position: existing
+                                            .type_condition_position
+                                            .clone(),
+                                        directives: Default::default(),
+                                        fragment_directives: existing.directives.clone(),
+                                        selection_id: crate::operation::SelectionId::new(),
+                                    }),
+                                    selection_set: existing.selection_set.clone(),
+                                },
+                            ))?;
+                        }
+                    }
+                }
+
+                *selection_set = new_selection_set;
+
+                Ok(())
+            }
+
+            fn into_inner(self) -> NamedFragments {
+                self.fragments
+            }
+        }
+
+        let mut generator = FragmentGenerator::default();
+        generator.visit_selection_set(&mut self.selection_set)?;
+        let fragments = generator.into_inner();
+        // To remove single-use fragment definitions:
+        // self.selection_set = fragments.reduce(&self.selection_set, 2)?;
+        self.named_fragments = fragments;
+        Ok(())
     }
 
     /// Used by legacy roundtrip tests.

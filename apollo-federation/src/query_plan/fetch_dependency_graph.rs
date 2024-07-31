@@ -2386,6 +2386,8 @@ impl FetchDependencyGraphNode {
             .map(|rebased| rebased.for_subgraph(self.subgraph_name.clone(), subgraph_schema))
         {
             operation.reuse_fragments(fragments)?;
+        } else {
+            operation.generate_fragments()?;
         }
 
         let operation_document = operation.try_into()?;
