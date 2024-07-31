@@ -10,7 +10,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
-use tokio::sync::broadcast;
 use tokio::sync::broadcast::Sender;
 use tower::ServiceExt;
 use tracing::instrument;
@@ -378,8 +377,6 @@ impl FetchNode {
         output_rewrites: &Option<Vec<DataRewrite>>,
         schema: &Schema,
         paths: Vec<Vec<Path>>,
-        id: Option<String>,
-        deferred_fetches: &HashMap<String, broadcast::Sender<(Value, Vec<Error>)>>,
         operation_str: &str,
         variables: Map<ByteString, Value>,
     ) -> (Value, Vec<Error>) {
@@ -436,13 +433,12 @@ impl FetchNode {
             output_rewrites,
             service_name,
         );
-        Self::deferred_fetches(current_dir, id, deferred_fetches, &value, &errors);
         (value, errors)
     }
 
     pub(crate) fn deferred_fetches(
         current_dir: &Path,
-        id: Option<String>,
+        id: &Option<String>,
         deferred_fetches: &HashMap<String, Sender<(Value, Vec<Error>)>>,
         value: &Value,
         errors: &[Error],
