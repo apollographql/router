@@ -1,4 +1,4 @@
-### Fix GraphQL query directives validation bug
+### Fix GraphQL query directives validation bug ([PR #5753](https://github.com/apollographql/router/pull/5753))
 
 GraphQL supports an obscure syntax, where a variable is used in a directive application on the same operation where the variable is declared.
 
@@ -9,3 +9,5 @@ query GetSomething($var: Int!) @someDirective(argument: $var) {
   something
 }
 ```
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/5753
