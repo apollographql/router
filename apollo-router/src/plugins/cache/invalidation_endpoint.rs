@@ -227,14 +227,12 @@ mod tests {
             .create_or_subscribe(InvalidationTopic, false)
             .await
             .unwrap();
-        let invalidation = Invalidation {
-            enabled: true,
-            handle,
-        };
+        let invalidation = Invalidation { handle };
         let config = Arc::new(SubgraphConfiguration {
             all: Subgraph {
                 ttl: None,
                 enabled: true,
+                redis: None,
                 private_id: None,
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
@@ -319,13 +317,13 @@ mod tests {
         });
 
         let invalidation = Invalidation {
-            enabled: true,
             handle: handle.clone(),
         };
         let config = Arc::new(SubgraphConfiguration {
             all: Subgraph {
                 ttl: None,
                 enabled: true,
+                redis: None,
                 private_id: None,
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
@@ -336,6 +334,7 @@ mod tests {
                 String::from("test"),
                 Subgraph {
                     ttl: None,
+                    redis: None,
                     enabled: true,
                     private_id: None,
                     invalidation: Some(SubgraphInvalidationConfig {
@@ -421,14 +420,12 @@ mod tests {
             .create_or_subscribe(InvalidationTopic, false)
             .await
             .unwrap();
-        let invalidation = Invalidation {
-            enabled: true,
-            handle,
-        };
+        let invalidation = Invalidation { handle };
         let config = Arc::new(SubgraphConfiguration {
             all: Subgraph {
                 ttl: None,
                 enabled: true,
+                redis: None,
                 private_id: None,
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
@@ -440,6 +437,7 @@ mod tests {
                 Subgraph {
                     ttl: None,
                     enabled: true,
+                    redis: None,
                     private_id: None,
                     invalidation: Some(SubgraphInvalidationConfig {
                         enabled: true,
@@ -520,15 +518,13 @@ mod tests {
             assert!(called);
         });
 
-        let invalidation = Invalidation {
-            enabled: true,
-            handle,
-        };
+        let invalidation = Invalidation { handle };
         let config = Arc::new(SubgraphConfiguration {
             all: Subgraph {
                 ttl: None,
                 enabled: true,
                 private_id: None,
+                redis: None,
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
                     shared_key: String::from("test"),
