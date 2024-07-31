@@ -27,6 +27,7 @@ use crate::schema::position::SchemaDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
 use crate::schema::referencer::DirectiveReferencers;
 use crate::schema::FederationSchema;
+use crate::sources::connect::spec::LATEST_CONNECT_VERSION;
 
 const TAG_DIRECTIVE_NAME_IN_SPEC: Name = name!("tag");
 const AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC: Name = name!("authenticated");
@@ -40,6 +41,13 @@ pub(super) fn carryover_directives(
     let Some(metadata) = from.metadata() else {
         return Ok(());
     };
+
+    // @join__directive(graph: [], name: "link", args: { url: "https://specs.apollo.dev/connect/v0.1" })
+    // this must exist for license key enforcement
+    SchemaDefinitionPosition.insert_directive(
+        to,
+        LATEST_CONNECT_VERSION.join_directive_application().into(),
+    )?;
 
     // @inaccessible
 
