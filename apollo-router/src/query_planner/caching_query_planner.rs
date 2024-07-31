@@ -117,12 +117,15 @@ where
         let mut hasher = StructHasher::new();
         match configuration.experimental_query_planner_mode {
             crate::configuration::QueryPlannerMode::New => {
+                "PLANNER-NEW".hash(&mut hasher);
                 configuration.rust_query_planner_config().hash(&mut hasher);
             }
             crate::configuration::QueryPlannerMode::Legacy => {
+                "PLANNER-LEGACY".hash(&mut hasher);
                 configuration.js_query_planner_config().hash(&mut hasher);
             }
             crate::configuration::QueryPlannerMode::Both => {
+                "PLANNER-BOTH".hash(&mut hasher);
                 configuration.js_query_planner_config().hash(&mut hasher);
                 configuration.rust_query_planner_config().hash(&mut hasher);
             }
