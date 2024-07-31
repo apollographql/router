@@ -230,10 +230,13 @@ where
         } else {
             cache_keys.len()
         };
-        tracing::info!(
-            "warming up the query plan cache with {} queries, this might take a while",
-            capacity
-        );
+
+        if capacity > 0 {
+            tracing::info!(
+                "warming up the query plan cache with {} queries, this might take a while",
+                capacity
+            );
+        }
 
         // persisted queries are added first because they should get a lower priority in the LRU cache,
         // since a lot of them may be there to support old clients
@@ -753,14 +756,14 @@ mod tests {
 
         let configuration = Arc::new(crate::Configuration::default());
         let schema = include_str!("testdata/schema.graphql");
-        let schema = Arc::new(Schema::parse_test(schema, &configuration).unwrap());
+        let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
         let mut planner = CachingQueryPlanner::new(
             delegate,
             schema.clone(),
             Default::default(),
             &configuration,
-            IndexMap::new(),
+            IndexMap::default(),
         )
         .await
         .unwrap();
@@ -851,7 +854,7 @@ mod tests {
         let configuration = Configuration::default();
 
         let schema =
-            Schema::parse_test(include_str!("testdata/schema.graphql"), &configuration).unwrap();
+            Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap();
 
         let doc = Query::parse_document(
             "query Me { me { username } }",
@@ -866,7 +869,7 @@ mod tests {
             Arc::new(schema),
             Default::default(),
             &configuration,
-            IndexMap::new(),
+            IndexMap::default(),
         )
         .await
         .unwrap();
@@ -937,14 +940,14 @@ mod tests {
             ..Default::default()
         });
         let schema = include_str!("testdata/schema.graphql");
-        let schema = Arc::new(Schema::parse_test(schema, &configuration).unwrap());
+        let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
         let mut planner = CachingQueryPlanner::new(
             delegate,
             schema.clone(),
             Default::default(),
             &configuration,
-            IndexMap::new(),
+            IndexMap::default(),
         )
         .await
         .unwrap();

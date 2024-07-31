@@ -141,7 +141,7 @@ pub(crate) trait RouterSuperServiceFactory: Send + Sync + 'static {
         &'a mut self,
         is_telemetry_disabled: bool,
         configuration: Arc<Configuration>,
-        schema: String,
+        schema: Arc<Schema>,
         previous_router: Option<&'a Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     ) -> Result<Self::RouterFactory, BoxError>;
@@ -159,7 +159,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         &'a mut self,
         _is_telemetry_disabled: bool,
         configuration: Arc<Configuration>,
-        schema: String,
+        schema: Arc<Schema>,
         previous_router: Option<&'a Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     ) -> Result<Self::RouterFactory, BoxError> {
@@ -179,17 +179,13 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                     .get("telemetry")
                     .cloned();
                 if let Some(plugin_config) = &mut telemetry_config {
-                    inject_schema_id(Some(&Schema::schema_id(&schema)), plugin_config);
+                    inject_schema_id(Some(&schema.schema_id), plugin_config);
                     match factory
                         .create_instance(
                             PluginInit::builder()
                                 .config(plugin_config.clone())
-                                .supergraph_sdl(Arc::new(schema.clone()))
-                                .supergraph_schema(Arc::new(
-                                    apollo_compiler::validation::Valid::assume_valid(
-                                        apollo_compiler::Schema::new(),
-                                    ),
-                                ))
+                                .supergraph_sdl(schema.raw_sdl.clone())
+                                .supergraph_schema(Arc::new(schema.supergraph_schema().clone()))
                                 .notify(configuration.notify.clone())
                                 .build(),
                         )
@@ -227,7 +223,7 @@ impl YamlRouterFactory {
     async fn inner_create<'a>(
         &'a mut self,
         configuration: Arc<Configuration>,
-        schema: String,
+        schema: Arc<Schema>,
         previous_router: Option<&'a RouterCreator>,
         initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
@@ -302,7 +298,7 @@ impl YamlRouterFactory {
     pub(crate) async fn inner_create_supergraph<'a>(
         &'a mut self,
         configuration: Arc<Configuration>,
-        schema: String,
+        schema: Arc<Schema>,
         previous_supergraph: Option<&'a SupergraphCreator>,
         initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
@@ -339,7 +335,7 @@ impl YamlRouterFactory {
             };
 
         let schema_changed = previous_supergraph
-            .map(|supergraph_creator| supergraph_creator.schema().raw_sdl.as_ref() == &schema)
+            .map(|supergraph_creator| supergraph_creator.schema().raw_sdl == schema.raw_sdl)
             .unwrap_or_default();
 
         let config_changed = previous_supergraph
@@ -439,7 +435,7 @@ pub(crate) async fn create_subgraph_services(
         .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
         .expect("traffic shaping should always be part of the plugin list");
 
-    let mut subgraph_services = IndexMap::new();
+    let mut subgraph_services = IndexMap::default();
     for (name, _) in schema.subgraphs() {
         let http_service = crate::services::http::HttpClientService::from_config(
             name,
@@ -519,16 +515,11 @@ fn load_certs(certificates: &str) -> io::Result<Vec<rustls::Certificate>> {
 /// not meant to be used directly
 pub async fn create_test_service_factory_from_yaml(schema: &str, configuration: &str) {
     let config: Configuration = serde_yaml::from_str(configuration).unwrap();
+    let schema = Arc::new(Schema::parse(schema, &config).unwrap());
 
     let is_telemetry_disabled = false;
     let service = YamlRouterFactory
-        .create(
-            is_telemetry_disabled,
-            Arc::new(config),
-            schema.to_string(),
-            None,
-            None,
-        )
+        .create(is_telemetry_disabled, Arc::new(config), schema, None, None)
         .await;
     assert_eq!(
         service.map(|_| ()).unwrap_err().to_string().as_str(),
@@ -570,7 +561,7 @@ pub(crate) async fn create_plugins(
         .map(|factory| (factory.name.as_str(), &**factory))
         .collect();
     let mut errors = Vec::new();
-    let mut plugin_instances = Plugins::new();
+    let mut plugin_instances = Plugins::default();
 
     // Use function-like macros to avoid borrow conflicts of captures
     macro_rules! add_plugin {
@@ -602,7 +593,6 @@ pub(crate) async fn create_plugins(
         ($name: literal, $opt_plugin_config: expr) => {{
             let name = concat!("apollo.", $name);
             let span = tracing::info_span!(concat!("plugin: ", "apollo.", $name));
-
             async {
                 let factory = apollo_plugin_factories
                     .remove(name)
@@ -974,13 +964,14 @@ mod test {
 
     async fn create_service(config: Configuration) -> Result<(), BoxError> {
         let schema = include_str!("testdata/supergraph.graphql");
+        let schema = Schema::parse(schema, &config)?;
 
         let is_telemetry_disabled = false;
         let service = YamlRouterFactory
             .create(
                 is_telemetry_disabled,
                 Arc::new(config),
-                schema.to_string(),
+                Arc::new(schema),
                 None,
                 None,
             )
@@ -1010,7 +1001,7 @@ mod test {
             ..Default::default()
         };
         let schema = include_str!("testdata/supergraph_with_context.graphql");
-        let schema = Arc::new(Schema::parse_test(schema, &config).unwrap());
+        let schema = Arc::new(Schema::parse(schema, &config).unwrap());
         assert!(
             can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_err(),
             "experimental_query_planner_mode: both cannot be used with @context"
@@ -1041,7 +1032,7 @@ mod test {
             ..Default::default()
         };
         let schema = include_str!("testdata/supergraph_with_override_label.graphql");
-        let schema = Arc::new(Schema::parse_test(schema, &config).unwrap());
+        let schema = Arc::new(Schema::parse(schema, &config).unwrap());
         assert!(
             can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_err(),
             "experimental_query_planner_mode: both cannot be used with progressive overrides"
@@ -1071,7 +1062,7 @@ mod test {
             ..Default::default()
         };
         let schema = include_str!("testdata/supergraph.graphql");
-        let schema = Arc::new(Schema::parse_test(schema, &config).unwrap());
+        let schema = Arc::new(Schema::parse(schema, &config).unwrap());
         assert!(
             can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_err(),
             "experimental_query_planner_mode: both cannot be used with fed1 supergraph"
@@ -1101,7 +1092,7 @@ mod test {
             ..Default::default()
         };
         let schema = include_str!("testdata/minimal_fed2_supergraph.graphql");
-        let schema = Arc::new(Schema::parse_test(schema, &config).unwrap());
+        let schema = Arc::new(Schema::parse(schema, &config).unwrap());
         assert!(
             can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_ok(),
             "experimental_query_planner_mode: both can be used"

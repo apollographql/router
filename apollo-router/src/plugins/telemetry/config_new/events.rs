@@ -1006,6 +1006,7 @@ mod tests {
                         subgraph::Response::fake2_builder()
                             .header("custom-header", "val1")
                             .header("x-log-response", HeaderValue::from_static("log"))
+                            .subgraph_name("subgraph")
                             .data(serde_json::json!({"data": "res"}).to_string())
                             .build()
                             .expect("expecting valid response")

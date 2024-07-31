@@ -22,6 +22,8 @@ use crate::plugins::telemetry::config::TracingCommon;
 pub(crate) mod apollo;
 pub(crate) mod apollo_telemetry;
 pub(crate) mod datadog;
+#[allow(unreachable_pub, dead_code)]
+pub(crate) mod datadog_exporter;
 pub(crate) mod jaeger;
 pub(crate) mod otlp;
 pub(crate) mod reload;

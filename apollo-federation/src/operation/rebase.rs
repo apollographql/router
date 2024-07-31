@@ -579,6 +579,7 @@ impl InlineFragment {
             .into())
         } else {
             let mut rebased_fragment_data = self.data().clone();
+            rebased_fragment_data.parent_type_position = parent_type.clone();
             rebased_fragment_data.type_condition_position = rebased_condition;
             rebased_fragment_data.schema = schema.clone();
             Ok(InlineFragment::new(rebased_fragment_data))
@@ -836,8 +837,8 @@ impl NamedFragments {
 
 #[cfg(test)]
 mod tests {
+    use apollo_compiler::collections::IndexSet;
     use apollo_compiler::name;
-    use indexmap::IndexSet;
 
     use crate::operation::normalize_operation;
     use crate::operation::tests::parse_schema_and_operation;
@@ -893,12 +894,12 @@ type U {
             "operation should have some fragments"
         );
 
-        if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
+        if let Some(operation) = executable_document.operations.named.get_mut("TestQuery") {
             let normalized_operation = normalize_operation(
                 operation,
                 NamedFragments::new(&executable_document.fragments, &schema),
                 &schema,
-                &IndexSet::new(),
+                &IndexSet::default(),
             )
             .unwrap();
 
@@ -979,12 +980,12 @@ type U {
         );
         assert_eq!(2, executable_document.fragments.len());
 
-        if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
+        if let Some(operation) = executable_document.operations.named.get_mut("TestQuery") {
             let normalized_operation = normalize_operation(
                 operation,
                 NamedFragments::new(&executable_document.fragments, &schema),
                 &schema,
-                &IndexSet::new(),
+                &IndexSet::default(),
             )
             .unwrap();
 
@@ -1061,12 +1062,12 @@ type T2 implements I {
             "operation should have some fragments"
         );
 
-        if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
+        if let Some(operation) = executable_document.operations.named.get_mut("TestQuery") {
             let normalized_operation = normalize_operation(
                 operation,
                 NamedFragments::new(&executable_document.fragments, &schema),
                 &schema,
-                &IndexSet::new(),
+                &IndexSet::default(),
             )
             .unwrap();
 
@@ -1138,8 +1139,9 @@ type T implements I {
             "operation should have some fragments"
         );
 
-        if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
-            let mut interface_objects: IndexSet<InterfaceTypeDefinitionPosition> = IndexSet::new();
+        if let Some(operation) = executable_document.operations.named.get_mut("TestQuery") {
+            let mut interface_objects: IndexSet<InterfaceTypeDefinitionPosition> =
+                IndexSet::default();
             interface_objects.insert(InterfaceTypeDefinitionPosition {
                 type_name: name!("I"),
             });
@@ -1236,12 +1238,12 @@ type T {
             "operation should have some fragments"
         );
 
-        if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
+        if let Some(operation) = executable_document.operations.named.get_mut("TestQuery") {
             let normalized_operation = normalize_operation(
                 operation,
                 NamedFragments::new(&executable_document.fragments, &schema),
                 &schema,
-                &IndexSet::new(),
+                &IndexSet::default(),
             )
             .unwrap();
 
@@ -1314,12 +1316,12 @@ type U {
             "operation should have some fragments"
         );
 
-        if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
+        if let Some(operation) = executable_document.operations.named.get_mut("TestQuery") {
             let normalized_operation = normalize_operation(
                 operation,
                 NamedFragments::new(&executable_document.fragments, &schema),
                 &schema,
-                &IndexSet::new(),
+                &IndexSet::default(),
             )
             .unwrap();
 
@@ -1387,12 +1389,12 @@ type T implements I {
             "operation should have some fragments"
         );
 
-        if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
+        if let Some(operation) = executable_document.operations.named.get_mut("TestQuery") {
             let normalized_operation = normalize_operation(
                 operation,
                 NamedFragments::new(&executable_document.fragments, &schema),
                 &schema,
-                &IndexSet::new(),
+                &IndexSet::default(),
             )
             .unwrap();
 

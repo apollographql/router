@@ -43,7 +43,6 @@ const FETCH_COST: QueryPlanCost = 1000.0;
 /// The exact number is a tad  arbitrary however.
 const PIPELINING_COST: QueryPlanCost = 100.0;
 
-#[derive(Clone)]
 pub(crate) struct FetchDependencyGraphToQueryPlanProcessor {
     variable_definitions: Vec<Node<VariableDefinition>>,
     fragments: Option<RebasedFragments>,

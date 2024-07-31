@@ -34,6 +34,7 @@ use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::services::HasSchema;
 use crate::services::SupergraphCreator;
+use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseState;
 
 /// Mocks for services the Apollo Router must integrate with.
@@ -291,10 +292,11 @@ impl<'a> TestHarness<'a> {
         let config = builder.configuration.unwrap_or_default();
         let canned_schema = include_str!("../testing_schema.graphql");
         let schema = builder.schema.unwrap_or(canned_schema);
+        let schema = Arc::new(Schema::parse(schema, &config)?);
         let supergraph_creator = YamlRouterFactory
             .inner_create_supergraph(
                 config.clone(),
-                schema.to_string(),
+                schema,
                 None,
                 None,
                 Some(builder.extra_plugins),
