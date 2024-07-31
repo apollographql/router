@@ -223,7 +223,7 @@ impl<'a> QueryHashVisitor<'a> {
                     "^:".hash(self);
                     self.hash_value(v);
                 }
-                "}".hash(self);
+                "^}".hash(self);
             }
         }
         "^VALUE-END".hash(self);
