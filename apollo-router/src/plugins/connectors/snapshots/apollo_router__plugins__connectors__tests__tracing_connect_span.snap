@@ -1,0 +1,79 @@
+---
+source: apollo-router/src/plugins/connectors/tests.rs
+expression: span
+---
+{
+  "name": "apollo_router::plugins::connectors::tests::root",
+  "record": {
+    "entries": [],
+    "metadata": {
+      "name": "root",
+      "target": "apollo_router::plugins::connectors::tests",
+      "level": "ERROR",
+      "module_path": "apollo_router::plugins::connectors::tests",
+      "fields": {
+        "names": []
+      }
+    }
+  },
+  "children": {
+    "apollo_router::services::connector_service::connect": {
+      "name": "apollo_router::services::connector_service::connect",
+      "record": {
+        "entries": [
+          [
+            "otel.kind",
+            "INTERNAL"
+          ],
+          [
+            "apollo.connector.type",
+            "http"
+          ],
+          [
+            "apollo.connector.field.name",
+            "users"
+          ],
+          [
+            "apollo.connector.selection",
+            "{\n  id\n  name\n}"
+          ],
+          [
+            "apollo_private.sent_time_offset",
+            "[sent_time_offset_redacted]"
+          ],
+          [
+            "apollo.connector.detail",
+            "{\"GET\":\"/users\"}"
+          ],
+          [
+            "apollo.connector.source.name",
+            "json"
+          ],
+          [
+            "apollo.connector.source.detail",
+            "[source_detail_redacted]"
+          ]
+        ],
+        "metadata": {
+          "name": "connect",
+          "target": "apollo_router::services::connector_service",
+          "level": "INFO",
+          "module_path": "apollo_router::services::connector_service",
+          "fields": {
+            "names": [
+              "otel.kind",
+              "apollo.connector.type",
+              "apollo.connector.detail",
+              "apollo.connector.field.name",
+              "apollo.connector.selection",
+              "apollo.connector.source.name",
+              "apollo.connector.source.detail",
+              "apollo_private.sent_time_offset"
+            ]
+          }
+        }
+      },
+      "children": {}
+    }
+  }
+}
