@@ -381,8 +381,10 @@ where
 
         tracing::debug!("warmed up the query planner cache with {count} queries planned and {reused} queries reused");
 
-        ::tracing::info!(
-            monotonic_counter.apollo.router.query.planning.warmup.reused = reused,
+        u64_counter!(
+            "apollo.router.query.planning.warmup.reused",
+            "The number of query plans that were reused instead of regenerated during query planner warm up",
+            reused as u64,
             query_plan_reuse_active = experimental_reuse_query_plans
         );
     }
