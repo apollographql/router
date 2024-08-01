@@ -398,17 +398,21 @@ async fn private() {
         (
             "user".to_string(),
             Subgraph {
+                redis: None,
                 private_id: Some("sub".to_string()),
-                enabled: Some(true),
+                enabled: true,
                 ttl: None,
+                ..Default::default()
             },
         ),
         (
             "orga".to_string(),
             Subgraph {
+                redis: None,
                 private_id: Some("sub".to_string()),
-                enabled: Some(true),
+                enabled: true,
                 ttl: None,
+                ..Default::default()
             },
         ),
     ]

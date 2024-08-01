@@ -1209,6 +1209,24 @@ fn add_core_feature_join(
         Node::new(join_enum_value_directive_definition),
     );
 
+    // scalar join__DirectiveArguments
+    let join_directive_arguments_name = name!("join__DirectiveArguments");
+    let join_directive_arguments_scalar = ExtendedType::Scalar(Node::new(ScalarType {
+        directives: Default::default(),
+        name: join_directive_arguments_name.clone(),
+        description: None,
+    }));
+    supergraph.types.insert(
+        join_directive_arguments_name,
+        join_directive_arguments_scalar,
+    );
+
+    let join_directive_directive_definition = join_directive_directive_definition();
+    supergraph.directive_definitions.insert(
+        join_directive_directive_definition.name.clone(),
+        Node::new(join_directive_directive_definition),
+    );
+
     let (name, join_graph_enum_type) = join_graph_enum_type(subgraphs_and_enum_values);
     supergraph.types.insert(name, join_graph_enum_type.into());
 }
@@ -1226,6 +1244,44 @@ fn join_enum_value_directive_definition() -> DirectiveDefinition {
             default_value: None,
         })],
         locations: vec![DirectiveLocation::EnumValue],
+        repeatable: true,
+    }
+}
+
+/// directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+fn join_directive_directive_definition() -> DirectiveDefinition {
+    DirectiveDefinition {
+        name: name!("join__directive"),
+        description: None,
+        arguments: vec![
+            Node::new(InputValueDefinition {
+                name: name!("graphs"),
+                description: None,
+                directives: Default::default(),
+                ty: ty!([join__Graph!]).into(),
+                default_value: None,
+            }),
+            Node::new(InputValueDefinition {
+                name: name!("name"),
+                description: None,
+                directives: Default::default(),
+                ty: ty!(String!).into(),
+                default_value: None,
+            }),
+            Node::new(InputValueDefinition {
+                name: name!("args"),
+                description: None,
+                directives: Default::default(),
+                ty: ty!(join__DirectiveArguments!).into(),
+                default_value: None,
+            }),
+        ],
+        locations: vec![
+            DirectiveLocation::Schema,
+            DirectiveLocation::Object,
+            DirectiveLocation::Interface,
+            DirectiveLocation::FieldDefinition,
+        ],
         repeatable: true,
     }
 }

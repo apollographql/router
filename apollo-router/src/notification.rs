@@ -807,6 +807,7 @@ where
         }
         #[allow(clippy::collapsible_if)]
         if topic_to_delete {
+            tracing::trace!("deleting subscription from unsubscribe");
             if self.subscriptions.remove(&topic).is_some() {
                 i64_up_down_counter!(
                     "apollo_router_opened_subscriptions",
@@ -880,6 +881,7 @@ where
 
             // Send error message to all killed connections
             for (_subscriber_id, subscription) in closed_subs {
+                tracing::trace!("deleting subscription from kill_dead_topics");
                 i64_up_down_counter!(
                     "apollo_router_opened_subscriptions",
                     "Number of opened subscriptions",
@@ -907,7 +909,7 @@ where
     }
 
     fn force_delete(&mut self, topic: K) {
-        tracing::trace!("deleting subscription");
+        tracing::trace!("deleting subscription from force_delete");
         let sub = self.subscriptions.remove(&topic);
         if let Some(sub) = sub {
             i64_up_down_counter!(

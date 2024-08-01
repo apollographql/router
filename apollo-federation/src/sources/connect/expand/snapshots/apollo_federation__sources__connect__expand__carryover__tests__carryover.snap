@@ -2,7 +2,7 @@
 source: apollo-federation/src/sources/connect/expand/carryover.rs
 expression: schema.schema().serialize().to_string()
 ---
-schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY) @link(url: "https://specs.apollo.dev/tag/v0.3") @link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY) @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", for: SECURITY) @link(url: "https://specs.apollo.dev/policy/v0.1", for: SECURITY) @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom"]) {
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) @join__directive(graphs: [], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1"}) @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY) @link(url: "https://specs.apollo.dev/tag/v0.3") @link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY) @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", for: SECURITY) @link(url: "https://specs.apollo.dev/policy/v0.1", for: SECURITY) @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom"]) {
   query: Query
 }
 
@@ -19,6 +19,8 @@ directive @join__implements(graph: join__Graph!, interface: String!) repeatable 
 directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
 
 directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments!) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
 
 directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
 
@@ -44,6 +46,8 @@ enum link__Purpose {
 scalar link__Import
 
 scalar join__FieldSet
+
+scalar join__DirectiveArguments
 
 enum join__Graph {
   ONE @join__graph(name: "one", url: "none")

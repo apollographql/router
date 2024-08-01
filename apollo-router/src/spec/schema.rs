@@ -5,7 +5,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 
-use apollo_compiler::ast;
 use apollo_compiler::schema::Implementers;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
@@ -43,47 +42,45 @@ pub(crate) struct Schema {
 pub(crate) struct ApiSchema(pub(crate) ValidFederationSchema);
 
 impl Schema {
-    pub(crate) fn parse_ast(sdl: &str) -> Result<ast::Document, SchemaError> {
+    pub(crate) fn parse(raw_sdl: &str, config: &Configuration) -> Result<Self, SchemaError> {
+        Self::parse_arc(raw_sdl.to_owned().into(), config)
+    }
+
+    pub(crate) fn parse_arc(
+        raw_sdl: Arc<String>,
+        config: &Configuration,
+    ) -> Result<Self, SchemaError> {
+        let start = Instant::now();
+
+        let expansion = expand_connectors(&raw_sdl).map_err(SchemaError::Connector)?;
+        let (raw_sdl, api_schema, connectors) = match expansion {
+            ExpansionResult::Expanded {
+                raw_sdl,
+                api_schema: api,
+                connectors,
+            } => (
+                Arc::new(raw_sdl),
+                Some(ValidFederationSchema::new(api).map_err(SchemaError::Connector)?),
+                Some(apply_config(config, connectors)),
+            ),
+            ExpansionResult::Unchanged => (raw_sdl, None, None),
+        };
+
         let mut parser = apollo_compiler::parser::Parser::new();
-        let result = parser.parse_ast(sdl, "schema.graphql");
+        let result = parser.parse_ast(raw_sdl.as_ref(), "schema.graphql");
 
         // Trace log recursion limit data
         let recursion_limit = parser.recursion_reached();
         tracing::trace!(?recursion_limit, "recursion limit data");
 
-        result.map_err(|invalid| {
-            SchemaError::Parse(ParseErrors {
-                errors: invalid.errors,
-            })
-        })
-    }
-
-    pub(crate) fn parse_compiler_schema(
-        sdl: &str,
-    ) -> Result<Valid<apollo_compiler::Schema>, SchemaError> {
-        Self::parse_ast(sdl)?
+        let definitions = result
+            .map_err(|invalid| {
+                SchemaError::Parse(ParseErrors {
+                    errors: invalid.errors,
+                })
+            })?
             .to_schema_validate()
-            .map_err(|errors| SchemaError::Validate(errors.into()))
-    }
-
-    pub(crate) fn parse(sdl: &str, config: &Configuration) -> Result<Self, SchemaError> {
-        let start = Instant::now();
-
-        let expansion = expand_connectors(sdl).map_err(SchemaError::Connector)?;
-        let (sdl, api_schema, connectors) = match expansion {
-            ExpansionResult::Expanded {
-                ref raw_sdl,
-                api_schema: api,
-                connectors,
-            } => (
-                raw_sdl.as_str(),
-                Some(ValidFederationSchema::new(api).map_err(SchemaError::Connector)?),
-                Some(apply_config(config, connectors)),
-            ),
-            ExpansionResult::Unchanged => (sdl, None, None),
-        };
-
-        let definitions = Self::parse_compiler_schema(sdl)?;
+            .map_err(|errors| SchemaError::Validate(errors.into()))?;
 
         let mut subgraphs = HashMap::new();
         // TODO: error if not found?
@@ -143,7 +140,7 @@ impl Schema {
         let implementers_map = definitions.implementers_map();
         let supergraph = Supergraph::from_schema(definitions)?;
 
-        let schema_id = Arc::new(Schema::schema_id(sdl));
+        let schema_id = Arc::new(Schema::schema_id(&raw_sdl));
 
         let api_schema = api_schema.map(Ok).unwrap_or_else(|| {
             supergraph
@@ -159,7 +156,7 @@ impl Schema {
         })?;
 
         Ok(Schema {
-            raw_sdl: Arc::new(sdl.to_owned()),
+            raw_sdl,
             supergraph,
             subgraphs,
             implementers_map,

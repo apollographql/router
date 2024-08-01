@@ -28,6 +28,7 @@ use crate::router_factory::YamlRouterFactory;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router::Request;
 use crate::services::supergraph;
+use crate::Configuration;
 
 pub(crate) mod mock_api {
     struct PathTemplate(String);
@@ -1028,12 +1029,13 @@ async fn execute(
     } else {
         common_config
     };
+    let config: Configuration = serde_json_bytes::from_value(config).unwrap();
 
     let router_creator = factory
         .create(
             false,
-            Arc::new(serde_json_bytes::from_value(config).unwrap()),
-            schema.to_string(),
+            Arc::new(config.clone()),
+            Arc::new(crate::spec::Schema::parse(schema, &config).unwrap()),
             None,
             None,
         )

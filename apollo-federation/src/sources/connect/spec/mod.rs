@@ -18,7 +18,9 @@ mod directives;
 pub(crate) mod schema;
 mod type_and_directive_specifications;
 
+use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
+use apollo_compiler::ast::Value;
 use apollo_compiler::name;
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
@@ -111,6 +113,33 @@ impl ConnectSpecDefinition {
     pub(crate) fn connect_directive_name(link: &Link) -> Name {
         link.directive_name_in_schema(&CONNECT_DIRECTIVE_NAME_IN_SPEC)
     }
+
+    pub(crate) fn join_directive_application(&self) -> Directive {
+        Directive {
+            name: name!(join__directive),
+            arguments: vec![
+                Argument {
+                    name: name!("graphs"),
+                    value: Value::List(vec![]).into(),
+                }
+                .into(),
+                Argument {
+                    name: name!("name"),
+                    value: Value::String("link".to_string()).into(),
+                }
+                .into(),
+                Argument {
+                    name: name!("args"),
+                    value: Value::Object(vec![(
+                        name!("url"),
+                        Value::String(self.url.to_string()).into(),
+                    )])
+                    .into(),
+                }
+                .into(),
+            ],
+        }
+    }
 }
 
 impl SpecDefinition for ConnectSpecDefinition {
@@ -134,4 +163,9 @@ lazy_static! {
 
         definitions
     };
+
+    pub(crate) static ref LATEST_CONNECT_VERSION: ConnectSpecDefinition = ConnectSpecDefinition::new(
+        Version { major: 0, minor: 1 },
+        Some(Version { major: 2, minor: 8 }),
+    );
 }

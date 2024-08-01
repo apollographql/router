@@ -360,13 +360,17 @@ async fn entity_cache() -> Result<(), BoxError> {
         .configuration_json(json!({
             "preview_entity_cache": {
                 "enabled": true,
-                "redis": {
-                    "urls": ["redis://127.0.0.1:6379"],
-                    "ttl": "2s"
+                "invalidation": {
+                    "listen": "127.0.0.1:4000",
+                    "path": "/invalidation"
                 },
                 "subgraph": {
                     "all": {
-                        "enabled": false
+                        "enabled": false,
+                        "redis": {
+                            "urls": ["redis://127.0.0.1:6379"],
+                            "ttl": "2s"
+                        },
                     },
                     "subgraphs": {
                         "products": {
@@ -470,13 +474,17 @@ async fn entity_cache() -> Result<(), BoxError> {
         .configuration_json(json!({
             "preview_entity_cache": {
                 "enabled": true,
-                "redis": {
-                    "urls": ["redis://127.0.0.1:6379"],
-                    "ttl": "2s"
+                "invalidation": {
+                    "listen": "127.0.0.1:4000",
+                    "path": "/invalidation"
                 },
                 "subgraph": {
                     "all": {
                         "enabled": false,
+                        "redis": {
+                            "urls": ["redis://127.0.0.1:6379"],
+                            "ttl": "2s"
+                        },
                     },
                     "subgraphs": {
                         "products": {
@@ -673,13 +681,17 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
         .configuration_json(json!({
             "preview_entity_cache": {
                 "enabled": true,
-                "redis": {
-                    "urls": ["redis://127.0.0.1:6379"],
-                    "ttl": "2s"
+                "invalidation": {
+                    "listen": "127.0.0.1:4000",
+                    "path": "/invalidation"
                 },
                 "subgraph": {
                     "all": {
                         "enabled": false,
+                        "redis": {
+                            "urls": ["redis://127.0.0.1:6379"],
+                            "ttl": "2s"
+                        },
                     },
                     "subgraphs": {
                         "products": {
