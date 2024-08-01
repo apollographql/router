@@ -200,7 +200,7 @@ router-bridge = "=0.5.27+v2.8.1"
 rust-embed = { version = "8.4.0", features = ["include-exclude"] }
 rustls = "0.21.12"
 rustls-native-certs = "0.6.3"
-rustls-pemfile = "1.0.4"
+rustls-pemfile = "2.0.0"
 schemars.workspace = true
 shellexpand = "3.1.0"
 sha2 = "0.10.8"
