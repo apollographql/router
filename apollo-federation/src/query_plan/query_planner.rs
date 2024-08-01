@@ -2,6 +2,7 @@ use std::cell::Cell;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
+use apollo_compiler::collections::HashMap;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::validation::Valid;
@@ -16,7 +17,6 @@ use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::operation::normalize_operation;
 use crate::operation::NamedFragments;
 use crate::operation::Operation;
-use crate::operation::RebasedFragments;
 use crate::operation::SelectionSet;
 use crate::query_graph::build_federated_query_graph;
 use crate::query_graph::path_tree::OpPathTree;
@@ -46,37 +46,6 @@ use crate::schema::ValidFederationSchema;
 use crate::utils::logging::snapshot;
 use crate::ApiSchemaOptions;
 use crate::Supergraph;
-
-pub(crate) enum SubgraphOperationCompression {
-    ReuseFragments(RebasedFragments),
-    GenerateFragments,
-    Disabled,
-}
-
-impl SubgraphOperationCompression {
-    /// Compress a subgraph operation.
-    pub(crate) fn compress(
-        &mut self,
-        subgraph_name: &Arc<str>,
-        subgraph_schema: &ValidFederationSchema,
-        operation: Operation,
-    ) -> Result<Operation, FederationError> {
-        match self {
-            Self::ReuseFragments(fragments) => {
-                let rebased = fragments.for_subgraph(Arc::clone(subgraph_name), subgraph_schema);
-                let mut operation = operation;
-                operation.reuse_fragments(rebased)?;
-                Ok(operation)
-            }
-            Self::GenerateFragments => {
-                let mut operation = operation;
-                operation.generate_fragments()?;
-                Ok(operation)
-            }
-            Self::Disabled => Ok(operation),
-        }
-    }
-}
 
 #[derive(Debug, Clone, Hash)]
 pub struct QueryPlannerConfig {
@@ -803,6 +772,67 @@ fn compute_plan_for_defer_conditionals(
         message: String::from("@defer is currently not supported"),
     }
     .into())
+}
+
+/// Tracks fragments from the original operation, along with versions rebased on other subgraphs.
+pub(crate) struct RebasedFragments {
+    original_fragments: NamedFragments,
+    /// Map key: subgraph name
+    rebased_fragments: Arc<HashMap<Arc<str>, NamedFragments>>,
+}
+
+impl RebasedFragments {
+    fn new(fragments: NamedFragments) -> Self {
+        Self {
+            original_fragments: fragments,
+            rebased_fragments: Default::default(),
+        }
+    }
+
+    fn for_subgraph(
+        &mut self,
+        subgraph_name: impl Into<Arc<str>>,
+        subgraph_schema: &ValidFederationSchema,
+    ) -> &NamedFragments {
+        Arc::make_mut(&mut self.rebased_fragments)
+            .entry(subgraph_name.into())
+            .or_insert_with(|| {
+                self.original_fragments
+                    .rebase_on(subgraph_schema)
+                    .unwrap_or_default()
+            })
+    }
+}
+
+pub(crate) enum SubgraphOperationCompression {
+    ReuseFragments(RebasedFragments),
+    GenerateFragments,
+    Disabled,
+}
+
+impl SubgraphOperationCompression {
+    /// Compress a subgraph operation.
+    pub(crate) fn compress(
+        &mut self,
+        subgraph_name: &Arc<str>,
+        subgraph_schema: &ValidFederationSchema,
+        operation: Operation,
+    ) -> Result<Operation, FederationError> {
+        match self {
+            Self::ReuseFragments(fragments) => {
+                let rebased = fragments.for_subgraph(Arc::clone(subgraph_name), subgraph_schema);
+                let mut operation = operation;
+                operation.reuse_fragments(rebased)?;
+                Ok(operation)
+            }
+            Self::GenerateFragments => {
+                let mut operation = operation;
+                operation.generate_fragments()?;
+                Ok(operation)
+            }
+            Self::Disabled => Ok(operation),
+        }
+    }
 }
 
 #[cfg(test)]

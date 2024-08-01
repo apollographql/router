@@ -3556,55 +3556,6 @@ impl NamedFragments {
     }
 }
 
-/// Tracks fragments from the original operation, along with versions rebased on other subgraphs.
-// XXX(@goto-bus-stop): improve/replace/reduce this structure. My notes:
-// This gets cloned only in recursive query planning. Then whenever `.for_subgraph()` ends up being
-// called, it always clones the `rebased_fragments` map. `.for_subgraph()` is called whenever the
-// plan is turned into plan nodes by the FetchDependencyGraphToQueryPlanProcessor.
-// This suggests that we can remove the Arc wrapper for `rebased_fragments` because we end up cloning the inner data anyways.
-//
-// This data structure is also used as an argument in several `crate::operation` functions. This
-// seems wrong. The only useful method on this structure is `.for_subgraph()`, which is only used
-// by the fetch dependency graph when creating plan nodes. That necessarily implies that all other
-// uses of this structure only access `.original_fragments`. In that case, we should pass around
-// the `NamedFragments` itself, not this wrapper structure.
-//
-// `.for_subgraph()` also requires a mutable reference to fill in the data. But
-// `.rebased_fragments` is really a cache, so requiring a mutable reference isn't an ideal API.
-// Conceptually you are just computing something and getting the result. Perhaps we can use a
-// concurrent map, or prepopulate the HashMap for all subgraphs, or precompute the whole thing for
-// all subgraphs (or precompute a hash map of subgraph names to OnceLocks).
-#[derive(Clone)]
-pub(crate) struct RebasedFragments {
-    pub(crate) original_fragments: NamedFragments,
-    // JS PORT NOTE: In JS implementation values were optional
-    /// Map key: subgraph name
-    rebased_fragments: Arc<HashMap<Arc<str>, NamedFragments>>,
-}
-
-impl RebasedFragments {
-    pub(crate) fn new(fragments: NamedFragments) -> Self {
-        Self {
-            original_fragments: fragments,
-            rebased_fragments: Arc::new(HashMap::new()),
-        }
-    }
-
-    pub(crate) fn for_subgraph(
-        &mut self,
-        subgraph_name: impl Into<Arc<str>>,
-        subgraph_schema: &ValidFederationSchema,
-    ) -> &NamedFragments {
-        Arc::make_mut(&mut self.rebased_fragments)
-            .entry(subgraph_name.into())
-            .or_insert_with(|| {
-                self.original_fragments
-                    .rebase_on(subgraph_schema)
-                    .unwrap_or_default()
-            })
-    }
-}
-
 // Collect used variables from operation types.
 
 pub(crate) struct VariableCollector<'s> {
