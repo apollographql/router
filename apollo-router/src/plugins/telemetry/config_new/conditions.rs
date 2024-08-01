@@ -752,7 +752,7 @@ mod test {
 
         assert_eq!(exists(Req).req(Some(1i64)), Some(true));
         assert_eq!(exists(Req).req(None), Some(false));
-        assert_eq!(exists(Resp).resp(None), false);
+        assert_eq!(!exists(Resp).resp(None));
 
         assert_eq!(all(eq(1, 1), eq(1, Req)).req(Some(1i64)), Some(true));
         assert_eq!(all(eq(1, 1), eq(1, Req)).req(None), None);
