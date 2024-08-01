@@ -104,23 +104,15 @@ impl FetchService {
             ..
         } = request;
 
-        let FetchNode {
-            operation,
-            service_name,
-            requires,
-            output_rewrites,
-            ..
-        } = fetch_node;
-
         let paths = variables.inverted_paths.clone();
-        let operation = operation.as_parsed().cloned();
+        let operation = fetch_node.operation.as_parsed().cloned();
 
         Box::pin(async move {
             let (_parts, response) = connector_service_factory
                 .create()
                 .oneshot(
                     ConnectRequest::builder()
-                        .service_name(service_name.clone())
+                        .service_name(fetch_node.service_name.clone())
                         .context(context)
                         .operation(operation?.clone())
                         .supergraph_request(supergraph_request)
@@ -131,15 +123,8 @@ impl FetchService {
                 .response
                 .into_parts();
 
-            let (value, errors) = FetchNode::response_at_path(
-                &schema,
-                &current_dir,
-                paths,
-                response,
-                &requires,
-                &output_rewrites,
-                &service_name,
-            );
+            let (value, errors) =
+                fetch_node.response_at_path(&schema, &current_dir, paths, response);
             Ok((value, errors))
         })
     }
@@ -159,12 +144,10 @@ impl FetchService {
         } = request;
 
         let FetchNode {
-            service_name,
-            operation,
-            operation_kind,
-            operation_name,
-            requires,
-            output_rewrites,
+            ref service_name,
+            ref operation,
+            ref operation_kind,
+            ref operation_name,
             ..
         } = fetch_node;
 
@@ -178,7 +161,7 @@ impl FetchService {
         let alias_query_string; // this exists outside the if block to allow the as_str() to be longer lived
         let aliased_operation = if let Some(ctx_arg) = &variables.contextual_arguments {
             if let Some(subgraph_schema) = subgraph_schemas.get(&service_name.to_string()) {
-                match build_operation_with_aliasing(&operation, ctx_arg, subgraph_schema) {
+                match build_operation_with_aliasing(operation, ctx_arg, subgraph_schema) {
                     Ok(op) => {
                         alias_query_string = op.serialize().no_indent().to_string();
                         alias_query_string.as_str()
@@ -226,25 +209,24 @@ impl FetchService {
                     .expect("it won't fail because the url is correct and already checked; qed"),
             )
             .subgraph_name(service_name.to_string())
-            .operation_kind(operation_kind)
+            .operation_kind(*operation_kind)
             .context(context.clone())
             .build();
         subgraph_request.query_hash = fetch_node.schema_aware_hash.clone();
         subgraph_request.authorization = fetch_node.authorization.clone();
         Box::pin(async move {
-            Ok(FetchNode::subgraph_fetch(
-                service,
-                subgraph_request,
-                &sns,
-                &current_dir,
-                &requires,
-                &output_rewrites,
-                &schema,
-                variables.inverted_paths,
-                &aqs,
-                variables.variables,
-            )
-            .await)
+            Ok(fetch_node
+                .subgraph_fetch(
+                    service,
+                    subgraph_request,
+                    &sns,
+                    &current_dir,
+                    &schema,
+                    variables.inverted_paths,
+                    &aqs,
+                    variables.variables,
+                )
+                .await)
         })
     }
 }
