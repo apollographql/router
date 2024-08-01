@@ -403,7 +403,7 @@ impl FragmentSpread {
             &self.schema,
         ) {
             Ok(FragmentSpread::new(FragmentSpreadData::from_fragment(
-                &named_fragment,
+                named_fragment,
                 &self.directives,
             )))
         } else {
@@ -500,7 +500,7 @@ impl FragmentSpreadSelection {
         }
 
         let spread = FragmentSpread::new(FragmentSpreadData::from_fragment(
-            &named_fragment,
+            named_fragment,
             &self.spread.directives,
         ));
         Ok(FragmentSpreadSelection {

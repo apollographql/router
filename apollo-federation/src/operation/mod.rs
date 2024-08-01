@@ -2027,7 +2027,7 @@ impl SelectionSet {
                     // if we don't expand fragments, we need to normalize it
                     let normalized_fragment_spread = FragmentSpreadSelection::from_fragment_spread(
                         fragment_spread_selection,
-                        &fragment,
+                        fragment,
                     )?;
                     destination.push(Selection::FragmentSpread(Arc::new(
                         normalized_fragment_spread,
