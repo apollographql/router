@@ -3,6 +3,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
+use super::Stage;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::Context;
@@ -57,26 +58,36 @@ where
 {
     pub(crate) fn evaluate_request(&mut self, request: &T::Request) -> Option<bool> {
         match self {
-            Condition::Eq(eq) => match (eq[0].on_request(request), eq[1].on_request(request)) {
-                (None, None) => None,
-                (None, Some(right)) => {
-                    eq[1] = SelectorOrValue::Value(right.into());
-                    None
+            Condition::Eq(eq) => {
+                if !eq[0].is_active(Stage::Request) && !eq[1].is_active(Stage::Request) {
+                    // Nothing to compute here
+                    return None;
                 }
-                (Some(left), None) => {
-                    eq[0] = SelectorOrValue::Value(left.into());
-                    None
-                }
-                (Some(left), Some(right)) => {
-                    if left == right {
-                        *self = Condition::True;
-                        Some(true)
-                    } else {
-                        Some(false)
+                match (eq[0].on_request(request), eq[1].on_request(request)) {
+                    (None, None) => None,
+                    (None, Some(right)) => {
+                        eq[1] = SelectorOrValue::Value(right.into());
+                        None
+                    }
+                    (Some(left), None) => {
+                        eq[0] = SelectorOrValue::Value(left.into());
+                        None
+                    }
+                    (Some(left), Some(right)) => {
+                        if left == right {
+                            *self = Condition::True;
+                            Some(true)
+                        } else {
+                            Some(false)
+                        }
                     }
                 }
-            },
+            }
             Condition::Gt(gt) => {
+                if !gt[0].is_active(Stage::Request) && !gt[1].is_active(Stage::Request) {
+                    // Nothing to compute here
+                    return None;
+                }
                 let left_att = gt[0].on_request(request).map(AttributeValue::from);
                 let right_att = gt[1].on_request(request).map(AttributeValue::from);
                 match (left_att, right_att) {
@@ -101,6 +112,10 @@ where
                 }
             }
             Condition::Lt(lt) => {
+                if !lt[0].is_active(Stage::Request) && !lt[1].is_active(Stage::Request) {
+                    // Nothing to compute here
+                    return None;
+                }
                 let left_att = lt[0].on_request(request).map(AttributeValue::from);
                 let right_att = lt[1].on_request(request).map(AttributeValue::from);
                 match (left_att, right_att) {
@@ -125,9 +140,13 @@ where
                 }
             }
             Condition::Exists(exist) => {
-                if exist.on_request(request).is_some() {
-                    *self = Condition::True;
-                    Some(true)
+                if exist.is_active(Stage::Request) {
+                    if exist.on_request(request).is_some() {
+                        *self = Condition::True;
+                        Some(true)
+                    } else {
+                        Some(false)
+                    }
                 } else {
                     None
                 }
@@ -309,6 +328,7 @@ where
             Condition::False => false,
         }
     }
+
     pub(crate) fn evaluate_drop(&self) -> Option<bool> {
         match self {
             Condition::Eq(eq) => match (eq[0].on_drop(), eq[1].on_drop()) {

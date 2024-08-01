@@ -51,6 +51,7 @@ pub(crate) trait Selectors {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) enum Stage {
     Request,
     Response,
