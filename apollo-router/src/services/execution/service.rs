@@ -291,7 +291,6 @@ impl ExecutionService {
             && response.data.is_none()
             && response.errors.is_empty()
         {
-            // todo: empty signature in this case?
             return response.into();
         }
 
