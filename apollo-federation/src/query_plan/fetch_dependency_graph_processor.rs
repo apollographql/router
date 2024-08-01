@@ -6,8 +6,8 @@ use apollo_compiler::executable::VariableDefinition;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 
+use super::query_planner::SubgraphOperationCompression;
 use crate::error::FederationError;
-use crate::operation::RebasedFragments;
 use crate::operation::SelectionSet;
 use crate::query_graph::QueryGraph;
 use crate::query_plan::conditions::Conditions;
@@ -48,7 +48,7 @@ const PIPELINING_COST: QueryPlanCost = 100.0;
 pub(crate) struct FetchDependencyGraphToQueryPlanProcessor {
     variable_definitions: Arc<Vec<Node<VariableDefinition>>>,
     operation_directives: Arc<DirectiveList>,
-    fragments: Option<RebasedFragments>,
+    operation_compression: SubgraphOperationCompression,
     operation_name: Option<Name>,
     assigned_defer_labels: Option<HashSet<String>>,
     counter: u32,
@@ -246,14 +246,14 @@ impl FetchDependencyGraphToQueryPlanProcessor {
     pub(crate) fn new(
         variable_definitions: Arc<Vec<Node<VariableDefinition>>>,
         operation_directives: Arc<DirectiveList>,
-        fragments: Option<RebasedFragments>,
+        operation_compression: SubgraphOperationCompression,
         operation_name: Option<Name>,
         assigned_defer_labels: Option<HashSet<String>>,
     ) -> Self {
         Self {
             variable_definitions,
             operation_directives,
-            fragments,
+            operation_compression,
             operation_name,
             assigned_defer_labels,
             counter: 0,
@@ -282,7 +282,7 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
             handled_conditions,
             &self.variable_definitions,
             &self.operation_directives,
-            self.fragments.as_mut(),
+            &mut self.operation_compression,
             op_name,
         )
     }

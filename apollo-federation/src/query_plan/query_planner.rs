@@ -15,6 +15,7 @@ use crate::error::SingleFederationError;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::operation::normalize_operation;
 use crate::operation::NamedFragments;
+use crate::operation::Operation;
 use crate::operation::RebasedFragments;
 use crate::operation::SelectionSet;
 use crate::query_graph::build_federated_query_graph;
@@ -45,6 +46,37 @@ use crate::schema::ValidFederationSchema;
 use crate::utils::logging::snapshot;
 use crate::ApiSchemaOptions;
 use crate::Supergraph;
+
+pub(crate) enum SubgraphOperationCompression {
+    ReuseFragments(RebasedFragments),
+    GenerateFragments,
+    Disabled,
+}
+
+impl SubgraphOperationCompression {
+    /// Compress a subgraph operation.
+    pub(crate) fn compress(
+        &mut self,
+        subgraph_name: &Arc<str>,
+        subgraph_schema: &ValidFederationSchema,
+        operation: Operation,
+    ) -> Result<Operation, FederationError> {
+        match self {
+            Self::ReuseFragments(fragments) => {
+                let rebased = fragments.for_subgraph(Arc::clone(subgraph_name), subgraph_schema);
+                let mut operation = operation;
+                operation.reuse_fragments(rebased)?;
+                Ok(operation)
+            }
+            Self::GenerateFragments => {
+                let mut operation = operation;
+                operation.generate_fragments()?;
+                Ok(operation)
+            }
+            Self::Disabled => Ok(operation),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Hash)]
 pub struct QueryPlannerConfig {
@@ -368,7 +400,6 @@ impl QueryPlanner {
             }
         }
 
-        let reuse_query_fragments = self.config.reuse_query_fragments;
         let normalized_operation = normalize_operation(
             operation,
             NamedFragments::new(&document.fragments, &self.api_schema),
@@ -433,23 +464,25 @@ impl QueryPlanner {
             );
         };
 
-        let rebased_fragments = if reuse_query_fragments {
+        let operation_compression = if self.config.generate_query_fragments {
+            SubgraphOperationCompression::GenerateFragments
+        } else if self.config.reuse_query_fragments {
             // For all subgraph fetches we query `__typename` on every abstract types (see
             // `FetchDependencyGraphNode::to_plan_node`) so if we want to have a chance to reuse
             // fragments, we should make sure those fragments also query `__typename` for every
             // abstract type.
-            Some(RebasedFragments::new(
+            SubgraphOperationCompression::ReuseFragments(RebasedFragments::new(
                 normalized_operation
                     .named_fragments
                     .add_typename_field_for_abstract_types_in_named_fragments()?,
             ))
         } else {
-            None
+            SubgraphOperationCompression::Disabled
         };
         let mut processor = FetchDependencyGraphToQueryPlanProcessor::new(
             normalized_operation.variables.clone(),
             normalized_operation.directives.clone(),
-            rebased_fragments,
+            operation_compression,
             operation.name.clone(),
             assigned_defer_labels,
         );

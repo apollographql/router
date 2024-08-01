@@ -1601,7 +1601,9 @@ impl Operation {
                                 Arc::clone(frag.get()),
                             ))?;
                         }
-                        SelectionValue::InlineFragment(frag) if !Self::is_worth_using(&frag.get().selection_set) => {
+                        SelectionValue::InlineFragment(frag)
+                            if !Self::is_worth_using(&frag.get().selection_set) =>
+                        {
                             new_selection_set.add_local_selection(&Selection::InlineFragment(
                                 Arc::clone(frag.get()),
                             ))?;

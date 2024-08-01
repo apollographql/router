@@ -29,6 +29,7 @@ use petgraph::visit::EdgeRef;
 use petgraph::visit::IntoNodeReferences;
 use serde::Serialize;
 
+use super::query_planner::SubgraphOperationCompression;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::graphql_definition::DeferDirectiveArguments;
@@ -39,7 +40,6 @@ use crate::operation::InlineFragment;
 use crate::operation::InlineFragmentData;
 use crate::operation::InlineFragmentSelection;
 use crate::operation::Operation;
-use crate::operation::RebasedFragments;
 use crate::operation::Selection;
 use crate::operation::SelectionId;
 use crate::operation::SelectionMap;
@@ -2321,7 +2321,7 @@ impl FetchDependencyGraphNode {
         handled_conditions: &Conditions,
         variable_definitions: &[Node<VariableDefinition>],
         operation_directives: &Arc<DirectiveList>,
-        fragments: Option<&mut RebasedFragments>,
+        operation_compression: &mut SubgraphOperationCompression,
         operation_name: Option<Name>,
     ) -> Result<Option<super::PlanNode>, FederationError> {
         if self.selection_set.selection_set.selections.is_empty() {
@@ -2364,7 +2364,7 @@ impl FetchDependencyGraphNode {
             list
         };
 
-        let mut operation = if self.is_entity_fetch {
+        let operation = if self.is_entity_fetch {
             operation_for_entities_fetch(
                 subgraph_schema,
                 selection,
@@ -2382,14 +2382,8 @@ impl FetchDependencyGraphNode {
                 &operation_name,
             )?
         };
-        if let Some(fragments) = fragments
-            .map(|rebased| rebased.for_subgraph(self.subgraph_name.clone(), subgraph_schema))
-        {
-            operation.reuse_fragments(fragments)?;
-        } else {
-            operation.generate_fragments()?;
-        }
-
+        let operation =
+            operation_compression.compress(&self.subgraph_name, subgraph_schema, operation)?;
         let operation_document = operation.try_into()?;
 
         let node = super::PlanNode::Fetch(Box::new(super::FetchNode {
