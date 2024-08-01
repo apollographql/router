@@ -1,10 +1,8 @@
 #![allow(missing_docs)] // FIXME
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde_json_bytes::Value;
-use tokio::sync::broadcast;
 use tower::BoxError;
 
 use crate::error::Error;
@@ -23,7 +21,6 @@ pub(crate) struct Request {
     pub(crate) supergraph_request: Arc<http::Request<GraphQLRequest>>,
     pub(crate) variables: Variables,
     pub(crate) current_dir: Path,
-    pub(crate) deferred_fetches: HashMap<String, broadcast::Sender<(Value, Vec<Error>)>>,
 }
 
 pub(crate) type Response = (Value, Vec<Error>);
@@ -40,7 +37,6 @@ impl Request {
         supergraph_request: Arc<http::Request<GraphQLRequest>>,
         variables: Variables,
         current_dir: Path,
-        deferred_fetches: HashMap<String, broadcast::Sender<(Value, Vec<Error>)>>,
     ) -> Self {
         Self {
             context,
@@ -48,7 +44,6 @@ impl Request {
             supergraph_request,
             variables,
             current_dir,
-            deferred_fetches,
         }
     }
 }

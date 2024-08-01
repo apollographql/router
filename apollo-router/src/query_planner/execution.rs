@@ -24,6 +24,7 @@ use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::plugins::subscription::SubscriptionConfig;
+use crate::query_planner::fetch::FetchNode;
 use crate::query_planner::fetch::Variables;
 use crate::query_planner::FlattenNode;
 use crate::query_planner::Primary;
@@ -252,7 +253,6 @@ impl PlanNode {
                                     .supergraph_request(parameters.supergraph_request.clone())
                                     .variables(variables)
                                     .current_dir(current_dir.clone())
-                                    .deferred_fetches(parameters.deferred_fetches.clone())
                                     .build();
                                 (value, errors) = match service.oneshot(request).await {
                                     Ok(r) => r,
@@ -264,6 +264,13 @@ impl PlanNode {
                                             .build()],
                                     ),
                                 };
+                                FetchNode::deferred_fetches(
+                                    current_dir,
+                                    &fetch_node.id,
+                                    parameters.deferred_fetches,
+                                    &value,
+                                    &errors,
+                                );
                             }
                             None => {
                                 value = Value::Object(Object::default());

@@ -98,7 +98,6 @@ impl FetchService {
         let FetchRequest {
             fetch_node,
             supergraph_request,
-            deferred_fetches,
             variables,
             context,
             current_dir,
@@ -110,7 +109,6 @@ impl FetchService {
             service_name,
             requires,
             output_rewrites,
-            id,
             ..
         } = fetch_node;
 
@@ -142,7 +140,6 @@ impl FetchService {
                 &output_rewrites,
                 &service_name,
             );
-            FetchNode::deferred_fetches(&current_dir, id, &deferred_fetches, &value, &errors);
             Ok((value, errors))
         })
     }
@@ -156,7 +153,6 @@ impl FetchService {
         let FetchRequest {
             fetch_node,
             supergraph_request,
-            deferred_fetches,
             variables,
             current_dir,
             context,
@@ -169,7 +165,6 @@ impl FetchService {
             operation_name,
             requires,
             output_rewrites,
-            id,
             ..
         } = fetch_node;
 
@@ -210,7 +205,6 @@ impl FetchService {
         let aqs = aliased_operation.to_string(); // TODO
         let sns = service_name.clone();
         let current_dir = current_dir.clone();
-        let deferred_fetches = deferred_fetches.clone();
         let service = subgraph_service_factory
             .create(&sns)
             .expect("we already checked that the service exists during planning; qed");
@@ -247,8 +241,6 @@ impl FetchService {
                 &output_rewrites,
                 &schema,
                 variables.inverted_paths,
-                id,
-                &deferred_fetches,
                 &aqs,
                 variables.variables,
             )
