@@ -31,7 +31,7 @@ expression: response
               "operationKind": "query",
               "operationName": "QueryUnion__Subgraph1__0",
               "outputRewrites": null,
-              "schemaAwareHash": "b9124cd1daa6e8347175ffe2108670a31c73cbc983e7812ee39f415235541005",
+              "schemaAwareHash": "b16b2cfb58581d40a2fed656dbd4453230bdc1d4a02de3dcfbba44bd31596982",
               "serviceName": "Subgraph1",
               "variableUsages": []
             },
@@ -80,7 +80,7 @@ expression: response
                         "typeCondition": "V"
                       }
                     ],
-                    "schemaAwareHash": "c50ca82d402a330c1b35a6d76332094c40b00d6dec6f6b2a9b0a32ced68f4e95",
+                    "schemaAwareHash": "f2c8b8e0f780b9b27b0150db8a8499f1e18799a16955f54f5300b02883320b0f",
                     "serviceName": "Subgraph1",
                     "variableUsages": [
                       "contextualArgument_1_1"
@@ -134,7 +134,7 @@ expression: response
                         "typeCondition": "V"
                       }
                     ],
-                    "schemaAwareHash": "ec99886497fee9b4f13565e19cadb13ae85c83de93acb53f298944b7a29e630e",
+                    "schemaAwareHash": "3cda39493e006fdba051bb1e1dfa442ec11481730b9a1ae38bf2ea6be9f65d28",
                     "serviceName": "Subgraph1",
                     "variableUsages": [
                       "contextualArgument_1_1"

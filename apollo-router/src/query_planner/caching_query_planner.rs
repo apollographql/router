@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::hash::Hash;
+use std::hash::Hasher;
 use std::ops::Deref;
 use std::sync::Arc;
 use std::task;
@@ -12,9 +13,7 @@ use rand::seq::SliceRandom;
 use rand::thread_rng;
 use router_bridge::planner::PlanOptions;
 use router_bridge::planner::Planner;
-use router_bridge::planner::QueryPlannerConfig;
 use router_bridge::planner::UsageReporting;
-use serde::Serialize;
 use sha2::Digest;
 use sha2::Sha256;
 use tower::BoxError;
@@ -54,15 +53,6 @@ pub(crate) type InMemoryCachePlanner =
     InMemoryCache<CachingQueryKey, Result<QueryPlannerContent, Arc<QueryPlannerError>>>;
 pub(crate) const APOLLO_OPERATION_ID: &str = "apollo_operation_id";
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize)]
-pub(crate) enum ConfigMode {
-    //FIXME: add the Rust planner structure once it is hashable and serializable,
-    // for now use the JS config as it expected to be identical to the Rust one
-    Rust(Arc<QueryPlannerConfig>),
-    Both(Arc<QueryPlannerConfig>),
-    Js(Arc<QueryPlannerConfig>),
-}
-
 /// A query planner wrapper that caches results.
 ///
 /// The query planner performs LRU caching.
@@ -76,7 +66,8 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
     subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     plugins: Arc<Plugins>,
     enable_authorization_directives: bool,
-    config_mode: ConfigMode,
+    experimental_reuse_query_plans: bool,
+    config_mode: Arc<QueryHash>,
     introspection: bool,
     legacy_introspection_caching: bool,
 }
@@ -123,17 +114,24 @@ where
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(configuration, &schema).unwrap_or(false);
 
-        let config_mode = match configuration.experimental_query_planner_mode {
+        let mut hasher = StructHasher::new();
+        match configuration.experimental_query_planner_mode {
             crate::configuration::QueryPlannerMode::New => {
-                ConfigMode::Rust(Arc::new(configuration.js_query_planner_config()))
+                "PLANNER-NEW".hash(&mut hasher);
+                configuration.rust_query_planner_config().hash(&mut hasher);
             }
             crate::configuration::QueryPlannerMode::Legacy => {
-                ConfigMode::Js(Arc::new(configuration.js_query_planner_config()))
+                "PLANNER-LEGACY".hash(&mut hasher);
+                configuration.js_query_planner_config().hash(&mut hasher);
             }
             crate::configuration::QueryPlannerMode::Both => {
-                ConfigMode::Both(Arc::new(configuration.js_query_planner_config()))
+                "PLANNER-BOTH".hash(&mut hasher);
+                configuration.js_query_planner_config().hash(&mut hasher);
+                configuration.rust_query_planner_config().hash(&mut hasher);
             }
         };
+        let config_mode = Arc::new(QueryHash(hasher.finalize()));
+
         Ok(Self {
             cache,
             delegate,
@@ -141,6 +139,10 @@ where
             subgraph_schemas,
             plugins: Arc::new(plugins),
             enable_authorization_directives,
+            experimental_reuse_query_plans: configuration
+                .supergraph
+                .query_planning
+                .experimental_reuse_query_plans,
             config_mode,
             introspection: configuration.supergraph.introspection,
             legacy_introspection_caching: configuration
@@ -195,7 +197,6 @@ where
                                 metadata,
                                 plan_options,
                                 config_mode: _,
-                                schema_id: _,
                                 introspection: _,
                             },
                             _,
@@ -283,20 +284,25 @@ where
             let caching_key = CachingQueryKey {
                 query: query.clone(),
                 operation: operation.clone(),
-                hash: doc.hash.clone(),
-                schema_id: Arc::clone(&self.schema.schema_id),
+                hash: if experimental_reuse_query_plans {
+                    CachingQueryHash::Reuse(doc.hash.clone())
+                } else {
+                    CachingQueryHash::DoNotReuse {
+                        query_hash: doc.hash.clone(),
+                        schema_hash: self.schema.hash.clone(),
+                    }
+                },
                 metadata,
                 plan_options,
                 config_mode: self.config_mode.clone(),
                 introspection: self.introspection,
             };
 
-            if experimental_reuse_query_plans {
-                // check if prewarming via seeing if the previous cache exists (aka a reloaded router); if reloading, try to reuse the
-                if let Some(ref previous_cache) = previous_cache {
-                    // if the query hash did not change with the schema update, we can reuse the previously cached entry
-                    if let Some(hash) = hash {
-                        if hash == doc.hash {
+            if let Some(warmup_hash) = hash {
+                if experimental_reuse_query_plans {
+                    if let Some(ref previous_cache) = previous_cache {
+                        // if the query hash did not change with the schema update, we can reuse the previously cached entry
+                        if warmup_hash.schema_aware_query_hash() == &*doc.hash {
                             if let Some(entry) =
                                 { previous_cache.lock().await.get(&caching_key).cloned() }
                             {
@@ -305,6 +311,8 @@ where
                                 continue;
                             }
                         }
+                    } else if warmup_hash.schema_aware_query_hash() == &*doc.hash {
+                        reused += 1;
                     }
                 }
             };
@@ -372,6 +380,13 @@ where
         }
 
         tracing::debug!("warmed up the query planner cache with {count} queries planned and {reused} queries reused");
+
+        u64_counter!(
+            "apollo.router.query.planning.warmup.reused",
+            "The number of query plans that were reused instead of regenerated during query planner warm up",
+            reused as u64,
+            query_plan_reuse_active = experimental_reuse_query_plans
+        );
     }
 }
 
@@ -480,8 +495,14 @@ where
         let caching_key = CachingQueryKey {
             query: request.query.clone(),
             operation: request.operation_name.to_owned(),
-            hash: doc.hash.clone(),
-            schema_id: Arc::clone(&self.schema.schema_id),
+            hash: if self.experimental_reuse_query_plans {
+                CachingQueryHash::Reuse(doc.hash.clone())
+            } else {
+                CachingQueryHash::DoNotReuse {
+                    query_hash: doc.hash.clone(),
+                    schema_hash: self.schema.hash.clone(),
+                }
+            },
             metadata,
             plan_options,
             config_mode: self.config_mode.clone(),
@@ -623,21 +644,20 @@ fn stats_report_key_hash(stats_report_key: &str) -> String {
     hex::encode(result)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct CachingQueryKey {
     pub(crate) query: String,
-    pub(crate) schema_id: Arc<String>,
     pub(crate) operation: Option<String>,
-    pub(crate) hash: Arc<QueryHash>,
+    pub(crate) hash: CachingQueryHash,
     pub(crate) metadata: CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
-    pub(crate) config_mode: ConfigMode,
+    pub(crate) config_mode: Arc<QueryHash>,
     pub(crate) introspection: bool,
 }
 
 // Update this key every time the cache key or the query plan format has to change.
 // When changed it MUST BE CALLED OUT PROMINENTLY IN THE CHANGELOG.
-const CACHE_KEY_VERSION: usize = 0;
+const CACHE_KEY_VERSION: usize = 1;
 const FEDERATION_VERSION: &str = std::env!("FEDERATION_VERSION");
 
 impl std::fmt::Display for CachingQueryKey {
@@ -646,33 +666,65 @@ impl std::fmt::Display for CachingQueryKey {
         hasher.update(self.operation.as_deref().unwrap_or("-"));
         let operation = hex::encode(hasher.finalize());
 
-        let mut hasher = Sha256::new();
-        hasher.update(serde_json::to_vec(&self.metadata).expect("serialization should not fail"));
-        hasher
-            .update(serde_json::to_vec(&self.plan_options).expect("serialization should not fail"));
-        hasher
-            .update(serde_json::to_vec(&self.config_mode).expect("serialization should not fail"));
-        hasher.update(&*self.schema_id);
-        hasher.update([self.introspection as u8]);
+        let mut hasher = StructHasher::new();
+        self.metadata.hash(&mut hasher);
+        self.plan_options.hash(&mut hasher);
+        self.config_mode.hash(&mut hasher);
+        self.introspection.hash(&mut hasher);
         let metadata = hex::encode(hasher.finalize());
 
         write!(
             f,
-            "plan:{}:{}:{}:{}:{}",
+            "plan:cache:{}:federation:{}:{}:opname:{}:metadata:{}",
             CACHE_KEY_VERSION, FEDERATION_VERSION, self.hash, operation, metadata,
         )
     }
 }
 
-impl Hash for CachingQueryKey {
+// TODO: this is an intermediate type to hold the query hash while query plan reuse is still experimental
+// this will be replaced by the schema aware query hash once the option is removed
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum CachingQueryHash {
+    Reuse(Arc<QueryHash>),
+    DoNotReuse {
+        query_hash: Arc<QueryHash>,
+        schema_hash: Arc<QueryHash>,
+    },
+}
+
+impl CachingQueryHash {
+    fn schema_aware_query_hash(&self) -> &QueryHash {
+        match self {
+            CachingQueryHash::Reuse(hash) => hash,
+            CachingQueryHash::DoNotReuse { query_hash, .. } => query_hash,
+        }
+    }
+}
+
+impl Hash for CachingQueryHash {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.schema_id.hash(state);
-        self.hash.0.hash(state);
-        self.operation.hash(state);
-        self.metadata.hash(state);
-        self.plan_options.hash(state);
-        self.config_mode.hash(state);
-        self.introspection.hash(state);
+        match self {
+            CachingQueryHash::Reuse(hash) => hash.hash(state),
+            CachingQueryHash::DoNotReuse {
+                schema_hash,
+                query_hash,
+            } => {
+                schema_hash.hash(state);
+                query_hash.hash(state);
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for CachingQueryHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CachingQueryHash::Reuse(hash) => write!(f, "query:{}", hash),
+            CachingQueryHash::DoNotReuse {
+                schema_hash,
+                query_hash,
+            } => write!(f, "schema:{}:query:{}", schema_hash, query_hash),
+        }
     }
 }
 
@@ -680,11 +732,37 @@ impl Hash for CachingQueryKey {
 pub(crate) struct WarmUpCachingQueryKey {
     pub(crate) query: String,
     pub(crate) operation: Option<String>,
-    pub(crate) hash: Option<Arc<QueryHash>>,
+    pub(crate) hash: Option<CachingQueryHash>,
     pub(crate) metadata: CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
-    pub(crate) config_mode: ConfigMode,
+    pub(crate) config_mode: Arc<QueryHash>,
     pub(crate) introspection: bool,
+}
+
+struct StructHasher {
+    hasher: Sha256,
+}
+
+impl StructHasher {
+    fn new() -> Self {
+        Self {
+            hasher: Sha256::new(),
+        }
+    }
+    fn finalize(self) -> Vec<u8> {
+        self.hasher.finalize().as_slice().into()
+    }
+}
+
+impl Hasher for StructHasher {
+    fn finish(&self) -> u64 {
+        unreachable!()
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        self.hasher.update(&[0xFF][..]);
+        self.hasher.update(bytes);
+    }
 }
 
 #[cfg(test)]

@@ -102,6 +102,8 @@ supergraph:
     experimental_reuse_query_plans: true
 ```
 
+To check if the Router deployment would benefit from this option, check the counter metric named `apollo.router.query.planning.warmup.reused` that indicates how many query plans were reused in warmup if its `query_plan_reuse_active` is true, or how many query plans would have been reused if the option was active, when `query_plan_reuse_active` is false.
+
 ## Caching automatic persisted queries (APQ)
 
 [Automatic Persisted Queries (**APQ**)](/apollo-server/performance/apq/) enable GraphQL clients to send a server the _hash_ of their query string, _instead of_ sending the query string itself. When query strings are very large, this can significantly reduce network usage.

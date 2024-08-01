@@ -26,7 +26,7 @@ async fn query_planner_cache() -> Result<(), BoxError> {
     // 2. run `docker compose up -d` and connect to the redis container by running `docker-compose exec redis /bin/bash`.
     // 3. Run the `redis-cli` command from the shell and start the redis `monitor` command.
     // 4. Run this test and yank the updated cache key from the redis logs.
-    let known_cache_key = "plan:0:v2.8.1:16385ebef77959fcdc520ad507eb1f7f7df28f1d54a0569e3adabcb4cd00d7ce:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:3106dfc3339d8c3f3020434024bff0f566a8be5995199954db5a7525a7d7e67a";
+    let known_cache_key = "plan:cache:1:federation:v2.8.1:schema:5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76:query:ff7e3b6ae2b7bd28b00641b22ff94aab8d18b6201a2d4598811d56d23a472460:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:383ebaca21536f16f63ba5ba2602e593382178ad1e539617af4487a2f9497947";
 
     let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
     let client = RedisClient::new(config, None, None, None);
@@ -410,14 +410,36 @@ async fn entity_cache() -> Result<(), BoxError> {
         .unwrap();
     insta::assert_json_snapshot!(response);
 
-    let s:String = client
-          .get("version:1.0:subgraph:products:type:Query:hash:0df945dc1bc08f7fc02e8905b4c72aa9112f29bb7a214e4a38d199f0aa635b48:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
-          .await
-          .unwrap();
+    let cache_key = "version:1.0:subgraph:products:type:Query:hash:de16db3b7eca8c9c1471657c634153d01b70d543a416ecc2042c7d870a1fcee1:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c";
+    let s: String = match client.get(cache_key).await {
+        Ok(s) => s,
+        Err(e) => {
+            println!("keys in Redis server:");
+            let mut scan = client.scan("subgraph:*", Some(u32::MAX), Some(ScanType::String));
+            while let Some(key) = scan.next().await {
+                let key = key.as_ref().unwrap().results();
+                println!("\t{key:?}");
+            }
+            panic!("key {cache_key} not found: {e}\nIf you see this error, make sure the federation version you use matches the redis key.");
+        }
+    };
     let v: Value = serde_json::from_str(&s).unwrap();
     insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
-    let s: String = client.get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:1de543dab57fde0f00247922ccc4f76d4c916ae26a89dd83cd1a62300d0cda20:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c").await.unwrap();
+    let cache_key = "version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:1173e6258da397d6b6c497968fea69d06aeba0e0fce17e69b6419f24ab18d4dd:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c";
+    let s: String = match client.get(cache_key).await {
+        Ok(s) => s,
+        Err(e) => {
+            println!("keys in Redis server:");
+            let mut scan = client.scan("subgraph:*", Some(u32::MAX), Some(ScanType::String));
+            while let Some(key) = scan.next().await {
+                let key = key.as_ref().unwrap().results();
+                println!("\t{key:?}");
+            }
+            panic!("key {cache_key} not found: {e}\nIf you see this error, make sure the federation version you use matches the redis key.");
+        }
+    };
+
     let v: Value = serde_json::from_str(&s).unwrap();
     insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
@@ -524,10 +546,20 @@ async fn entity_cache() -> Result<(), BoxError> {
         .unwrap();
     insta::assert_json_snapshot!(response);
 
-    let s:String = client
-        .get("version:1.0:subgraph:reviews:type:Product:entity:d9a4cd73308dd13ca136390c10340823f94c335b9da198d2339c886c738abf0d:hash:1de543dab57fde0f00247922ccc4f76d4c916ae26a89dd83cd1a62300d0cda20:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
-        .await
-        .unwrap();
+    let cache_key = "version:1.0:subgraph:reviews:type:Product:entity:d9a4cd73308dd13ca136390c10340823f94c335b9da198d2339c886c738abf0d:hash:1173e6258da397d6b6c497968fea69d06aeba0e0fce17e69b6419f24ab18d4dd:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c";
+    let s: String = match client.get(cache_key).await {
+        Ok(s) => s,
+        Err(e) => {
+            println!("keys in Redis server:");
+            let mut scan = client.scan("subgraph:*", Some(u32::MAX), Some(ScanType::String));
+            while let Some(key) = scan.next().await {
+                let key = key.as_ref().unwrap().results();
+                println!("\t{key:?}");
+            }
+            panic!("key {cache_key} not found: {e}\nIf you see this error, make sure the federation version you use matches the redis key.");
+        }
+    };
+
     let v: Value = serde_json::from_str(&s).unwrap();
     insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
@@ -745,10 +777,20 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
         .unwrap();
     insta::assert_json_snapshot!(response);
 
-    let s:String = client
-          .get("version:1.0:subgraph:products:type:Query:hash:0df945dc1bc08f7fc02e8905b4c72aa9112f29bb7a214e4a38d199f0aa635b48:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
-          .await
-          .unwrap();
+    let cache_key = "version:1.0:subgraph:products:type:Query:hash:de16db3b7eca8c9c1471657c634153d01b70d543a416ecc2042c7d870a1fcee1:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c";
+    let s: String = match client.get(cache_key).await {
+        Ok(s) => s,
+        Err(e) => {
+            println!("keys in Redis server:");
+            let mut scan = client.scan("plan:*", Some(u32::MAX), Some(ScanType::String));
+            while let Some(key) = scan.next().await {
+                let key = key.as_ref().unwrap().results();
+                println!("\t{key:?}");
+            }
+            panic!("key {cache_key} not found: {e}\nIf you see this error, make sure the federation version you use matches the redis key.");
+        }
+    };
+
     let v: Value = serde_json::from_str(&s).unwrap();
     assert_eq!(
         v.as_object().unwrap().get("data").unwrap(),
@@ -767,7 +809,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
     );
 
     let s: String = client
-        .get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:1de543dab57fde0f00247922ccc4f76d4c916ae26a89dd83cd1a62300d0cda20:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+        .get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:1173e6258da397d6b6c497968fea69d06aeba0e0fce17e69b6419f24ab18d4dd:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
         .await
         .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
@@ -811,7 +853,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
     insta::assert_json_snapshot!(response);
 
     let s:String = client
-          .get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:3b6ef3c8fd34c469d59f513942c5f4c8f91135e828712de2024e2cd4613c50ae:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:716216b556dec381ea72d96361bb68c506bd8bac5b8a27fa6afbef37f19ee7bb:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
@@ -921,7 +963,7 @@ async fn connection_failure_blocks_startup() {
 async fn query_planner_redis_update_query_fragments() {
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_query_fragments.router.yaml"),
-        "plan:0:v2.8.1:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:9054d19854e1d9e282ac7645c612bc70b8a7143d43b73d44dade4a5ec43938b4",
+        "plan:cache:1:federation:v2.8.1:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:ca955be743f0dedae36910f6173d8f3e1076441b20a8e9d3466c320d39d83062:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:1ef4ca9553c8d72dc3308163027fbab0c26e8ff73daa07b1139e49fed01fc5c5",
     )
     .await;
 }
@@ -940,7 +982,7 @@ async fn query_planner_redis_update_planner_mode() {
 async fn query_planner_redis_update_introspection() {
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_introspection.router.yaml"),
-        "plan:0:v2.8.1:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:04b3051125b5994fba6b0a22b2d8b4246cadc145be030c491a3431655d2ba07a",
+        "plan:cache:1:federation:v2.8.1:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:ca955be743f0dedae36910f6173d8f3e1076441b20a8e9d3466c320d39d83062:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:783c95a060a2a43f14f0241915247b148c542b9ff0e9238f16bae2cc172ac427",
     )
     .await;
 }
@@ -949,7 +991,8 @@ async fn query_planner_redis_update_introspection() {
 async fn query_planner_redis_update_defer() {
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_defer.router.yaml"),
-        "plan:0:v2.8.1:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:3b7241b0db2cd878b79c0810121953ba544543f3cb2692aaf1a59184470747b0",
+        "plan:cache:1:federation:v2.8.1:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:ca955be743f0dedae36910f6173d8f3e1076441b20a8e9d3466c320d39d83062:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:c632e2e80594b3b8b8e7bf13ee5f2d3e3e1f6cb050d41a8d751b2c2de3e60906",
+
     )
     .await;
 }
@@ -960,7 +1003,8 @@ async fn query_planner_redis_update_type_conditional_fetching() {
         include_str!(
             "fixtures/query_planner_redis_config_update_type_conditional_fetching.router.yaml"
         ),
-        "plan:0:v2.8.1:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:0ca695a8c4c448b65fa04229c663f44150af53b184ebdcbb0ad6862290efed76",
+        "plan:cache:1:federation:v2.8.1:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:ca955be743f0dedae36910f6173d8f3e1076441b20a8e9d3466c320d39d83062:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:25dbfa37dc81a68cb3d2302ed470a0dcd5596b23cacd20f4b1e295b98f45239c",
+
     )
     .await;
 }
@@ -971,7 +1015,8 @@ async fn query_planner_redis_update_reuse_query_fragments() {
         include_str!(
             "fixtures/query_planner_redis_config_update_reuse_query_fragments.router.yaml"
         ),
-        "plan:0:v2.8.1:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:f7c04319556397ec4b550aa5aaa96c73689cee09026b661b6a9fc20b49e6fa77",
+        "plan:cache:1:federation:v2.8.1:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:ca955be743f0dedae36910f6173d8f3e1076441b20a8e9d3466c320d39d83062:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:8e23b92bb8eb456dd7596dda44f26de31b8b06349549a157bfb7c2d1b492ecc4",
+
     )
     .await;
 }
@@ -994,7 +1039,8 @@ async fn test_redis_query_plan_config_update(updated_config: &str, new_cache_key
     router.assert_started().await;
     router.clear_redis_cache().await;
 
-    let starting_key = "plan:0:v2.8.1:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:4a5827854a6d2efc85045f0d5bede402e15958390f1073d2e77df56188338e5a";
+    let starting_key = "plan:cache:1:federation:v2.8.1:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:ca955be743f0dedae36910f6173d8f3e1076441b20a8e9d3466c320d39d83062:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:664d923109135eee5e1f316e19f73a3db1a3fafadc7019cb9b8a9b13d70ac2a3";
+
     router.execute_default_query().await;
     router.assert_redis_cache_contains(starting_key, None).await;
     router.update_config(updated_config).await;
