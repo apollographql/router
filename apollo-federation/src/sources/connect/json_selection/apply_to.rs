@@ -240,10 +240,6 @@ impl ApplyTo for NamedSelection {
     }
 }
 
-// $typenames is a special variable for referring to literal typenames. See
-// note in selection_set.rs for more detail.
-pub(super) const TYPENAMES: &str = "$typenames";
-
 impl ApplyTo for PathSelection {
     fn apply_to_path(
         &self,
@@ -274,18 +270,6 @@ impl ApplyTo for PathList {
                     tail.apply_to_path(var_data, vars, var_path, errors)
                 } else if var_name == "@" {
                     tail.apply_to_path(data, vars, input_path, errors)
-                } else if var_name == TYPENAMES {
-                    if let PathList::Key(Key::Field(ref name), _) = **tail {
-                        let var_data = json!({ name: name });
-                        let input_path = InputPath::Empty.append(json!(name));
-                        tail.apply_to_path(&var_data, vars, &input_path, errors)
-                    } else {
-                        errors.insert(ApplyToError::new(
-                            format!("Invalid {} usage", TYPENAMES).as_str(),
-                            vec![json!(var_name), json!(tail)],
-                        ));
-                        None
-                    }
                 } else {
                     errors.insert(ApplyToError::new(
                         format!("Variable {} not found", var_name).as_str(),
@@ -1312,7 +1296,7 @@ mod tests {
     #[test]
     fn test_apply_to_variable_expressions_typename() {
         let typename_object =
-            selection!("__typename: $typenames.Product reviews { __typename: $typenames.Review }")
+            selection!("__typename: $->echo('Product') reviews { __typename: $->echo('Review') }")
                 .apply_to(&json!({"reviews": [{}]}));
         assert_eq!(
             typename_object,

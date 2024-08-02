@@ -25,8 +25,9 @@ use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::Node;
 use multimap::MultiMap;
 
+use super::js_literal::JSLiteral;
+use super::parser::MethodArgs;
 use super::parser::PathList;
-use super::TYPENAMES;
 use crate::sources::connect::json_selection::Alias;
 use crate::sources::connect::json_selection::NamedSelection;
 use crate::sources::connect::JSONSelection;
@@ -67,9 +68,12 @@ impl SubSelection {
                 },
                 PathSelection {
                     path: PathList::Var(
-                        TYPENAMES.to_string(),
-                        Box::new(PathList::Key(
-                            Key::Field(selection_set.ty.to_string()),
+                        "$".to_string(),
+                        Box::new(PathList::Method(
+                            "echo".to_string(),
+                            Some(MethodArgs(vec![JSLiteral::String(
+                                selection_set.ty.to_string(),
+                            )])),
                             Box::new(PathList::Empty),
                         )),
                     ),
@@ -574,10 +578,10 @@ mod tests {
         assert_eq!(
             transformed.to_string(),
             r###".result {
-  __typename: $typenames.T
+  __typename: $->echo("T")
   id
   author: {
-    __typename: $typenames.A
+    __typename: $->echo("A")
     id: authorId
   }
 }"###
