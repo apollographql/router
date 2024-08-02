@@ -14,6 +14,7 @@ use tracing::Span;
 use super::instruments::Instrumented;
 use super::Selector;
 use super::Selectors;
+use super::Stage;
 use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
 use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
 use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
@@ -126,6 +127,54 @@ impl Events {
             error: self.subgraph.attributes.error.clone().into(),
             custom: custom_events,
         }
+    }
+
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        if let StandardEventConfig::Conditional { condition, .. } = &self.router.attributes.request
+        {
+            condition.validate(Some(Stage::Request))?;
+        }
+        if let StandardEventConfig::Conditional { condition, .. } = &self.router.attributes.response
+        {
+            condition.validate(Some(Stage::Response))?;
+        }
+        if let StandardEventConfig::Conditional { condition, .. } =
+            &self.supergraph.attributes.request
+        {
+            condition.validate(Some(Stage::Request))?;
+        }
+        if let StandardEventConfig::Conditional { condition, .. } =
+            &self.supergraph.attributes.response
+        {
+            condition.validate(Some(Stage::Response))?;
+        }
+        if let StandardEventConfig::Conditional { condition, .. } =
+            &self.subgraph.attributes.request
+        {
+            condition.validate(Some(Stage::Request))?;
+        }
+        if let StandardEventConfig::Conditional { condition, .. } =
+            &self.subgraph.attributes.response
+        {
+            condition.validate(Some(Stage::Response))?;
+        }
+        for (name, custom_event) in &self.router.custom {
+            custom_event.validate().map_err(|err| {
+                format!("configuration error for router custom event {name:?}: {err}")
+            })?;
+        }
+        for (name, custom_event) in &self.supergraph.custom {
+            custom_event.validate().map_err(|err| {
+                format!("configuration error for supergraph custom event {name:?}: {err}")
+            })?;
+        }
+        for (name, custom_event) in &self.subgraph.custom {
+            custom_event.validate().map_err(|err| {
+                format!("configuration error for subgraph custom event {name:?}: {err}")
+            })?;
+        }
+
+        Ok(())
     }
 }
 
@@ -574,6 +623,21 @@ where
     /// The event conditions.
     #[serde(default = "Condition::empty::<E>")]
     condition: Condition<E>,
+}
+
+impl<A, E, Request, Response, EventResponse> Event<A, E>
+where
+    A: Selectors<Request = Request, Response = Response, EventResponse = EventResponse>
+        + Default
+        + Debug,
+    E: Selector<Request = Request, Response = Response, EventResponse = EventResponse> + Debug,
+{
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        let stage = Some(self.on.into());
+        self.attributes.validate(stage)?;
+        self.condition.validate(stage)?;
+        Ok(())
+    }
 }
 
 /// When to trigger the event.

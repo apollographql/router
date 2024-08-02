@@ -56,6 +56,64 @@ impl<T> Condition<T>
 where
     T: Selector,
 {
+    /// restricted_stage is Some if this condiiton will only applies at a specific stage like for events for example
+    pub(crate) fn validate(&self, restricted_stage: Option<Stage>) -> Result<(), String> {
+        match self {
+            Condition::Eq(arr) | Condition::Gt(arr) | Condition::Lt(arr) => match (&arr[0], &arr[1]) {
+                (SelectorOrValue::Value(val1), SelectorOrValue::Value(val2)) => {
+                    Err(format!("trying to compare 2 values ('{val1}' and '{val2}'), usually it's a syntax error because you want to use a specific selector and a value in a condition"))
+                }
+                (SelectorOrValue::Value(_), SelectorOrValue::Selector(sel)) | (SelectorOrValue::Selector(sel), SelectorOrValue::Value(_)) => {
+                    // Special condition for events
+                    if let Some(Stage::Request) = &restricted_stage {
+                        if !sel.is_active(Stage::Request) {
+                            return Err(String::from("can't compare a selector computed in another stage than 'request' because it won't be computed at all"));
+                        }
+                    }
+                    Ok(())
+                },
+                (SelectorOrValue::Selector(sel1), SelectorOrValue::Selector(sel2)) => {
+                    // Special condition for events
+                    if let Some(Stage::Request) = &restricted_stage {
+                        if !sel1.is_active(Stage::Request) || !sel2.is_active(Stage::Request) {
+                            return Err(String::from("can't compare a selector computed in another stage than 'request' because it won't be computed at all"));
+                        }
+                    }
+                    Ok(())
+                },
+                
+            },
+            Condition::Exists(sel) => {
+                match restricted_stage {
+                    Some(stage) => {
+                        if sel.is_active(stage) {
+                            Ok(())
+                        } else {
+                            Err(format!("the 'exists' condition use a selector applied at the wrong stage, this condition will be executed at the {} stage.", stage))
+                        }
+                    },
+                    None => Ok(())
+                }
+            },
+            Condition::All(all) => {
+                for cond in all {
+                    cond.validate(restricted_stage)?;
+                }
+
+                Ok(())
+            },
+            Condition::Any(any) => {
+                for cond in any {
+                    cond.validate(restricted_stage)?;
+                }
+
+                Ok(())
+            },
+            Condition::Not(cond) => cond.validate(restricted_stage),
+            Condition::True | Condition::False => Ok(()),
+        }
+    }
+
     pub(crate) fn evaluate_request(&mut self, request: &T::Request) -> Option<bool> {
         match self {
             Condition::Eq(eq) => {

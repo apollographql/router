@@ -149,6 +149,18 @@ where
     }
 }
 
+impl<Att, Request, Response, EventResponse> Conditional<Att>
+where
+    Att: Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
+{
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        match &self.condition {
+            Some(cond) => cond.lock().validate(None),
+            None => Ok(()),
+        }
+    }
+}
+
 impl<Att, Request, Response, EventResponse> Selector for Conditional<Att>
 where
     Att: Selector<Request = Request, Response = Response, EventResponse = EventResponse>,

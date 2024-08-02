@@ -1,3 +1,4 @@
+use events::EventOn;
 use opentelemetry::baggage::BaggageExt;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceId;
@@ -52,6 +53,7 @@ pub(crate) trait Selectors {
 }
 
 #[allow(dead_code)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Stage {
     Request,
     Response,
@@ -59,6 +61,55 @@ pub(crate) enum Stage {
     ResponseField,
     Error,
     Drop,
+}
+
+impl std::fmt::Display for Stage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Stage::Request => write!(f, "request"),
+            Stage::Response => write!(f, "response"),
+            Stage::ResponseEvent => write!(f, "response_event"),
+            Stage::ResponseField => write!(f, "response_field"),
+            Stage::Error => write!(f, "error"),
+            Stage::Drop => write!(f, "drop"),
+        }
+    }
+}
+
+impl From<EventOn> for Stage {
+    fn from(value: EventOn) -> Self {
+        match value {
+            EventOn::Request => Self::Request,
+            EventOn::Response => Self::Response,
+            EventOn::EventResponse => Self::ResponseEvent,
+            EventOn::Error => Self::Error,
+        }
+    }
+}
+
+impl PartialOrd for Stage {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        match self {
+            Stage::Request => {
+                if *other != Self::Request {
+                    Some(std::cmp::Ordering::Less)
+                } else {
+                    Some(std::cmp::Ordering::Equal)
+                }
+            }
+            Stage::Response
+            | Stage::ResponseEvent
+            | Stage::ResponseField
+            | Stage::Error
+            | Stage::Drop => {
+                if *other != Self::Request {
+                    Some(std::cmp::Ordering::Greater)
+                } else {
+                    Some(std::cmp::Ordering::Less)
+                }
+            }
+        }
+    }
 }
 
 pub(crate) trait Selector {
