@@ -1560,8 +1560,7 @@ impl Operation {
 
         impl FragmentGenerator {
             fn next_name(&self) -> Name {
-                let len = self.fragments.len();
-                Name::new_unchecked(&format!("_generated{len}"))
+                fragment_name(self.fragments.len())
             }
 
             fn is_worth_using(selection_set: &SelectionSet) -> bool {
@@ -1701,6 +1700,31 @@ impl Operation {
     }
 }
 
+fn fragment_name(mut index: usize) -> Name {
+    /// https://spec.graphql.org/draft/#NameContinue
+    const NAME_CHARS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+    /// https://spec.graphql.org/draft/#NameStart
+    const NAME_START_CHARS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_";
+
+    if index < NAME_START_CHARS.len() {
+        Name::new_static_unchecked(&NAME_START_CHARS[index..index + 1])
+    } else {
+        let mut s = String::new();
+
+        let i = index % NAME_START_CHARS.len();
+        s.push(NAME_START_CHARS.as_bytes()[i].into());
+        index /= NAME_START_CHARS.len();
+
+        while index > 0 {
+            let i = index % NAME_CHARS.len();
+            s.push(NAME_CHARS.as_bytes()[i].into());
+            index /= NAME_CHARS.len();
+        }
+
+        Name::new_unchecked(&s)
+    }
+}
+
 //=============================================================================
 // Tests
 
@@ -1726,6 +1750,13 @@ mod tests {
             validate_operation(&$operation.schema, &optimized.to_string());
             insta::assert_snapshot!(optimized, @$expected)
         }};
+    }
+
+    #[test]
+    fn generated_fragment_names() {
+        assert_eq!(fragment_name(0), "a");
+        assert_eq!(fragment_name(100), "Vb");
+        assert_eq!(fragment_name(usize::MAX), "oS5Uz8g3Iqw");
     }
 
     #[test]

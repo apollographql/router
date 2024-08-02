@@ -51,14 +51,14 @@ fn it_respects_generate_query_fragments_option() {
         {
           t {
             __typename
-            ..._generated0
+            ...a
             ... on B {
               z
             }
           }
         }
 
-        fragment _generated0 on A {
+        fragment a on A {
           x
           y
         }
@@ -103,21 +103,21 @@ fn it_handles_nested_fragment_generation() {
         {
           t {
             __typename
-            ..._generated1
+            ...b
           }
         }
 
-        fragment _generated0 on A {
+        fragment a on A {
           x
           y
         }
 
-        fragment _generated1 on A {
+        fragment b on A {
           x
           y
           t {
             __typename
-            ..._generated0
+            ...a
             ... on B {
               z
             }
@@ -157,11 +157,11 @@ fn it_handles_fragments_with_one_non_leaf_field() {
         {
           t {
             __typename
-            ..._generated0
+            ...a
           }
         }
 
-        fragment _generated0 on A {
+        fragment a on A {
           t {
             __typename
             ... on B {
@@ -205,15 +205,15 @@ fn it_identifies_and_reuses_equivalent_fragments_that_arent_identical() {
         {
           t {
             __typename
-            ..._generated0
+            ...a
           }
           t2 {
             __typename
-            ..._generated0
+            ...a
           }
         }
 
-        fragment _generated0 on A {
+        fragment a on A {
           x
           y
         }
@@ -253,20 +253,20 @@ fn fragments_that_share_a_hash_but_are_not_identical_generate_their_own_fragment
         {
           t {
             __typename
-            ..._generated0
+            ...a
           }
           t2 {
             __typename
-            ..._generated1
+            ...b
           }
         }
 
-        fragment _generated0 on A {
+        fragment a on A {
           x
           y
         }
 
-        fragment _generated1 on A {
+        fragment b on A {
           y
           z
         }
