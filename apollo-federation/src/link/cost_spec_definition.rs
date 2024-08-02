@@ -6,6 +6,7 @@ use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::EnumType;
 use apollo_compiler::schema::ObjectType;
+use apollo_compiler::schema::ScalarType;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use lazy_static::lazy_static;
@@ -18,6 +19,7 @@ use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
 use crate::schema::position::EnumTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
+use crate::schema::position::ScalarTypeDefinitionPosition;
 use crate::schema::FederationSchema;
 
 pub(crate) const COST_DIRECTIVE_NAME_IN_SPEC: Name = name!("cost");
@@ -170,6 +172,11 @@ impl CostSpecDefinition {
         propagate_demand_control_directives_for_object,
         ObjectType,
         ObjectTypeDefinitionPosition
+    );
+    propagate_demand_control_directives_to_position!(
+        propagate_demand_control_directives_for_scalar,
+        ScalarType,
+        ScalarTypeDefinitionPosition
     );
 }
 

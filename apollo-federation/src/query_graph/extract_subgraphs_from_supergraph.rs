@@ -500,26 +500,27 @@ fn add_all_empty_subgraph_types(
                             message: "Subgraph unexpectedly does not use federation spec"
                                 .to_owned(),
                         })?;
-                    let cost_spec_definition =
-                        federation_spec_definition.get_cost_spec_definition(&subgraph.schema);
 
-                    let mut subgraph_type = ScalarType {
-                        description: None,
-                        name: pos.type_name.clone(),
-                        directives: Default::default(),
-                    };
+                    pos.pre_insert(&mut subgraph.schema)?;
+                    pos.insert(
+                        &mut subgraph.schema,
+                        Node::new(ScalarType {
+                            description: None,
+                            name: pos.type_name.clone(),
+                            directives: Default::default(),
+                        }),
+                    )?;
 
-                    if let Some(cost_spec_definition) = cost_spec_definition {
-                        cost_spec_definition.propagate_demand_control_schema_directives(
-                            &subgraph.schema,
-                            type_.directives(),
-                            &mut subgraph_type.directives,
+                    if let Some(cost_spec_definition) =
+                        federation_spec_definition.get_cost_spec_definition(&subgraph.schema)
+                    {
+                        cost_spec_definition.propagate_demand_control_directives_for_scalar(
+                            &mut subgraph.schema,
+                            pos.get(supergraph_schema.schema())?,
+                            pos,
                             original_directive_names,
                         )?;
                     }
-
-                    pos.pre_insert(&mut subgraph.schema)?;
-                    pos.insert(&mut subgraph.schema, Node::new(subgraph_type))?;
                 }
                 None
             }
