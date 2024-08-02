@@ -77,6 +77,7 @@ lazy_static! {
         // Array/string methods
         methods.insert("first".to_string(), first_method);
         methods.insert("last".to_string(), last_method);
+        methods.insert("has".to_string(), has_method);
         methods.insert("get".to_string(), get_method);
         methods.insert("slice".to_string(), slice_method);
         // The ->size method works for objects as well as arrays and strings.
@@ -465,6 +466,87 @@ fn last_method(
     }
 }
 
+fn has_method(
+    method_name: &str,
+    method_args: &Option<MethodArgs>,
+    data: &JSON,
+    vars: &VarsWithPathsMap,
+    input_path: &InputPath<JSON>,
+    tail: &PathList,
+    errors: &mut IndexSet<ApplyToError>,
+) -> Option<JSON> {
+    if let Some(MethodArgs(args)) = method_args {
+        match args.first() {
+            Some(arg) => match &arg.apply_to_path(data, vars, input_path, errors) {
+                Some(json_index @ JSON::Number(n)) => match (data, n.as_i64()) {
+                    (JSON::Array(array), Some(index)) => {
+                        let ilen = array.len() as i64;
+                        // Negative indices count from the end of the array
+                        let index = if index < 0 { ilen + index } else { index };
+                        tail.apply_to_path(
+                            &JSON::Bool(index >= 0 && index < ilen),
+                            vars,
+                            &input_path.append(json_index.clone()),
+                            errors,
+                        )
+                    }
+                    (json_key @ JSON::String(s), Some(index)) => {
+                        let ilen = s.as_str().len() as i64;
+                        // Negative indices count from the end of the array
+                        let index = if index < 0 { ilen + index } else { index };
+                        tail.apply_to_path(
+                            &JSON::Bool(index >= 0 && index < ilen),
+                            vars,
+                            &input_path.append(json_key.clone()),
+                            errors,
+                        )
+                    }
+                    _ => tail.apply_to_path(
+                        &JSON::Bool(false),
+                        vars,
+                        &input_path.append(json_index.clone()),
+                        errors,
+                    ),
+                },
+                Some(json_key @ JSON::String(s)) => match data {
+                    JSON::Object(map) => tail.apply_to_path(
+                        &JSON::Bool(map.contains_key(s.as_str())),
+                        vars,
+                        &input_path.append(json_key.clone()),
+                        errors,
+                    ),
+                    _ => tail.apply_to_path(
+                        &JSON::Bool(false),
+                        vars,
+                        &input_path.append(json_key.clone()),
+                        errors,
+                    ),
+                },
+                Some(value) => tail.apply_to_path(
+                    &JSON::Bool(false),
+                    vars,
+                    &input_path.append(value.clone()),
+                    errors,
+                ),
+                None => tail.apply_to_path(&JSON::Bool(false), vars, input_path, errors),
+            },
+            None => {
+                errors.insert(ApplyToError::new(
+                    format!("Method ->{} requires an argument", method_name).as_str(),
+                    input_path.to_vec(),
+                ));
+                None
+            }
+        }
+    } else {
+        errors.insert(ApplyToError::new(
+            format!("Method ->{} requires an argument", method_name).as_str(),
+            input_path.to_vec(),
+        ));
+        None
+    }
+}
+
 // Returns the array or string element at the given index, as Option<JSON>. If
 // the index is out of bounds, returns None and reports an error.
 fn get_method(
@@ -545,18 +627,15 @@ fn get_method(
                         ));
                         None
                     }
-                }
+                },
                 Some(key @ JSON::String(s)) => match data {
                     JSON::Object(map) => {
                         if let Some(value) = map.get(s.as_str()) {
                             tail.apply_to_path(value, vars, input_path, errors)
                         } else {
                             errors.insert(ApplyToError::new(
-                                format!(
-                                    "Method ->{}({}) object key not found",
-                                    method_name, key,
-                                )
-                                .as_str(),
+                                format!("Method ->{}({}) object key not found", method_name, key,)
+                                    .as_str(),
                                 input_path.to_vec(),
                             ));
                             None
@@ -564,23 +643,18 @@ fn get_method(
                     }
                     _ => {
                         errors.insert(ApplyToError::new(
-                            format!(
-                                "Method ->{}({}) requires an object input",
-                                method_name,
-                                key,
-                            )
-                            .as_str(),
+                            format!("Method ->{}({}) requires an object input", method_name, key,)
+                                .as_str(),
                             input_path.to_vec(),
                         ));
                         None
                     }
-                }
+                },
                 Some(value) => {
                     errors.insert(ApplyToError::new(
                         format!(
                             "Method ->{}({}) requires an integer or string argument",
-                            method_name,
-                            value,
+                            method_name, value,
                         )
                         .as_str(),
                         input_path.to_vec(),
@@ -1405,6 +1479,96 @@ mod tests {
                     "path": ["object"],
                 }))]
             ),
+        );
+
+        // Test the ->has method
+        assert_eq!(
+            selection!("$->has(1)").apply_to(&json!([1, 2, 3])),
+            (Some(json!(true)), vec![]),
+        );
+        assert_eq!(
+            selection!("$->has(5)").apply_to(&json!([1, 2, 3])),
+            (Some(json!(false)), vec![]),
+        );
+        assert_eq!(
+            selection!("$->has(2)").apply_to(&json!("oyez")),
+            (Some(json!(true)), vec![]),
+        );
+        assert_eq!(
+            selection!("$->has(-2)").apply_to(&json!("oyez")),
+            (Some(json!(true)), vec![]),
+        );
+        assert_eq!(
+            selection!("$->has(10)").apply_to(&json!("oyez")),
+            (Some(json!(false)), vec![]),
+        );
+        assert_eq!(
+            selection!("$->has(-10)").apply_to(&json!("oyez")),
+            (Some(json!(false)), vec![]),
+        );
+        // Test the ->has method with object keys
+        assert_eq!(
+            selection!("object->has('a')").apply_to(&json!({
+                "object": {
+                    "a": 123,
+                    "b": 456,
+                },
+            })),
+            (Some(json!(true)), vec![]),
+        );
+        assert_eq!(
+            selection!("object->has('c')").apply_to(&json!({
+                "object": {
+                    "a": 123,
+                    "b": 456,
+                },
+            })),
+            (Some(json!(false)), vec![]),
+        );
+        assert_eq!(
+            selection!("object->has(true)").apply_to(&json!({
+                "object": {
+                    "a": 123,
+                    "b": 456,
+                },
+            })),
+            (Some(json!(false)), vec![]),
+        );
+        assert_eq!(
+            selection!("object->has(null)").apply_to(&json!({
+                "object": {
+                    "a": 123,
+                    "b": 456,
+                },
+            })),
+            (Some(json!(false)), vec![]),
+        );
+        assert_eq!(
+            selection!("object->has('a')->and(object->has('b'))").apply_to(&json!({
+                "object": {
+                    "a": 123,
+                    "b": 456,
+                },
+            })),
+            (Some(json!(true)), vec![]),
+        );
+        assert_eq!(
+            selection!("object->has('b')->and(object->has('c'))").apply_to(&json!({
+                "object": {
+                    "a": 123,
+                    "b": 456,
+                },
+            })),
+            (Some(json!(false)), vec![]),
+        );
+        assert_eq!(
+            selection!("object->has('xxx')->typeof").apply_to(&json!({
+                "object": {
+                    "a": 123,
+                    "b": 456,
+                },
+            })),
+            (Some(json!("boolean")), vec![]),
         );
 
         assert_eq!(

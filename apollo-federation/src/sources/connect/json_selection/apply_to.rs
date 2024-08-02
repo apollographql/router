@@ -248,7 +248,36 @@ impl ApplyTo for PathSelection {
         input_path: &InputPath<JSON>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
-        self.path.apply_to_path(data, vars, input_path, errors)
+        match &self.path {
+            // If this is a KeyPath, instead of using data as given, we need to
+            // evaluate the path starting from the current value of $. To
+            // evaluate the KeyPath against data, prefix it with @. This logic
+            // supports method chaining like obj->has('a')->and(obj->has('b')),
+            // where both obj references are interpreted as $.obj.
+            PathList::Key(key, tail) => {
+                if let Some((dollar_data, dollar_path)) = vars.get("$") {
+                    let input_path_with_key = dollar_path.append(key.to_json());
+                    if let Some(child) = dollar_data.get(key.as_string()) {
+                        tail.apply_to_path(child, vars, &input_path_with_key, errors)
+                    } else {
+                        errors.insert(ApplyToError::new(
+                            format!(
+                                "Property {} not found in {}",
+                                key.dotted(),
+                                json_type_name(dollar_data),
+                            )
+                            .as_str(),
+                            input_path_with_key.to_vec(),
+                        ));
+                        None
+                    }
+                } else {
+                    // If $ is undefined for some reason, fall back to using data.
+                    self.path.apply_to_path(data, vars, input_path, errors)
+                }
+            }
+            path => path.apply_to_path(data, vars, input_path, errors),
+        }
     }
 }
 
