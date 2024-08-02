@@ -1530,9 +1530,11 @@ impl Telemetry {
                     .extensions()
                     .with_lock(|lock| lock.get::<ExtendedReferenceStats>().cloned())
                     .unwrap_or_default();
+                // Clear the enum values from responses when we send them in a report so that we properly report enum response
+                // values for deferred responses and subscriptions.
                 let enum_response_references = context
                     .extensions()
-                    .with_lock(|lock| lock.get::<ReferencedEnums>().cloned())
+                    .with_lock(|mut lock| lock.remove::<ReferencedEnums>())
                     .unwrap_or_default();
 
                 SingleStatsReport {
