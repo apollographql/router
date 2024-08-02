@@ -371,7 +371,6 @@ impl FetchNode {
         &self,
         service: BoxService,
         subgraph_request: SubgraphRequest,
-        service_name: &str,
         current_dir: &Path,
         schema: &Schema,
         paths: Vec<Vec<Path>>,
@@ -391,13 +390,13 @@ impl FetchNode {
                     FetchError::SubrequestHttpError { .. } => *inner,
                     _ => FetchError::SubrequestHttpError {
                         status_code: None,
-                        service: service_name.to_string(),
+                        service: self.service_name.to_string(),
                         reason: inner.to_string(),
                     },
                 },
                 Err(e) => FetchError::SubrequestHttpError {
                     status_code: None,
-                    service: service_name.to_string(),
+                    service: self.service_name.to_string(),
                     reason: e.to_string(),
                 },
             }) {
@@ -410,13 +409,13 @@ impl FetchNode {
             Ok(res) => res.response.into_parts(),
         };
 
-        super::log::trace_subfetch(service_name, operation_str, &variables, &response);
+        super::log::trace_subfetch(&self.service_name, operation_str, &variables, &response);
 
         if !response.is_primary() {
             return (
                 Value::default(),
                 vec![FetchError::SubrequestUnexpectedPatchResponse {
-                    service: service_name.to_string(),
+                    service: self.service_name.to_string(),
                 }
                 .to_graphql_error(Some(current_dir.to_owned()))],
             );

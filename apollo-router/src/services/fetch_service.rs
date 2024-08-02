@@ -186,10 +186,9 @@ impl FetchService {
         };
 
         let aqs = aliased_operation.to_string(); // TODO
-        let sns = service_name.clone();
         let current_dir = current_dir.clone();
         let service = subgraph_service_factory
-            .create(&sns)
+            .create(&service_name.clone())
             .expect("we already checked that the service exists during planning; qed");
 
         let mut subgraph_request = SubgraphRequest::builder()
@@ -219,7 +218,6 @@ impl FetchService {
                 .subgraph_fetch(
                     service,
                     subgraph_request,
-                    &sns,
                     &current_dir,
                     &schema,
                     variables.inverted_paths,
