@@ -13,8 +13,10 @@ use tower::BoxError;
 
 use super::redis::*;
 use crate::configuration::RedisCache;
+use crate::error::QueryPlannerError;
 use crate::metrics;
 use crate::plugins::telemetry::config_new::instruments::METER_NAME;
+use crate::services::QueryPlannerContent;
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry_api::metrics::{Meter, ObservableGauge};
 use opentelemetry_api::KeyValue;
@@ -38,15 +40,6 @@ where
     K: Clone + fmt::Debug + fmt::Display + Hash + Eq + Send + Sync,
 {
     // Nothing to implement, since K already supports the other traits.
-    // It has the functions it needs already
-}
-
-// Blanket implementation which satisfies the compiler
-impl<V> ValueType for V
-where
-    V: Clone + fmt::Debug + Send + Sync + Serialize + DeserializeOwned,
-{
-    // Nothing to implement, since V already supports the other traits.
     // It has the functions it needs already
 }
 
@@ -300,5 +293,23 @@ impl Display for CacheStorageName {
             CacheStorageName::Redis => write!(f, "redis"),
             CacheStorageName::Memory => write!(f, "memory"),
         }
+    }
+}
+
+impl ValueType for String {
+    fn estimated_size(&self) -> Option<usize> {
+        Some(self.len())
+    }
+}
+
+impl ValueType for crate::graphql::Response {
+    fn estimated_size(&self) -> Option<usize> {
+        None
+    }
+}
+
+impl ValueType for usize {
+    fn estimated_size(&self) -> Option<usize> {
+        Some(std::mem::size_of::<usize>())
     }
 }

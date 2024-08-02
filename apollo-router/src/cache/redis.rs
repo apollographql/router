@@ -591,6 +591,7 @@ impl RedisCacheStorage {
 mod test {
     use std::time::SystemTime;
 
+    use crate::cache::storage::ValueType;
     use url::Url;
 
     #[test]
@@ -598,6 +599,11 @@ mod test {
         #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
         struct Stuff {
             time: SystemTime,
+        }
+        impl ValueType for Stuff {
+            fn estimated_size(&self) -> Option<usize> {
+                None
+            }
         }
 
         let invalid_json_payload = super::RedisValue(Stuff {

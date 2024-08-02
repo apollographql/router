@@ -32,6 +32,7 @@ use crate::batching::BatchQuery;
 use crate::cache::redis::RedisCacheStorage;
 use crate::cache::redis::RedisKey;
 use crate::cache::redis::RedisValue;
+use crate::cache::storage::ValueType;
 use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::configuration::RedisCache;
 use crate::error::FetchError;
@@ -736,6 +737,12 @@ fn update_cache_control(context: &Context, cache_control: &CacheControl) {
 struct CacheEntry {
     control: CacheControl,
     data: Value,
+}
+
+impl ValueType for CacheEntry {
+    fn estimated_size(&self) -> Option<usize> {
+        None
+    }
 }
 
 async fn cache_store_root_from_response(
