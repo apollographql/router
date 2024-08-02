@@ -67,7 +67,6 @@ pub(crate) fn make_request(
     transport: &HttpJsonTransport,
     inputs: IndexMap<String, Value>,
     original_request: &connect::Request,
-    debug: &mut Option<ConnectorContext>,
 ) -> Result<http::Request<RouterBody>, HttpJsonTransportError> {
     let uri = make_uri(
         transport.source_url.as_ref(),
@@ -100,18 +99,20 @@ pub(crate) fn make_request(
         &transport.headers,
     );
 
-    if let Some(ref mut debug) = debug {
-        debug.push_request(
-            &request,
-            json_body.as_ref(),
-            transport.body.as_ref().map(|body| SelectionData {
-                source: body.to_string(),
-                transformed: body.to_string(),
-                result: json_body.clone(),
-                errors: apply_to_errors,
-            }),
-        );
-    }
+    original_request.context.extensions().with_lock(|mut lock| {
+        if let Some(debug) = lock.get_mut::<ConnectorContext>() {
+            debug.push_request(
+                &request,
+                json_body.as_ref(),
+                transport.body.as_ref().map(|body| SelectionData {
+                    source: body.to_string(),
+                    transformed: body.to_string(),
+                    result: json_body.clone(),
+                    errors: apply_to_errors,
+                }),
+            );
+        }
+    });
 
     Ok(request)
 }

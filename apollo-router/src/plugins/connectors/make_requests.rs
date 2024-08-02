@@ -11,7 +11,6 @@ use serde_json_bytes::Value;
 
 use super::http_json_transport::make_request;
 use super::http_json_transport::HttpJsonTransportError;
-use super::plugin::ConnectorContext;
 use crate::services::connect;
 use crate::services::router::body::RouterBody;
 
@@ -131,7 +130,6 @@ pub(crate) enum ResponseTypeName {
 pub(crate) fn make_requests(
     request: connect::Request,
     connector: &Connector,
-    debug: &mut Option<ConnectorContext>,
 ) -> Result<Vec<(http::Request<RouterBody>, ResponseKey)>, MakeRequestError> {
     let request_params = match connector.entity_resolver {
         Some(EntityResolver::Explicit) => entities_from_request(&request),
@@ -139,14 +137,13 @@ pub(crate) fn make_requests(
         None => root_fields(&request),
     }?;
 
-    request_params_to_requests(connector, request_params, &request, debug)
+    request_params_to_requests(connector, request_params, &request)
 }
 
 fn request_params_to_requests(
     connector: &Connector,
     request_params: Vec<ResponseKey>,
     original_request: &connect::Request,
-    debug: &mut Option<ConnectorContext>,
 ) -> Result<Vec<(http::Request<RouterBody>, ResponseKey)>, MakeRequestError> {
     let mut results = vec![];
 
@@ -155,7 +152,6 @@ fn request_params_to_requests(
             &connector.transport,
             response_key.inputs().merge(connector.config.as_ref()),
             original_request,
-            debug,
         )?;
 
         results.push((request, response_key));
@@ -1280,7 +1276,7 @@ mod tests {
             config: Default::default(),
         };
 
-        let requests = super::make_requests(req, &connector, &mut None).unwrap();
+        let requests = super::make_requests(req, &connector).unwrap();
 
         assert_debug_snapshot!(requests, @r###"
         [
