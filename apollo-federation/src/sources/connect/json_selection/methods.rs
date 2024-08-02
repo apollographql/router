@@ -2,7 +2,9 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use lazy_static::lazy_static;
 use serde_json_bytes::serde_json::Number;
+use serde_json_bytes::ByteString;
 use serde_json_bytes::Value as JSON;
+use serde_json_bytes::Map as JSONMap;
 
 use super::helpers::json_type_name;
 use super::immutable::InputPath;
@@ -74,14 +76,19 @@ lazy_static! {
         methods.insert("div".to_string(), div_method);
         methods.insert("mod".to_string(), mod_method);
 
-        // Array/string methods
+        // Array/string methods (note that ->has and ->get also work for array
+        // and string indexes)
         methods.insert("first".to_string(), first_method);
         methods.insert("last".to_string(), last_method);
+        methods.insert("slice".to_string(), slice_method);
+        methods.insert("size".to_string(), size_method);
+
+        // Object methods (note that ->size also works for objects)
         methods.insert("has".to_string(), has_method);
         methods.insert("get".to_string(), get_method);
-        methods.insert("slice".to_string(), slice_method);
-        // The ->size method works for objects as well as arrays and strings.
-        methods.insert("size".to_string(), size_method);
+        methods.insert("keys".to_string(), keys_method);
+        methods.insert("values".to_string(), values_method);
+        methods.insert("entries".to_string(), entries_method);
 
         // Logical methods
         methods.insert("not".to_string(), not_method);
@@ -800,6 +807,129 @@ fn size_method(
     }
 }
 
+fn keys_method(
+    method_name: &str,
+    method_args: &Option<MethodArgs>,
+    data: &JSON,
+    vars: &VarsWithPathsMap,
+    input_path: &InputPath<JSON>,
+    tail: &PathList,
+    errors: &mut IndexSet<ApplyToError>,
+) -> Option<JSON> {
+    if let Some(MethodArgs(_)) = method_args {
+        errors.insert(ApplyToError::new(
+            format!("Method ->{} does not take any arguments", method_name).as_str(),
+            input_path.to_vec(),
+        ));
+        return None;
+    }
+
+    match data {
+        JSON::Object(map) => {
+            let keys = map.keys().map(|key| JSON::String(key.clone())).collect();
+            tail.apply_to_path(&JSON::Array(keys), vars, input_path, errors)
+        }
+        _ => {
+            errors.insert(ApplyToError::new(
+                format!(
+                    "Method ->{} requires an object input, not {}",
+                    method_name,
+                    json_type_name(data),
+                )
+                .as_str(),
+                input_path.to_vec(),
+            ));
+            None
+        }
+    }
+}
+
+fn values_method(
+    method_name: &str,
+    method_args: &Option<MethodArgs>,
+    data: &JSON,
+    vars: &VarsWithPathsMap,
+    input_path: &InputPath<JSON>,
+    tail: &PathList,
+    errors: &mut IndexSet<ApplyToError>,
+) -> Option<JSON> {
+    if let Some(MethodArgs(_)) = method_args {
+        errors.insert(ApplyToError::new(
+            format!("Method ->{} does not take any arguments", method_name).as_str(),
+            input_path.to_vec(),
+        ));
+        return None;
+    }
+
+    match data {
+        JSON::Object(map) => {
+            let values = map.values().cloned().collect();
+            tail.apply_to_path(&JSON::Array(values), vars, input_path, errors)
+        }
+        _ => {
+            errors.insert(ApplyToError::new(
+                format!(
+                    "Method ->{} requires an object input, not {}",
+                    method_name,
+                    json_type_name(data),
+                )
+                .as_str(),
+                input_path.to_vec(),
+            ));
+            None
+        }
+    }
+}
+
+// Returns a list of [{ key, value }, ...] objects for each key-value pair in
+// the object. Returning a list of [[ key, value ], ...] pairs might also seem
+// like an option, but GraphQL doesn't handle heterogeneous lists (or tuples) as
+// well as it handles objects with named properties like { key, value }.
+fn entries_method(
+    method_name: &str,
+    method_args: &Option<MethodArgs>,
+    data: &JSON,
+    vars: &VarsWithPathsMap,
+    input_path: &InputPath<JSON>,
+    tail: &PathList,
+    errors: &mut IndexSet<ApplyToError>,
+) -> Option<JSON> {
+    if let Some(MethodArgs(_)) = method_args {
+        errors.insert(ApplyToError::new(
+            format!("Method ->{} does not take any arguments", method_name).as_str(),
+            input_path.to_vec(),
+        ));
+        return None;
+    }
+
+    match data {
+        JSON::Object(map) => {
+            let entries = map
+                .iter()
+                .map(|(key, value)| {
+                    let mut key_value_pair = JSONMap::new();
+                    key_value_pair.insert(ByteString::from("key"), JSON::String(key.clone()));
+                    key_value_pair.insert(ByteString::from("value"), value.clone());
+                    JSON::Object(key_value_pair)
+                })
+                .collect();
+            tail.apply_to_path(&JSON::Array(entries), vars, input_path, errors)
+        }
+        _ => {
+            errors.insert(ApplyToError::new(
+                format!(
+                    "Method ->{} requires an object input, not {}",
+                    method_name,
+                    json_type_name(data),
+                )
+                .as_str(),
+                input_path.to_vec(),
+            ));
+            None
+        }
+    }
+}
+
 fn not_method(
     method_name: &str,
     method_args: &Option<MethodArgs>,
@@ -1340,38 +1470,26 @@ mod tests {
             selection!("$->first").apply_to(&json!([1, 2, 3])),
             (Some(json!(1)), vec![]),
         );
+
         assert_eq!(selection!("$->first").apply_to(&json!([])), (None, vec![]),);
-        assert_eq!(
-            selection!("$->first").apply_to(&json!("hello")),
-            (Some(json!("h")), vec![]),
-        );
 
         assert_eq!(
             selection!("$->last").apply_to(&json!([1, 2, 3])),
             (Some(json!(3)), vec![]),
         );
+
         assert_eq!(selection!("$->last").apply_to(&json!([])), (None, vec![]),);
-        assert_eq!(
-            selection!("$->last").apply_to(&json!("hello")),
-            (Some(json!("o")), vec![]),
-        );
 
         assert_eq!(
             selection!("$->get(1)").apply_to(&json!([1, 2, 3])),
             (Some(json!(2)), vec![]),
         );
+
         assert_eq!(
             selection!("$->get(-1)").apply_to(&json!([1, 2, 3])),
             (Some(json!(3)), vec![]),
         );
-        assert_eq!(
-            selection!("$->get(2)").apply_to(&json!("oyez")),
-            (Some(json!("e")), vec![]),
-        );
-        assert_eq!(
-            selection!("$->get(-1)").apply_to(&json!("oyez")),
-            (Some(json!("z")), vec![]),
-        );
+
         assert_eq!(
             selection!("numbers->map(@->get(-2))").apply_to(&json!({
                 "numbers": [
@@ -1381,6 +1499,7 @@ mod tests {
             })),
             (Some(json!([2, 5])), vec![]),
         );
+
         assert_eq!(
             selection!("$->get(3)").apply_to(&json!([1, 2, 3])),
             (
@@ -1391,6 +1510,7 @@ mod tests {
                 }))]
             ),
         );
+
         assert_eq!(
             selection!("$->get(-4)").apply_to(&json!([1, 2, 3])),
             (
@@ -1401,30 +1521,7 @@ mod tests {
                 }))]
             ),
         );
-        assert_eq!(
-            selection!("$->get(3)").apply_to(&json!("oyez")),
-            (Some(json!("z")), vec![]),
-        );
-        assert_eq!(
-            selection!("$->get(4)").apply_to(&json!("oyez")),
-            (
-                None,
-                vec![ApplyToError::from_json(&json!({
-                    "message": "Method ->get(4) string index out of bounds",
-                    "path": [],
-                }))]
-            ),
-        );
-        assert_eq!(
-            selection!("$->get($->echo(-5)->mul(2))").apply_to(&json!("oyez")),
-            (
-                None,
-                vec![ApplyToError::from_json(&json!({
-                    "message": "Method ->get(-10) string index out of bounds",
-                    "path": [],
-                }))]
-            ),
-        );
+
         assert_eq!(
             selection!("$->get").apply_to(&json!([1, 2, 3])),
             (
@@ -1435,6 +1532,7 @@ mod tests {
                 }))]
             ),
         );
+
         assert_eq!(
             selection!("$->get('bogus')").apply_to(&json!([1, 2, 3])),
             (
@@ -1445,6 +1543,155 @@ mod tests {
                 }))]
             ),
         );
+
+        assert_eq!(
+            selection!("$->has(1)").apply_to(&json!([1, 2, 3])),
+            (Some(json!(true)), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$->has(5)").apply_to(&json!([1, 2, 3])),
+            (Some(json!(false)), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$->slice(1, 3)").apply_to(&json!([1, 2, 3, 4, 5])),
+            (Some(json!([2, 3])), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$->slice(1, 3)").apply_to(&json!([1, 2])),
+            (Some(json!([2])), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$->slice(1, 3)").apply_to(&json!([1])),
+            (Some(json!([])), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$->slice(1, 3)").apply_to(&json!([])),
+            (Some(json!([])), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$->size").apply_to(&json!([])),
+            (Some(json!(0)), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$->size").apply_to(&json!([1, 2, 3])),
+            (Some(json!(3)), vec![]),
+        );
+    }
+
+    #[test]
+    fn test_size_method_errors() {
+        assert_eq!(
+            selection!("$->size").apply_to(&json!(null)),
+            (
+                None,
+                vec![ApplyToError::from_json(&json!({
+                    "message": "Method ->size requires an array, string, or object input, not null",
+                    "path": [],
+                }))]
+            ),
+        );
+
+        assert_eq!(
+            selection!("$->size").apply_to(&json!(true)),
+            (
+                None,
+                vec![ApplyToError::from_json(&json!({
+                    "message": "Method ->size requires an array, string, or object input, not boolean",
+                    "path": [],
+                }))]
+            ),
+        );
+
+        assert_eq!(
+            selection!("count->size").apply_to(&json!({
+                "count": 123,
+            })),
+            (
+                None,
+                vec![ApplyToError::from_json(&json!({
+                    "message": "Method ->size requires an array, string, or object input, not number",
+                    "path": ["count"],
+                }))]
+            ),
+        );
+    }
+
+    #[test]
+    fn test_string_methods() {
+        assert_eq!(
+            selection!("$->has(2)").apply_to(&json!("oyez")),
+            (Some(json!(true)), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$->has(-2)").apply_to(&json!("oyez")),
+            (Some(json!(true)), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$->has(10)").apply_to(&json!("oyez")),
+            (Some(json!(false)), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$->has(-10)").apply_to(&json!("oyez")),
+            (Some(json!(false)), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$->first").apply_to(&json!("hello")),
+            (Some(json!("h")), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$->last").apply_to(&json!("hello")),
+            (Some(json!("o")), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$->get(2)").apply_to(&json!("oyez")),
+            (Some(json!("e")), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$->get(-1)").apply_to(&json!("oyez")),
+            (Some(json!("z")), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$->get(3)").apply_to(&json!("oyez")),
+            (Some(json!("z")), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$->get(4)").apply_to(&json!("oyez")),
+            (
+                None,
+                vec![ApplyToError::from_json(&json!({
+                    "message": "Method ->get(4) string index out of bounds",
+                    "path": [],
+                }))]
+            ),
+        );
+
+        assert_eq!(
+            selection!("$->get($->echo(-5)->mul(2))").apply_to(&json!("oyez")),
+            (
+                None,
+                vec![ApplyToError::from_json(&json!({
+                    "message": "Method ->get(-10) string index out of bounds",
+                    "path": [],
+                }))]
+            ),
+        );
+
         assert_eq!(
             selection!("$->get(true)").apply_to(&json!("input")),
             (
@@ -1457,56 +1704,38 @@ mod tests {
         );
 
         assert_eq!(
-            selection!("object->get('a')").apply_to(&json!({
-                "object": {
-                    "a": 123,
-                    "b": 456,
-                },
-            })),
-            (Some(json!(123)), vec![]),
-        );
-        assert_eq!(
-            selection!("object->get('c')").apply_to(&json!({
-                "object": {
-                    "a": 123,
-                    "b": 456,
-                },
-            })),
-            (
-                None,
-                vec![ApplyToError::from_json(&json!({
-                    "message": "Method ->get(\"c\") object key not found",
-                    "path": ["object"],
-                }))]
-            ),
+            selection!("$->slice(1, 3)").apply_to(&json!("")),
+            (Some(json!("")), vec![]),
         );
 
-        // Test the ->has method
         assert_eq!(
-            selection!("$->has(1)").apply_to(&json!([1, 2, 3])),
-            (Some(json!(true)), vec![]),
+            selection!("$->slice(1, 3)").apply_to(&json!("hello")),
+            (Some(json!("el")), vec![]),
         );
+
         assert_eq!(
-            selection!("$->has(5)").apply_to(&json!([1, 2, 3])),
-            (Some(json!(false)), vec![]),
+            selection!("$->slice(1, 3)").apply_to(&json!("he")),
+            (Some(json!("e")), vec![]),
         );
+
         assert_eq!(
-            selection!("$->has(2)").apply_to(&json!("oyez")),
-            (Some(json!(true)), vec![]),
+            selection!("$->slice(1, 3)").apply_to(&json!("h")),
+            (Some(json!("")), vec![]),
         );
+
         assert_eq!(
-            selection!("$->has(-2)").apply_to(&json!("oyez")),
-            (Some(json!(true)), vec![]),
+            selection!("$->size").apply_to(&json!("hello")),
+            (Some(json!(5)), vec![]),
         );
+
         assert_eq!(
-            selection!("$->has(10)").apply_to(&json!("oyez")),
-            (Some(json!(false)), vec![]),
+            selection!("$->size").apply_to(&json!("")),
+            (Some(json!(0)), vec![]),
         );
-        assert_eq!(
-            selection!("$->has(-10)").apply_to(&json!("oyez")),
-            (Some(json!(false)), vec![]),
-        );
-        // Test the ->has method with object keys
+    }
+
+    #[test]
+    fn test_object_methods() {
         assert_eq!(
             selection!("object->has('a')").apply_to(&json!({
                 "object": {
@@ -1516,6 +1745,7 @@ mod tests {
             })),
             (Some(json!(true)), vec![]),
         );
+
         assert_eq!(
             selection!("object->has('c')").apply_to(&json!({
                 "object": {
@@ -1525,6 +1755,7 @@ mod tests {
             })),
             (Some(json!(false)), vec![]),
         );
+
         assert_eq!(
             selection!("object->has(true)").apply_to(&json!({
                 "object": {
@@ -1534,6 +1765,7 @@ mod tests {
             })),
             (Some(json!(false)), vec![]),
         );
+
         assert_eq!(
             selection!("object->has(null)").apply_to(&json!({
                 "object": {
@@ -1543,6 +1775,7 @@ mod tests {
             })),
             (Some(json!(false)), vec![]),
         );
+
         assert_eq!(
             selection!("object->has('a')->and(object->has('b'))").apply_to(&json!({
                 "object": {
@@ -1552,6 +1785,7 @@ mod tests {
             })),
             (Some(json!(true)), vec![]),
         );
+
         assert_eq!(
             selection!("object->has('b')->and(object->has('c'))").apply_to(&json!({
                 "object": {
@@ -1561,6 +1795,7 @@ mod tests {
             })),
             (Some(json!(false)), vec![]),
         );
+
         assert_eq!(
             selection!("object->has('xxx')->typeof").apply_to(&json!({
                 "object": {
@@ -1572,91 +1807,183 @@ mod tests {
         );
 
         assert_eq!(
-            selection!("$->slice(1, 3)").apply_to(&json!([1, 2, 3, 4, 5])),
-            (Some(json!([2, 3])), vec![]),
-        );
-        assert_eq!(
-            selection!("$->slice(1, 3)").apply_to(&json!([1, 2])),
-            (Some(json!([2])), vec![]),
-        );
-        assert_eq!(
-            selection!("$->slice(1, 3)").apply_to(&json!([1])),
-            (Some(json!([])), vec![]),
-        );
-        assert_eq!(
-            selection!("$->slice(1, 3)").apply_to(&json!([])),
-            (Some(json!([])), vec![]),
-        );
-        assert_eq!(
-            selection!("$->slice(1, 3)").apply_to(&json!("hello")),
-            (Some(json!("el")), vec![]),
-        );
-        assert_eq!(
-            selection!("$->slice(1, 3)").apply_to(&json!("he")),
-            (Some(json!("e")), vec![]),
-        );
-        assert_eq!(
-            selection!("$->slice(1, 3)").apply_to(&json!("h")),
-            (Some(json!("")), vec![]),
-        );
-        assert_eq!(
-            selection!("$->slice(1, 3)").apply_to(&json!("")),
-            (Some(json!("")), vec![]),
-        );
-
-        assert_eq!(
-            selection!("$->size").apply_to(&json!([])),
-            (Some(json!(0)), vec![]),
-        );
-        assert_eq!(
-            selection!("$->size").apply_to(&json!([1, 2, 3])),
-            (Some(json!(3)), vec![]),
-        );
-        assert_eq!(
-            selection!("$->size").apply_to(&json!("hello")),
-            (Some(json!(5)), vec![]),
-        );
-        assert_eq!(
-            selection!("$->size").apply_to(&json!("")),
-            (Some(json!(0)), vec![]),
-        );
-        assert_eq!(
             selection!("$->size").apply_to(&json!({ "a": 1, "b": 2, "c": 3 })),
             (Some(json!(3)), vec![]),
         );
+
         assert_eq!(
             selection!("$->size").apply_to(&json!({})),
             (Some(json!(0)), vec![]),
         );
+
         assert_eq!(
-            selection!("$->size").apply_to(&json!(null)),
-            (
-                None,
-                vec![ApplyToError::from_json(&json!({
-                    "message": "Method ->size requires an array, string, or object input, not null",
-                    "path": [],
-                }))]
-            ),
+            selection!("$->get('a')").apply_to(&json!({
+                "a": 1,
+                "b": 2,
+                "c": 3,
+            })),
+            (Some(json!(1)), vec![]),
         );
+
         assert_eq!(
-            selection!("$->size").apply_to(&json!(true)),
-            (
-                None,
-                vec![ApplyToError::from_json(&json!({
-                    "message": "Method ->size requires an array, string, or object input, not boolean",
-                    "path": [],
-                }))]
-            ),
+            selection!("$->get('b')").apply_to(&json!({
+                "a": 1,
+                "b": 2,
+                "c": 3,
+            })),
+            (Some(json!(2)), vec![]),
         );
+
         assert_eq!(
-            selection!("count->size").apply_to(&json!({
-                "count": 123,
+            selection!("$->get('c')").apply_to(&json!({
+                "a": 1,
+                "b": 2,
+                "c": 3,
+            })),
+            (Some(json!(3)), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$->get('d')").apply_to(&json!({
+                "a": 1,
+                "b": 2,
+                "c": 3,
             })),
             (
                 None,
                 vec![ApplyToError::from_json(&json!({
-                    "message": "Method ->size requires an array, string, or object input, not number",
-                    "path": ["count"],
+                    "message": "Method ->get(\"d\") object key not found",
+                    "path": [],
+                }))]
+            ),
+        );
+
+        assert_eq!(
+            selection!("$->get('a')->add(10)").apply_to(&json!({
+                "a": 1,
+                "b": 2,
+                "c": 3,
+            })),
+            (Some(json!(11)), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$->get('b')->add(10)").apply_to(&json!({
+                "a": 1,
+                "b": 2,
+                "c": 3,
+            })),
+            (Some(json!(12)), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$->keys").apply_to(&json!({
+                "a": 1,
+                "b": 2,
+                "c": 3,
+            })),
+            (Some(json!(["a", "b", "c"])), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$->keys").apply_to(&json!({})),
+            (Some(json!([])), vec![]),
+        );
+
+        assert_eq!(
+            selection!("notAnObject->keys").apply_to(&json!({
+                "notAnObject": 123,
+            })),
+            (
+                None,
+                vec![ApplyToError::from_json(&json!({
+                    "message": "Method ->keys requires an object input, not number",
+                    "path": ["notAnObject"],
+                }))]
+            ),
+        );
+
+        assert_eq!(
+            selection!("$->values").apply_to(&json!({
+                "a": 1,
+                "b": "two",
+                "c": false,
+            })),
+            (Some(json!([1, "two", false])), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$->values").apply_to(&json!({})),
+            (Some(json!([])), vec![]),
+        );
+
+        assert_eq!(
+            selection!("notAnObject->values").apply_to(&json!({
+                "notAnObject": null,
+            })),
+            (
+                None,
+                vec![ApplyToError::from_json(&json!({
+                    "message": "Method ->values requires an object input, not null",
+                    "path": ["notAnObject"],
+                }))]
+            ),
+        );
+
+        assert_eq!(
+            selection!("$->entries").apply_to(&json!({
+                "a": 1,
+                "b": "two",
+                "c": false,
+            })),
+            (
+                Some(json!([
+                    { "key": "a", "value": 1 },
+                    { "key": "b", "value": "two" },
+                    { "key": "c", "value": false },
+                ])),
+                vec![],
+            ),
+        );
+
+        assert_eq!(
+            // This is just like $->keys, given the automatic array mapping of
+            // .key, though you probably want to use ->keys directly because it
+            // avoids cloning all the values unnecessarily.
+            selection!("$->entries.key").apply_to(&json!({
+                "one": 1,
+                "two": 2,
+                "three": 3,
+            })),
+            (Some(json!(["one", "two", "three"])), vec![]),
+        );
+
+        assert_eq!(
+            // This is just like $->values, given the automatic array mapping of
+            // .value, though you probably want to use ->values directly because
+            // it avoids cloning all the keys unnecessarily.
+            selection!("$->entries.value").apply_to(&json!({
+                "one": 1,
+                "two": 2,
+                "three": 3,
+            })),
+            (Some(json!([1, 2, 3])), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$->entries").apply_to(&json!({})),
+            (Some(json!([])), vec![]),
+        );
+
+        assert_eq!(
+            selection!("notAnObject->entries").apply_to(&json!({
+                "notAnObject": true,
+            })),
+            (
+                None,
+                vec![ApplyToError::from_json(&json!({
+                    "message": "Method ->entries requires an object input, not boolean",
+                    "path": ["notAnObject"],
                 }))]
             ),
         );

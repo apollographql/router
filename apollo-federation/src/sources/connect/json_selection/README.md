@@ -686,12 +686,21 @@ first: list->first
 last: list->last
 index3: list->get(3)
 secondToLast: list->get(-2)
-# The ->get method also works for object keys.
-aValue: $->echo({ a: 123 })->get("a")
 slice: list->slice(0, 5)
+substring: string->slice(2, 5)
 arraySize: array->size
 stringLength: string->size
+
+# Object methods
+aValue: $->echo({ a: 123 })->get("a")
+hasKey: object->has("key")
+hasAB: object->has("a")->and(object->has("b"))
 numberOfProperties: object->size
+keys: object->keys
+values: object->values
+entries: object->entries
+keysFromEntries: object->entries.key
+valuesFromEntries: object->entries.value
 
 # Logical methods
 negation: $.condition->not
