@@ -64,6 +64,12 @@ enum AorB @federation__cost(weight: 15) {
   B
 }
 
+scalar ExpensiveInt @federation__cost(weight: 30)
+
+type ExpensiveObject @federation__cost(weight: 40) {
+  id: ID
+}
+
 input InputTypeWithCost {
   somethingWithCost: Int @federation__cost(weight: 20)
 }
@@ -75,6 +81,8 @@ type Query {
   ): Int
   enumWithCost: AorB
   inputWithCost(someInput: InputTypeWithCost): Int
+  scalarWithCost: ExpensiveInt
+  objectWithCost: ExpensiveObject
   _service: _Service!
 }
 

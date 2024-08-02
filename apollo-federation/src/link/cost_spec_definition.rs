@@ -5,6 +5,7 @@ use apollo_compiler::ast::Directive;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::EnumType;
+use apollo_compiler::schema::ObjectType;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use lazy_static::lazy_static;
@@ -16,6 +17,7 @@ use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
 use crate::schema::position::EnumTypeDefinitionPosition;
+use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::FederationSchema;
 
 pub(crate) const COST_DIRECTIVE_NAME_IN_SPEC: Name = name!("cost");
@@ -100,11 +102,88 @@ impl CostSpecDefinition {
         Ok(())
     }
 
+    pub(crate) fn propagate_demand_control_schema_directives(
+        &self,
+        subgraph_schema: &FederationSchema,
+        source: &apollo_compiler::schema::DirectiveList,
+        dest: &mut apollo_compiler::schema::DirectiveList,
+        original_directive_names: &HashMap<Name, Name>,
+    ) -> Result<(), FederationError> {
+        let cost_directive_name = original_directive_names.get(&COST_DIRECTIVE_NAME_IN_SPEC);
+        if let Some(cost_directive) = source.get(
+            cost_directive_name
+                .unwrap_or(&COST_DIRECTIVE_NAME_IN_SPEC)
+                .as_str(),
+        ) {
+            dest.push(Component::from(self.cost_directive(
+                subgraph_schema,
+                cost_directive.arguments.clone(),
+            )?));
+        }
+
+        let list_size_directive_name =
+            original_directive_names.get(&LIST_SIZE_DIRECTIVE_NAME_IN_SPEC);
+        if let Some(list_size_directive) = source.get(
+            list_size_directive_name
+                .unwrap_or(&LIST_SIZE_DIRECTIVE_NAME_IN_SPEC)
+                .as_str(),
+        ) {
+            dest.push(Component::from(self.list_size_directive(
+                subgraph_schema,
+                list_size_directive.arguments.clone(),
+            )?));
+        }
+
+        Ok(())
+    }
+
     pub(crate) fn propagate_demand_control_directives_for_enum(
         &self,
         subgraph_schema: &mut FederationSchema,
         source: &Node<EnumType>,
         dest: &EnumTypeDefinitionPosition,
+        original_directive_names: &HashMap<Name, Name>,
+    ) -> Result<(), FederationError> {
+        let cost_directive_name = original_directive_names.get(&COST_DIRECTIVE_NAME_IN_SPEC);
+        if let Some(cost_directive) = source.directives.get(
+            cost_directive_name
+                .unwrap_or(&COST_DIRECTIVE_NAME_IN_SPEC)
+                .as_str(),
+        ) {
+            dest.insert_directive(
+                subgraph_schema,
+                Component::from(
+                    self.cost_directive(subgraph_schema, cost_directive.arguments.clone())?,
+                ),
+            )?;
+        }
+
+        let list_size_directive_name =
+            original_directive_names.get(&LIST_SIZE_DIRECTIVE_NAME_IN_SPEC);
+        if let Some(list_size_directive) = source.directives.get(
+            list_size_directive_name
+                .unwrap_or(&LIST_SIZE_DIRECTIVE_NAME_IN_SPEC)
+                .as_str(),
+        ) {
+            dest.insert_directive(
+                subgraph_schema,
+                Component::from(
+                    self.list_size_directive(
+                        subgraph_schema,
+                        list_size_directive.arguments.clone(),
+                    )?,
+                ),
+            )?;
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn propagate_demand_control_directives_for_object(
+        &self,
+        subgraph_schema: &mut FederationSchema,
+        source: &Node<ObjectType>,
+        dest: &ObjectTypeDefinitionPosition,
         original_directive_names: &HashMap<Name, Name>,
     ) -> Result<(), FederationError> {
         let cost_directive_name = original_directive_names.get(&COST_DIRECTIVE_NAME_IN_SPEC);

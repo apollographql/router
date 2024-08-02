@@ -332,6 +332,8 @@ fn extract_subgraphs_from_fed_2_supergraph(
     join_spec_definition: &'static JoinSpecDefinition,
     filtered_types: &Vec<TypeDefinitionPosition>,
 ) -> Result<(), FederationError> {
+    let original_directive_names = get_original_directive_names(supergraph_schema)?;
+
     let TypeInfos {
         object_types,
         interface_types,
@@ -345,9 +347,8 @@ fn extract_subgraphs_from_fed_2_supergraph(
         federation_spec_definitions,
         join_spec_definition,
         filtered_types,
+        &original_directive_names,
     )?;
-
-    let original_directive_names = get_original_directive_names(supergraph_schema)?;
 
     extract_object_type_content(
         supergraph_schema,
@@ -463,6 +464,7 @@ fn add_all_empty_subgraph_types(
     federation_spec_definitions: &IndexMap<Name, &'static FederationSpecDefinition>,
     join_spec_definition: &'static JoinSpecDefinition,
     filtered_types: &Vec<TypeDefinitionPosition>,
+    original_directive_names: &HashMap<Name, Name>,
 ) -> Result<TypeInfos, FederationError> {
     let type_directive_definition =
         join_spec_definition.type_directive_definition(supergraph_schema)?;
@@ -492,15 +494,32 @@ fn add_all_empty_subgraph_types(
                         graph_enum_value_name_to_subgraph_name,
                         &type_directive_application.graph,
                     )?;
+                    let federation_spec_definition = federation_spec_definitions
+                        .get(&type_directive_application.graph)
+                        .ok_or_else(|| SingleFederationError::InvalidFederationSupergraph {
+                            message: "Subgraph unexpectedly does not use federation spec"
+                                .to_owned(),
+                        })?;
+                    let cost_spec_definition =
+                        federation_spec_definition.get_cost_spec_definition(&subgraph.schema);
+
+                    let mut subgraph_type = ScalarType {
+                        description: None,
+                        name: pos.type_name.clone(),
+                        directives: Default::default(),
+                    };
+
+                    if let Some(cost_spec_definition) = cost_spec_definition {
+                        cost_spec_definition.propagate_demand_control_schema_directives(
+                            &subgraph.schema,
+                            type_.directives(),
+                            &mut subgraph_type.directives,
+                            original_directive_names,
+                        )?;
+                    }
+
                     pos.pre_insert(&mut subgraph.schema)?;
-                    pos.insert(
-                        &mut subgraph.schema,
-                        Node::new(ScalarType {
-                            description: None,
-                            name: pos.type_name.clone(),
-                            directives: Default::default(),
-                        }),
-                    )?;
+                    pos.insert(&mut subgraph.schema, Node::new(subgraph_type))?;
                 }
                 None
             }
@@ -794,6 +813,29 @@ fn extract_object_type_content(
                 &mut subgraph.schema,
                 ComponentName::from(Name::new(implements_directive_application.interface)?),
             )?;
+        }
+
+        for graph_enum_value in subgraph_info.keys() {
+            let subgraph = get_subgraph(
+                subgraphs,
+                graph_enum_value_name_to_subgraph_name,
+                graph_enum_value,
+            )?;
+            let federation_spec_definition = federation_spec_definitions
+                .get(graph_enum_value)
+                .ok_or_else(|| SingleFederationError::InvalidFederationSupergraph {
+                    message: "Subgraph unexpectedly does not use federation spec".to_owned(),
+                })?;
+            if let Some(cost_spec_definition) =
+                federation_spec_definition.get_cost_spec_definition(&subgraph.schema)
+            {
+                cost_spec_definition.propagate_demand_control_directives_for_object(
+                    &mut subgraph.schema,
+                    type_,
+                    &pos,
+                    original_directive_names,
+                )?;
+            }
         }
 
         for (field_name, field) in type_.fields.iter() {
