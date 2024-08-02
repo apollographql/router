@@ -28,7 +28,7 @@ pub(crate) trait ValueType:
 {
     /// Returns an estimated size of the cache entry in bytes.
     fn estimated_size(&self) -> Option<usize> {
-        Some(1)
+        None
     }
 }
 
