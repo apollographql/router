@@ -1,25 +1,26 @@
-use lru::LruCache;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
 use std::fmt::Display;
 use std::fmt::{self};
 use std::hash::Hash;
 use std::num::NonZeroUsize;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::AtomicI64;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
+
+use lru::LruCache;
+use opentelemetry::metrics::MeterProvider;
+use opentelemetry_api::metrics::Meter;
+use opentelemetry_api::metrics::ObservableGauge;
+use opentelemetry_api::KeyValue;
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 use tower::BoxError;
 
 use super::redis::*;
 use crate::configuration::RedisCache;
-use crate::error::QueryPlannerError;
 use crate::metrics;
 use crate::plugins::telemetry::config_new::instruments::METER_NAME;
-use crate::services::QueryPlannerContent;
-use opentelemetry::metrics::MeterProvider;
-use opentelemetry_api::metrics::{Meter, ObservableGauge};
-use opentelemetry_api::KeyValue;
 
 pub(crate) trait KeyType:
     Clone + fmt::Debug + fmt::Display + Hash + Eq + Send + Sync

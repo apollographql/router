@@ -24,7 +24,8 @@ use tower_service::Service;
 use tracing::Instrument;
 
 use super::fetch::QueryHash;
-use crate::cache::storage::{InMemoryCache, ValueType};
+use crate::cache::storage::InMemoryCache;
+use crate::cache::storage::ValueType;
 use crate::cache::DeduplicatingCache;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;

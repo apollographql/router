@@ -591,8 +591,9 @@ impl RedisCacheStorage {
 mod test {
     use std::time::SystemTime;
 
-    use crate::cache::storage::ValueType;
     use url::Url;
+
+    use crate::cache::storage::ValueType;
 
     #[test]
     fn ensure_invalid_payload_serialization_doesnt_fail() {

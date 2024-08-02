@@ -2,16 +2,16 @@
 
 use std::sync::Arc;
 
-use crate::cache::storage::ValueType;
-use crate::error::QueryPlannerError;
-use crate::graphql;
-use crate::query_planner::QueryPlan;
-use crate::Context;
 use async_trait::async_trait;
 use derivative::Derivative;
 use serde::Deserialize;
 use serde::Serialize;
 use static_assertions::assert_impl_all;
+
+use crate::error::QueryPlannerError;
+use crate::graphql;
+use crate::query_planner::QueryPlan;
+use crate::Context;
 
 assert_impl_all!(Request: Send);
 /// [`Context`] for the request.
