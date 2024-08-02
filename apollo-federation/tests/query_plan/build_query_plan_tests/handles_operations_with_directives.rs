@@ -148,6 +148,9 @@ fn test_if_directives_at_the_operation_level_are_passed_down_to_subgraph_queries
         }
       }
     "#);
+    // This checks a regression where the `variable_usages` included the `representations` variable.
+    assert_eq!(b_fetch_nodes[0].variable_usages.len(), 0);
+    assert_eq!(b_fetch_nodes[1].variable_usages.len(), 0);
 }
 
 #[test]

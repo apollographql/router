@@ -2362,6 +2362,14 @@ impl FetchDependencyGraphNode {
                 .cloned()
                 .collect::<Vec<_>>()
         };
+        let variable_usages = {
+            let mut list = variable_definitions
+                .iter()
+                .map(|var_def| var_def.name.clone())
+                .collect::<Vec<_>>();
+            list.sort();
+            list
+        };
 
         let mut operation = if self.is_entity_fetch {
             operation_for_entities_fetch(
@@ -2386,16 +2394,6 @@ impl FetchDependencyGraphNode {
         {
             operation.reuse_fragments(fragments)?;
         }
-
-        let variable_usages = {
-            let mut list = operation
-                .variables
-                .iter()
-                .map(|variable| variable.name.clone())
-                .collect::<Vec<_>>();
-            list.sort();
-            list
-        };
 
         let operation_document = operation.try_into()?;
 
