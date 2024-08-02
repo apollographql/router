@@ -14,7 +14,9 @@ use self::storage::ValueType;
 use crate::configuration::RedisCache;
 
 pub(crate) mod redis;
+mod size_estimation;
 pub(crate) mod storage;
+pub(crate) use size_estimation::estimate_size;
 
 type WaitMap<K, V> = Arc<Mutex<HashMap<K, broadcast::Sender<V>>>>;
 pub(crate) const DEFAULT_CACHE_CAPACITY: NonZeroUsize = match NonZeroUsize::new(512) {

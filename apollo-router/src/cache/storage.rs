@@ -10,6 +10,7 @@ use lru::LruCache;
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry_api::metrics::Meter;
 use opentelemetry_api::metrics::ObservableGauge;
+use opentelemetry_api::metrics::Unit;
 use opentelemetry_api::KeyValue;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -138,6 +139,7 @@ where
         let cache_estimated_storage_gauge = meter
             .i64_observable_gauge("apollo.router.cache.estimated.storage.size")
             .with_description("Estimated cache storage")
+            .with_unit(Unit::new("bytes"))
             .with_callback(move |i| {
                 // If there's no storage then don't bother updating the gauge
                 let value = cache_estimated_storage_for_gauge.load(Ordering::SeqCst);

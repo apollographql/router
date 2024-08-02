@@ -24,6 +24,7 @@ use tower_service::Service;
 use tracing::Instrument;
 
 use super::fetch::QueryHash;
+use crate::cache::estimate_size;
 use crate::cache::storage::InMemoryCache;
 use crate::cache::storage::ValueType;
 use crate::cache::DeduplicatingCache;
@@ -687,7 +688,12 @@ pub(crate) struct WarmUpCachingQueryKey {
 
 impl ValueType for Result<QueryPlannerContent, Arc<QueryPlannerError>> {
     fn estimated_size(&self) -> Option<usize> {
-        todo!()
+        match self {
+            Ok(QueryPlannerContent::Plan { plan }) => Some(estimate_size(plan)),
+            Ok(QueryPlannerContent::Response { response }) => Some(estimate_size(response)),
+            Ok(QueryPlannerContent::IntrospectionDisabled) => None,
+            Err(e) => Some(estimate_size(e)),
+        }
     }
 }
 
