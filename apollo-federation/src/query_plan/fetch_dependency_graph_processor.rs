@@ -1,5 +1,7 @@
 use std::collections::HashSet;
+use std::sync::Arc;
 
+use apollo_compiler::executable::DirectiveList;
 use apollo_compiler::executable::VariableDefinition;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
@@ -44,7 +46,8 @@ const FETCH_COST: QueryPlanCost = 1000.0;
 const PIPELINING_COST: QueryPlanCost = 100.0;
 
 pub(crate) struct FetchDependencyGraphToQueryPlanProcessor {
-    variable_definitions: Vec<Node<VariableDefinition>>,
+    variable_definitions: Arc<Vec<Node<VariableDefinition>>>,
+    operation_directives: Arc<DirectiveList>,
     fragments: Option<RebasedFragments>,
     operation_name: Option<Name>,
     assigned_defer_labels: Option<HashSet<String>>,
@@ -241,13 +244,15 @@ fn sequence_cost(values: impl IntoIterator<Item = QueryPlanCost>) -> QueryPlanCo
 
 impl FetchDependencyGraphToQueryPlanProcessor {
     pub(crate) fn new(
-        variable_definitions: Vec<Node<VariableDefinition>>,
+        variable_definitions: Arc<Vec<Node<VariableDefinition>>>,
+        operation_directives: Arc<DirectiveList>,
         fragments: Option<RebasedFragments>,
         operation_name: Option<Name>,
         assigned_defer_labels: Option<HashSet<String>>,
     ) -> Self {
         Self {
             variable_definitions,
+            operation_directives,
             fragments,
             operation_name,
             assigned_defer_labels,
@@ -276,6 +281,7 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
             query_graph,
             handled_conditions,
             &self.variable_definitions,
+            &self.operation_directives,
             self.fragments.as_mut(),
             op_name,
         )
