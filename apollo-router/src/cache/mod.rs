@@ -37,7 +37,7 @@ where
     pub(crate) async fn with_capacity(
         capacity: NonZeroUsize,
         redis: Option<RedisCache>,
-        caller: &str,
+        caller: &'static str,
     ) -> Result<Self, BoxError> {
         Ok(Self {
             wait_map: Arc::new(Mutex::new(HashMap::new())),
@@ -47,7 +47,7 @@ where
 
     pub(crate) async fn from_configuration(
         config: &crate::configuration::Cache,
-        caller: &str,
+        caller: &'static str,
     ) -> Result<Self, BoxError> {
         Self::with_capacity(config.in_memory.limit, config.redis.clone(), caller).await
     }
