@@ -285,18 +285,17 @@ pub(crate) fn extract_enums_from_response(
     operation_name: Option<&str>,
     schema: &Valid<Schema>,
     response_body: &Object,
-) -> ReferencedEnums {
-    let mut result = ReferencedEnums::new();
+    existing_refs: &mut ReferencedEnums,
+) {
     if let Some(operation) = query.operation(operation_name) {
         extract_enums_from_selection_set(
             &operation.selection_set,
             &query.fragments,
             schema,
             response_body,
-            &mut result,
+            existing_refs,
         );
     }
-    result
 }
 
 fn add_enum_value_to_map(
