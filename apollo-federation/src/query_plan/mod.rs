@@ -235,10 +235,12 @@ pub struct FetchDataKeyRenamer {
 /// elements.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub enum FetchDataPathElement {
-    Key(Name),
-    AnyIndex,
+    Key(Conditions, Name),
+    AnyIndex(Conditions),
     TypenameEquals(Name),
 }
+
+pub type Conditions = Vec<Name>;
 
 /// Vectors of this element match a path in a query. Each element is (1) a field in a query, or (2)
 /// an inline fragment in a query.

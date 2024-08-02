@@ -18,6 +18,7 @@ use apollo_compiler::executable::DirectiveList;
 use apollo_compiler::executable::VariableDefinition;
 use apollo_compiler::name;
 use apollo_compiler::schema;
+use apollo_compiler::schema::ObjectType;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use itertools::Itertools;
@@ -257,6 +258,9 @@ pub(crate) struct FetchDependencyGraphNodePath {
     pub(crate) full_path: Arc<OpPath>,
     path_in_node: Arc<OpPath>,
     response_path: Vec<FetchDataPathElement>,
+    type_conditioned_fetching_enabled: bool,
+    possible_types: Vec<Node<ObjectType>>,
+    possible_types_after_last_field: Vec<Node<ObjectType>>,
 }
 
 #[derive(Debug, Clone)]
@@ -449,6 +453,9 @@ impl FetchDependencyGraphNodePath {
             full_path: self.full_path.clone(),
             path_in_node: new_context,
             response_path: self.response_path.clone(),
+            type_conditioned_fetching_enabled: self.type_conditioned_fetching_enabled,
+            possible_types: self.possible_types.clone(),
+            possible_types_after_last_field: self.possible_types_after_last_field.clone(),
         }
     }
 
@@ -456,11 +463,81 @@ impl FetchDependencyGraphNodePath {
         &self,
         element: Arc<OpPathElement>,
     ) -> Result<FetchDependencyGraphNodePath, FederationError> {
+        let response_path = self.updated_response_path(&element)?;
+        let new_possible_types = self.new_possible_types(&element);
+        let possible_types_after_last_field = if let &OpPathElement::Field(_) = element.as_ref() {
+            new_possible_types
+        } else {
+            self.possible_types_after_last_field.clone()
+        };
+
         Ok(Self {
-            response_path: self.updated_response_path(&element)?,
+            response_path,
             full_path: Arc::new(self.full_path.with_pushed(element.clone())),
             path_in_node: Arc::new(self.path_in_node.with_pushed(element)),
+            type_conditioned_fetching_enabled: self.type_conditioned_fetching_enabled,
+            possible_types: self.possible_types.clone(),
+            possible_types_after_last_field,
         })
+    }
+
+    fn new_possible_types(&self, element: &OpPathElement) -> Vec<Node<ObjectType>> {
+        if !self.type_conditioned_fetching_enabled {
+            return Default::default();
+        }
+
+        match element {
+            OpPathElement::InlineFragment(f) => match &f.type_condition_position {
+                None => self.possible_types.clone(),
+                Some(tcp) => {
+                    let element_possible_types =
+                        f.schema().possible_runtime_types(tcp.clone()).unwrap();
+                    self.possible_types
+                        .iter()
+                        // TODO: O(n)
+                        .filter(|possible_type| {
+                            element_possible_types
+                                .iter()
+                                .any(|ept| ept.type_name == possible_type.name)
+                        })
+                        .cloned()
+                        .collect()
+                }
+            },
+            OpPathElement::Field(f) => self.advance_field_type(f),
+        }
+    }
+
+    fn advance_field_type(&self, element: &Field) -> Vec<Node<ObjectType>> {
+        let schema = element.schema();
+        if schema
+            .get_type(element.name().clone())
+            .unwrap()
+            .is_composite_type()
+        {
+            return Default::default();
+        }
+
+        let mut res = self
+            .possible_types
+            .clone()
+            .into_iter()
+            .map(|pt| {
+                let fd = pt.fields.get(element.name()).unwrap();
+                let typ = schema.get_type(fd.name.clone()).unwrap();
+                schema
+                    .possible_runtime_types(typ.as_composite_type().unwrap())
+                    .unwrap()
+                    .iter()
+                    .map(|ctdp| (ctdp.get(schema.schema()).unwrap()).clone())
+                    .collect::<Vec<_>>()
+            })
+            .flatten()
+            .collect::<Vec<_>>();
+
+        res.sort_by(|stuff, other_stuff| stuff.name.cmp(&other_stuff.name));
+
+        res
     }
 
     fn updated_response_path(
@@ -469,19 +546,28 @@ impl FetchDependencyGraphNodePath {
     ) -> Result<Vec<FetchDataPathElement>, FederationError> {
         let mut new_path = self.response_path.clone();
         if let OpPathElement::Field(field) = element {
-            new_path.push(FetchDataPathElement::Key(field.response_name()));
-            // TODO: is there a simpler we to find a field’s type from `&Field`?
+            if self.possible_types_after_last_field.len() != self.possible_types.len() {
+                let conditions = &self.possible_types;
+                let previous_last_element = new_path.pop();
+            }
+
+            new_path.push(FetchDataPathElement::Key(
+                Default::default(),
+                field.response_name(),
+            ));
+
+            // TODO: is there a simpler way to find a field’s type from `&Field`?
             let mut type_ = &field.field_position.get(field.schema.schema())?.ty;
             loop {
                 match type_ {
                     schema::Type::Named(_) | schema::Type::NonNullNamed(_) => break,
                     schema::Type::List(inner) | schema::Type::NonNullList(inner) => {
-                        new_path.push(FetchDataPathElement::AnyIndex);
+                        new_path.push(FetchDataPathElement::AnyIndex(Default::default()));
                         type_ = inner
                     }
                 }
             }
-        };
+        }
         Ok(new_path)
     }
 }
@@ -3641,7 +3727,7 @@ fn compute_input_rewrites_on_key_fetch(
     {
         // rewrite path: [ ... on <input_type_name>, __typename ]
         let type_cond = FetchDataPathElement::TypenameEquals(input_type_name.clone());
-        let typename_field_elem = FetchDataPathElement::Key(TYPENAME_FIELD);
+        let typename_field_elem = FetchDataPathElement::Key(Default::default(), TYPENAME_FIELD);
         let rewrite = FetchDataRewrite::ValueSetter(FetchDataValueSetter {
             path: vec![type_cond, typename_field_elem],
             set_value_to: dest_type.type_name().to_string().into(),
@@ -4261,5 +4347,8 @@ fn path_for_parent(
         full_path: path.full_path.clone(),
         path_in_node: Arc::new(final_path),
         response_path: path.response_path.clone(),
+        possible_types: path.possible_types.clone(),
+        possible_types_after_last_field: path.possible_types_after_last_field.clone(),
+        type_conditioned_fetching_enabled: path.type_conditioned_fetching_enabled,
     })
 }

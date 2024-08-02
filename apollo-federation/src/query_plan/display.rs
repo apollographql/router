@@ -1,4 +1,5 @@
 use std::fmt;
+use std::fmt::Write;
 
 use apollo_compiler::executable;
 
@@ -356,10 +357,24 @@ fn write_selections(
 impl fmt::Display for FetchDataPathElement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Key(name) => f.write_str(name),
-            Self::AnyIndex => f.write_str("@"),
+            Self::Key(conditions, name) => {
+                write_conditions(conditions, f)?;
+                f.write_str(name)
+            }
+            Self::AnyIndex(conditions) => {
+                write_conditions(conditions, f)?;
+                f.write_str("@")
+            }
             Self::TypenameEquals(name) => write!(f, "... on {name}"),
         }
+    }
+}
+
+fn write_conditions(conditions: &Vec<Name>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    if !conditions.is_empty() {
+        write!(f, "|[on {}]", conditions.join(","))
+    } else {
+        Ok(())
     }
 }
 
