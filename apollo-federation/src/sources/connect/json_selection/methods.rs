@@ -77,6 +77,7 @@ lazy_static! {
         // Array methods
         methods.insert("first".to_string(), first_method);
         methods.insert("last".to_string(), last_method);
+        methods.insert("get".to_string(), get_method);
         methods.insert("slice".to_string(), slice_method);
 
         // Logical methods
@@ -413,12 +414,19 @@ fn first_method(
         return None;
     }
 
-    if let JSON::Array(array) = data {
-        array
+    match data {
+        JSON::Array(array) => array
             .first()
-            .and_then(|first| tail.apply_to_path(first, vars, input_path, errors))
-    } else {
-        tail.apply_to_path(data, vars, input_path, errors)
+            .and_then(|first| tail.apply_to_path(first, vars, input_path, errors)),
+        JSON::String(s) => s.as_str().chars().next().and_then(|first| {
+            tail.apply_to_path(
+                &JSON::String(first.to_string().into()),
+                vars,
+                input_path,
+                errors,
+            )
+        }),
+        _ => tail.apply_to_path(data, vars, input_path, errors),
     }
 }
 
@@ -439,12 +447,165 @@ fn last_method(
         return None;
     }
 
-    if let JSON::Array(array) = data {
-        array
+    match data {
+        JSON::Array(array) => array
             .last()
-            .and_then(|last| tail.apply_to_path(last, vars, input_path, errors))
+            .and_then(|last| tail.apply_to_path(last, vars, input_path, errors)),
+        JSON::String(s) => s.as_str().chars().last().and_then(|last| {
+            tail.apply_to_path(
+                &JSON::String(last.to_string().into()),
+                vars,
+                input_path,
+                errors,
+            )
+        }),
+        _ => tail.apply_to_path(data, vars, input_path, errors),
+    }
+}
+
+// Returns the array or string element at the given index, as Option<JSON>. If
+// the index is out of bounds, returns None and reports an error.
+fn get_method(
+    method_name: &str,
+    method_args: &Option<MethodArgs>,
+    data: &JSON,
+    vars: &VarsWithPathsMap,
+    input_path: &InputPath<JSON>,
+    tail: &PathList,
+    errors: &mut IndexSet<ApplyToError>,
+) -> Option<JSON> {
+    if let Some(MethodArgs(args)) = method_args {
+        if let Some(index_literal) = args.first() {
+            match &index_literal.apply_to_path(data, vars, input_path, errors) {
+                Some(JSON::Number(n)) => match (data, n.as_i64()) {
+                    (JSON::Array(array), Some(i)) => {
+                        // Negative indices count from the end of the array
+                        if let Some(element) = array.get(if i < 0 {
+                            (array.len() as i64 + i) as usize
+                        } else {
+                            i as usize
+                        }) {
+                            tail.apply_to_path(element, vars, input_path, errors)
+                        } else {
+                            errors.insert(ApplyToError::new(
+                                format!(
+                                    "Method ->{}({}) array index out of bounds",
+                                    method_name, i,
+                                )
+                                .as_str(),
+                                input_path.to_vec(),
+                            ));
+                            None
+                        }
+                    }
+                    (JSON::String(s), Some(i)) => {
+                        let s_str = s.as_str();
+                        let ilen = s_str.len() as i64;
+                        // Negative indices count from the end of the array
+                        let index = if i < 0 { ilen + i } else { i };
+                        if index >= 0 && index < ilen {
+                            let uindex = index as usize;
+                            let single_char_string = s_str[uindex..uindex + 1].to_string();
+                            tail.apply_to_path(
+                                &JSON::String(single_char_string.into()),
+                                vars,
+                                input_path,
+                                errors,
+                            )
+                        } else {
+                            errors.insert(ApplyToError::new(
+                                format!(
+                                    "Method ->{}({}) string index out of bounds",
+                                    method_name, i,
+                                )
+                                .as_str(),
+                                input_path.to_vec(),
+                            ));
+                            None
+                        }
+                    }
+                    (_, None) => {
+                        errors.insert(ApplyToError::new(
+                            format!("Method ->{} requires an integer index", method_name).as_str(),
+                            input_path.to_vec(),
+                        ));
+                        None
+                    }
+                    _ => {
+                        errors.insert(ApplyToError::new(
+                            format!(
+                                "Method ->{} requires an array or string input, not {}",
+                                method_name,
+                                json_type_name(data),
+                            )
+                            .as_str(),
+                            input_path.to_vec(),
+                        ));
+                        None
+                    }
+                }
+                Some(key @ JSON::String(s)) => match data {
+                    JSON::Object(map) => {
+                        if let Some(value) = map.get(s.as_str()) {
+                            tail.apply_to_path(value, vars, input_path, errors)
+                        } else {
+                            errors.insert(ApplyToError::new(
+                                format!(
+                                    "Method ->{}({}) object key not found",
+                                    method_name, key,
+                                )
+                                .as_str(),
+                                input_path.to_vec(),
+                            ));
+                            None
+                        }
+                    }
+                    _ => {
+                        errors.insert(ApplyToError::new(
+                            format!(
+                                "Method ->{}({}) requires an object input",
+                                method_name,
+                                key,
+                            )
+                            .as_str(),
+                            input_path.to_vec(),
+                        ));
+                        None
+                    }
+                }
+                Some(value) => {
+                    errors.insert(ApplyToError::new(
+                        format!(
+                            "Method ->{}({}) requires an integer or string argument",
+                            method_name,
+                            value,
+                        )
+                        .as_str(),
+                        input_path.to_vec(),
+                    ));
+                    None
+                }
+                None => {
+                    errors.insert(ApplyToError::new(
+                        format!("Method ->{} received undefined argument", method_name).as_str(),
+                        input_path.to_vec(),
+                    ));
+                    None
+                }
+            }
+        } else {
+            errors.insert(ApplyToError::new(
+                format!("Method ->{} requires an argument", method_name).as_str(),
+                input_path.to_vec(),
+            ));
+            None
+        }
     } else {
-        tail.apply_to_path(data, vars, input_path, errors)
+        errors.insert(ApplyToError::new(
+            format!("Method ->{} requires an argument", method_name).as_str(),
+            input_path.to_vec(),
+        ));
+        None
     }
 }
 
@@ -1059,7 +1220,7 @@ mod tests {
         assert_eq!(selection!("$->first").apply_to(&json!([])), (None, vec![]),);
         assert_eq!(
             selection!("$->first").apply_to(&json!("hello")),
-            (Some(json!("hello")), vec![]),
+            (Some(json!("h")), vec![]),
         );
 
         assert_eq!(
@@ -1069,7 +1230,132 @@ mod tests {
         assert_eq!(selection!("$->last").apply_to(&json!([])), (None, vec![]),);
         assert_eq!(
             selection!("$->last").apply_to(&json!("hello")),
-            (Some(json!("hello")), vec![]),
+            (Some(json!("o")), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$->get(1)").apply_to(&json!([1, 2, 3])),
+            (Some(json!(2)), vec![]),
+        );
+        assert_eq!(
+            selection!("$->get(-1)").apply_to(&json!([1, 2, 3])),
+            (Some(json!(3)), vec![]),
+        );
+        assert_eq!(
+            selection!("$->get(2)").apply_to(&json!("oyez")),
+            (Some(json!("e")), vec![]),
+        );
+        assert_eq!(
+            selection!("$->get(-1)").apply_to(&json!("oyez")),
+            (Some(json!("z")), vec![]),
+        );
+        assert_eq!(
+            selection!("numbers->map(@->get(-2))").apply_to(&json!({
+                "numbers": [
+                    [1, 2, 3],
+                    [5, 6],
+                ],
+            })),
+            (Some(json!([2, 5])), vec![]),
+        );
+        assert_eq!(
+            selection!("$->get(3)").apply_to(&json!([1, 2, 3])),
+            (
+                None,
+                vec![ApplyToError::from_json(&json!({
+                    "message": "Method ->get(3) array index out of bounds",
+                    "path": [],
+                }))]
+            ),
+        );
+        assert_eq!(
+            selection!("$->get(-4)").apply_to(&json!([1, 2, 3])),
+            (
+                None,
+                vec![ApplyToError::from_json(&json!({
+                    "message": "Method ->get(-4) array index out of bounds",
+                    "path": [],
+                }))]
+            ),
+        );
+        assert_eq!(
+            selection!("$->get(3)").apply_to(&json!("oyez")),
+            (Some(json!("z")), vec![]),
+        );
+        assert_eq!(
+            selection!("$->get(4)").apply_to(&json!("oyez")),
+            (
+                None,
+                vec![ApplyToError::from_json(&json!({
+                    "message": "Method ->get(4) string index out of bounds",
+                    "path": [],
+                }))]
+            ),
+        );
+        assert_eq!(
+            selection!("$->get($->echo(-5)->mul(2))").apply_to(&json!("oyez")),
+            (
+                None,
+                vec![ApplyToError::from_json(&json!({
+                    "message": "Method ->get(-10) string index out of bounds",
+                    "path": [],
+                }))]
+            ),
+        );
+        assert_eq!(
+            selection!("$->get").apply_to(&json!([1, 2, 3])),
+            (
+                None,
+                vec![ApplyToError::from_json(&json!({
+                    "message": "Method ->get requires an argument",
+                    "path": [],
+                }))]
+            ),
+        );
+        assert_eq!(
+            selection!("$->get('bogus')").apply_to(&json!([1, 2, 3])),
+            (
+                None,
+                vec![ApplyToError::from_json(&json!({
+                    "message": "Method ->get(\"bogus\") requires an object input",
+                    "path": [],
+                }))]
+            ),
+        );
+        assert_eq!(
+            selection!("$->get(true)").apply_to(&json!("input")),
+            (
+                None,
+                vec![ApplyToError::from_json(&json!({
+                    "message": "Method ->get(true) requires an integer or string argument",
+                    "path": [],
+                }))]
+            ),
+        );
+
+        assert_eq!(
+            selection!("object->get('a')").apply_to(&json!({
+                "object": {
+                    "a": 123,
+                    "b": 456,
+                },
+            })),
+            (Some(json!(123)), vec![]),
+        );
+        assert_eq!(
+            selection!("object->get('c')").apply_to(&json!({
+                "object": {
+                    "a": 123,
+                    "b": 456,
+                },
+            })),
+            (
+                None,
+                vec![ApplyToError::from_json(&json!({
+                    "message": "Method ->get(\"c\") object key not found",
+                    "path": ["object"],
+                }))]
+            ),
         );
 
         assert_eq!(

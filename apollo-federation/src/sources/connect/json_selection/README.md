@@ -689,9 +689,13 @@ product: $.a->mul($.b, $.c)
 quotient: $.a->div($.b)
 remainder: $.a->mod($.b)
 
-# Array methods
+# Array/string methods
 first: list->first
 last: list->last
+index3: list->get(3)
+secondToLast: list->get(-2)
+# The ->get method also works for object keys.
+aValue: $->echo({ a: 123 })->get("a")
 slice: list->slice(0, 5)
 
 # Logical methods
