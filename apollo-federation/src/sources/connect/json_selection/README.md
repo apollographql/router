@@ -697,6 +697,9 @@ secondToLast: list->get(-2)
 # The ->get method also works for object keys.
 aValue: $->echo({ a: 123 })->get("a")
 slice: list->slice(0, 5)
+arraySize: array->size
+stringLength: string->size
+numberOfProperties: object->size
 
 # Logical methods
 negation: $.condition->not

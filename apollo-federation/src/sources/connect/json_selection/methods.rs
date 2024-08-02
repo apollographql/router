@@ -74,11 +74,13 @@ lazy_static! {
         methods.insert("div".to_string(), div_method);
         methods.insert("mod".to_string(), mod_method);
 
-        // Array methods
+        // Array/string methods
         methods.insert("first".to_string(), first_method);
         methods.insert("last".to_string(), last_method);
         methods.insert("get".to_string(), get_method);
         methods.insert("slice".to_string(), slice_method);
+        // The ->size method works for objects as well as arrays and strings.
+        methods.insert("size".to_string(), size_method);
 
         // Logical methods
         methods.insert("not".to_string(), not_method);
@@ -674,6 +676,53 @@ fn slice_method(
         tail.apply_to_path(&array, vars, input_path, errors)
     } else {
         Some(data.clone())
+    }
+}
+
+fn size_method(
+    method_name: &str,
+    method_args: &Option<MethodArgs>,
+    data: &JSON,
+    vars: &VarsWithPathsMap,
+    input_path: &InputPath<JSON>,
+    tail: &PathList,
+    errors: &mut IndexSet<ApplyToError>,
+) -> Option<JSON> {
+    if let Some(MethodArgs(_)) = method_args {
+        errors.insert(ApplyToError::new(
+            format!("Method ->{} does not take any arguments", method_name).as_str(),
+            input_path.to_vec(),
+        ));
+        return None;
+    }
+
+    match data {
+        JSON::Array(array) => {
+            let size = array.len() as i64;
+            tail.apply_to_path(&JSON::Number(size.into()), vars, input_path, errors)
+        }
+        JSON::String(s) => {
+            let size = s.as_str().len() as i64;
+            tail.apply_to_path(&JSON::Number(size.into()), vars, input_path, errors)
+        }
+        // Though we can't ask for ->first or ->last or ->at(n) on an object, we
+        // can safely return how many properties the object has for ->size.
+        JSON::Object(map) => {
+            let size = map.len() as i64;
+            tail.apply_to_path(&JSON::Number(size.into()), vars, input_path, errors)
+        }
+        _ => {
+            errors.insert(ApplyToError::new(
+                format!(
+                    "Method ->{} requires an array, string, or object input, not {}",
+                    method_name,
+                    json_type_name(data),
+                )
+                .as_str(),
+                input_path.to_vec(),
+            ));
+            None
+        }
     }
 }
 
@@ -1389,6 +1438,63 @@ mod tests {
         assert_eq!(
             selection!("$->slice(1, 3)").apply_to(&json!("")),
             (Some(json!("")), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$->size").apply_to(&json!([])),
+            (Some(json!(0)), vec![]),
+        );
+        assert_eq!(
+            selection!("$->size").apply_to(&json!([1, 2, 3])),
+            (Some(json!(3)), vec![]),
+        );
+        assert_eq!(
+            selection!("$->size").apply_to(&json!("hello")),
+            (Some(json!(5)), vec![]),
+        );
+        assert_eq!(
+            selection!("$->size").apply_to(&json!("")),
+            (Some(json!(0)), vec![]),
+        );
+        assert_eq!(
+            selection!("$->size").apply_to(&json!({ "a": 1, "b": 2, "c": 3 })),
+            (Some(json!(3)), vec![]),
+        );
+        assert_eq!(
+            selection!("$->size").apply_to(&json!({})),
+            (Some(json!(0)), vec![]),
+        );
+        assert_eq!(
+            selection!("$->size").apply_to(&json!(null)),
+            (
+                None,
+                vec![ApplyToError::from_json(&json!({
+                    "message": "Method ->size requires an array, string, or object input, not null",
+                    "path": [],
+                }))]
+            ),
+        );
+        assert_eq!(
+            selection!("$->size").apply_to(&json!(true)),
+            (
+                None,
+                vec![ApplyToError::from_json(&json!({
+                    "message": "Method ->size requires an array, string, or object input, not boolean",
+                    "path": [],
+                }))]
+            ),
+        );
+        assert_eq!(
+            selection!("count->size").apply_to(&json!({
+                "count": 123,
+            })),
+            (
+                None,
+                vec![ApplyToError::from_json(&json!({
+                    "message": "Method ->size requires an array, string, or object input, not number",
+                    "path": ["count"],
+                }))]
+            ),
         );
     }
 
