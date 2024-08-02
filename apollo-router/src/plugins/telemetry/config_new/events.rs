@@ -736,6 +736,7 @@ mod tests {
     use super::*;
     use crate::assert_snapshot_subscriber;
     use crate::context::CONTAINS_GRAPHQL_ERROR;
+    use crate::context::OPERATION_NAME;
     use crate::graphql;
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::test::PluginTestHarness;
@@ -865,6 +866,54 @@ mod tests {
                         supergraph::Response::fake_builder()
                             .header("custom-header", "val1")
                             .header("x-log-request", HeaderValue::from_static("log"))
+                            .data(serde_json::json!({"data": "res"}).to_string())
+                            .build()
+                            .expect("expecting valid response")
+                    },
+                )
+                .await
+                .expect("expecting successful response");
+        }
+        .with_subscriber(assert_snapshot_subscriber!())
+        .await
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_supergraph_events_with_exists_condition() {
+        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+            .config(include_str!(
+                "../testdata/custom_events_exists_condition.router.yaml"
+            ))
+            .build()
+            .await;
+
+        async {
+            let ctx = Context::new();
+            ctx.insert(OPERATION_NAME, String::from("Test")).unwrap();
+            test_harness
+                .call_supergraph(
+                    supergraph::Request::fake_builder()
+                        .query("query Test { foo }")
+                        .context(ctx)
+                        .build()
+                        .unwrap(),
+                    |_r| {
+                        supergraph::Response::fake_builder()
+                            .data(serde_json::json!({"data": "res"}).to_string())
+                            .build()
+                            .expect("expecting valid response")
+                    },
+                )
+                .await
+                .expect("expecting successful response");
+            test_harness
+                .call_supergraph(
+                    supergraph::Request::fake_builder()
+                        .query("query { foo }")
+                        .build()
+                        .unwrap(),
+                    |_r| {
+                        supergraph::Response::fake_builder()
                             .data(serde_json::json!({"data": "res"}).to_string())
                             .build()
                             .expect("expecting valid response")
