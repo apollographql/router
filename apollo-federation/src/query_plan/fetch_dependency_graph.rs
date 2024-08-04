@@ -794,15 +794,7 @@ impl FetchDependencyGraph {
     }
 
     fn is_descendant_of(&self, node_id: NodeIndex, maybe_ancestor_id: NodeIndex) -> bool {
-        if node_id == maybe_ancestor_id {
-            return true;
-        }
-        for child_id in self.children_of(node_id) {
-            if self.is_descendant_of(child_id, maybe_ancestor_id) {
-                return true;
-            }
-        }
-        false
+        petgraph::algo::has_path_connecting(&self.graph, maybe_ancestor_id, node_id, None)
     }
 
     /// Returns whether `node_id` is both a child of `maybe_parent_id` but also if we can show that the
