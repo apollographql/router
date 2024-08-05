@@ -104,19 +104,20 @@ mod test {
     use crate::Configuration;
 
     static UNREDACTED_PRODUCT_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
-        Bytes::from_static(r#"{"data":{"topProducts":null},"errors":[{"message":"couldn't find mock for query {\"query\":\"query ErrorTopProducts__products__0($first:Int){topProducts(first:$first){__typename upc name}}\",\"operationName\":\"ErrorTopProducts__products__0\",\"variables\":{\"first\":2}}","extensions":{"test":"value","code":"FETCH_ERROR"}}]}"#.as_bytes())
+        Bytes::from_static(r#"{"data":{"topProducts":null},"errors":[{"message":"couldn't find mock for query {\"query\":\"query ErrorTopProducts__products__0($first:Int){topProducts(first:$first){__typename upc name}}\",\"operationName\":\"ErrorTopProducts__products__0\",\"variables\":{\"first\":2}}","path":[],"extensions":{"test":"value","code":"FETCH_ERROR"}}]}"#.as_bytes())
     });
 
     static REDACTED_PRODUCT_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
         Bytes::from_static(
-            r#"{"data":{"topProducts":null},"errors":[{"message":"Subgraph errors redacted"}]}"#
+            r#"{"data":{"topProducts":null},"errors":[{"message":"Subgraph errors redacted","path":[]}]}"#
                 .as_bytes(),
         )
     });
 
     static REDACTED_ACCOUNT_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
         Bytes::from_static(
-            r#"{"data":null,"errors":[{"message":"Subgraph errors redacted"}]}"#.as_bytes(),
+            r#"{"data":null,"errors":[{"message":"Subgraph errors redacted","path":[]}]}"#
+                .as_bytes(),
         )
     });
 
