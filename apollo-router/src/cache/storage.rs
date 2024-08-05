@@ -137,7 +137,7 @@ where
         let cache_estimated_storage = Arc::new(AtomicI64::new(0));
         let cache_estimated_storage_for_gauge = cache_estimated_storage.clone();
         let cache_estimated_storage_gauge = meter
-            .i64_observable_gauge("apollo.router.cache.estimated.storage.size")
+            .i64_observable_gauge("apollo.router.cache.storage.estimated_size")
             .with_description("Estimated cache storage")
             .with_unit(Unit::new("bytes"))
             .with_callback(move |i| {
