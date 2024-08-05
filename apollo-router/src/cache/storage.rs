@@ -328,11 +328,12 @@ impl ValueType for usize {
 
 #[cfg(test)]
 mod test {
+    use std::num::NonZeroUsize;
+
     use crate::cache::estimate_size;
     use crate::cache::storage::CacheStorage;
     use crate::cache::storage::ValueType;
     use crate::metrics::FutureMetricsExt;
-    use std::num::NonZeroUsize;
 
     #[tokio::test]
     async fn test_metrics() {
