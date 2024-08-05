@@ -9,13 +9,16 @@ use fred::prelude::RedisError;
 use fred::prelude::RedisValue;
 use http::header::CACHE_CONTROL;
 use http::HeaderValue;
+use http::StatusCode;
 use parking_lot::Mutex;
 use tower::ServiceExt;
 
 use super::entity::EntityCache;
 use crate::cache::redis::RedisCacheStorage;
 use crate::plugin::test::MockSubgraph;
+use crate::plugin::test::MockSubgraphService;
 use crate::plugins::cache::entity::Subgraph;
+use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::Context;
 use crate::MockedSubgraphs;
@@ -684,6 +687,24 @@ async fn no_data() {
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(entity_cache)
+        .subgraph_hook(|name, service| {
+            if name == "orga" {
+                let mut subgraph = MockSubgraphService::new();
+                subgraph
+                    .expect_call()
+                    .times(1)
+                    .returning(move |req: subgraph::Request| {
+                        Err("orga not found".into())
+                        /*Ok(subgraph::Response::fake_builder()
+                        .context(req.context)
+                        .status_code(StatusCode::BAD_REQUEST)
+                        .build())*/
+                    });
+                subgraph.boxed()
+            } else {
+                service
+            }
+        })
         .extra_plugin(subgraphs)
         .build_supergraph()
         .await

@@ -656,8 +656,44 @@ impl InnerCacheService {
             .await?
             {
                 ControlFlow::Break(response) => Ok(response),
-                ControlFlow::Continue((request, cache_result)) => {
-                    let mut response = self.service.call(request).await?;
+                ControlFlow::Continue((request, mut cache_result)) => {
+                    let context = request.context.clone();
+                    let mut response = match self.service.call(request).await {
+                        Ok(response) => response,
+                        Err(e) => {
+                            let e = match e.downcast::<FetchError>() {
+                                Ok(inner) => match *inner {
+                                    FetchError::SubrequestHttpError { .. } => *inner,
+                                    _ => FetchError::SubrequestHttpError {
+                                        status_code: None,
+                                        service: self.name.to_string(),
+                                        reason: inner.to_string(),
+                                    },
+                                },
+                                Err(e) => FetchError::SubrequestHttpError {
+                                    status_code: None,
+                                    service: self.name.to_string(),
+                                    reason: e.to_string(),
+                                },
+                            };
+
+                            let (new_entities, new_errors) =
+                                assemble_response_from_error(e, &mut cache_result.0);
+
+                            let mut data = Object::default();
+                            data.insert(ENTITIES, new_entities.into());
+
+                            let mut response = subgraph::Response::builder()
+                                .context(context)
+                                .data(Value::Object(data))
+                                .errors(new_errors)
+                                .extensions(Object::new())
+                                .build();
+                            CacheControl::no_store().to_headers(response.response.headers_mut())?;
+
+                            return Ok(response);
+                        }
+                    };
 
                     let mut cache_control =
                         if response.response.headers().contains_key(CACHE_CONTROL) {
@@ -1317,4 +1353,31 @@ async fn insert_entities_in_result(
     }
 
     Ok((new_entities, new_errors))
+}
+
+fn assemble_response_from_error(
+    e: FetchError,
+    result: &mut Vec<IntermediateResult>,
+) -> (Vec<Value>, Vec<Error>) {
+    let mut new_entities = Vec::new();
+    let mut new_errors = Vec::new();
+    let graphql_error = e.to_graphql_error(None);
+
+    for (new_entity_idx, IntermediateResult { cache_entry, .. }) in result.drain(..).enumerate() {
+        match cache_entry {
+            Some(v) => {
+                new_entities.push(v.data);
+            }
+            None => {
+                new_entities.push(Value::Null);
+                let mut e = graphql_error.clone();
+                e.path = Some(Path(vec![
+                    PathElement::Key(ENTITIES.to_string(), None),
+                    PathElement::Index(new_entity_idx),
+                ]));
+                new_errors.push(e);
+            }
+        }
+    }
+    (new_entities, new_errors)
 }
