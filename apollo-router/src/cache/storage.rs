@@ -316,3 +316,44 @@ impl ValueType for usize {
         Some(std::mem::size_of::<usize>())
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::cache::storage::{CacheStorage, ValueType};
+    use crate::metrics::FutureMetricsExt;
+    use std::num::NonZeroUsize;
+
+    #[tokio::test]
+    async fn test_metrics() {
+        #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+        struct Stuff {}
+        impl ValueType for Stuff {
+            fn estimated_size(&self) -> Option<usize> {
+                Some(1)
+            }
+        }
+
+        async {
+            let cache: CacheStorage<String, Stuff> =
+                CacheStorage::new(NonZeroUsize::new(10).unwrap(), None, "test")
+                    .await
+                    .unwrap();
+
+            cache.insert("test".to_string(), Stuff {}).await;
+            assert_gauge!(
+                "apollo.router.cache.storage.estimated_size",
+                1,
+                "kind" = "test",
+                "type" = "memory"
+            );
+            assert_gauge!(
+                "apollo_router_cache_size",
+                1,
+                "kind" = "test",
+                "type" = "memory"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+}

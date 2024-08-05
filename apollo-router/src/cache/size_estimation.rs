@@ -393,17 +393,46 @@ mod test {
         struct Test {
             string: String,
             u8: u8,
+            embedded: TestEmbedded,
         }
 
+        #[derive(Serialize)]
+        struct TestEmbedded {
+            string: String,
+            u8: u8,
+        }
+
+        // Baseline
         let s = estimate_size(&Test {
             string: "".to_string(),
             u8: 0,
+            embedded: TestEmbedded {
+                string: "".to_string(),
+                u8: 0,
+            },
         });
-        assert_eq!(s, 25);
+        assert_eq!(s, 50);
+
+        // Test modifying the root struct
         let s = estimate_size(&Test {
             string: "test".to_string(),
             u8: 0,
+            embedded: TestEmbedded {
+                string: "".to_string(),
+                u8: 0,
+            },
         });
-        assert_eq!(s, 29);
+        assert_eq!(s, 54);
+
+        // Test modifying the embedded struct
+        let s = estimate_size(&Test {
+            string: "".to_string(),
+            u8: 0,
+            embedded: TestEmbedded {
+                string: "test".to_string(),
+                u8: 0,
+            },
+        });
+        assert_eq!(s, 54);
     }
 }
