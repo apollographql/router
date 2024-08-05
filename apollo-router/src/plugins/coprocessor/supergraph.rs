@@ -871,7 +871,7 @@ mod tests {
         let service = supergraph_stage.as_service(
             mock_http_client,
             mock_supergraph_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             Arc::new("".to_string()),
         );
 
@@ -1136,6 +1136,7 @@ mod tests {
                     SelectorOrValue::Value(true.into()),
                 ])
                 .into(),
+                url: None,
                 headers: true,
                 context: true,
                 body: true,
@@ -1215,7 +1216,7 @@ mod tests {
         let service = supergraph_stage.as_service(
             mock_http_client,
             mock_supergraph_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             Arc::new("".to_string()),
         );
 

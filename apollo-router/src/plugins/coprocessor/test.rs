@@ -468,6 +468,7 @@ mod tests {
                     SelectorOrValue::Value("value".to_string().into()),
                 ])
                 .into(),
+                url: None,
                 headers: false,
                 context: false,
                 body: true,
@@ -518,7 +519,7 @@ mod tests {
         let service = subgraph_stage.as_service(
             mock_http_client,
             mock_subgraph_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             "my_subgraph_service_name".to_string(),
         );
 
@@ -606,7 +607,6 @@ mod tests {
     async fn external_plugin_subgraph_request_controlflow_break_with_message_string() {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
-
                 body: true,
                 ..Default::default()
             },
@@ -667,7 +667,6 @@ mod tests {
         let subgraph_stage = SubgraphStage {
             request: Default::default(),
             response: SubgraphResponseConf {
-
                 body: true,
                 ..Default::default()
             },
@@ -783,6 +782,7 @@ mod tests {
                     default: None,
                 })
                 .into(),
+                url: None,
                 headers: false,
                 context: false,
                 body: true,
@@ -863,7 +863,7 @@ mod tests {
         let service = subgraph_stage.as_service(
             mock_http_client,
             mock_subgraph_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             "my_subgraph_service_name".to_string(),
         );
 
@@ -898,6 +898,7 @@ mod tests {
             request: Default::default(),
             response: SupergraphResponseConf {
                 condition: Default::default(),
+                url: None,
                 headers: false,
                 context: false,
                 body: true,
@@ -940,7 +941,7 @@ mod tests {
         let service = supergraph_stage.as_service(
             mock_http_client,
             mock_supergraph_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             Arc::default(),
         );
 
@@ -1065,7 +1066,7 @@ mod tests {
         let service = router_stage.as_service(
             mock_http_client,
             mock_router_service.boxed(),
-            "http://test".to_string(),
+            Url::parse("http://test").unwrap(),
             Arc::new("".to_string()),
         );
 
@@ -1086,6 +1087,7 @@ mod tests {
                     SelectorOrValue::Value("GET".to_string().into()),
                 ])
                 .into(),
+                url: None,
                 headers: true,
                 context: true,
                 body: true,
@@ -1532,7 +1534,7 @@ mod tests {
         })
         .await;
 
-        let mock_http_client = mock_with_callback(move |req: hyper::Request<Body>| {
+        let mock_http_client = mock_with_callback(move |req: hyper::Request<RouterBody>| {
             Box::pin(async {
                 let (parts, body) = req.into_parts();
                 let deserialized_request: Externalizable<serde_json::Value> =
@@ -1591,7 +1593,7 @@ mod tests {
                   "sdl": "the sdl shouldnt change"
                 });
                 Ok(hyper::Response::builder()
-                    .body(Body::from(serde_json::to_string(&input).unwrap()))
+                    .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
                     .unwrap())
             })
         });
