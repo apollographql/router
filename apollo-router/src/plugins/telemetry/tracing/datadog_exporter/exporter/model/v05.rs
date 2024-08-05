@@ -129,7 +129,7 @@ fn write_unified_tag<'a>(
 }
 
 fn get_sampling_priority(_span: &SpanData) -> f64 {
-    1.0
+    0.0
 }
 
 fn get_measuring(span: &SpanData) -> f64 {
