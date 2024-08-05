@@ -1553,133 +1553,6 @@ impl Operation {
     }
 
     pub(crate) fn generate_fragments(&mut self) -> Result<(), FederationError> {
-        #[derive(Debug, Default)]
-        struct FragmentGenerator {
-            fragments: NamedFragments,
-        }
-
-        impl FragmentGenerator {
-            fn next_name(&self) -> Name {
-                fragment_name(self.fragments.len())
-            }
-
-            fn is_worth_using(selection_set: &SelectionSet) -> bool {
-                let mut iter = selection_set.iter();
-                let Some(first) = iter.next() else {
-                    // An empty selection is not worth using (and invalid!)
-                    return false;
-                };
-                let Selection::Field(field) = first else {
-                    return true;
-                };
-                // If there's more than one selection, or one selection with a subselection,
-                // it's probably worth using
-                iter.next().is_some() || field.selection_set.is_some()
-            }
-
-            fn visit_selection_set(
-                &mut self,
-                selection_set: &mut SelectionSet,
-            ) -> Result<(), FederationError> {
-                let mut new_selection_set = SelectionSet::empty(
-                    selection_set.schema.clone(),
-                    selection_set.type_position.clone(),
-                );
-
-                for (_key, selection) in Arc::make_mut(&mut selection_set.selections).iter_mut() {
-                    match selection {
-                        SelectionValue::Field(mut field) => {
-                            if let Some(selection_set) = field.get_selection_set_mut() {
-                                self.visit_selection_set(selection_set)?;
-                            }
-                            new_selection_set
-                                .add_local_selection(&Selection::Field(Arc::clone(field.get())))?;
-                        }
-                        SelectionValue::FragmentSpread(frag) => {
-                            new_selection_set.add_local_selection(&Selection::FragmentSpread(
-                                Arc::clone(frag.get()),
-                            ))?;
-                        }
-                        SelectionValue::InlineFragment(frag)
-                            if !Self::is_worth_using(&frag.get().selection_set) =>
-                        {
-                            new_selection_set.add_local_selection(&Selection::InlineFragment(
-                                Arc::clone(frag.get()),
-                            ))?;
-                        }
-                        SelectionValue::InlineFragment(mut candidate) => {
-                            self.visit_selection_set(candidate.get_selection_set_mut())?;
-
-                            let directives = &candidate.get().inline_fragment.directives;
-                            let skip_include = directives
-                                .iter()
-                                .map(|directive| match directive.name.as_str() {
-                                    "skip" | "include" => Ok(directive.clone()),
-                                    _ => Err(()),
-                                })
-                                .collect::<Result<executable::DirectiveList, _>>();
-
-                            // If there are any directives *other* than @skip and @include,
-                            // we can't just transfer them to the generated fragment spread,
-                            // so we have to keep this inline fragment.
-                            let Ok(skip_include) = skip_include else {
-                                new_selection_set.add_local_selection(
-                                    &Selection::InlineFragment(Arc::clone(candidate.get())),
-                                )?;
-                                continue;
-                            };
-
-                            let existing = self.fragments.iter().find(|existing| {
-                                existing.type_condition_position
-                                    == candidate.get().inline_fragment.casted_type()
-                                    && existing.selection_set == candidate.get().selection_set
-                            });
-
-                            let existing = if let Some(existing) = existing {
-                                existing
-                            } else {
-                                let name = self.next_name();
-                                self.fragments.insert(Fragment {
-                                    schema: selection_set.schema.clone(),
-                                    name: name.clone(),
-                                    type_condition_position: candidate
-                                        .get()
-                                        .inline_fragment
-                                        .casted_type(),
-                                    directives: Default::default(),
-                                    selection_set: candidate.get().selection_set.clone(),
-                                });
-                                self.fragments.get(&name).unwrap()
-                            };
-                            new_selection_set.add_local_selection(&Selection::from(
-                                FragmentSpreadSelection {
-                                    spread: FragmentSpread::new(FragmentSpreadData {
-                                        schema: selection_set.schema.clone(),
-                                        fragment_name: existing.name.clone(),
-                                        type_condition_position: existing
-                                            .type_condition_position
-                                            .clone(),
-                                        directives: skip_include.into(),
-                                        fragment_directives: existing.directives.clone(),
-                                        selection_id: crate::operation::SelectionId::new(),
-                                    }),
-                                    selection_set: existing.selection_set.clone(),
-                                },
-                            ))?;
-                        }
-                    }
-                }
-
-                *selection_set = new_selection_set;
-
-                Ok(())
-            }
-
-            fn into_inner(self) -> NamedFragments {
-                self.fragments
-            }
-        }
-
         let mut generator = FragmentGenerator::default();
         generator.visit_selection_set(&mut self.selection_set)?;
         let fragments = generator.into_inner();
@@ -1719,6 +1592,7 @@ impl Operation {
     }
 }
 
+/// Returns a consistent GraphQL name for the given index.
 fn fragment_name(mut index: usize) -> Name {
     /// https://spec.graphql.org/draft/#NameContinue
     const NAME_CHARS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
@@ -1741,6 +1615,129 @@ fn fragment_name(mut index: usize) -> Name {
         }
 
         Name::new_unchecked(&s)
+    }
+}
+
+#[derive(Debug, Default)]
+struct FragmentGenerator {
+    fragments: NamedFragments,
+}
+
+impl FragmentGenerator {
+    fn next_name(&self) -> Name {
+        fragment_name(self.fragments.len())
+    }
+
+    /// Is a selection set worth using for a newly generated named fragment?
+    fn is_worth_using(selection_set: &SelectionSet) -> bool {
+        let mut iter = selection_set.iter();
+        let Some(first) = iter.next() else {
+            // An empty selection is not worth using (and invalid!)
+            return false;
+        };
+        let Selection::Field(field) = first else {
+            return true;
+        };
+        // If there's more than one selection, or one selection with a subselection,
+        // it's probably worth using
+        iter.next().is_some() || field.selection_set.is_some()
+    }
+
+    /// Modify the selection set so that eligible inline fragments are moved to named fragment spreads.
+    fn visit_selection_set(
+        &mut self,
+        selection_set: &mut SelectionSet,
+    ) -> Result<(), FederationError> {
+        let mut new_selection_set = SelectionSet::empty(
+            selection_set.schema.clone(),
+            selection_set.type_position.clone(),
+        );
+
+        for (_key, selection) in Arc::make_mut(&mut selection_set.selections).iter_mut() {
+            match selection {
+                SelectionValue::Field(mut field) => {
+                    if let Some(selection_set) = field.get_selection_set_mut() {
+                        self.visit_selection_set(selection_set)?;
+                    }
+                    new_selection_set
+                        .add_local_selection(&Selection::Field(Arc::clone(field.get())))?;
+                }
+                SelectionValue::FragmentSpread(frag) => {
+                    new_selection_set
+                        .add_local_selection(&Selection::FragmentSpread(Arc::clone(frag.get())))?;
+                }
+                SelectionValue::InlineFragment(frag)
+                    if !Self::is_worth_using(&frag.get().selection_set) =>
+                {
+                    new_selection_set
+                        .add_local_selection(&Selection::InlineFragment(Arc::clone(frag.get())))?;
+                }
+                SelectionValue::InlineFragment(mut candidate) => {
+                    self.visit_selection_set(candidate.get_selection_set_mut())?;
+
+                    let directives = &candidate.get().inline_fragment.directives;
+                    let skip_include = directives
+                        .iter()
+                        .map(|directive| match directive.name.as_str() {
+                            "skip" | "include" => Ok(directive.clone()),
+                            _ => Err(()),
+                        })
+                        .collect::<Result<executable::DirectiveList, _>>();
+
+                    // If there are any directives *other* than @skip and @include,
+                    // we can't just transfer them to the generated fragment spread,
+                    // so we have to keep this inline fragment.
+                    let Ok(skip_include) = skip_include else {
+                        new_selection_set.add_local_selection(&Selection::InlineFragment(
+                            Arc::clone(candidate.get()),
+                        ))?;
+                        continue;
+                    };
+
+                    let existing = self.fragments.iter().find(|existing| {
+                        existing.type_condition_position
+                            == candidate.get().inline_fragment.casted_type()
+                            && existing.selection_set == candidate.get().selection_set
+                    });
+
+                    let existing = if let Some(existing) = existing {
+                        existing
+                    } else {
+                        let name = self.next_name();
+                        self.fragments.insert(Fragment {
+                            schema: selection_set.schema.clone(),
+                            name: name.clone(),
+                            type_condition_position: candidate.get().inline_fragment.casted_type(),
+                            directives: Default::default(),
+                            selection_set: candidate.get().selection_set.clone(),
+                        });
+                        self.fragments.get(&name).unwrap()
+                    };
+                    new_selection_set.add_local_selection(&Selection::from(
+                        FragmentSpreadSelection {
+                            spread: FragmentSpread::new(FragmentSpreadData {
+                                schema: selection_set.schema.clone(),
+                                fragment_name: existing.name.clone(),
+                                type_condition_position: existing.type_condition_position.clone(),
+                                directives: skip_include.into(),
+                                fragment_directives: existing.directives.clone(),
+                                selection_id: crate::operation::SelectionId::new(),
+                            }),
+                            selection_set: existing.selection_set.clone(),
+                        },
+                    ))?;
+                }
+            }
+        }
+
+        *selection_set = new_selection_set;
+
+        Ok(())
+    }
+
+    /// Consumes the generator and returns the fragments it generated.
+    fn into_inner(self) -> NamedFragments {
+        self.fragments
     }
 }
 
