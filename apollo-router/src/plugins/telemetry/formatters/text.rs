@@ -27,6 +27,8 @@ use super::get_trace_and_span_id;
 use super::EventFormatter;
 use super::APOLLO_PRIVATE_PREFIX;
 use super::EXCLUDED_ATTRIBUTES;
+use crate::plugins::telemetry::config::TraceIdFormat;
+use crate::plugins::telemetry::config_new::logging::DisplayTraceIdFormat;
 use crate::plugins::telemetry::config_new::logging::TextFormat;
 use crate::plugins::telemetry::dynamic_attribute::EventAttributes;
 use crate::plugins::telemetry::dynamic_attribute::LogAttributes;
@@ -324,7 +326,24 @@ where
 
         if let Some(ref span) = current_span {
             if let Some((trace_id, span_id)) = get_trace_and_span_id(span) {
-                if self.config.display_trace_id {
+                let trace_id = match self.config.display_trace_id {
+                    DisplayTraceIdFormat::Bool(true)
+                    | DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::Hexadecimal)
+                    | DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::OpenTelemetry) => {
+                        Some(TraceIdFormat::Hexadecimal.format(trace_id))
+                    }
+                    DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::Decimal) => {
+                        Some(TraceIdFormat::Decimal.format(trace_id))
+                    }
+                    DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::Datadog) => {
+                        Some(TraceIdFormat::Datadog.format(trace_id))
+                    }
+                    DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::Uuid) => {
+                        Some(TraceIdFormat::Uuid.format(trace_id))
+                    }
+                    DisplayTraceIdFormat::Bool(false) => None,
+                };
+                if let Some(trace_id) = trace_id {
                     write!(writer, "trace_id: {} ", trace_id)?;
                 }
                 if self.config.display_span_id {

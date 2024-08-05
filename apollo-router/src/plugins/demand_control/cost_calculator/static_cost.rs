@@ -501,9 +501,9 @@ mod tests {
 
     async fn planned_cost(schema_str: &str, query_str: &str) -> f64 {
         let config: Arc<Configuration> = Arc::new(Default::default());
-        let (_schema, query) = parse_schema_and_operation(schema_str, query_str, &config);
+        let (schema, query) = parse_schema_and_operation(schema_str, query_str, &config);
 
-        let mut planner = BridgeQueryPlanner::new(schema_str.to_string(), config.clone(), None)
+        let mut planner = BridgeQueryPlanner::new(schema.into(), config.clone(), None)
             .await
             .unwrap();
 

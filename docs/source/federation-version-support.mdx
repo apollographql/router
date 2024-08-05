@@ -1,10 +1,10 @@
 ---
-title: Federation Version Support in the Apollo Router
+title: Federation Version Support
 subtitle: Check router version compatibility with Apollo Federation versions
-description: This reference shows which version of Apollo Federation each Apollo Router release is compiled against. Ensure your router uses at least the listed federation version.
+description: This reference shows which version of Apollo Federation each GraphOS Router and Apollo Router Core release is compiled against. Ensure your router uses at least the listed federation version.
 ---
 
-The Apollo Router supports supergraph schemas that are generated via Apollo Federation 2.x [composition](/federation/federated-types/composition/). This composition algorithm is usually performed by one of the following:
+The GraphOS Router and Apollo Router Core support supergraph schemas that are generated via Apollo Federation 2.x [composition](/federation/federated-types/composition/). This composition algorithm is usually performed by one of the following:
 
 * Apollo GraphOS (for supergraphs that use [managed federation](/federation/managed-federation/overview/))
 * The Rover CLI (for _non_-managed supergraphs)
@@ -53,7 +53,7 @@ The table below shows which version of federation each router release is compile
     </tr>
     <tr>
         <td>
-            v1.46.0 - v1.47.0
+            v1.46.0 - v1.47.0        
         </td>
         <td>
             2.7.5
@@ -371,6 +371,6 @@ The table below shows which version of federation each router release is compile
 
 ## Federation 1 support
 
-Federation 2.x composition is backward compatible with Federation 1.x subgraph schemas, so you can use the Apollo Router with any valid Federation 1.x supergraph.
+Federation 2.x composition is backward compatible with Federation 1.x subgraph schemas, so you can use the router with any valid Federation 1.x supergraph.
 
-If your Federation 1.x supergraph _doesn't_ work with the Apollo Router, see possible causes in [Backward compatibility in Federation 2](/federation/federation-2/backward-compatibility/).
+If your Federation 1.x supergraph _doesn't_ work with the router, see possible causes in [Backward compatibility in Federation 2](/federation/federation-2/backward-compatibility/).

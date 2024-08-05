@@ -484,6 +484,7 @@ mod test {
     use crate::services::PluggableSupergraphServiceBuilder;
     use crate::services::SupergraphRequest;
     use crate::services::SupergraphResponse;
+    use crate::spec::Schema;
     use crate::Configuration;
 
     static EXPECTED_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
@@ -568,14 +569,14 @@ mod test {
         .unwrap();
 
         let config = Arc::new(config);
+        let schema = Arc::new(Schema::parse(schema, &config).unwrap());
         let planner = BridgeQueryPlannerPool::new(
-            schema.to_string(),
+            schema.clone(),
             config.clone(),
             NonZeroUsize::new(1).unwrap(),
         )
         .await
         .unwrap();
-        let schema = planner.schema();
         let subgraph_schemas = planner.subgraph_schemas();
 
         let mut builder =
