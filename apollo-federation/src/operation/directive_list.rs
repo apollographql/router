@@ -1,4 +1,3 @@
-use std::cmp::Ordering;
 use std::fmt;
 use std::fmt::Display;
 use std::hash::BuildHasher;
@@ -39,9 +38,8 @@ impl PartialEq for DirectiveListInner {
                 .iter_sorted()
                 .zip(other.iter_sorted())
                 .all(|(left, right)| {
-                    left.name == right.name
-                        && compare_sorted_arguments(&left.arguments, &right.arguments)
-                            == Ordering::Equal
+                    // We can just use `Eq` because the arguments are sorted recursively
+                    left.name == right.name && left.arguments == right.arguments
                 })
     }
 }

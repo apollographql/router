@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use apollo_compiler::executable;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
@@ -10,37 +8,6 @@ use super::HasSelectionKey;
 use super::InlineFragmentSelection;
 use super::Selection;
 use super::SelectionSet;
-
-/// Compare two input values, with two special cases for objects: assuming no duplicate keys,
-/// and order-independence.
-///
-/// This comes from apollo-rs: https://github.com/apollographql/apollo-rs/blob/6825be88fe13cd0d67b83b0e4eb6e03c8ab2555e/crates/apollo-compiler/src/validation/selection.rs#L160-L188
-/// Hopefully we can do this more easily in the future!
-fn same_value(left: &executable::Value, right: &executable::Value) -> bool {
-    use apollo_compiler::executable::Value;
-    match (left, right) {
-        (Value::Null, Value::Null) => true,
-        (Value::Enum(left), Value::Enum(right)) => left == right,
-        (Value::Variable(left), Value::Variable(right)) => left == right,
-        (Value::String(left), Value::String(right)) => left == right,
-        (Value::Float(left), Value::Float(right)) => left == right,
-        (Value::Int(left), Value::Int(right)) => left == right,
-        (Value::Boolean(left), Value::Boolean(right)) => left == right,
-        (Value::List(left), Value::List(right)) if left.len() == right.len() => left
-            .iter()
-            .zip(right.iter())
-            .all(|(left, right)| same_value(left, right)),
-        (Value::Object(left), Value::Object(right)) if left.len() == right.len() => {
-            left.iter().all(|(key, value)| {
-                right
-                    .iter()
-                    .find(|(other_key, _)| key == other_key)
-                    .is_some_and(|(_, other_value)| same_value(value, other_value))
-            })
-        }
-        _ => false,
-    }
-}
 
 /// Sort an input value, which means specifically sorting their object values by keys (assuming no
 /// duplicates). This is used for hashing input values in a way consistent with [same_value()].
@@ -132,29 +99,6 @@ fn compare_sorted_name_value_pairs<'doc>(
         })
 }
 
-/// Returns true if two argument lists are equivalent.
-///
-/// The arguments and values must be the same, independent of order.
-fn same_arguments(
-    left: &[Node<executable::Argument>],
-    right: &[Node<executable::Argument>],
-) -> bool {
-    if left.len() != right.len() {
-        return false;
-    }
-
-    let right = right
-        .iter()
-        .map(|arg| (&arg.name, arg))
-        .collect::<HashMap<_, _>>();
-
-    left.iter().all(|arg| {
-        right
-            .get(&arg.name)
-            .is_some_and(|right_arg| same_value(&arg.value, &right_arg.value))
-    })
-}
-
 /// Sort arguments, which means specifically sorting arguments by names and object values by keys
 /// (assuming no duplicates). This is used for hashing arguments in a way consistent with
 /// [same_arguments()].
@@ -177,20 +121,6 @@ pub(super) fn compare_sorted_arguments(
         right.iter().map(|arg| &arg.name),
         right.iter().map(|arg| &arg.value),
     )
-}
-
-/// Returns true if two directive lists are equivalent, independent of order.
-fn same_directives(left: &executable::DirectiveList, right: &executable::DirectiveList) -> bool {
-    if left.len() != right.len() {
-        return false;
-    }
-
-    left.iter().all(|left_directive| {
-        right.iter().any(|right_directive| {
-            left_directive.name == right_directive.name
-                && same_arguments(&left_directive.arguments, &right_directive.arguments)
-        })
-    })
 }
 
 pub(super) fn is_deferred_selection(directives: &executable::DirectiveList) -> bool {
@@ -264,8 +194,8 @@ impl FieldSelection {
     pub fn containment(&self, other: &FieldSelection, options: ContainmentOptions) -> Containment {
         if self.field.name() != other.field.name()
             || self.field.alias != other.field.alias
-            || !same_arguments(&self.field.arguments, &other.field.arguments)
-            || !same_directives(&self.field.directives, &other.field.directives)
+            || self.field.arguments != other.field.arguments
+            || self.field.directives != other.field.directives
         {
             return Containment::NotContained;
         }

@@ -2,10 +2,9 @@ use std::sync::Arc;
 
 use apollo_compiler::executable;
 use apollo_compiler::name;
-use apollo_compiler::Node;
 
-use super::DirectiveList;
 use super::runtime_types_intersect;
+use super::DirectiveList;
 use super::Field;
 use super::FieldData;
 use super::FieldSelection;
@@ -94,7 +93,7 @@ impl FieldSelection {
                         field_position: field_composite_type_position
                             .introspection_typename_field(),
                         alias: None,
-                        arguments: Arc::new(vec![]),
+                        arguments: Default::default(),
                         directives,
                         sibling_typename: None,
                     }),
@@ -235,7 +234,7 @@ impl InlineFragmentSelection {
                         schema: schema.clone(),
                         field_position: parent_typename_field,
                         alias: None,
-                        arguments: Arc::new(vec![]),
+                        arguments: Default::default(),
                         directives,
                         sibling_typename: None,
                     }),

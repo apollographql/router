@@ -83,6 +83,65 @@ impl SelectionId {
     }
 }
 
+/// A list of arguments to a field or directive.
+///
+/// All arguments and input object values are sorted in a consistent order.
+///
+/// This type is immutable and cheaply cloneable.
+#[derive(Clone, PartialEq, Eq, Default)]
+pub(crate) struct ArgumentList {
+    inner: Option<Arc<[Node<executable::Argument>]>>,
+}
+
+impl std::fmt::Debug for ArgumentList {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        // Print the slice representation.
+        self.deref().fmt(f)
+    }
+}
+
+impl From<Vec<Node<executable::Argument>>> for ArgumentList {
+    fn from(mut arguments: Vec<Node<executable::Argument>>) -> Self {
+        if arguments.is_empty() {
+            return Self::new();
+        }
+
+        sort_arguments(&mut arguments);
+
+        Self {
+            inner: Some(Arc::from(arguments)),
+        }
+    }
+}
+
+impl FromIterator<Node<executable::Argument>> for ArgumentList {
+    fn from_iter<T: IntoIterator<Item = Node<executable::Argument>>>(iter: T) -> Self {
+        Self::from(Vec::from_iter(iter))
+    }
+}
+
+impl Deref for ArgumentList {
+    type Target = [Node<executable::Argument>];
+
+    fn deref(&self) -> &Self::Target {
+        self.inner.as_deref().unwrap_or_default()
+    }
+}
+
+impl ArgumentList {
+    /// Create an empty argument list.
+    pub(crate) const fn new() -> Self {
+        Self { inner: None }
+    }
+
+    /// Create a argument list with a single argument.
+    ///
+    /// This sorts any input object values provided to the argument.
+    pub(crate) fn one(argument: impl Into<Node<executable::Argument>>) -> Self {
+        Self::from(vec![argument.into()])
+    }
+}
+
 /// An analogue of the apollo-compiler type `Operation` with these changes:
 /// - Stores the schema that the operation is queried against.
 /// - Swaps `operation_type` with `root_kind` (using the analogous apollo-federation type).
@@ -1050,16 +1109,13 @@ mod field_selection {
     use std::hash::Hash;
     use std::hash::Hasher;
     use std::ops::Deref;
-    use std::sync::Arc;
 
     use apollo_compiler::ast;
-    use apollo_compiler::executable;
     use apollo_compiler::Name;
-    use apollo_compiler::Node;
     use serde::Serialize;
 
     use crate::error::FederationError;
-    use crate::operation::sort_arguments;
+    use crate::operation::ArgumentList;
     use crate::operation::DirectiveList;
     use crate::operation::HasSelectionKey;
     use crate::operation::SelectionKey;
@@ -1127,8 +1183,6 @@ mod field_selection {
     pub(crate) struct Field {
         data: FieldData,
         key: SelectionKey,
-        #[serde(serialize_with = "crate::display_helpers::serialize_as_debug_string")]
-        sorted_arguments: Arc<Vec<Node<executable::Argument>>>,
     }
 
     impl std::fmt::Debug for Field {
@@ -1141,7 +1195,7 @@ mod field_selection {
         fn eq(&self, other: &Self) -> bool {
             self.data.field_position.field_name() == other.data.field_position.field_name()
                 && self.key == other.key
-                && self.sorted_arguments == other.sorted_arguments
+                && self.data.arguments == other.data.arguments
         }
     }
 
@@ -1151,7 +1205,7 @@ mod field_selection {
         fn hash<H: Hasher>(&self, state: &mut H) {
             self.data.field_position.field_name().hash(state);
             self.key.hash(state);
-            self.sorted_arguments.hash(state);
+            self.data.arguments.hash(state);
         }
     }
 
@@ -1165,11 +1219,8 @@ mod field_selection {
 
     impl Field {
         pub(crate) fn new(data: FieldData) -> Self {
-            let mut arguments = data.arguments.as_ref().clone();
-            sort_arguments(&mut arguments);
             Self {
                 key: data.key(),
-                sorted_arguments: Arc::new(arguments),
                 data,
             }
         }
@@ -1306,7 +1357,7 @@ mod field_selection {
         pub(crate) field_position: FieldDefinitionPosition,
         pub(crate) alias: Option<Name>,
         #[serde(serialize_with = "crate::display_helpers::serialize_as_debug_string")]
-        pub(crate) arguments: Arc<Vec<Node<executable::Argument>>>,
+        pub(crate) arguments: ArgumentList,
         #[serde(serialize_with = "crate::display_helpers::serialize_as_string")]
         pub(crate) directives: DirectiveList,
         pub(crate) sibling_typename: Option<SiblingTypename>,
@@ -1376,8 +1427,8 @@ mod fragment_spread_selection {
     use apollo_compiler::Name;
     use serde::Serialize;
 
-    use super::DirectiveList;
     use crate::operation::is_deferred_selection;
+    use crate::operation::DirectiveList;
     use crate::operation::HasSelectionKey;
     use crate::operation::SelectionId;
     use crate::operation::SelectionKey;
@@ -1608,11 +1659,11 @@ mod inline_fragment_selection {
 
     use serde::Serialize;
 
-    use super::DirectiveList;
     use crate::error::FederationError;
     use crate::link::graphql_definition::defer_directive_arguments;
     use crate::link::graphql_definition::DeferDirectiveArguments;
     use crate::operation::is_deferred_selection;
+    use crate::operation::DirectiveList;
     use crate::operation::HasSelectionKey;
     use crate::operation::SelectionId;
     use crate::operation::SelectionKey;
@@ -3188,7 +3239,7 @@ impl FieldSelection {
                 schema: schema.clone(),
                 field_position,
                 alias: field.alias.clone(),
-                arguments: Arc::new(field.arguments.clone()),
+                arguments: field.arguments.clone().into(),
                 directives: field.directives.clone().into(),
                 sibling_typename: None,
             }),
