@@ -356,4 +356,34 @@ mod test {
         .with_metrics()
         .await;
     }
+
+    #[tokio::test]
+    #[should_panic]
+    async fn test_metrics_not_emitted_where_no_estimated_size() {
+        #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+        struct Stuff {}
+        impl ValueType for Stuff {
+            fn estimated_size(&self) -> Option<usize> {
+                None
+            }
+        }
+
+        async {
+            let cache: CacheStorage<String, Stuff> =
+                CacheStorage::new(NonZeroUsize::new(10).unwrap(), None, "test")
+                    .await
+                    .unwrap();
+
+            cache.insert("test".to_string(), Stuff {}).await;
+            // This metric won't exist
+            assert_gauge!(
+                "apollo_router_cache_size",
+                0,
+                "kind" = "test",
+                "type" = "memory"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
 }
