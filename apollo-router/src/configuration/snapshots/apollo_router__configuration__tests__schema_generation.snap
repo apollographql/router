@@ -1615,17 +1615,12 @@ expression: "&schema"
           "$ref": "#/definitions/Metrics",
           "description": "#/definitions/Metrics"
         },
-        "redis": {
-          "$ref": "#/definitions/RedisCache",
-          "description": "#/definitions/RedisCache"
-        },
         "subgraph": {
           "$ref": "#/definitions/SubgraphConfiguration_for_Subgraph",
           "description": "#/definitions/SubgraphConfiguration_for_Subgraph"
         }
       },
       "required": [
-        "redis",
         "subgraph"
       ],
       "type": "object"
@@ -2119,6 +2114,17 @@ expression: "&schema"
       ],
       "type": "string"
     },
+    "DisplayTraceIdFormat": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/TraceIdFormat",
+          "description": "#/definitions/TraceIdFormat"
+        },
+        {
+          "type": "boolean"
+        }
+      ]
+    },
     "Enabled": {
       "enum": [
         "enabled"
@@ -2542,8 +2548,8 @@ expression: "&schema"
           "type": "boolean"
         },
         "format": {
-          "$ref": "#/definitions/TraceIdFormat2",
-          "description": "#/definitions/TraceIdFormat2"
+          "$ref": "#/definitions/TraceIdFormat",
+          "description": "#/definitions/TraceIdFormat"
         },
         "header_name": {
           "description": "Choose the header name to expose trace_id (default: apollo-trace-id)",
@@ -5629,6 +5635,11 @@ expression: "&schema"
           "nullable": true,
           "type": "string"
         },
+        "redis": {
+          "$ref": "#/definitions/RedisCache",
+          "description": "#/definitions/RedisCache",
+          "nullable": true
+        },
         "ttl": {
           "$ref": "#/definitions/Ttl",
           "description": "#/definitions/Ttl",
@@ -7186,27 +7197,16 @@ expression: "&schema"
     "TraceIdFormat": {
       "oneOf": [
         {
-          "description": "Open Telemetry trace ID, a hex string.",
+          "description": "Format the Trace ID as a hexadecimal number\n\n(e.g. Trace ID 16 -> 00000000000000000000000000000010)",
           "enum": [
-            "open_telemetry"
+            "hexadecimal"
           ],
           "type": "string"
         },
         {
-          "description": "Datadog trace ID, a u64.",
-          "enum": [
-            "datadog"
-          ],
-          "type": "string"
-        }
-      ]
-    },
-    "TraceIdFormat2": {
-      "oneOf": [
-        {
           "description": "Format the Trace ID as a hexadecimal number\n\n(e.g. Trace ID 16 -> 00000000000000000000000000000010)",
           "enum": [
-            "hexadecimal"
+            "open_telemetry"
           ],
           "type": "string"
         },
@@ -7221,6 +7221,13 @@ expression: "&schema"
           "description": "Datadog",
           "enum": [
             "datadog"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "UUID format with dashes (eg. 67e55044-10b1-426f-9247-bb680e5fe0c8)",
+          "enum": [
+            "uuid"
           ],
           "type": "string"
         }
@@ -8171,9 +8178,8 @@ expression: "&schema"
                   "type": "boolean"
                 },
                 "display_trace_id": {
-                  "default": true,
-                  "description": "Include the trace id (if any) with the log event. (default: true)",
-                  "type": "boolean"
+                  "$ref": "#/definitions/DisplayTraceIdFormat",
+                  "description": "#/definitions/DisplayTraceIdFormat"
                 }
               },
               "type": "object"
@@ -8269,9 +8275,8 @@ expression: "&schema"
                   "type": "boolean"
                 },
                 "display_trace_id": {
-                  "default": false,
-                  "description": "Include the trace id (if any) with the log event. (default: false)",
-                  "type": "boolean"
+                  "$ref": "#/definitions/DisplayTraceIdFormat",
+                  "description": "#/definitions/DisplayTraceIdFormat"
                 }
               },
               "type": "object"

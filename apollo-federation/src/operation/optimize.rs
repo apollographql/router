@@ -926,7 +926,7 @@ impl SelectionSet {
             // over fragment reuse, and so we do not want to invest a lot of time into improving
             // fragment reuse. We do the simple, less-than-ideal thing.
             if let Some(variable_definitions) = &context.operation_variables {
-                let fragment_variables = candidate.selection_set.used_variables();
+                let fragment_variables = candidate.used_variables();
                 if fragment_variables
                     .difference(variable_definitions)
                     .next()

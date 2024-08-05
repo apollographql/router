@@ -447,7 +447,8 @@ impl QueryPlanner {
             None
         };
         let mut processor = FetchDependencyGraphToQueryPlanProcessor::new(
-            operation.variables.clone(),
+            normalized_operation.variables.clone(),
+            normalized_operation.directives.clone(),
             rebased_fragments,
             operation.name.clone(),
             assigned_defer_labels,
