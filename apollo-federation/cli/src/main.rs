@@ -134,14 +134,14 @@ fn main() -> ExitCode {
         Command::Api {
             schemas,
             enable_defer,
-        } => to_api_schema(&schemas, enable_defer),
-        Command::QueryGraph { schemas } => dot_query_graph(&schemas),
-        Command::FederatedGraph { schemas } => dot_federated_graph(&schemas),
+        } => cmd_api_schema(&schemas, enable_defer),
+        Command::QueryGraph { schemas } => cmd_query_graph(&schemas),
+        Command::FederatedGraph { schemas } => cmd_federated_graph(&schemas),
         Command::Plan {
             query,
             schemas,
             planner,
-        } => plan(&query, &schemas, planner),
+        } => cmd_plan(&query, &schemas, planner),
         Command::Validate { schemas } => cmd_validate(&schemas),
         Command::Compose { schemas } => cmd_compose(&schemas),
         Command::Extract {
@@ -172,7 +172,7 @@ fn read_input(input_path: &Path) -> String {
     }
 }
 
-fn to_api_schema(file_paths: &[PathBuf], enable_defer: bool) -> Result<(), FederationError> {
+fn cmd_api_schema(file_paths: &[PathBuf], enable_defer: bool) -> Result<(), FederationError> {
     let supergraph = load_supergraph(file_paths)?;
     let api_schema = supergraph.to_api_schema(apollo_federation::ApiSchemaOptions {
         include_defer: enable_defer,
@@ -218,7 +218,7 @@ fn load_supergraph(
     }
 }
 
-fn dot_query_graph(file_paths: &[PathBuf]) -> Result<(), FederationError> {
+fn cmd_query_graph(file_paths: &[PathBuf]) -> Result<(), FederationError> {
     let supergraph = load_supergraph(file_paths)?;
     let name: &str = if file_paths.len() == 1 {
         file_paths[0].file_stem().unwrap().to_str().unwrap()
@@ -231,7 +231,7 @@ fn dot_query_graph(file_paths: &[PathBuf]) -> Result<(), FederationError> {
     Ok(())
 }
 
-fn dot_federated_graph(file_paths: &[PathBuf]) -> Result<(), FederationError> {
+fn cmd_federated_graph(file_paths: &[PathBuf]) -> Result<(), FederationError> {
     let supergraph = load_supergraph(file_paths)?;
     let api_schema = supergraph.to_api_schema(Default::default())?;
     let query_graph =
@@ -240,7 +240,7 @@ fn dot_federated_graph(file_paths: &[PathBuf]) -> Result<(), FederationError> {
     Ok(())
 }
 
-fn plan(
+fn cmd_plan(
     query_path: &Path,
     schema_paths: &[PathBuf],
     planner: QueryPlannerArgs,
