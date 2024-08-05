@@ -253,7 +253,7 @@ impl SubscriptionNode {
         let service = parameters
             .service_factory
             .subgraph_service_for_subscriptions(service_name)
-            .unwrap();
+            .expect("we already checked that the service exists during planning; qed");
 
         let (_parts, response) = service
             .oneshot(subgraph_request)

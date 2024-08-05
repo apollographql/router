@@ -86,10 +86,7 @@ impl Schema {
         // TODO: error if not found?
         if let Some(join_enum) = definitions.get_enum("join__Graph") {
             for (name, url) in join_enum.values.values().filter_map(|value| {
-                let join_directive = value
-                    .directives
-                    .iter()
-                    .find(|directive| directive.name.eq_ignore_ascii_case("join__graph"))?;
+                let join_directive = value.directives.get("join__graph")?;
                 let name = join_directive.argument_by_name("name")?.as_str()?;
                 let url = join_directive.argument_by_name("url")?.as_str()?;
                 Some((name, url))
