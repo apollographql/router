@@ -210,7 +210,9 @@ fn it_migrates_skip_include() {
         }
         "#,
 
-        // Note: `... on B {}` won't be replaced, since it has only one field.
+        // Note: `... on A @custom {}` won't be replaced, since it has a custom directive. Even
+        // though it also supports being used on a named fragment spread, we cannot assume that
+        // the behaviour is exactly the same.
         @r###"
     QueryPlan {
       Fetch(service: "Subgraph1") {
