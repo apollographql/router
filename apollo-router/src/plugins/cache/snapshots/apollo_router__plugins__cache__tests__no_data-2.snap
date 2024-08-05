@@ -1,0 +1,30 @@
+---
+source: apollo-router/src/plugins/cache/tests.rs
+expression: response
+---
+{
+  "data": {
+    "currentUser": {
+      "allOrganizations": [
+        {
+          "id": "1",
+          "name": "Organization 1"
+        },,
+        {
+          "id": "2",
+          "name": null
+        },
+        {
+          "id": "3",
+          "name": "Organization 3"
+        }
+      ]
+    }
+  },
+  "errors": [
+    {
+      "message": "Organization not found",
+      "path": ["currentUser", "allOrganizations", 1]
+    }
+  ]
+}
