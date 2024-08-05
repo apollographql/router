@@ -100,6 +100,41 @@ impl std::fmt::Debug for ArgumentList {
     }
 }
 
+/// Sort an input value, which means specifically sorting their object values by keys (assuming no
+/// duplicates).
+///
+/// After sorting, hashing and plain-Rust equality have the expected result for values that are
+/// spec-equivalent.
+fn sort_value(value: &mut executable::Value) {
+    use apollo_compiler::executable::Value;
+    match value {
+        Value::List(elems) => {
+            elems
+                .iter_mut()
+                .for_each(|value| sort_value(value.make_mut()));
+        }
+        Value::Object(pairs) => {
+            pairs
+                .iter_mut()
+                .for_each(|(_, value)| sort_value(value.make_mut()));
+            pairs.sort_by(|left, right| left.0.cmp(&right.0));
+        }
+        _ => {}
+    }
+}
+
+/// Sort arguments, which means specifically sorting arguments by names and object values by keys
+/// (assuming no duplicates).
+///
+/// After sorting, hashing and plain-Rust equality have the expected result for lists that are
+/// spec-equivalent.
+fn sort_arguments(arguments: &mut [Node<executable::Argument>]) {
+    arguments
+        .iter_mut()
+        .for_each(|arg| sort_value(arg.make_mut().value.make_mut()));
+    arguments.sort_by(|left, right| left.name.cmp(&right.name));
+}
+
 impl From<Vec<Node<executable::Argument>>> for ArgumentList {
     fn from(mut arguments: Vec<Node<executable::Argument>>) -> Self {
         if arguments.is_empty() {
