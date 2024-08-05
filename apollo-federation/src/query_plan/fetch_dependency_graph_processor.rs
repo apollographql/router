@@ -1,12 +1,12 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use apollo_compiler::executable::DirectiveList;
 use apollo_compiler::executable::VariableDefinition;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 
 use crate::error::FederationError;
+use crate::operation::DirectiveList;
 use crate::operation::RebasedFragments;
 use crate::operation::SelectionSet;
 use crate::query_graph::QueryGraph;
@@ -47,7 +47,7 @@ const PIPELINING_COST: QueryPlanCost = 100.0;
 
 pub(crate) struct FetchDependencyGraphToQueryPlanProcessor {
     variable_definitions: Arc<Vec<Node<VariableDefinition>>>,
-    operation_directives: Arc<DirectiveList>,
+    operation_directives: DirectiveList,
     fragments: Option<RebasedFragments>,
     operation_name: Option<Name>,
     assigned_defer_labels: Option<HashSet<String>>,
@@ -245,7 +245,7 @@ fn sequence_cost(values: impl IntoIterator<Item = QueryPlanCost>) -> QueryPlanCo
 impl FetchDependencyGraphToQueryPlanProcessor {
     pub(crate) fn new(
         variable_definitions: Arc<Vec<Node<VariableDefinition>>>,
-        operation_directives: Arc<DirectiveList>,
+        operation_directives: DirectiveList,
         fragments: Option<RebasedFragments>,
         operation_name: Option<Name>,
         assigned_defer_labels: Option<HashSet<String>>,
