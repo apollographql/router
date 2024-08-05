@@ -1,6 +1,8 @@
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 
 const SUBGRAPH: &str = r#"
+      directive @custom on INLINE_FRAGMENT | FRAGMENT_SPREAD
+
       type Query {
         t: T
         t2: T
@@ -175,6 +177,73 @@ fn it_handles_fragments_with_one_non_leaf_field() {
     );
 }
 
+#[test]
+fn it_migrates_skip_include() {
+    let planner = planner!(
+        config = QueryPlannerConfig { generate_query_fragments: true, reuse_query_fragments: false, ..Default::default() },
+        Subgraph1: SUBGRAPH,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+        query ($var: Boolean!) {
+          t {
+            ... on A {
+              x
+              y
+              t {
+                ... on A @include(if: $var) {
+                  x
+                  y
+                }
+                ... on A @skip(if: $var) {
+                  x
+                  y
+                }
+                ... on A @custom {
+                  x
+                  y
+                }
+              }
+            }
+          }
+        }
+        "#,
+
+        // Note: `... on B {}` won't be replaced, since it has only one field.
+        @r###"
+    QueryPlan {
+      Fetch(service: "Subgraph1") {
+        {
+          t {
+            __typename
+            ...b
+          }
+        }
+
+        fragment a on A {
+          x
+          y
+        }
+
+        fragment b on A {
+          x
+          y
+          t {
+            __typename
+            ...a @include(if: $var)
+            ...a @skip(if: $var)
+            ... on A @custom {
+              x
+              y
+            }
+          }
+        }
+      },
+    }
+    "###
+    );
+}
 #[test]
 fn it_identifies_and_reuses_equivalent_fragments_that_arent_identical() {
     let planner = planner!(

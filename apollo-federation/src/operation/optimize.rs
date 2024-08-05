@@ -1610,6 +1610,25 @@ impl Operation {
                         SelectionValue::InlineFragment(mut candidate) => {
                             self.visit_selection_set(candidate.get_selection_set_mut())?;
 
+                            let directives = &candidate.get().inline_fragment.directives;
+                            let skip_include = directives
+                                .iter()
+                                .map(|directive| match directive.name.as_str() {
+                                    "skip" | "include" => Ok(directive.clone()),
+                                    _ => Err(()),
+                                })
+                                .collect::<Result<executable::DirectiveList, _>>();
+
+                            // If there are any directives *other* than @skip and @include,
+                            // we can't just transfer them to the generated fragment spread,
+                            // so we have to keep this inline fragment.
+                            let Ok(skip_include) = skip_include else {
+                                new_selection_set.add_local_selection(
+                                    &Selection::InlineFragment(Arc::clone(candidate.get())),
+                                )?;
+                                continue;
+                            };
+
                             let existing = self.fragments.iter().find(|existing| {
                                 existing.type_condition_position
                                     == candidate.get().inline_fragment.casted_type()
@@ -1640,7 +1659,7 @@ impl Operation {
                                         type_condition_position: existing
                                             .type_condition_position
                                             .clone(),
-                                        directives: Default::default(),
+                                        directives: skip_include.into(),
                                         fragment_directives: existing.directives.clone(),
                                         selection_id: crate::operation::SelectionId::new(),
                                     }),
