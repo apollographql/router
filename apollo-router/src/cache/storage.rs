@@ -264,15 +264,24 @@ where
     {
         // Update the cache size and estimated storage size
         // This is cheaper than trying to estimate the cache storage size by iterating over the cache
+        let new_value_size = value.estimated_size().unwrap_or(0) as i64;
+
+        let (old_value, length) = {
+            let mut in_memory = self.inner.lock().await;
+            (in_memory.push(key, value), in_memory.len())
+        };
+
+        let size_delta = match old_value {
+            Some((_, old_value)) => {
+                let old_value_size = old_value.estimated_size().unwrap_or(0) as i64;
+                new_value_size - old_value_size
+            }
+            None => new_value_size,
+        };
         self.cache_estimated_storage
-            .fetch_add(value.estimated_size().unwrap_or(0) as i64, Ordering::SeqCst);
-        let mut in_memory = self.inner.lock().await;
-        if let Some((_, v)) = in_memory.push(key, value) {
-            self.cache_estimated_storage
-                .fetch_sub(v.estimated_size().unwrap_or(0) as i64, Ordering::SeqCst);
-        }
-        self.cache_size
-            .store(in_memory.len() as i64, Ordering::SeqCst);
+            .fetch_add(size_delta, Ordering::SeqCst);
+
+        self.cache_size.store(length as i64, Ordering::SeqCst);
     }
 
     pub(crate) fn in_memory_cache(&self) -> InMemoryCache<K, V> {
@@ -319,11 +328,11 @@ impl ValueType for usize {
 
 #[cfg(test)]
 mod test {
-    use std::num::NonZeroUsize;
-
+    use crate::cache::estimate_size;
     use crate::cache::storage::CacheStorage;
     use crate::cache::storage::ValueType;
     use crate::metrics::FutureMetricsExt;
+    use std::num::NonZeroUsize;
 
     #[tokio::test]
     async fn test_metrics() {
@@ -381,6 +390,95 @@ mod test {
             assert_gauge!(
                 "apollo_router_cache_size",
                 0,
+                "kind" = "test",
+                "type" = "memory"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_metrics_eviction() {
+        #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+        struct Stuff {
+            test: String,
+        }
+        impl ValueType for Stuff {
+            fn estimated_size(&self) -> Option<usize> {
+                Some(estimate_size(self))
+            }
+        }
+
+        async {
+            // note that the cache size is 1
+            // so the second insert will always evict
+            let cache: CacheStorage<String, Stuff> =
+                CacheStorage::new(NonZeroUsize::new(1).unwrap(), None, "test")
+                    .await
+                    .unwrap();
+
+            cache
+                .insert(
+                    "test".to_string(),
+                    Stuff {
+                        test: "test".to_string(),
+                    },
+                )
+                .await;
+            assert_gauge!(
+                "apollo.router.cache.storage.estimated_size",
+                28,
+                "kind" = "test",
+                "type" = "memory"
+            );
+            assert_gauge!(
+                "apollo_router_cache_size",
+                1,
+                "kind" = "test",
+                "type" = "memory"
+            );
+
+            // Insert something slightly larger
+            cache
+                .insert(
+                    "test".to_string(),
+                    Stuff {
+                        test: "test_extended".to_string(),
+                    },
+                )
+                .await;
+            assert_gauge!(
+                "apollo.router.cache.storage.estimated_size",
+                37,
+                "kind" = "test",
+                "type" = "memory"
+            );
+            assert_gauge!(
+                "apollo_router_cache_size",
+                1,
+                "kind" = "test",
+                "type" = "memory"
+            );
+
+            // Even though this is a new cache entry, we should get back to where we initially were
+            cache
+                .insert(
+                    "test2".to_string(),
+                    Stuff {
+                        test: "test".to_string(),
+                    },
+                )
+                .await;
+            assert_gauge!(
+                "apollo.router.cache.storage.estimated_size",
+                28,
+                "kind" = "test",
+                "type" = "memory"
+            );
+            assert_gauge!(
+                "apollo_router_cache_size",
+                1,
                 "kind" = "test",
                 "type" = "memory"
             );
