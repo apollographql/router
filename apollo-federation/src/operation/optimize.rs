@@ -791,8 +791,8 @@ impl<'a> FullMatchingFragmentCondition<'a> {
                 fragment.type_condition_position == **type_condition_position
                     && fragment
                         .directives
-                        .iter_sorted()
-                        .all(|d1| directives.iter_sorted().any(|d2| d1 == d2))
+                        .iter()
+                        .all(|d1| directives.iter().any(|d2| d1 == d2))
             }
         }
     }
@@ -1384,8 +1384,8 @@ impl InlineFragmentSelection {
                         let directives: executable::DirectiveList = self
                             .inline_fragment
                             .directives
-                            .iter_sorted()
-                            .filter(|d1| !fragment.directives.iter_sorted().any(|d2| *d1 == d2))
+                            .iter()
+                            .filter(|d1| !fragment.directives.iter().any(|d2| *d1 == d2))
                             .cloned()
                             .collect();
                         return Ok(
