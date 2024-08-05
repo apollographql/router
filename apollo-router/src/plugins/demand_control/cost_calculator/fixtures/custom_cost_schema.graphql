@@ -82,6 +82,12 @@ enum AorB @join__type(graph: SUBGRAPHWITHCOST) @cost(weight: 15) {
   B @join__enumValue(graph: SUBGRAPHWITHCOST)
 }
 
+scalar ExpensiveInt @join__type(graph: SUBGRAPHWITHCOST) @cost(weight: 30)
+
+type ExpensiveObject @join__type(graph: SUBGRAPHWITHCOST) @cost(weight: 40) {
+  id: ID
+}
+
 input InputTypeWithCost @join__type(graph: SUBGRAPHWITHCOST) {
   somethingWithCost: Int @cost(weight: 20)
 }
@@ -129,6 +135,8 @@ type Query
   enumWithCost: AorB @join__field(graph: SUBGRAPHWITHCOST)
   inputWithCost(someInput: InputTypeWithCost): Int
     @join__field(graph: SUBGRAPHWITHCOST)
+  scalarWithCost: ExpensiveInt @join__field(graph: SUBGRAPHWITHCOST)
+  objectWithCost: ExpensiveObject @join__field(graph: SUBGRAPHWITHCOST)
   fieldWithListSize: [String!]
     @join__field(graph: SUBGRAPHWITHLISTSIZE)
     @listSize(assumedSize: 2000, requireOneSlicingArgument: false)

@@ -736,8 +736,8 @@ mod tests {
         let schema = include_str!("./fixtures/custom_cost_schema.graphql");
         let query = include_str!("./fixtures/custom_cost_query.graphql");
 
-        assert_eq!(estimated_cost(schema, query), 57.0);
+        assert_eq!(estimated_cost(schema, query), 127.0);
         // TODO: This needs the new directive extraction to work
-        //assert_eq!(planned_cost(schema, query).await, 57.0);
+        //assert_eq!(planned_cost(schema, query).await, 127.0);
     }
 }
