@@ -1646,7 +1646,7 @@ impl FragmentSpreadData {
             fragment_name: fragment.name.clone(),
             type_condition_position: fragment.type_condition_position.clone(),
             directives: spread_directives.clone().into(),
-            fragment_directives: fragment.directives.clone().into(),
+            fragment_directives: fragment.directives.clone(),
             selection_id: SelectionId::new(),
         }
     }
