@@ -99,7 +99,7 @@ impl StaticCostCalculator {
         // Determine the cost for this particular field. Scalars are free, non-scalars are not.
         // For fields with selections, add in the cost of the selections as well.
         let mut type_cost = if let Some(cost_directive) =
-            CostDirective::from_field(&definition).or(CostDirective::from_type(ty))
+            CostDirective::from_field(definition).or(CostDirective::from_type(ty))
         {
             cost_directive.weight()
         } else if ty.is_interface() || ty.is_object() || ty.is_union() {
@@ -156,7 +156,6 @@ impl StaticCostCalculator {
         argument: &InputValueDefinition,
         schema: &Valid<Schema>,
     ) -> Result<f64, DemandControlError> {
-        tracing::debug!("Scoring {:?}", argument);
         let cost_directive = CostDirective::from_argument(argument);
         if let Some(ty) = schema.types.get(argument.ty.inner_named_type().as_str()) {
             match ty {
@@ -536,9 +535,9 @@ mod tests {
 
     async fn planned_cost(schema_str: &str, query_str: &str) -> f64 {
         let config: Arc<Configuration> = Arc::new(Default::default());
-        let (_schema, query) = parse_schema_and_operation(schema_str, query_str, &config);
+        let (schema, query) = parse_schema_and_operation(schema_str, query_str, &config);
 
-        let mut planner = BridgeQueryPlanner::new(schema_str.to_string(), config.clone(), None)
+        let mut planner = BridgeQueryPlanner::new(schema.into(), config.clone(), None, None)
             .await
             .unwrap();
 
