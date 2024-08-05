@@ -267,7 +267,7 @@ where
         self.cache_estimated_storage
             .fetch_add(value.estimated_size().unwrap_or(0) as i64, Ordering::SeqCst);
         let mut in_memory = self.inner.lock().await;
-        if let Some((_, v)) = in_memory.push(key.clone(), value.clone()) {
+        if let Some((_, v)) = in_memory.push(key, value) {
             self.cache_estimated_storage
                 .fetch_sub(v.estimated_size().unwrap_or(0) as i64, Ordering::SeqCst);
         }
