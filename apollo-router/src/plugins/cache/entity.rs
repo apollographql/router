@@ -66,7 +66,7 @@ register_plugin!("apollo", "preview_entity_cache", EntityCache);
 
 #[derive(Clone)]
 pub(crate) struct EntityCache {
-    storage: Option<RedisCacheStorage>,
+    storage: Arc<Storage>,
     endpoint_config: Option<Arc<InvalidationEndpointConfig>>,
     subgraphs: Arc<SubgraphConfiguration<Subgraph>>,
     entity_type: Option<String>,
@@ -76,11 +76,21 @@ pub(crate) struct EntityCache {
     pub(crate) invalidation: Invalidation,
 }
 
+pub(crate) struct Storage {
+    all: Option<RedisCacheStorage>,
+    subgraphs: HashMap<String, RedisCacheStorage>,
+}
+
+impl Storage {
+    pub(crate) fn get(&self, subgraph: &str) -> Option<&RedisCacheStorage> {
+        self.subgraphs.get(subgraph).or(self.all.as_ref())
+    }
+}
+
 /// Configuration for entity caching
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) struct Config {
-    redis: RedisCache,
     /// Enable or disable the entity caching feature
     #[serde(default)]
     enabled: bool,
@@ -100,6 +110,9 @@ pub(crate) struct Config {
 #[derive(Clone, Debug, JsonSchema, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 pub(crate) struct Subgraph {
+    /// Redis configuration
+    pub(crate) redis: Option<RedisCache>,
+
     /// expiration for all keys for this subgraph, unless overriden by the `Cache-Control` header in subgraph responses
     pub(crate) ttl: Option<Ttl>,
 
@@ -116,6 +129,7 @@ pub(crate) struct Subgraph {
 impl Default for Subgraph {
     fn default() -> Self {
         Self {
+            redis: None,
             enabled: true,
             ttl: Default::default(),
             private_id: Default::default(),
@@ -172,26 +186,64 @@ impl Plugin for EntityCache {
             .query
             .as_ref()
             .map(|q| q.name.to_string());
-        let required_to_start = init.config.redis.required_to_start;
-        // we need to explicitely disable TTL reset because it is managed directly by this plugin
-        let mut redis_config = init.config.redis.clone();
-        redis_config.reset_ttl = false;
-        let storage = match RedisCacheStorage::new(redis_config).await {
-            Ok(storage) => Some(storage),
-            Err(e) => {
-                tracing::error!(
-                    cache = "entity",
-                    e,
-                    "could not open connection to Redis for caching",
-                );
-                if required_to_start {
-                    return Err(e);
-                }
-                None
-            }
-        };
 
-        if init.config.redis.ttl.is_none()
+        let mut all = None;
+
+        if let Some(redis) = &init.config.subgraph.all.redis {
+            let mut redis_config = redis.clone();
+            let required_to_start = redis_config.required_to_start;
+            // we need to explicitely disable TTL reset because it is managed directly by this plugin
+            redis_config.reset_ttl = false;
+            all = match RedisCacheStorage::new(redis_config).await {
+                Ok(storage) => Some(storage),
+                Err(e) => {
+                    tracing::error!(
+                        cache = "entity",
+                        e,
+                        "could not open connection to Redis for caching",
+                    );
+                    if required_to_start {
+                        return Err(e);
+                    }
+                    None
+                }
+            };
+        }
+        let mut subgraph_storages = HashMap::new();
+        for (subgraph, config) in &init.config.subgraph.subgraphs {
+            if let Some(redis) = &config.redis {
+                let required_to_start = redis.required_to_start;
+                // we need to explicitely disable TTL reset because it is managed directly by this plugin
+                let mut redis_config = redis.clone();
+                redis_config.reset_ttl = false;
+                let storage = match RedisCacheStorage::new(redis_config).await {
+                    Ok(storage) => Some(storage),
+                    Err(e) => {
+                        tracing::error!(
+                            cache = "entity",
+                            e,
+                            "could not open connection to Redis for caching",
+                        );
+                        if required_to_start {
+                            return Err(e);
+                        }
+                        None
+                    }
+                };
+                if let Some(storage) = storage {
+                    subgraph_storages.insert(subgraph.clone(), storage);
+                }
+            }
+        }
+
+        if init
+            .config
+            .subgraph
+            .all
+            .redis
+            .as_ref()
+            .map(|r| r.ttl.is_none())
+            .unwrap_or(false)
             && init
                 .config
                 .subgraph
@@ -219,6 +271,11 @@ impl Plugin for EntityCache {
                     .into(),
             );
         }
+
+        let storage = Arc::new(Storage {
+            all,
+            subgraphs: subgraph_storages,
+        });
 
         let invalidation = Invalidation::new(storage.clone()).await?;
 
@@ -256,8 +313,8 @@ impl Plugin for EntityCache {
         name: &str,
         mut service: subgraph::BoxService,
     ) -> subgraph::BoxService {
-        let storage = match self.storage.clone() {
-            Some(storage) => storage,
+        let storage = match self.storage.get(name) {
+            Some(storage) => storage.clone(),
             None => {
                 return ServiceBuilder::new()
                     .map_response(move |response: subgraph::Response| {
@@ -386,9 +443,14 @@ impl EntityCache {
         use std::net::Ipv4Addr;
         use std::net::SocketAddr;
 
-        let invalidation = Invalidation::new(Some(storage.clone())).await?;
+        let storage = Arc::new(Storage {
+            all: Some(storage),
+            subgraphs: HashMap::new(),
+        });
+        let invalidation = Invalidation::new(storage.clone()).await?;
+
         Ok(Self {
-            storage: Some(storage),
+            storage,
             entity_type: None,
             enabled: true,
             subgraphs: Arc::new(SubgraphConfiguration {

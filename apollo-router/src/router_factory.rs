@@ -444,8 +444,7 @@ pub(crate) async fn create_subgraph_services(
             shaping.enable_subgraph_http2(name),
         )?;
 
-        let http_service_factory =
-            HttpClientServiceFactory::new(Arc::new(http_service), plugins.clone());
+        let http_service_factory = HttpClientServiceFactory::new(http_service, plugins.clone());
 
         let subgraph_service = shaping.subgraph_service_internal(
             name,

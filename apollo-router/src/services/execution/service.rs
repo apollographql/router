@@ -353,16 +353,20 @@ impl ExecutionService {
 
             nullified_paths.extend(paths);
 
-            let referenced_enums = if let (ApolloMetricsReferenceMode::Extended, Some(Value::Object(response_body))) = (metrics_ref_mode, &response.data) {
+            let mut referenced_enums = context
+                .extensions()
+                .with_lock(|lock| lock.get::<ReferencedEnums>().cloned())
+                .unwrap_or_default();
+            if let (ApolloMetricsReferenceMode::Extended, Some(Value::Object(response_body))) = (metrics_ref_mode, &response.data) {
                 extract_enums_from_response(
                     query.clone(),
                     operation_name,
                     schema.api_schema(),
                     response_body,
+                    &mut referenced_enums,
                 )
-            } else {
-                ReferencedEnums::new()
             };
+
             context
                     .extensions()
                     .with_lock(|mut lock| lock.insert::<ReferencedEnums>(referenced_enums));
