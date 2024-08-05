@@ -8,6 +8,7 @@ use apollo_federation::sources::connect::Connector;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use opentelemetry::Key;
+use parking_lot::Mutex;
 use tower::BoxError;
 use tower::ServiceExt;
 use tracing::Instrument;
@@ -18,6 +19,7 @@ use super::http::HttpRequest;
 use super::new_service::ServiceFactory;
 use crate::plugins::connectors::handle_responses::handle_responses;
 use crate::plugins::connectors::make_requests::make_requests;
+use crate::plugins::connectors::plugin::ConnectorContext;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
 use crate::plugins::connectors::tracing::CONNECT_SPAN_NAME;
 use crate::plugins::subscription::SubscriptionConfig;
@@ -124,10 +126,13 @@ async fn execute(
     schema: &Valid<apollo_compiler::Schema>,
 ) -> Result<ConnectResponse, BoxError> {
     let context = request.context.clone();
-    let context2 = context.clone();
     let original_subgraph_name = connector.id.subgraph_name.to_string();
 
-    let requests = make_requests(request, connector).map_err(BoxError::from)?;
+    let debug = context
+        .extensions()
+        .with_lock(|lock| lock.get::<Arc<Mutex<ConnectorContext>>>().cloned());
+
+    let requests = make_requests(request, connector, &debug).map_err(BoxError::from)?;
 
     let tasks = requests.into_iter().map(move |(req, key)| {
         let context = context.clone();
@@ -151,7 +156,7 @@ async fn execute(
         .await
         .map_err(BoxError::from)?;
 
-    handle_responses(responses, connector, context2, schema)
+    handle_responses(responses, connector, &debug, schema)
         .await
         .map_err(BoxError::from)
 }

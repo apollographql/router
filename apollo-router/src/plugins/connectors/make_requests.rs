@@ -1,9 +1,12 @@
+use std::sync::Arc;
+
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable::Selection;
 use apollo_federation::sources::connect::Connector;
 use apollo_federation::sources::connect::CustomConfiguration;
 use apollo_federation::sources::connect::EntityResolver;
 use itertools::Itertools;
+use parking_lot::Mutex;
 use serde_json_bytes::json;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
@@ -11,6 +14,7 @@ use serde_json_bytes::Value;
 
 use super::http_json_transport::make_request;
 use super::http_json_transport::HttpJsonTransportError;
+use super::plugin::ConnectorContext;
 use crate::services::connect;
 use crate::services::router::body::RouterBody;
 
@@ -130,6 +134,7 @@ pub(crate) enum ResponseTypeName {
 pub(crate) fn make_requests(
     request: connect::Request,
     connector: &Connector,
+    debug: &Option<Arc<Mutex<ConnectorContext>>>,
 ) -> Result<Vec<(http::Request<RouterBody>, ResponseKey)>, MakeRequestError> {
     let request_params = match connector.entity_resolver {
         Some(EntityResolver::Explicit) => entities_from_request(&request),
@@ -137,13 +142,14 @@ pub(crate) fn make_requests(
         None => root_fields(&request),
     }?;
 
-    request_params_to_requests(connector, request_params, &request)
+    request_params_to_requests(connector, request_params, &request, debug)
 }
 
 fn request_params_to_requests(
     connector: &Connector,
     request_params: Vec<ResponseKey>,
     original_request: &connect::Request,
+    debug: &Option<Arc<Mutex<ConnectorContext>>>,
 ) -> Result<Vec<(http::Request<RouterBody>, ResponseKey)>, MakeRequestError> {
     let mut results = vec![];
 
@@ -152,6 +158,7 @@ fn request_params_to_requests(
             &connector.transport,
             response_key.inputs().merge(connector.config.as_ref()),
             original_request,
+            debug,
         )?;
 
         results.push((request, response_key));
@@ -1276,7 +1283,7 @@ mod tests {
             config: Default::default(),
         };
 
-        let requests = super::make_requests(req, &connector).unwrap();
+        let requests = super::make_requests(req, &connector, &None).unwrap();
 
         assert_debug_snapshot!(requests, @r###"
         [

@@ -24,6 +24,7 @@ use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
 use lazy_static::lazy_static;
+use parking_lot::Mutex;
 use serde_json_bytes::json;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
@@ -67,6 +68,7 @@ pub(crate) fn make_request(
     transport: &HttpJsonTransport,
     inputs: IndexMap<String, Value>,
     original_request: &connect::Request,
+    debug: &Option<Arc<Mutex<ConnectorContext>>>,
 ) -> Result<http::Request<RouterBody>, HttpJsonTransportError> {
     let uri = make_uri(
         transport.source_url.as_ref(),
@@ -99,20 +101,18 @@ pub(crate) fn make_request(
         &transport.headers,
     );
 
-    original_request.context.extensions().with_lock(|mut lock| {
-        if let Some(debug) = lock.get_mut::<ConnectorContext>() {
-            debug.push_request(
-                &request,
-                json_body.as_ref(),
-                transport.body.as_ref().map(|body| SelectionData {
-                    source: body.to_string(),
-                    transformed: body.to_string(),
-                    result: json_body.clone(),
-                    errors: apply_to_errors,
-                }),
-            );
-        }
-    });
+    if let Some(debug) = debug {
+        debug.lock().push_request(
+            &request,
+            json_body.as_ref(),
+            transport.body.as_ref().map(|body| SelectionData {
+                source: body.to_string(),
+                transformed: body.to_string(),
+                result: json_body.clone(),
+                errors: apply_to_errors,
+            }),
+        );
+    }
 
     Ok(request)
 }
