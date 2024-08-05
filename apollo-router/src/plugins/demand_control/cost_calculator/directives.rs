@@ -40,8 +40,10 @@ impl CostDirective {
     }
 
     fn from_directives(directives: &DirectiveList) -> Option<Self> {
+        // TODO: Make sure to handle renaming
         directives
             .get("cost")
+            .or(directives.get("federation__cost"))
             .and_then(|cost| cost.argument_by_name("weight"))
             .and_then(|weight| weight.to_i32())
             .map(|weight| Self { weight })
@@ -52,6 +54,7 @@ impl CostDirective {
     ) -> Option<Self> {
         directives
             .get("cost")
+            .or(directives.get("federation__cost"))
             .and_then(|cost| cost.argument_by_name("weight"))
             .and_then(|weight| weight.to_i32())
             .map(|weight| Self { weight })
@@ -87,7 +90,10 @@ impl<'schema> ListSizeDirective<'schema> {
         field: &'schema Field,
         definition: &'schema FieldDefinition,
     ) -> Result<Option<Self>, DemandControlError> {
-        let directive = definition.directives.get("listSize");
+        let directive = definition
+            .directives
+            .get("listSize")
+            .or(definition.directives.get("federation__listSize"));
 
         if let Some(directive) = directive {
             let assumed_size = directive

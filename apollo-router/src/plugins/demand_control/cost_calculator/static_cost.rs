@@ -485,19 +485,25 @@ impl ResponseVisitor for ResponseCostCalculator {
 mod tests {
     use std::sync::Arc;
 
+    use apollo_federation::query_plan::query_planner::QueryPlanner;
     use bytes::Bytes;
     use test_log::test;
-    use tower::Service;
 
     use super::*;
-    use crate::query_planner::BridgeQueryPlanner;
     use crate::services::layers::query_analysis::ParsedDocument;
-    use crate::services::QueryPlannerContent;
-    use crate::services::QueryPlannerRequest;
     use crate::spec;
     use crate::spec::Query;
     use crate::Configuration;
-    use crate::Context;
+
+    impl StaticCostCalculator {
+        fn rust_planned(
+            &self,
+            query_plan: &apollo_federation::query_plan::QueryPlan,
+        ) -> Result<f64, DemandControlError> {
+            let js_planner_node: PlanNode = query_plan.node.as_ref().unwrap().into();
+            self.score_plan_node(&js_planner_node)
+        }
+    }
 
     fn parse_schema_and_operation(
         schema_str: &str,
@@ -537,29 +543,23 @@ mod tests {
         let config: Arc<Configuration> = Arc::new(Default::default());
         let (schema, query) = parse_schema_and_operation(schema_str, query_str, &config);
 
-        let mut planner = BridgeQueryPlanner::new(schema.into(), config.clone(), None, None)
-            .await
-            .unwrap();
+        let planner =
+            QueryPlanner::new(schema.federation_supergraph(), Default::default()).unwrap();
 
-        let ctx = Context::new();
-        ctx.extensions()
-            .with_lock(|mut lock| lock.insert::<ParsedDocument>(query));
-
-        let planner_res = planner
-            .call(QueryPlannerRequest::new(query_str.to_string(), None, ctx))
-            .await
-            .unwrap();
-        let query_plan = match planner_res.content.unwrap() {
-            QueryPlannerContent::Plan { plan } => plan,
-            _ => panic!("Query planner returned unexpected non-plan content"),
-        };
+        let query_plan = planner.build_query_plan(&query.executable, None).unwrap();
 
         let calculator = StaticCostCalculator {
-            subgraph_schemas: planner.subgraph_schemas(),
+            subgraph_schemas: Arc::new(
+                planner
+                    .subgraph_schemas()
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), Arc::new(v.schema().clone())))
+                    .collect(),
+            ),
             list_size: 100,
         };
 
-        calculator.planned(&query_plan).unwrap()
+        calculator.rust_planned(&query_plan).unwrap()
     }
 
     fn actual_cost(schema_str: &str, query_str: &str, response_bytes: &'static [u8]) -> f64 {
@@ -737,6 +737,6 @@ mod tests {
 
         assert_eq!(estimated_cost(schema, query), 127.0);
         // TODO: This needs the new directive extraction to work
-        //assert_eq!(planned_cost(schema, query).await, 127.0);
+        assert_eq!(planned_cost(schema, query).await, 127.0);
     }
 }
