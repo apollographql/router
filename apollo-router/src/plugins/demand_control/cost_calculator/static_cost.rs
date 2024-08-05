@@ -503,7 +503,7 @@ mod tests {
         let config: Arc<Configuration> = Arc::new(Default::default());
         let (schema, query) = parse_schema_and_operation(schema_str, query_str, &config);
 
-        let mut planner = BridgeQueryPlanner::new(schema.into(), config.clone(), None)
+        let mut planner = BridgeQueryPlanner::new(schema.into(), config.clone(), None, None)
             .await
             .unwrap();
 
