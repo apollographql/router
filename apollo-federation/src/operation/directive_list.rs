@@ -167,6 +167,13 @@ impl DirectiveList {
         Self { inner: None }
     }
 
+    /// Create a directive list with a single directive.
+    ///
+    /// This sorts arguments and input object values provided to the directive.
+    pub(crate) fn one(directive: impl Into<Node<executable::Directive>>) -> Self {
+        std::iter::once(directive.into()).collect()
+    }
+
     /// Iterate the directives in their original order.
     pub(crate) fn iter(&self) -> impl ExactSizeIterator<Item = &Node<executable::Directive>> {
         self.inner

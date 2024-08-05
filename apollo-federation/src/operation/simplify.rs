@@ -4,6 +4,7 @@ use apollo_compiler::executable;
 use apollo_compiler::name;
 use apollo_compiler::Node;
 
+use super::DirectiveList;
 use super::runtime_types_intersect;
 use super::Field;
 use super::FieldData;
@@ -83,7 +84,7 @@ impl FieldSelection {
                 // sub-selection is empty. Which suggest something may be wrong with this part of the query
                 // intent, but the query was valid while keeping an empty sub-selection isn't. So in that
                 // case, we just add some "non-included" __typename field just to keep the query valid.
-                let directive = Node::new(executable::Directive {
+                let directives = DirectiveList::one(executable::Directive {
                     name: name!("include"),
                     arguments: vec![(name!("if"), false).into()],
                 });
@@ -94,7 +95,7 @@ impl FieldSelection {
                             .introspection_typename_field(),
                         alias: None,
                         arguments: Arc::new(vec![]),
-                        directives: [directive].into_iter().collect(),
+                        directives,
                         sibling_typename: None,
                     }),
                     None,
@@ -220,7 +221,7 @@ impl InlineFragmentSelection {
                 // We should be able to rebase, or there is a bug, so error if that is the case.
                 // If we rebased successfully then we add "non-included" __typename field selection
                 // just to keep the query valid.
-                let directive = Node::new(executable::Directive {
+                let directives = DirectiveList::one(executable::Directive {
                     name: name!("include"),
                     arguments: vec![(name!("if"), false).into()],
                 });
@@ -235,7 +236,7 @@ impl InlineFragmentSelection {
                         field_position: parent_typename_field,
                         alias: None,
                         arguments: Arc::new(vec![]),
-                        directives: [directive].into_iter().collect(),
+                        directives,
                         sibling_typename: None,
                     }),
                     None,
