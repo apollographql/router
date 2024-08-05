@@ -82,7 +82,7 @@ impl StaticCostCalculator {
             ))
         })?;
 
-        let list_size_directive = ListSizeDirective::from_field(field, definition)?;
+        let list_size_directive = ListSizeDirective::from_field(schema, field, definition)?;
         let instance_count = if !field.ty().is_list() {
             1
         } else if let Some(value) = list_size_from_upstream {
@@ -99,7 +99,7 @@ impl StaticCostCalculator {
         // Determine the cost for this particular field. Scalars are free, non-scalars are not.
         // For fields with selections, add in the cost of the selections as well.
         let mut type_cost = if let Some(cost_directive) =
-            CostDirective::from_field(definition).or(CostDirective::from_type(ty))
+            CostDirective::from_field(schema, definition).or(CostDirective::from_type(schema, ty))
         {
             cost_directive.weight()
         } else if ty.is_interface() || ty.is_object() || ty.is_union() {
@@ -156,7 +156,7 @@ impl StaticCostCalculator {
         argument: &InputValueDefinition,
         schema: &Valid<Schema>,
     ) -> Result<f64, DemandControlError> {
-        let cost_directive = CostDirective::from_argument(argument);
+        let cost_directive = CostDirective::from_argument(schema, argument);
         if let Some(ty) = schema.types.get(argument.ty.inner_named_type().as_str()) {
             match ty {
                 apollo_compiler::schema::ExtendedType::InputObject(inner_arguments) => {
@@ -736,7 +736,15 @@ mod tests {
         let query = include_str!("./fixtures/custom_cost_query.graphql");
 
         assert_eq!(estimated_cost(schema, query), 127.0);
-        // TODO: This needs the new directive extraction to work
+        assert_eq!(planned_cost(schema, query).await, 127.0);
+    }
+
+    #[test(tokio::test)]
+    async fn custom_cost_query_with_renamed_directives() {
+        let schema = include_str!("./fixtures/custom_cost_schema_with_renamed_directives.graphql");
+        let query = include_str!("./fixtures/custom_cost_query.graphql");
+
+        assert_eq!(estimated_cost(schema, query), 127.0);
         assert_eq!(planned_cost(schema, query).await, 127.0);
     }
 }
