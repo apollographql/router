@@ -668,9 +668,6 @@ impl FetchDependencyGraph {
         //    keeping nodes separated when they have a different path in their parent
         //    allows to keep that "path in parent" more precisely,
         //    which is important for some case of @requires).
-        // for existing_id in self.children_of(parent.parent_node_id) {
-        //     let existing = self.node_weight(existing_id)?;
-        // // TODO: REVERSING ORDER OF CHILDREN DOES FIX THE ISSUE BUT SEEMS WRONG
         for existing_id in self.children_of(parent.parent_node_id) {
             let existing = self.node_weight(existing_id)?;
             // we compare the subgraph names last because on average it improves performance
