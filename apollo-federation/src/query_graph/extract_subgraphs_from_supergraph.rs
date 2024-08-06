@@ -343,7 +343,6 @@ fn get_apollo_directive_names(
             }
         }
     }
-    println!("{:?}", hm);
     Ok(hm)
 }
 
