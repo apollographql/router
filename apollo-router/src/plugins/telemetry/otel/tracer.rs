@@ -16,6 +16,7 @@ use opentelemetry_sdk::trace::Tracer as SdkTracer;
 use opentelemetry_sdk::trace::TracerProvider as SdkTracerProvider;
 
 use super::OtelData;
+use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
 
 /// An interface for authors of OpenTelemetry SDKs to build pre-sampled tracers.
 ///
@@ -158,7 +159,13 @@ fn process_sampling_result(
             decision: SamplingDecision::RecordAndSample,
             trace_state,
             ..
-        } => Some((trace_flags | TraceFlags::SAMPLED, trace_state.clone())),
+        } => Some((
+            trace_flags | TraceFlags::SAMPLED,
+            // Datadog trace state needs setting on the span context
+            trace_state
+                .with_priority_sampling(true)
+                .with_measuring(true),
+        )),
     }
 }
 
