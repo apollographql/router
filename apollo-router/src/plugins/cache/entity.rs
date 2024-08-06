@@ -677,8 +677,12 @@ impl InnerCacheService {
                                 },
                             };
 
-                            let (new_entities, new_errors) =
-                                assemble_response_from_error(e, &mut cache_result.0);
+                            let graphql_error = e.to_graphql_error(None);
+
+                            let (new_entities, new_errors) = assemble_response_from_errors(
+                                &[graphql_error],
+                                &mut cache_result.0,
+                            );
 
                             let mut data = Object::default();
                             data.insert(ENTITIES, new_entities.into());
@@ -1000,6 +1004,15 @@ async fn cache_store_entities_from_response(
             .and_then(|v| v.as_object_mut())
             .map(|o| o.insert(ENTITIES, new_entities.into()));
         response.response.body_mut().data = data;
+        response.response.body_mut().errors = new_errors;
+    } else {
+        let (new_entities, new_errors) =
+            assemble_response_from_errors(&response.response.body().errors, &mut result_from_cache);
+
+        let mut data = Object::default();
+        data.insert(ENTITIES, new_entities.into());
+
+        response.response.body_mut().data = Some(Value::Object(data));
         response.response.body_mut().errors = new_errors;
     }
 
@@ -1355,13 +1368,12 @@ async fn insert_entities_in_result(
     Ok((new_entities, new_errors))
 }
 
-fn assemble_response_from_error(
-    e: FetchError,
+fn assemble_response_from_errors(
+    graphql_errors: &[Error],
     result: &mut Vec<IntermediateResult>,
 ) -> (Vec<Value>, Vec<Error>) {
     let mut new_entities = Vec::new();
     let mut new_errors = Vec::new();
-    let graphql_error = e.to_graphql_error(None);
 
     for (new_entity_idx, IntermediateResult { cache_entry, .. }) in result.drain(..).enumerate() {
         match cache_entry {
@@ -1370,12 +1382,14 @@ fn assemble_response_from_error(
             }
             None => {
                 new_entities.push(Value::Null);
-                let mut e = graphql_error.clone();
-                e.path = Some(Path(vec![
-                    PathElement::Key(ENTITIES.to_string(), None),
-                    PathElement::Index(new_entity_idx),
-                ]));
-                new_errors.push(e);
+
+                for mut error in graphql_errors.iter().cloned() {
+                    error.path = Some(Path(vec![
+                        PathElement::Key(ENTITIES.to_string(), None),
+                        PathElement::Index(new_entity_idx),
+                    ]));
+                    new_errors.push(error);
+                }
             }
         }
     }
