@@ -227,6 +227,9 @@ pub(crate) struct SubgraphEnteringEdgeInfo {
 /// Note that we shouldn't add `derive(Serialize, Deserialize)` to this without changing the types
 /// to be something like UUIDs.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+// NOTE(@TylerBloom): This feature gate can be removed once the condition in the comment above is
+// met.
+#[cfg_attr(feature = "snapshot_tracing", derive(serde::Serialize))]
 pub(crate) struct OverrideId(usize);
 
 /// Global storage for the counter used to allocate `OverrideId`s.

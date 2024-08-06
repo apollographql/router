@@ -43,28 +43,7 @@
             "type": "ReloadSubgraphs",
             "subgraphs": {
                 "accounts": {
-                    "requests": [
-                        {
-                            "request": {
-                                "body": {"query":"mutation{updateMyAccount{name}}"}
-                            },
-                            "response": {
-                                "headers": {
-                                    "Content-Type": "application/json"
-                                },
-                                "body": {
-                                    "data": { "updateMyAccount": { "name": "invalidation-subgraph-type2" } },
-                                    "extensions": {
-                                        "invalidation": [{
-                                            "kind": "type",
-                                            "subgraph": "accounts",
-                                            "type": "Query"
-                                        }]
-                                    }
-                                }
-                            }
-                        }
-                    ]
+                    "requests": []
                 }
             }
         },
@@ -83,15 +62,14 @@
             }
         },
         {
-            "type": "Request",
+            "type": "EndpointRequest",
+            "url": "http://127.0.0.1:12345/invalidation-sample-subgraph-type",
             "request": {
-                "query": "mutation { updateMyAccount { name } }"
-            },
-            "expected_response": {
-                "data":{
-                    "updateMyAccount":{
-                        "name":"invalidation-subgraph-type2"
-                    }
+                "method": "POST",
+                "body": {
+                    "kind": "type",
+                    "subgraph": "accounts",
+                    "type": "Query"
                 }
             }
         },

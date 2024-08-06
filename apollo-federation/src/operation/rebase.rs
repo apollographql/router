@@ -579,6 +579,7 @@ impl InlineFragment {
             .into())
         } else {
             let mut rebased_fragment_data = self.data().clone();
+            rebased_fragment_data.parent_type_position = parent_type.clone();
             rebased_fragment_data.type_condition_position = rebased_condition;
             rebased_fragment_data.schema = schema.clone();
             Ok(InlineFragment::new(rebased_fragment_data))

@@ -33,7 +33,7 @@ telemetry:
 
 <Note>
 
-You must specify `protocol: http` or the exporter will fail to connect to Dynatrace.
+You must specify `protocol: http` or the exporter will fail to connect to Dynatrace. Additionally, if your Dynatrace endpoint does not contain a port, you must append `:443` to the endpoint. For example: `https://subdomain.live.dynatrace.com:443/api/v2/otlp/v1/traces`.
 
 </Note>
 

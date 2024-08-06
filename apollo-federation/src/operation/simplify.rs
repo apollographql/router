@@ -158,12 +158,12 @@ impl InlineFragmentSelection {
         named_fragments: &NamedFragments,
         schema: &ValidFederationSchema,
     ) -> Result<Option<SelectionOrSet>, FederationError> {
-        let this_condition = self.inline_fragment.type_condition_position.clone();
+        let this_condition = self.inline_fragment.type_condition_position.as_ref();
         // This method assumes by contract that `parent_type` runtimes intersects `self.inline_fragment.parent_type_position`'s,
         // but `parent_type` runtimes may be a subset. So first check if the selection should not be discarded on that account (that
         // is, we should not keep the selection if its condition runtimes don't intersect at all with those of
         // `parent_type` as that would ultimately make an invalid selection set).
-        if let Some(ref type_condition) = this_condition {
+        if let Some(type_condition) = this_condition {
             if (self.inline_fragment.schema != *schema
                 || self.inline_fragment.parent_type_position != *parent_type)
                 && !runtime_types_intersect(type_condition, parent_type, schema)
@@ -182,7 +182,7 @@ impl InlineFragmentSelection {
             //   cannot be restricting things further (it's typically a less precise interface/union).
             let useless_fragment = match this_condition {
                 None => true,
-                Some(ref c) => self.inline_fragment.schema == *schema && c == parent_type,
+                Some(c) => self.inline_fragment.schema == *schema && c == parent_type,
             };
             if useless_fragment || parent_type.is_object_type() {
                 // Try to skip this fragment and flatten_unnecessary_fragments self.selection_set with `parent_type`,
