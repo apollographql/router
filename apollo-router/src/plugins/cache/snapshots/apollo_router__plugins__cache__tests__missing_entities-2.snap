@@ -23,7 +23,12 @@ expression: response
   },
   "errors": [
     {
-      "message": "Organization not found"
+      "message": "Organization not found",
+      "path": [
+        "currentUser",
+        "allOrganizations",
+        2
+      ]
     }
   ]
 }
