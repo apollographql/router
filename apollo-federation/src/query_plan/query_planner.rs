@@ -987,23 +987,23 @@ type User
             Flatten(path: "bestRatedProducts.@") {
               Fetch(service: "products") {
                 {
-                  ... on Book {
+                  ... on Movie {
                     __typename
                     id
                   }
-                  ... on Movie {
+                  ... on Book {
                     __typename
                     id
                   }
                 } =>
                 {
-                  ... on Book {
+                  ... on Movie {
                     vendor {
                       __typename
                       id
                     }
                   }
-                  ... on Movie {
+                  ... on Book {
                     vendor {
                       __typename
                       id
@@ -1092,14 +1092,14 @@ type User
                     Flatten(path: "bestRatedProducts.@") {
                       Fetch(service: "products") {
                         {
-                          ... on Book {
+                          ... on Movie {
                             __typename
                             id
                             reviews {
                               rating
                             }
                           }
-                          ... on Movie {
+                          ... on Book {
                             __typename
                             id
                             reviews {
@@ -1108,10 +1108,10 @@ type User
                           }
                         } =>
                         {
-                          ... on Book {
+                          ... on Movie {
                             avg_rating
                           }
-                          ... on Movie {
+                          ... on Book {
                             avg_rating
                           }
                         }

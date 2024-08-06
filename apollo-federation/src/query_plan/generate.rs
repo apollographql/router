@@ -252,7 +252,11 @@ mod tests {
     }
 
     impl<'a> PlanBuilder<Plan, Element> for TestPlanBuilder<'a> {
-        fn add_to_plan(&mut self, partial_plan: &Plan, new_element: Element) -> Plan {
+        fn add_to_plan(
+            &mut self,
+            partial_plan: &Plan,
+            new_element: Element,
+        ) -> Result<Plan, FederationError> {
             let new_plan: Plan = partial_plan
                 .iter()
                 .cloned()
@@ -261,7 +265,7 @@ mod tests {
             if new_plan.len() == self.target_len {
                 self.generated.push(new_plan.clone())
             }
-            new_plan
+            Ok(new_plan)
         }
 
         fn compute_plan_cost(&mut self, plan: &mut Plan) -> Result<QueryPlanCost, FederationError> {

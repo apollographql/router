@@ -1888,7 +1888,9 @@ impl FederatedQueryGraphBuilder {
                             followup_edge_weight.transition,
                             QueryGraphEdgeTransition::KeyResolution
                         ) {
-                            if let (Some(conditions), Some(followup_conditions)) = (&edge_weight.conditions, &followup_edge_weight.conditions) {
+                            if let (Some(conditions), Some(followup_conditions)) =
+                                (&edge_weight.conditions, &followup_edge_weight.conditions)
+                            {
                                 if conditions == followup_conditions {
                                     continue;
                                 }

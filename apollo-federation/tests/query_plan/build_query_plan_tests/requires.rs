@@ -151,22 +151,22 @@ fn it_handles_multiple_requires_within_the_same_entity_fetch() {
             Flatten(path: "is.@") {
               Fetch(service: "Subgraph2") {
                 {
-                  ... on T2 {
+                  ... on T3 {
                     __typename
                     id
                     f
                   }
-                  ... on T3 {
+                  ... on T2 {
                     __typename
                     id
                     f
                   }
                 } =>
                 {
-                  ... on T2 {
+                  ... on T3 {
                     g
                   }
-                  ... on T3 {
+                  ... on T2 {
                     g
                   }
                 }
@@ -409,8 +409,8 @@ fn it_handles_simple_require_chain() {
                 {
                   ... on T {
                     __typename
-                    id
                     v
+                    id
                   }
                 } =>
                 {
@@ -1689,20 +1689,20 @@ fn it_handles_multiple_requires_with_multiple_fetches() {
                 Flatten(path: "t.bar.@") {
                   Fetch(service: "s4") {
                     {
-                      ... on T {
+                      ... on U {
                         __typename
                         id
                       }
-                      ... on U {
+                      ... on T {
                         __typename
                         id
                       }
                     } =>
                     {
-                      ... on T {
+                      ... on U {
                         name
                       }
-                      ... on U {
+                      ... on T {
                         name
                       }
                     }

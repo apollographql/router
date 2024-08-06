@@ -1063,14 +1063,17 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
 }
 
 impl<'a: 'b, 'b> PlanBuilder<PlanInfo, Arc<OpPathTree>> for QueryPlanningTraversal<'a, 'b> {
-    fn add_to_plan(&mut self, plan_info: &PlanInfo, tree: Arc<OpPathTree>) -> Result<PlanInfo, FederationError> {
+    fn add_to_plan(
+        &mut self,
+        plan_info: &PlanInfo,
+        tree: Arc<OpPathTree>,
+    ) -> Result<PlanInfo, FederationError> {
         let mut updated_graph = plan_info.fetch_dependency_graph.clone();
-        self.updated_dependency_graph(&mut updated_graph, &tree).map(
-            |_| PlanInfo {
+        self.updated_dependency_graph(&mut updated_graph, &tree)
+            .map(|_| PlanInfo {
                 fetch_dependency_graph: updated_graph,
                 path_tree: plan_info.path_tree.merge(&tree),
-            }
-        )
+            })
     }
 
     fn compute_plan_cost(

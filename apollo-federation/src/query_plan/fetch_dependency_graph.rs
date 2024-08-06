@@ -28,6 +28,7 @@ use petgraph::stable_graph::StableDiGraph;
 use petgraph::visit::EdgeRef;
 use petgraph::visit::IntoNodeReferences;
 use serde::Serialize;
+
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::graphql_definition::DeferDirectiveArguments;
@@ -670,9 +671,8 @@ impl FetchDependencyGraph {
         // for existing_id in self.children_of(parent.parent_node_id) {
         //     let existing = self.node_weight(existing_id)?;
         // // TODO: REVERSING ORDER OF CHILDREN DOES FIX THE ISSUE BUT SEEMS WRONG
-        let children: Vec<NodeIndex> = self.children_of(parent.parent_node_id).collect();
-        for existing_id in children.iter().rev() {
-            let existing = self.node_weight(*existing_id)?;
+        for existing_id in self.children_of(parent.parent_node_id) {
+            let existing = self.node_weight(existing_id)?;
             // we compare the subgraph names last because on average it improves performance
             if existing.merge_at.as_deref() == Some(merge_at)
                 && existing
@@ -687,16 +687,16 @@ impl FetchDependencyGraph {
                             if fragment.casted_type() == type_
                         )
                     })
-                && !self.is_in_nodes_or_their_ancestors(*existing_id, conditions_nodes)
+                && !self.is_in_nodes_or_their_ancestors(existing_id, conditions_nodes)
                 && self
-                    .parents_relations_of(*existing_id)
+                    .parents_relations_of(existing_id)
                     .find(|rel| rel.parent_node_id == parent.parent_node_id)
                     .and_then(|rel| rel.path_in_parent)
                     == parent.path_in_parent
                 && existing.defer_ref.as_ref() == defer_ref
                 && existing.subgraph_name == *subgraph_name
             {
-                return Ok(*existing_id);
+                return Ok(existing_id);
             }
         }
         let new_node = self.new_key_node(subgraph_name, merge_at.to_vec(), defer_ref.cloned())?;
@@ -863,6 +863,7 @@ impl FetchDependencyGraph {
     fn children_of(&self, node_id: NodeIndex) -> impl Iterator<Item = NodeIndex> + '_ {
         self.graph
             .neighbors_directed(node_id, petgraph::Direction::Outgoing)
+            .sorted_by_key(|n| n.index())
     }
 
     fn parent_relation(
