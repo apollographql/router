@@ -74,19 +74,21 @@ impl Plugin for Connectors {
                     res = match res {
                         Ok(mut res) => {
                             if is_enabled {
-                                if let Some(debug) = res
-                                    .context
-                                    .extensions()
-                                    .with_lock(|mut lock| lock.remove::<Arc<Mutex<ConnectorContext>>>())
+                                if let Some(debug) =
+                                    res.context.extensions().with_lock(|mut lock| {
+                                        lock.remove::<Arc<Mutex<ConnectorContext>>>()
+                                    })
                                 {
                                     let (parts, stream) = res.response.into_parts();
                                     let (mut first, rest) = stream.into_future().await;
 
                                     if let Some(first) = &mut first {
-                                        first.extensions.insert(
-                                            "apolloConnectorsDebugging",
-                                            json!({"version": "1", "data": debug.lock().clone().serialize() }),
-                                        );
+                                        if let Some(inner) = Arc::into_inner(debug) {
+                                            first.extensions.insert(
+                                                "apolloConnectorsDebugging",
+                                                json!({"version": "1", "data": inner.into_inner().serialize() }),
+                                            );
+                                        }
                                     }
                                     res.response = http::Response::from_parts(
                                         parts,
