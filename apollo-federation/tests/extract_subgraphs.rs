@@ -511,3 +511,93 @@ fn extracts_renamed_demand_control_directives() {
     }
     insta::assert_snapshot!(snapshot);
 }
+
+#[test]
+fn does_not_extract_demand_control_directive_name_conflicts() {
+    let subgraphs = Supergraph::new(r#"
+        schema
+          @link(url: "https://specs.apollo.dev/link/v1.0")
+          @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
+          @link(url: "https://example.com/myCustomDirective/v1.0", import: ["@cost"])
+          @link(url: "https://example.com/myOtherCustomDirective/v1.0", import: ["@listSize"])
+        {
+          query: Query
+        }
+        
+        directive @cost(name: String!) on FIELD_DEFINITION
+        
+        directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+        
+        directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+        
+        directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+        
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+        
+        directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+        
+        directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+        
+        directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+        
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+        
+        directive @listSize(name: String!) on FIELD_DEFINITION
+        
+        input join__ContextArgument {
+          name: String!
+          type: String!
+          context: String!
+          selection: join__FieldValue!
+        }
+        
+        scalar join__DirectiveArguments
+        
+        scalar join__FieldSet
+        
+        scalar join__FieldValue
+        
+        enum join__Graph {
+          SUBGRAPH_A @join__graph(name: "subgraph-a", url: "")
+          SUBGRAPH_B @join__graph(name: "subgraph-b", url: "")
+        }
+        
+        scalar link__Import
+        
+        enum link__Purpose {
+          """
+          `SECURITY` features provide metadata necessary to securely resolve fields.
+          """
+          SECURITY
+        
+          """
+          `EXECUTION` features provide metadata necessary for operation execution.
+          """
+          EXECUTION
+        }
+        
+        type Query
+          @join__type(graph: SUBGRAPH_A)
+          @join__type(graph: SUBGRAPH_B)
+        {
+          a: Int @join__field(graph: SUBGRAPH_A) @cost(name: "cost")
+          b: [Int] @join__field(graph: SUBGRAPH_B) @listSize(name: "listSize")
+        }
+    "#)
+    .expect("parses")
+    .extract_subgraphs()
+    .expect("extracts");
+
+    let mut snapshot = String::new();
+    for (_name, subgraph) in subgraphs {
+        use std::fmt::Write;
+
+        _ = writeln!(
+            &mut snapshot,
+            "{}\n---\n{}",
+            subgraph.name,
+            subgraph.schema.schema()
+        );
+    }
+    insta::assert_snapshot!(snapshot);
+}
