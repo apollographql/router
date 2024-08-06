@@ -606,6 +606,7 @@ impl BridgeQueryPlanner {
                         formatted_query_plan,
                         query: Arc::new(selections),
                         query_metrics,
+                        estimated_size: Default::default(),
                     }),
                 })
             }

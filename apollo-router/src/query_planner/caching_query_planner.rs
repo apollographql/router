@@ -689,7 +689,7 @@ pub(crate) struct WarmUpCachingQueryKey {
 impl ValueType for Result<QueryPlannerContent, Arc<QueryPlannerError>> {
     fn estimated_size(&self) -> Option<usize> {
         match self {
-            Ok(QueryPlannerContent::Plan { plan }) => Some(estimate_size(plan)),
+            Ok(QueryPlannerContent::Plan { plan }) => Some(plan.estimated_size()),
             Ok(QueryPlannerContent::Response { response }) => Some(estimate_size(response)),
             Ok(QueryPlannerContent::IntrospectionDisabled) => None,
             Err(e) => Some(estimate_size(e)),
@@ -848,6 +848,7 @@ mod tests {
                     .into(),
                     query: Arc::new(Query::empty()),
                     query_metrics: Default::default(),
+                    estimated_size: Default::default(),
                 };
                 let qp_content = QueryPlannerContent::Plan {
                     plan: Arc::new(query_plan),
