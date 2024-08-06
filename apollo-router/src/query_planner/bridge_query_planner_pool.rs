@@ -263,3 +263,39 @@ impl tower::Service<QueryPlannerRequest> for BridgeQueryPlannerPool {
         })
     }
 }
+
+#[cfg(test)]
+
+mod tests {
+    use crate::Context;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_v8_metrics() {
+        let sdl = include_str!("../testdata/minimal_fed2_supergraph.graphql");
+        let config = Arc::default();
+        let schema = Schema::parse(sdl, &config).unwrap();
+
+        let mut pool =
+            BridgeQueryPlannerPool::new(Arc::new(schema), config, NonZeroUsize::new(2).unwrap())
+                .await
+                .unwrap();
+        pool.call(QueryPlannerRequest::new(
+            include_str!("../query_planner/testdata/query.graphql").to_string(),
+            None,
+            Context::new(),
+        ))
+        .await
+        .unwrap();
+
+        let metrics = crate::metrics::collect_metrics();
+        let heap_used = metrics.find("apollo.router.v8.heap.used").unwrap();
+        let heap_total = metrics.find("apollo.router.v8.heap.total").unwrap();
+
+        println!(
+            "got heap_used: {:?}, heap_total: {:?}",
+            heap_used, heap_total
+        );
+    }
+}
