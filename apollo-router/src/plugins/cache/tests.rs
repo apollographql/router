@@ -9,7 +9,6 @@ use fred::prelude::RedisError;
 use fred::prelude::RedisValue;
 use http::header::CACHE_CONTROL;
 use http::HeaderValue;
-use http::StatusCode;
 use parking_lot::Mutex;
 use tower::ServiceExt;
 
@@ -639,7 +638,169 @@ async fn no_data() {
     let response = response.next_response().await.unwrap();
     insta::assert_json_snapshot!(response);
 
-    // Now testing without any mock subgraphs, all the data should come from the cache
+    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), HashMap::new())
+        .await
+        .unwrap();
+
+    let subgraphs = MockedSubgraphs(
+        [(
+            "user",
+            MockSubgraph::builder()
+                .with_json(
+                    serde_json::json! {{"query":"{currentUser{allOrganizations{__typename id}}}"}},
+                    serde_json::json! {{"data": {"currentUser": { "allOrganizations": [
+                        {
+                            "__typename": "Organization",
+                            "id": "1"
+                        },
+                        {
+                            "__typename": "Organization",
+                            "id": "2"
+                        },
+                        {
+                            "__typename": "Organization",
+                            "id": "3"
+                        }
+                    ] }}}},
+                )
+                .with_header(CACHE_CONTROL, HeaderValue::from_static("no-store"))
+                .build(),
+        )]
+        .into_iter()
+        .collect(),
+    );
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_plugin(entity_cache)
+        .subgraph_hook(|name, service| {
+            if name == "orga" {
+                let mut subgraph = MockSubgraphService::new();
+                subgraph
+                    .expect_call()
+                    .times(1)
+                    .returning(move |_req: subgraph::Request| Err("orga not found".into()));
+                subgraph.boxed()
+            } else {
+                service
+            }
+        })
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .build()
+        .unwrap();
+    let mut response = service.oneshot(request).await.unwrap();
+    let response = response.next_response().await.unwrap();
+
+    insta::assert_json_snapshot!(response);
+}
+
+#[tokio::test]
+async fn missing_entities() {
+    let query = "query { currentUser { allOrganizations { id name } } }";
+
+    let subgraphs = MockedSubgraphs([
+        ("user", MockSubgraph::builder().with_json(
+                serde_json::json!{{"query":"{currentUser{allOrganizations{__typename id}}}"}},
+                serde_json::json!{{"data": {"currentUser": { "allOrganizations": [
+                    {
+                        "__typename": "Organization",
+                        "id": "1"
+                    },
+                    {
+                        "__typename": "Organization",
+                        "id": "2"
+                    }
+                ] }}}}
+        ).with_header(CACHE_CONTROL, HeaderValue::from_static("no-store")).build()),
+        ("orga", MockSubgraph::builder().with_json(
+            serde_json::json!{{
+                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{name}}}",
+            "variables": {
+                "representations": [
+                    {
+                        "id": "1",
+                        "__typename": "Organization",
+                    },
+                    {
+                        "id": "2",
+                        "__typename": "Organization",
+                    }
+                ]
+            }}},
+            serde_json::json!{{
+                "data": {
+                    "_entities": [
+                        {
+                            "name": "Organization 1",
+                        },
+                        {
+                            "name": "Organization 2"
+                        }
+                    ]
+            }
+            }}
+        ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600")).build())
+    ].into_iter().collect());
+
+    let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
+        .await
+        .unwrap();
+    let map = [
+        (
+            "user".to_string(),
+            Subgraph {
+                redis: None,
+                private_id: Some("sub".to_string()),
+                enabled: true,
+                ttl: None,
+                ..Default::default()
+            },
+        ),
+        (
+            "orga".to_string(),
+            Subgraph {
+                redis: None,
+                private_id: Some("sub".to_string()),
+                enabled: true,
+                ttl: None,
+                ..Default::default()
+            },
+        ),
+    ]
+    .into_iter()
+    .collect();
+    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), map)
+        .await
+        .unwrap();
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_plugin(entity_cache)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .build()
+        .unwrap();
+    let mut response = service.oneshot(request).await.unwrap();
+    let response = response.next_response().await.unwrap();
+    insta::assert_json_snapshot!(response);
+
     let entity_cache = EntityCache::with_mocks(redis_cache.clone(), HashMap::new())
         .await
         .unwrap();
@@ -668,7 +829,7 @@ async fn no_data() {
                 "variables": {
                     "representations": [
                         {
-                            "id": "2",
+                            "id": "3",
                             "__typename": "Organization",
                         }
                     ]
@@ -687,24 +848,6 @@ async fn no_data() {
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(entity_cache)
-        .subgraph_hook(|name, service| {
-            if name == "orga" {
-                let mut subgraph = MockSubgraphService::new();
-                subgraph
-                    .expect_call()
-                    .times(1)
-                    .returning(move |req: subgraph::Request| {
-                        Err("orga not found".into())
-                        /*Ok(subgraph::Response::fake_builder()
-                        .context(req.context)
-                        .status_code(StatusCode::BAD_REQUEST)
-                        .build())*/
-                    });
-                subgraph.boxed()
-            } else {
-                service
-            }
-        })
         .extra_plugin(subgraphs)
         .build_supergraph()
         .await
@@ -717,7 +860,6 @@ async fn no_data() {
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
     let response = response.next_response().await.unwrap();
-
     insta::assert_json_snapshot!(response);
 }
 
