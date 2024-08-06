@@ -942,22 +942,6 @@ impl Selection {
             }
         }
     }
-
-    pub(crate) fn for_each_element(
-        &self,
-        parent_type_position: CompositeTypeDefinitionPosition,
-        callback: &mut impl FnMut(OpPathElement) -> Result<(), FederationError>,
-    ) -> Result<(), FederationError> {
-        match self {
-            Selection::Field(field_selection) => field_selection.for_each_element(callback),
-            Selection::InlineFragment(inline_fragment_selection) => {
-                inline_fragment_selection.for_each_element(callback)
-            }
-            Selection::FragmentSpread(fragment_spread_selection) => {
-                fragment_spread_selection.for_each_element(parent_type_position, callback)
-            }
-        }
-    }
 }
 
 impl From<FieldSelection> for Selection {
@@ -1574,22 +1558,6 @@ impl FragmentSpreadSelection {
             return Ok(true);
         }
         self.selection_set.any_element(predicate)
-    }
-
-    pub(crate) fn for_each_element(
-        &self,
-        parent_type_position: CompositeTypeDefinitionPosition,
-        callback: &mut impl FnMut(OpPathElement) -> Result<(), FederationError>,
-    ) -> Result<(), FederationError> {
-        let inline_fragment = InlineFragment::new(InlineFragmentData {
-            schema: self.spread.schema.clone(),
-            parent_type_position,
-            type_condition_position: Some(self.spread.type_condition_position.clone()),
-            directives: self.spread.directives.clone(),
-            selection_id: self.spread.selection_id.clone(),
-        });
-        callback(inline_fragment.into())?;
-        self.selection_set.for_each_element(callback)
     }
 }
 
@@ -2916,19 +2884,6 @@ impl SelectionSet {
         }
         Ok(false)
     }
-
-    /// Runs the given callback for all elements in the selection set and their descendants. Note
-    /// that fragment spread selections are converted to inline fragment elements, and their
-    /// fragment selection sets are recursed into.
-    pub(crate) fn for_each_element(
-        &self,
-        callback: &mut impl FnMut(OpPathElement) -> Result<(), FederationError>,
-    ) -> Result<(), FederationError> {
-        for selection in self.selections.values() {
-            selection.for_each_element(self.type_position.clone(), callback)?
-        }
-        Ok(())
-    }
 }
 
 impl IntoIterator for SelectionSet {
@@ -3244,17 +3199,6 @@ impl FieldSelection {
         }
         Ok(false)
     }
-
-    pub(crate) fn for_each_element(
-        &self,
-        callback: &mut impl FnMut(OpPathElement) -> Result<(), FederationError>,
-    ) -> Result<(), FederationError> {
-        callback(self.field.clone().into())?;
-        if let Some(selection_set) = &self.selection_set {
-            selection_set.for_each_element(callback)?;
-        }
-        Ok(())
-    }
 }
 
 impl Field {
@@ -3417,14 +3361,6 @@ impl InlineFragmentSelection {
             return Ok(true);
         }
         self.selection_set.any_element(predicate)
-    }
-
-    pub(crate) fn for_each_element(
-        &self,
-        callback: &mut impl FnMut(OpPathElement) -> Result<(), FederationError>,
-    ) -> Result<(), FederationError> {
-        callback(self.inline_fragment.clone().into())?;
-        self.selection_set.for_each_element(callback)
     }
 }
 
