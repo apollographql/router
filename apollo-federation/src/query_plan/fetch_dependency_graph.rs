@@ -546,15 +546,22 @@ impl FetchDependencyGraphNodePath {
     ) -> Result<Vec<FetchDataPathElement>, FederationError> {
         let mut new_path = self.response_path.clone();
         if let OpPathElement::Field(field) = element {
-            if self.possible_types_after_last_field.len() != self.possible_types.len() {
-                let conditions = &self.possible_types;
-                let previous_last_element = new_path.pop();
-            }
+            let conditions =
+                if self.possible_types_after_last_field.len() != self.possible_types.len() {
+                    let conditions = &self.possible_types;
 
-            new_path.push(FetchDataPathElement::Key(
-                Default::default(),
-                field.response_name(),
-            ));
+                    match new_path.pop() {
+                        Some(FetchDataPathElement::AnyIndex(_))
+                        | Some(FetchDataPathElement::Key(_, _)) => {
+                            conditions.iter().map(|c| c.name.clone()).collect()
+                        }
+                        _ => Default::default(),
+                    }
+                } else {
+                    Default::default()
+                };
+
+            new_path.push(FetchDataPathElement::Key(conditions, field.response_name()));
 
             // TODO: is there a simpler way to find a field’s type from `&Field`?
             let mut type_ = &field.field_position.get(field.schema.schema())?.ty;

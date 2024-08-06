@@ -1,5 +1,4 @@
 use std::fmt;
-use std::fmt::Write;
 
 use apollo_compiler::executable;
 

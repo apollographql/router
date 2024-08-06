@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::task::Poll;
 
+use apollo_compiler::ast::Document;
 use futures::future;
 use http::HeaderMap;
 use http::HeaderName;
@@ -91,11 +92,10 @@ impl MockSubgraphBuilder {
     ///
     /// the arguments must deserialize to `crate::graphql::Request` and `crate::graphql::Response`
     pub fn with_json(mut self, request: serde_json::Value, response: serde_json::Value) -> Self {
-        self.mocks.insert(
-            serde_json::from_value(request).unwrap(),
-            serde_json::from_value(response).unwrap(),
-        );
-
+        let mut request = serde_json::from_value(request).unwrap();
+        normalize(&mut request);
+        self.mocks
+            .insert(request, serde_json::from_value(response).unwrap());
         self
     }
 
@@ -121,6 +121,15 @@ impl MockSubgraphBuilder {
             headers: self.headers,
         }
     }
+}
+
+// Normalize queries so that spaces don't have an impact on the cache
+fn normalize(request: &mut Request) {
+    request.query = Some(
+        Document::parse(request.query.clone().unwrap(), "request")
+            .unwrap()
+            .to_string(),
+    );
 }
 
 impl Service<SubgraphRequest> for MockSubgraph {
@@ -172,6 +181,8 @@ impl Service<SubgraphRequest> for MockSubgraph {
                     serde_json_bytes::Value::String("subscriptionId".to_string().into());
             }
         }
+
+        normalize(body);
 
         let response = if let Some(response) = self.mocks.get(body) {
             // Build an http Response

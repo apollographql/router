@@ -29,9 +29,51 @@ struct RequestAndResponse {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_type_conditions_enabled() {
+    let legacy = _test_type_conditions_enabled("legacy").await;
+    let new = _test_type_conditions_enabled("new").await;
+    assert_eq!(legacy, new);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_type_conditions_enabled_generate_query_fragments() {
+    let legacy = _test_type_conditions_enabled_generate_query_fragments("legacy").await;
+    let new = _test_type_conditions_enabled_generate_query_fragments("new").await;
+    assert_eq!(legacy, new);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_type_conditions_enabled_list_of_list() {
+    let legacy = _test_type_conditions_enabled_list_of_list("legacy").await;
+    let new = _test_type_conditions_enabled_list_of_list("new").await;
+    assert_eq!(legacy, new);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_type_conditions_enabled_list_of_list_of_list() {
+    let legacy = _test_type_conditions_enabled_list_of_list_of_list("legacy").await;
+    let new = _test_type_conditions_enabled_list_of_list_of_list("new").await;
+    assert_eq!(legacy, new);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_type_conditions_disabled() {
+    let legacy = _test_type_conditions_disabled("legacy").await;
+    let new = _test_type_conditions_disabled("new").await;
+    assert_eq!(legacy, new);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_type_conditions_enabled_shouldnt_make_article_fetch() {
+    let legacy = _test_type_conditions_enabled_shouldnt_make_article_fetch("legacy").await;
+    let new = _test_type_conditions_enabled_shouldnt_make_article_fetch("new").await;
+    assert_eq!(legacy, new);
+}
+
+async fn _test_type_conditions_enabled(planner_mode: &str) -> Response {
     let harness = setup_from_mocks(
         json! {{
             "experimental_type_conditioned_fetching": true,
+            "experimental_query_planner_mode": planner_mode,
             // will make debugging easier
             "plugins": {
                 "experimental.expose_query_plan": true
@@ -71,13 +113,14 @@ async fn test_type_conditions_enabled() {
         .unwrap();
 
     insta::assert_json_snapshot!(response);
+    response
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_type_conditions_enabled_generate_query_fragments() {
+async fn _test_type_conditions_enabled_generate_query_fragments(planner_mode: &str) -> Response {
     let harness = setup_from_mocks(
         json! {{
             "experimental_type_conditioned_fetching": true,
+            "experimental_query_planner_mode": planner_mode,
             "supergraph": {
                 "generate_query_fragments": true
             },
@@ -120,13 +163,14 @@ async fn test_type_conditions_enabled_generate_query_fragments() {
         .unwrap();
 
     insta::assert_json_snapshot!(response);
+    response
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_type_conditions_enabled_list_of_list() {
+async fn _test_type_conditions_enabled_list_of_list(planner_mode: &str) -> Response {
     let harness = setup_from_mocks(
         json! {{
             "experimental_type_conditioned_fetching": true,
+            "experimental_query_planner_mode": planner_mode,
             // will make debugging easier
             "plugins": {
                 "experimental.expose_query_plan": true
@@ -166,14 +210,15 @@ async fn test_type_conditions_enabled_list_of_list() {
         .unwrap();
 
     insta::assert_json_snapshot!(response);
+    response
 }
 
 // one last to make sure unnesting is correct
-#[tokio::test(flavor = "multi_thread")]
-async fn test_type_conditions_enabled_list_of_list_of_list() {
+async fn _test_type_conditions_enabled_list_of_list_of_list(planner_mode: &str) -> Response {
     let harness = setup_from_mocks(
         json! {{
             "experimental_type_conditioned_fetching": true,
+            "experimental_query_planner_mode": planner_mode,
             // will make debugging easier
             "plugins": {
                 "experimental.expose_query_plan": true
@@ -213,13 +258,14 @@ async fn test_type_conditions_enabled_list_of_list_of_list() {
         .unwrap();
 
     insta::assert_json_snapshot!(response);
+    response
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_type_conditions_disabled() {
+async fn _test_type_conditions_disabled(planner_mode: &str) -> Response {
     let harness = setup_from_mocks(
         json! {{
             "experimental_type_conditioned_fetching": false,
+            "experimental_query_planner_mode": planner_mode,
             // will make debugging easier
             "plugins": {
                 "experimental.expose_query_plan": true
@@ -258,13 +304,14 @@ async fn test_type_conditions_disabled() {
         .unwrap();
 
     insta::assert_json_snapshot!(response);
+    response
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_type_conditions_enabled_shouldnt_make_article_fetch() {
+async fn _test_type_conditions_enabled_shouldnt_make_article_fetch(planner_mode: &str) -> Response {
     let harness = setup_from_mocks(
         json! {{
             "experimental_type_conditioned_fetching": true,
+            "experimental_query_planner_mode": planner_mode,
             // will make debugging easier
             "plugins": {
                 "experimental.expose_query_plan": true
@@ -304,6 +351,7 @@ async fn test_type_conditions_enabled_shouldnt_make_article_fetch() {
         .unwrap();
 
     insta::assert_json_snapshot!(response);
+    response
 }
 
 fn setup_from_mocks(
