@@ -101,7 +101,7 @@ impl BridgeQueryPlannerPool {
             })?
             .subgraph_schemas();
 
-        let planners = bridge_query_planners
+        let planners: Vec<_> = bridge_query_planners
             .iter()
             .map(|p| p.planner().clone())
             .collect();
@@ -332,7 +332,5 @@ mod tests {
         }
         .with_metrics()
         .await;
-
-        panic!()
     }
 }
