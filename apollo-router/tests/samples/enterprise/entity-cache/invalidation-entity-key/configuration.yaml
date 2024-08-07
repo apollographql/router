@@ -15,3 +15,9 @@ preview_entity_cache:
       reviews:
         ttl: 120s
         enabled: true
+
+telemetry:
+  exporters:
+    logging:
+      stdout:
+        format: text
