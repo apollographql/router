@@ -189,22 +189,22 @@ fn it_works_on_interfaces() {
             Flatten(path: "noProvides") {
               Fetch(service: "Subgraph2") {
                 {
-                  ... on T2 {
+                  ... on T1 {
                     __typename
                     id
                   }
-                  ... on T1 {
+                  ... on T2 {
                     __typename
                     id
                   }
                 } =>
                 {
-                  ... on T2 {
+                  ... on T1 {
                     v {
                       a
                     }
                   }
-                  ... on T1 {
+                  ... on T2 {
                     v {
                       a
                     }
@@ -320,21 +320,21 @@ fn it_works_on_unions() {
         Flatten(path: "noProvides") {
           Fetch(service: "Subgraph2") {
             {
-              ... on T2 {
+              ... on T1 {
                 __typename
                 id
               }
-              ... on T1 {
+              ... on T2 {
                 __typename
                 id
               }
             } =>
             {
-              ... on T2 {
-                b
-              }
               ... on T1 {
                 a
+              }
+              ... on T2 {
+                b
               }
             }
           },
@@ -545,21 +545,21 @@ fn it_allow_providing_fields_for_only_some_subtype() {
             Flatten(path: "noProvides") {
               Fetch(service: "Subgraph2") {
                 {
-                  ... on T2 {
+                  ... on T1 {
                     __typename
                     id
                   }
-                  ... on T1 {
+                  ... on T2 {
                     __typename
                     id
                   }
                 } =>
                 {
-                  ... on T2 {
-                    a
+                  ... on T1 {
                     b
                   }
-                  ... on T1 {
+                  ... on T2 {
+                    a
                     b
                   }
                 }

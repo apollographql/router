@@ -846,20 +846,20 @@ fn handles_types_with_no_common_supertype_at_the_same_merge_at() {
           Flatten(path: "t.sub") {
             Fetch(service: "Subgraph2") {
               {
-                ... on Bar {
+                ... on Foo {
                   __typename
                   id
                 }
-                ... on Foo {
+                ... on Bar {
                   __typename
                   id
                 }
               } =>
               {
-                ... on Bar {
+                ... on Foo {
                   y
                 }
-                ... on Foo {
+                ... on Bar {
                   y
                 }
               }

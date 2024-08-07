@@ -668,7 +668,9 @@ impl FetchDependencyGraph {
         //    keeping nodes separated when they have a different path in their parent
         //    allows to keep that "path in parent" more precisely,
         //    which is important for some case of @requires).
-        for existing_id in self.children_of(parent.parent_node_id) {
+        for existing_id in
+            FetchDependencyGraph::sorted_nodes(self.children_of(parent.parent_node_id))
+        {
             let existing = self.node_weight(existing_id)?;
             // we compare the subgraph names last because on average it improves performance
             if existing.merge_at.as_deref() == Some(merge_at)
@@ -860,7 +862,6 @@ impl FetchDependencyGraph {
     fn children_of(&self, node_id: NodeIndex) -> impl Iterator<Item = NodeIndex> + '_ {
         self.graph
             .neighbors_directed(node_id, petgraph::Direction::Outgoing)
-            .sorted_by_key(|n| n.index())
     }
 
     fn parent_relation(
@@ -889,6 +890,27 @@ impl FetchDependencyGraph {
             })
     }
 
+    /// By default, petgraph iterates over the nodes in the order of their node indices, but if
+    /// we retrieve node iterator based on the edges (e.g. children of/parents of), then resulting
+    /// iteration order is unspecified. In practice, it appears that edges are iterated in the
+    /// *reverse* iteration order.
+    ///
+    /// Since this behavior can affect the query plans, we can use this method to explicitly sort
+    /// the iterator to ensure we consistently follow the node index order.
+    ///
+    /// NOTE: In JS implementation, whenever we remove/merge nodes, we always shift left remaining
+    /// nodes so there are no gaps in the node IDs and the newly created nodes are always created
+    /// with the largest IDs. RS implementation has different behavior - whenever nodes are removed,
+    /// their IDs are later reused by petgraph so we no longer have guarantee that node with the
+    /// largest ID is the last node that was created. Due to the above, sorting by node IDs may still
+    /// result in different iteration order than the JS code, but in practice might be enough to
+    /// ensure correct plans.
+    fn sorted_nodes<'graph>(
+        nodes: impl Iterator<Item = NodeIndex> + 'graph,
+    ) -> impl Iterator<Item = NodeIndex> + 'graph {
+        nodes.sorted_by_key(|n| n.index())
+    }
+
     fn type_for_fetch_inputs(
         &self,
         type_name: &Name,
@@ -902,24 +924,13 @@ impl FetchDependencyGraph {
     /// Find redundant edges coming out of a node. See `remove_redundant_edges`.
     fn collect_redundant_edges(&self, node_index: NodeIndex, acc: &mut HashSet<EdgeIndex>) {
         let mut stack = vec![];
-        // JS PORT NOTE: JS was doing removal of edges in place which eliminates potential cycles,
-        // since in RS we remove AFTER we process all nodes, we need to be able to break out of cycles
-        let mut processed_items = HashSet::new();
         for start_index in self.children_of(node_index) {
-            for child in self.children_of(start_index) {
-                if processed_items.insert(child) {
-                    stack.push(child);
-                }
-            }
+            stack.extend(self.children_of(start_index));
             while let Some(v) = stack.pop() {
                 for edge in self.graph.edges_connecting(node_index, v) {
                     acc.insert(edge.id());
                 }
-                for descendant in self.children_of(v) {
-                    if processed_items.insert(descendant) {
-                        stack.push(descendant);
-                    }
-                }
+                stack.extend(self.children_of(v));
             }
         }
     }
@@ -984,9 +995,19 @@ impl FetchDependencyGraph {
             return;
         }
 
-        let indices: Vec<NodeIndex> = self.graph.node_indices().collect();
-        for node_index in indices {
-            self.remove_redundant_edges(node_index);
+        // Two phases for mutability reasons: first all redundant edges coming out of all nodes are
+        // collected and then they are all removed.
+        let mut redundant_edges = HashSet::new();
+        for node_index in self.graph.node_indices() {
+            self.collect_redundant_edges(node_index, &mut redundant_edges);
+        }
+
+        // PORT_NOTE: JS version calls `FetchGroup.removeChild`, which calls onModification.
+        if !redundant_edges.is_empty() {
+            self.on_modification();
+        }
+        for edge in redundant_edges {
+            self.graph.remove_edge(edge);
         }
 
         self.is_reduced = true;
