@@ -7,7 +7,7 @@ This metric give an estimated size in bytes for the cache entry and has the foll
 - `kind`: `query planner`.
 - `storage`: `memory`.
 
-As the size is only an estimation, users should check for correlation with pod memory usage to determine if cache needs to be updated.
+Before using the estimate to decide whether to update the cache, users should validate that the estimate correlates with their pod's memory usage. 
 
 Usage scenario:
 * Your pods are being terminated due to memory pressure.
