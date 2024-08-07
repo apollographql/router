@@ -517,7 +517,7 @@ impl RedisCacheStorage {
         ttl: Option<Duration>,
     ) {
         let key = self.make_key(key);
-        tracing::trace!("inserting into redis: {:?}, {:?}", key, value);
+        tracing::info!("inserting into redis: {:?}", key);
         let expiration = ttl
             .as_ref()
             .or(self.ttl.as_ref())
