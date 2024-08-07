@@ -905,17 +905,17 @@ async fn cache_store_root_from_response(
             let data = data.clone();
             tracing::info!("storing cache entry for {}", cache_key);
             tokio::spawn(async move {
-            cache
-                .insert(
-                    RedisKey(cache_key),
-                    RedisValue(CacheEntry {
-                        control: cache_control,
-                        data,
-                    }),
-                    ttl,
-                )
-                .instrument(span)
-                .await;
+                cache
+                    .insert(
+                        RedisKey(cache_key),
+                        RedisValue(CacheEntry {
+                            control: cache_control,
+                            data,
+                        }),
+                        ttl,
+                    )
+                    .instrument(span)
+                    .await;
             });
         }
     }
@@ -1309,10 +1309,10 @@ async fn insert_entities_in_result(
         let span = tracing::info_span!("cache_store");
 
         tokio::spawn(async move {
-        cache
-            .insert_multiple(&to_insert, ttl)
-            .instrument(span)
-            .await;
+            cache
+                .insert_multiple(&to_insert, ttl)
+                .instrument(span)
+                .await;
         });
     }
 
