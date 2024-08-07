@@ -7,11 +7,11 @@
             "schema_path": "./supergraph.graphql",
             "configuration_path": "./configuration.yaml",
             "subgraphs": {
-                "accounts": {
+                "invalidation-subgraph-type-accounts": {
                     "requests": [
                         {
                             "request": {
-                                "body": {"query":"query InvalidationSubgraphType__accounts__0{me{name id}}","operationName":"InvalidationSubgraphType__accounts__0"}
+                                "body": {"query":"query InvalidationSubgraphType__invalidation_subgraph_type_accounts__0{me{name id}}","operationName":"InvalidationSubgraphType__invalidation_subgraph_type_accounts__0"}
                             },
                             "response": {
                                 "headers": {
@@ -42,7 +42,7 @@
         {
             "type": "ReloadSubgraphs",
             "subgraphs": {
-                "accounts": {
+                "invalidation-subgraph-type-accounts": {
                     "requests": []
                 }
             }
@@ -71,7 +71,7 @@
                 },
                 "body": [{
                     "kind": "type",
-                    "subgraph": "accounts",
+                    "subgraph": "invalidation-subgraph-type-accounts",
                     "type": "Query"
                 }]
             }
@@ -79,11 +79,11 @@
         {
             "type": "ReloadSubgraphs",
             "subgraphs": {
-                "accounts": {
+                "invalidation-subgraph-type-accounts": {
                     "requests": [
                         {
                             "request": {
-                                "body": {"query":"query InvalidationSubgraphType__accounts__0{me{name id}}", "operationName":"InvalidationSubgraphType__accounts__0"}
+                                "body": {"query":"query InvalidationSubgraphType__invalidation_subgraph_type_accounts__0{me{name id}}", "operationName":"InvalidationSubgraphType__invalidation_subgraph_type_accounts__0"}
                             },
                             "response": {
                                 "headers": {
@@ -121,7 +121,7 @@
                 },
                 "body": [{
                     "kind": "type",
-                    "subgraph": "accounts",
+                    "subgraph": "invalidation-subgraph-type-accounts",
                     "type": "Query"
                 }]
             }
