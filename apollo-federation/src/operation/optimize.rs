@@ -1166,14 +1166,11 @@ impl NamedFragments {
     }
 
     /// The inner loop body of `reduce` method.
-    /// - Takes i32 `min_usage_to_optimize` since `collect_used_fragment_names` counts usages in
-    ///   i32.
     fn reduce_inner(
         &mut self,
         selection_set: &SelectionSet,
         min_usage_to_optimize: u32,
     ) -> Result<SelectionSet, FederationError> {
-        // Initial computation of fragment usages in `selection_set`.
         let mut usages = selection_set.used_fragments();
 
         // Short-circuiting: Nothing was used => Drop everything (selection_set is unchanged).
