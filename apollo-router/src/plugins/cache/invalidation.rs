@@ -167,8 +167,6 @@ async fn handle_request(
     let mut error = None;
 
     while let Some(res) = stream.next().await {
-        println!("scan res: {res:?}");
-
         match res {
             Err(e) => {
                 tracing::error!(
@@ -191,7 +189,7 @@ async fn handle_request(
                         count += keys.len() as u64;
                         storage.delete(keys).await;
 
-                        println!("deleted keys: {keys:?}");
+                        println!("deleted keys");
                         u64_counter!(
                             "apollo.router.operations.entity.invalidation.entry",
                             "Entity cache counter for invalidated entries",
@@ -199,6 +197,8 @@ async fn handle_request(
                             "origin" = origin,
                             "subgraph.name" = subgraph.clone()
                         );
+                    } else {
+                        println!("scanning did not find keys");
                     }
                 }
             }
