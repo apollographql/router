@@ -921,7 +921,13 @@ impl FetchDependencyGraph {
             .try_into()?)
     }
 
-    /// Find redundant edges coming out of a node. See `remove_redundant_edges`.
+    /// Find redundant edges coming out of a node. See `remove_redundant_edges`. This method assumes
+    /// that the underlying graph does not have any cycles between nodes.
+    ///
+    /// PORT NOTE: JS implementation performs in-place removal of edges when finding the redundant
+    /// edges. In RS implementation we first collect the edges and then remove them. This has a side
+    /// effect that if we ever end up with a cycle in a graph (which is an invalid state), this method
+    /// may result in infinite loop.
     fn collect_redundant_edges(&self, node_index: NodeIndex, acc: &mut HashSet<EdgeIndex>) {
         let mut stack = vec![];
         for start_index in self.children_of(node_index) {
