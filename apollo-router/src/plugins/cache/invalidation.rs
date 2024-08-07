@@ -89,7 +89,7 @@ impl Invalidation {
         origin: InvalidationOrigin,
         requests: Vec<InvalidationRequest>,
     ) -> Result<u64, BoxError> {
-        println!("invalidation endpoint got: {requests:?}");
+        tracing::info!("invalidation endpoint got: {requests:?}");
         let mut sink = self.handle.clone().into_sink();
         let (response_tx, mut response_rx) = broadcast::channel(2);
         sink.send((requests, origin, response_tx.clone()))
@@ -156,7 +156,7 @@ async fn handle_request(
 ) -> Result<u64, InvalidationError> {
     let key_prefix = request.key_prefix();
     let subgraph = request.subgraph_name();
-    println!(
+    tracing::info!(
         "got invalidation request: {request:?}, will scan for: {}",
         key_prefix
     );
@@ -185,11 +185,11 @@ async fn handle_request(
                         .map(|k| RedisKey(k.to_string()))
                         .collect::<Vec<_>>();
                     if !keys.is_empty() {
-                        println!("deleting keys: {keys:?}");
+                        tracing::info!("deleting keys: {keys:?}");
                         count += keys.len() as u64;
                         storage.delete(keys).await;
 
-                        println!("deleted keys");
+                        tracing::info!("deleted keys");
                         u64_counter!(
                             "apollo.router.operations.entity.invalidation.entry",
                             "Entity cache counter for invalidated entries",
@@ -198,7 +198,7 @@ async fn handle_request(
                             "subgraph.name" = subgraph.clone()
                         );
                     } else {
-                        println!("scanning did not find keys");
+                        tracing::info!("scanning did not find keys");
                     }
                 }
             }
@@ -222,7 +222,7 @@ async fn handle_request_batch(
     origin: &'static str,
     requests: Vec<InvalidationRequest>,
 ) -> Result<u64, InvalidationError> {
-    println!("handle_request_batch got: {requests:?}");
+    tracing::info!("handle_request_batch got: {requests:?}");
 
     let mut count = 0;
     let mut errors = Vec::new();
