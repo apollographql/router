@@ -2,7 +2,7 @@
 source: apollo-federation/tests/extract_subgraphs.rs
 expression: snapshot
 ---
-Subgraph1: https://Subgraph1
+subgraphWithCost
 ---
 schema {
   query: Query
@@ -59,21 +59,32 @@ scalar federation__FieldSet
 
 scalar federation__Scope
 
+enum AorB @federation__cost(weight: 15) {
+  A
+  B
+}
+
+scalar ExpensiveInt @federation__cost(weight: 30)
+
+type ExpensiveObject @federation__cost(weight: 40) {
+  id: ID
+}
+
+input InputTypeWithCost {
+  somethingWithCost: Int @federation__cost(weight: 20)
+}
+
 type Query {
-  t: T
-  _entities(representations: [_Any!]!): [_Entity]!
+  fieldWithCost: Int @federation__cost(weight: 5)
+  argWithCost(
+    arg: Int @federation__cost(weight: 10),
+  ): Int
+  enumWithCost: AorB
+  inputWithCost(someInput: InputTypeWithCost): Int
+  scalarWithCost: ExpensiveInt
+  objectWithCost: ExpensiveObject
   _service: _Service!
 }
-
-type S {
-  x: Int
-}
-
-type T @federation__key(fields: "k", resolvable: true) {
-  k: ID @federation__shareable
-}
-
-union U = S | T
 
 scalar _Any
 
@@ -81,9 +92,7 @@ type _Service {
   sdl: String
 }
 
-union _Entity = T
-
-Subgraph2: https://Subgraph2
+subgraphWithListSize
 ---
 schema {
   query: Query
@@ -140,26 +149,18 @@ scalar federation__FieldSet
 
 scalar federation__Scope
 
-enum E {
-  V1
-  V2
+type HasInts {
+  ints: [Int!]
 }
 
-type T @federation__key(fields: "k", resolvable: true) {
-  k: ID @federation__shareable
-  a: Int
-  b: String
+type Query {
+  fieldWithListSize: [String!] @federation__listSize(assumedSize: 2000, requireOneSlicingArgument: false)
+  fieldWithDynamicListSize(first: Int!): HasInts @federation__listSize(slicingArguments: ["first"], sizedFields: ["ints"], requireOneSlicingArgument: true)
+  _service: _Service!
 }
 
 scalar _Any
 
 type _Service {
   sdl: String
-}
-
-union _Entity = T
-
-type Query {
-  _entities(representations: [_Any!]!): [_Entity]!
-  _service: _Service!
 }
