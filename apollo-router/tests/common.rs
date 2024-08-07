@@ -540,7 +540,6 @@ impl IntegrationTest {
         async move {
             let span = info_span!("client_request");
             let span_id = span.context().span().span_context().trace_id();
-            dbg!(&span_id);
             async move {
                 let client = reqwest::Client::new();
 
@@ -558,7 +557,6 @@ impl IntegrationTest {
                     .build()
                     .unwrap();
                 telemetry.inject_context(&mut request);
-                dbg!(&request.headers());
                 request.headers_mut().remove(ACCEPT);
                 match client.execute(request).await {
                     Ok(response) => (span_id, response),
