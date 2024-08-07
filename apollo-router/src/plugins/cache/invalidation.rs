@@ -89,6 +89,7 @@ impl Invalidation {
         origin: InvalidationOrigin,
         requests: Vec<InvalidationRequest>,
     ) -> Result<u64, BoxError> {
+        println!("invalidation endpoint got: {requests:?}");
         let mut sink = self.handle.clone().into_sink();
         let (response_tx, mut response_rx) = broadcast::channel(2);
         sink.send((requests, origin, response_tx.clone()))
@@ -155,7 +156,7 @@ async fn handle_request(
 ) -> Result<u64, InvalidationError> {
     let key_prefix = request.key_prefix();
     let subgraph = request.subgraph_name();
-    tracing::debug!(
+    println!(
         "got invalidation request: {request:?}, will scan for: {}",
         key_prefix
     );
@@ -166,6 +167,8 @@ async fn handle_request(
     let mut error = None;
 
     while let Some(res) = stream.next().await {
+        println!("scan res: {res:?}");
+
         match res {
             Err(e) => {
                 tracing::error!(
@@ -184,10 +187,11 @@ async fn handle_request(
                         .map(|k| RedisKey(k.to_string()))
                         .collect::<Vec<_>>();
                     if !keys.is_empty() {
-                        tracing::debug!("deleting keys: {keys:?}");
+                        println!("deleting keys: {keys:?}");
                         count += keys.len() as u64;
                         storage.delete(keys).await;
 
+                        println!("deleted keys: {keys:?}");
                         u64_counter!(
                             "apollo.router.operations.entity.invalidation.entry",
                             "Entity cache counter for invalidated entries",
@@ -218,6 +222,8 @@ async fn handle_request_batch(
     origin: &'static str,
     requests: Vec<InvalidationRequest>,
 ) -> Result<u64, InvalidationError> {
+    println!("handle_request_batch got: {requests:?}");
+
     let mut count = 0;
     let mut errors = Vec::new();
     for request in requests {
