@@ -1555,10 +1555,7 @@ impl Operation {
     pub(crate) fn generate_fragments(&mut self) -> Result<(), FederationError> {
         let mut generator = FragmentGenerator::default();
         generator.visit_selection_set(&mut self.selection_set)?;
-        let fragments = generator.into_inner();
-        // To remove single-use fragment definitions:
-        // self.selection_set = fragments.reduce(&self.selection_set, 2)?;
-        self.named_fragments = fragments;
+        self.named_fragments = generator.into_inner();
         Ok(())
     }
 
