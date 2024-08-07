@@ -430,6 +430,18 @@ pub(crate) enum AttributeValue {
     Array(AttributeArray),
 }
 
+impl AttributeValue {
+    pub(crate) fn as_f64(&self) -> Option<f64> {
+        match self {
+            AttributeValue::Bool(_) => None,
+            AttributeValue::I64(v) => Some(*v as f64),
+            AttributeValue::F64(v) => Some(*v),
+            AttributeValue::String(v) => v.parse::<f64>().ok(),
+            AttributeValue::Array(_) => None,
+        }
+    }
+}
+
 impl From<String> for AttributeValue {
     fn from(value: String) -> Self {
         AttributeValue::String(value)
