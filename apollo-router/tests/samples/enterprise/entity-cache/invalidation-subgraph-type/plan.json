@@ -66,11 +66,14 @@
             "url": "http://127.0.0.1:12345/invalidation-sample-subgraph-type",
             "request": {
                 "method": "POST",
-                "body": {
+                "headers": {
+                    "Authorization": "1234"
+                },
+                "body": [{
                     "kind": "type",
                     "subgraph": "accounts",
                     "type": "Query"
-                }
+                }]
             }
         },
         {
