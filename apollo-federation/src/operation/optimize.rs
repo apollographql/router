@@ -1128,8 +1128,6 @@ impl NamedFragments {
         selection_set: &SelectionSet,
         min_usage_to_optimize: u32,
     ) -> Result<SelectionSet, FederationError> {
-        let min_usage_to_optimize: i32 = min_usage_to_optimize.try_into().unwrap_or(i32::MAX);
-
         // Call `reduce_inner` repeatedly until we reach a fix-point, since newly computed
         // selection set may drop some fragment references due to normalization, which could lead
         // to further reduction.
@@ -1173,15 +1171,14 @@ impl NamedFragments {
     fn reduce_inner(
         &mut self,
         selection_set: &SelectionSet,
-        min_usage_to_optimize: i32,
+        min_usage_to_optimize: u32,
     ) -> Result<SelectionSet, FederationError> {
         // Initial computation of fragment usages in `selection_set`.
-        let mut usages = HashMap::new();
-        selection_set.collect_used_fragment_names(&mut usages);
+        let mut usages = selection_set.used_fragments();
 
         // Short-circuiting: Nothing was used => Drop everything (selection_set is unchanged).
         if usages.is_empty() {
-            self.retain(|_, _| false);
+            *self = Default::default();
             return Ok(selection_set.clone());
         }
 
@@ -1252,7 +1249,7 @@ impl NamedFragments {
         )
     }
 
-    fn update_usages(usages: &mut HashMap<Name, i32>, fragment: &Node<Fragment>, usage_count: i32) {
+    fn update_usages(usages: &mut HashMap<Name, u32>, fragment: &Node<Fragment>, usage_count: u32) {
         let mut inner_usages = HashMap::new();
         fragment.collect_used_fragment_names(&mut inner_usages);
 
