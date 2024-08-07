@@ -754,6 +754,7 @@ async fn cache_lookup_root(
         private_id,
     );
 
+    tracing::info!("looking up cache key for root {}", key);
     let cache_result: Option<RedisValue<CacheEntry>> = cache.get(RedisKey(key.clone())).await;
 
     match cache_result {
@@ -805,6 +806,8 @@ async fn cache_lookup_entities(
         is_known_private,
         private_id,
     )?;
+
+    tracing::info!("looking up cache keys for entities {:?}", keys);
 
     let cache_result: Vec<Option<CacheEntry>> = cache
         .get_multiple(keys.iter().map(|k| RedisKey(k.clone())).collect::<Vec<_>>())
@@ -900,6 +903,7 @@ async fn cache_store_root_from_response(
         if response.response.body().errors.is_empty() && cache_control.should_store() {
             let span = tracing::info_span!("cache.entity.store");
             let data = data.clone();
+            tracing::info!("storing cache entry for {}", cache_key);
             tokio::spawn(async move {
                 cache
                     .insert(
