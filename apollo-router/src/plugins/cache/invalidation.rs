@@ -162,7 +162,7 @@ async fn handle_request(
     );
 
     // FIXME: configurable batch size
-    let mut stream = storage.scan(key_prefix.clone(), Some(10));
+    let mut stream = storage.scan(key_prefix.clone(), Some(1000));
     let mut count = 0u64;
     let mut error = None;
 
