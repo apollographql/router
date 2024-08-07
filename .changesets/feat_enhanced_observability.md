@@ -9,7 +9,6 @@ This metric give an estimated size in bytes for the cache entry and has the foll
 
 Before using the estimate to decide whether to update the cache, users should validate that the estimate correlates with their pod's memory usage. 
 
-Usage scenario:
 To learn how to troubleshoot with this metric, see the [Pods terminating due to memory pressure](https://www.apollographql.com/docs/router/containerization/kubernetes#pods-terminating-due-to-memory-pressure) guide in docs.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/5770
