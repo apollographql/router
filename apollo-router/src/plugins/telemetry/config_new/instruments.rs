@@ -103,6 +103,36 @@ const HTTP_CLIENT_REQUEST_BODY_SIZE_METRIC: &str = "http.client.request.body.siz
 const HTTP_CLIENT_RESPONSE_BODY_SIZE_METRIC: &str = "http.client.response.body.size";
 
 impl InstrumentsConfig {
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        for (name, custom) in &self.router.custom {
+            custom.condition.validate(None).map_err(|err| {
+                format!("error for custom router instrument {name:?} in condition: {err}")
+            })?;
+        }
+        for (name, custom) in &self.supergraph.custom {
+            custom.condition.validate(None).map_err(|err| {
+                format!("error for custom supergraph instrument {name:?} in condition: {err}")
+            })?;
+        }
+        for (name, custom) in &self.subgraph.custom {
+            custom.condition.validate(None).map_err(|err| {
+                format!("error for custom subgraph instrument {name:?} in condition: {err}")
+            })?;
+        }
+        for (name, custom) in &self.graphql.custom {
+            custom.condition.validate(None).map_err(|err| {
+                format!("error for custom graphql instrument {name:?} in condition: {err}")
+            })?;
+        }
+        for (name, custom) in &self.cache.custom {
+            custom.condition.validate(None).map_err(|err| {
+                format!("error for custom cache instrument {name:?} in condition: {err}")
+            })?;
+        }
+
+        Ok(())
+    }
+
     /// Update the defaults for spans configuration regarding the `default_attribute_requirement_level`
     pub(crate) fn update_defaults(&mut self) {
         self.router

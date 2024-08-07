@@ -3,6 +3,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
+use super::Stage;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::Context;
@@ -55,28 +56,96 @@ impl<T> Condition<T>
 where
     T: Selector,
 {
-    pub(crate) fn evaluate_request(&mut self, request: &T::Request) -> Option<bool> {
+    /// restricted_stage is Some if this condiiton will only applies at a specific stage like for events for example
+    pub(crate) fn validate(&self, restricted_stage: Option<Stage>) -> Result<(), String> {
         match self {
-            Condition::Eq(eq) => match (eq[0].on_request(request), eq[1].on_request(request)) {
-                (None, None) => None,
-                (None, Some(right)) => {
-                    eq[1] = SelectorOrValue::Value(right.into());
-                    None
+            Condition::Eq(arr) | Condition::Gt(arr) | Condition::Lt(arr) => match (&arr[0], &arr[1]) {
+                (SelectorOrValue::Value(val1), SelectorOrValue::Value(val2)) => {
+                    Err(format!("trying to compare 2 values ('{val1}' and '{val2}'), usually it's a syntax error because you want to use a specific selector and a value in a condition"))
                 }
-                (Some(left), None) => {
-                    eq[0] = SelectorOrValue::Value(left.into());
-                    None
-                }
-                (Some(left), Some(right)) => {
-                    if left == right {
-                        *self = Condition::True;
-                        Some(true)
-                    } else {
-                        Some(false)
+                (SelectorOrValue::Value(_), SelectorOrValue::Selector(sel)) | (SelectorOrValue::Selector(sel), SelectorOrValue::Value(_)) => {
+                    // Special condition for events
+                    if let Some(Stage::Request) = &restricted_stage {
+                        if !sel.is_active(Stage::Request) {
+                            return Err(String::from("can't compare a selector computed in another stage than 'request' because it won't be computed at all"));
+                        }
                     }
+                    Ok(())
+                },
+                (SelectorOrValue::Selector(sel1), SelectorOrValue::Selector(sel2)) => {
+                    // Special condition for events
+                    if let Some(Stage::Request) = &restricted_stage {
+                        if !sel1.is_active(Stage::Request) || !sel2.is_active(Stage::Request) {
+                            return Err(String::from("can't compare a selector computed in another stage than 'request' because it won't be computed at all"));
+                        }
+                    }
+                    Ok(())
+                },
+                
+            },
+            Condition::Exists(sel) => {
+                match restricted_stage {
+                    Some(stage) => {
+                        if sel.is_active(stage) {
+                            Ok(())
+                        } else {
+                            Err(format!("the 'exists' condition use a selector applied at the wrong stage, this condition will be executed at the {} stage.", stage))
+                        }
+                    },
+                    None => Ok(())
                 }
             },
+            Condition::All(all) => {
+                for cond in all {
+                    cond.validate(restricted_stage)?;
+                }
+
+                Ok(())
+            },
+            Condition::Any(any) => {
+                for cond in any {
+                    cond.validate(restricted_stage)?;
+                }
+
+                Ok(())
+            },
+            Condition::Not(cond) => cond.validate(restricted_stage),
+            Condition::True | Condition::False => Ok(()),
+        }
+    }
+
+    pub(crate) fn evaluate_request(&mut self, request: &T::Request) -> Option<bool> {
+        match self {
+            Condition::Eq(eq) => {
+                if !eq[0].is_active(Stage::Request) && !eq[1].is_active(Stage::Request) {
+                    // Nothing to compute here
+                    return None;
+                }
+                match (eq[0].on_request(request), eq[1].on_request(request)) {
+                    (None, None) => None,
+                    (None, Some(right)) => {
+                        eq[1] = SelectorOrValue::Value(right.into());
+                        None
+                    }
+                    (Some(left), None) => {
+                        eq[0] = SelectorOrValue::Value(left.into());
+                        None
+                    }
+                    (Some(left), Some(right)) => {
+                        if left == right {
+                            *self = Condition::True;
+                            Some(true)
+                        } else {
+                            Some(false)
+                        }
+                    }
+                }
+            }
             Condition::Gt(gt) => {
+                if !gt[0].is_active(Stage::Request) && !gt[1].is_active(Stage::Request) {
+                    // Nothing to compute here
+                    return None;
+                }
                 let left_att = gt[0].on_request(request).map(AttributeValue::from);
                 let right_att = gt[1].on_request(request).map(AttributeValue::from);
                 match (left_att, right_att) {
@@ -101,6 +170,10 @@ where
                 }
             }
             Condition::Lt(lt) => {
+                if !lt[0].is_active(Stage::Request) && !lt[1].is_active(Stage::Request) {
+                    // Nothing to compute here
+                    return None;
+                }
                 let left_att = lt[0].on_request(request).map(AttributeValue::from);
                 let right_att = lt[1].on_request(request).map(AttributeValue::from);
                 match (left_att, right_att) {
@@ -125,9 +198,13 @@ where
                 }
             }
             Condition::Exists(exist) => {
-                if exist.on_request(request).is_some() {
-                    *self = Condition::True;
-                    Some(true)
+                if exist.is_active(Stage::Request) {
+                    if exist.on_request(request).is_some() {
+                        *self = Condition::True;
+                        Some(true)
+                    } else {
+                        Some(false)
+                    }
                 } else {
                     None
                 }
@@ -309,6 +386,7 @@ where
             Condition::False => false,
         }
     }
+
     pub(crate) fn evaluate_drop(&self) -> Option<bool> {
         match self {
             Condition::Eq(eq) => match (eq[0].on_drop(), eq[1].on_drop()) {
@@ -456,6 +534,13 @@ where
             SelectorOrValue::Selector(selector) => selector.on_drop(),
         }
     }
+
+    fn is_active(&self, stage: super::Stage) -> bool {
+        match self {
+            SelectorOrValue::Value(_) => true,
+            SelectorOrValue::Selector(selector) => selector.is_active(stage),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -545,11 +630,15 @@ mod test {
                 _ => None,
             }
         }
+
+        fn is_active(&self, _stage: crate::plugins::telemetry::config_new::Stage) -> bool {
+            true
+        }
     }
 
     #[test]
     fn test_condition_exist() {
-        assert_eq!(exists(Req).req(None), None);
+        assert_eq!(exists(Req).req(None), Some(false));
         assert_eq!(exists(Req).req(Some(1i64)), Some(true));
         assert!(!exists(Resp).resp(None));
         assert!(exists(Resp).resp(Some(1i64)));
@@ -720,7 +809,8 @@ mod test {
         assert_eq!(lt(Req, Req).req(None), None);
 
         assert_eq!(exists(Req).req(Some(1i64)), Some(true));
-        assert_eq!(exists(Req).req(None), None);
+        assert_eq!(exists(Req).req(None), Some(false));
+        assert!(!exists(Resp).resp(None));
 
         assert_eq!(all(eq(1, 1), eq(1, Req)).req(Some(1i64)), Some(true));
         assert_eq!(all(eq(1, 1), eq(1, Req)).req(None), None);

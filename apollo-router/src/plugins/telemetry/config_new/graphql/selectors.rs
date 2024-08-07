@@ -13,6 +13,7 @@ use crate::plugins::telemetry::config_new::instruments::InstrumentValue;
 use crate::plugins::telemetry::config_new::instruments::StandardUnit;
 use crate::plugins::telemetry::config_new::selectors::OperationName;
 use crate::plugins::telemetry::config_new::Selector;
+use crate::plugins::telemetry::config_new::Stage;
 use crate::Context;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
@@ -172,6 +173,10 @@ impl Selector for GraphQLSelector {
                 .map(opentelemetry::Value::from)
             }
         }
+    }
+
+    fn is_active(&self, stage: Stage) -> bool {
+        matches!(stage, Stage::ResponseField)
     }
 }
 

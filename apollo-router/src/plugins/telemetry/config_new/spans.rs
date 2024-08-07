@@ -53,6 +53,26 @@ impl Spans {
             TelemetryDataKind::Traces,
         );
     }
+
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        for (name, custom) in &self.router.attributes.custom {
+            custom
+                .validate()
+                .map_err(|err| format!("error for router span attribute {name:?}: {err}"))?;
+        }
+        for (name, custom) in &self.supergraph.attributes.custom {
+            custom
+                .validate()
+                .map_err(|err| format!("error for supergraph span attribute {name:?}: {err}"))?;
+        }
+        for (name, custom) in &self.subgraph.attributes.custom {
+            custom
+                .validate()
+                .map_err(|err| format!("error for subgraph span attribute {name:?}: {err}"))?;
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug, Default)]

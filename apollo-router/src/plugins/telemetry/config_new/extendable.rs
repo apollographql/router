@@ -17,6 +17,7 @@ use serde_json::Map;
 use serde_json::Value;
 use tower::BoxError;
 
+use super::Stage;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selector;
@@ -255,6 +256,23 @@ where
     }
 }
 
+impl<A, E, Request, Response, EventResponse> Extendable<A, E>
+where
+    A: Default + Selectors<Request = Request, Response = Response, EventResponse = EventResponse>,
+    E: Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
+{
+    pub(crate) fn validate(&self, restricted_stage: Option<Stage>) -> Result<(), String> {
+        if let Some(Stage::Request) = &restricted_stage {
+            for (name, custom) in &self.custom {
+                if !custom.is_active(Stage::Request) {
+                    return Err(format!("cannot set the attribute {name:?} because it's using a selector computed in another stage than 'request' because it won't be computed"));
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
 #[cfg(test)]
 mod test {
     use std::sync::Arc;
