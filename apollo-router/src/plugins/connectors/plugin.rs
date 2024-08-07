@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use apollo_federation::sources::connect::ApplyToError;
 use bytes::Bytes;
 use futures::future::ready;
@@ -5,6 +7,7 @@ use futures::stream::once;
 use futures::StreamExt;
 use http::HeaderValue;
 use itertools::Itertools;
+use parking_lot::Mutex;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::json;
@@ -57,7 +60,9 @@ impl Plugin for Connectors {
                             == Some(&HeaderValue::from_static("true"));
                     if is_enabled {
                         req.context.extensions().with_lock(|mut lock| {
-                            lock.insert::<ConnectorContext>(ConnectorContext::default());
+                            lock.insert::<Arc<Mutex<ConnectorContext>>>(Arc::new(Mutex::new(
+                                ConnectorContext::default(),
+                            )));
                         });
                     }
 
@@ -69,19 +74,21 @@ impl Plugin for Connectors {
                     res = match res {
                         Ok(mut res) => {
                             if is_enabled {
-                                if let Some(debug) = res
-                                    .context
-                                    .extensions()
-                                    .with_lock(|mut lock| lock.remove::<ConnectorContext>())
+                                if let Some(debug) =
+                                    res.context.extensions().with_lock(|mut lock| {
+                                        lock.remove::<Arc<Mutex<ConnectorContext>>>()
+                                    })
                                 {
                                     let (parts, stream) = res.response.into_parts();
                                     let (mut first, rest) = stream.into_future().await;
 
                                     if let Some(first) = &mut first {
-                                        first.extensions.insert(
-                                            "apolloConnectorsDebugging",
-                                            json!({"version": "1", "data": debug.serialize() }),
-                                        );
+                                        if let Some(inner) = Arc::into_inner(debug) {
+                                            first.extensions.insert(
+                                                "apolloConnectorsDebugging",
+                                                json!({"version": "1", "data": inner.into_inner().serialize() }),
+                                            );
+                                        }
                                     }
                                     res.response = http::Response::from_parts(
                                         parts,

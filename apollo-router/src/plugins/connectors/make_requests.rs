@@ -1,9 +1,12 @@
+use std::sync::Arc;
+
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable::Selection;
 use apollo_federation::sources::connect::Connector;
 use apollo_federation::sources::connect::CustomConfiguration;
 use apollo_federation::sources::connect::EntityResolver;
 use itertools::Itertools;
+use parking_lot::Mutex;
 use serde_json_bytes::json;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
@@ -131,7 +134,7 @@ pub(crate) enum ResponseTypeName {
 pub(crate) fn make_requests(
     request: connect::Request,
     connector: &Connector,
-    debug: &mut Option<ConnectorContext>,
+    debug: &Option<Arc<Mutex<ConnectorContext>>>,
 ) -> Result<Vec<(http::Request<RouterBody>, ResponseKey)>, MakeRequestError> {
     let request_params = match connector.entity_resolver {
         Some(EntityResolver::Explicit) => entities_from_request(&request),
@@ -146,7 +149,7 @@ fn request_params_to_requests(
     connector: &Connector,
     request_params: Vec<ResponseKey>,
     original_request: &connect::Request,
-    debug: &mut Option<ConnectorContext>,
+    debug: &Option<Arc<Mutex<ConnectorContext>>>,
 ) -> Result<Vec<(http::Request<RouterBody>, ResponseKey)>, MakeRequestError> {
     let mut results = vec![];
 
@@ -1280,7 +1283,7 @@ mod tests {
             config: Default::default(),
         };
 
-        let requests = super::make_requests(req, &connector, &mut None).unwrap();
+        let requests = super::make_requests(req, &connector, &None).unwrap();
 
         assert_debug_snapshot!(requests, @r###"
         [

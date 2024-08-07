@@ -1,7 +1,10 @@
+use std::sync::Arc;
+
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
 use apollo_federation::sources::connect::ApplyTo;
 use apollo_federation::sources::connect::Connector;
+use parking_lot::Mutex;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 
@@ -35,7 +38,7 @@ pub(crate) enum HandleResponseError {
 pub(crate) async fn handle_responses(
     responses: Vec<http::Response<RouterBody>>,
     connector: &Connector,
-    debug: &mut Option<ConnectorContext>,
+    debug: &Option<Arc<Mutex<ConnectorContext>>>,
     _schema: &Valid<Schema>, // TODO for future apply_with_selection
 ) -> Result<Response, HandleResponseError> {
     use HandleResponseError::*;
@@ -58,8 +61,8 @@ pub(crate) async fn handle_responses(
 
         if parts.status.is_success() {
             let Ok(json_data) = serde_json::from_slice::<Value>(body) else {
-                if let Some(ref mut debug) = debug {
-                    debug.push_invalid_response(&parts, body);
+                if let Some(debug) = debug {
+                    debug.lock().push_invalid_response(&parts, body);
                 }
                 return Err(InvalidResponseBody(
                     "couldn't deserialize response body".into(),
@@ -77,8 +80,8 @@ pub(crate) async fn handle_responses(
                     &response_key.inputs().merge(connector.config.as_ref()),
                 );
 
-                if let Some(ref mut debug) = debug {
-                    debug.push_response(
+                if let Some(ref debug) = debug {
+                    debug.lock().push_response(
                         &parts,
                         &json_data,
                         Some(SelectionData {
@@ -169,13 +172,13 @@ pub(crate) async fn handle_responses(
                 _ => {}
             };
 
-            if let Some(ref mut debug) = debug {
+            if let Some(ref debug) = debug {
                 match serde_json::from_slice(body) {
                     Ok(json_data) => {
-                        debug.push_response(&parts, &json_data, None);
+                        debug.lock().push_response(&parts, &json_data, None);
                     }
                     Err(_) => {
-                        debug.push_invalid_response(&parts, body);
+                        debug.lock().push_invalid_response(&parts, body);
                     }
                 }
             }
@@ -300,10 +303,9 @@ mod tests {
 
         let schema = Schema::parse_and_validate("type Query { hello: String }", "./").unwrap();
 
-        let res =
-            super::handle_responses(vec![response1, response2], &connector, &mut None, &schema)
-                .await
-                .unwrap();
+        let res = super::handle_responses(vec![response1, response2], &connector, &None, &schema)
+            .await
+            .unwrap();
 
         assert_debug_snapshot!(res, @r###"
         Response {
@@ -400,10 +402,9 @@ mod tests {
         )
         .unwrap();
 
-        let res =
-            super::handle_responses(vec![response1, response2], &connector, &mut None, &schema)
-                .await
-                .unwrap();
+        let res = super::handle_responses(vec![response1, response2], &connector, &None, &schema)
+            .await
+            .unwrap();
 
         assert_debug_snapshot!(res, @r###"
         Response {
@@ -506,10 +507,9 @@ mod tests {
         )
         .unwrap();
 
-        let res =
-            super::handle_responses(vec![response1, response2], &connector, &mut None, &schema)
-                .await
-                .unwrap();
+        let res = super::handle_responses(vec![response1, response2], &connector, &None, &schema)
+            .await
+            .unwrap();
 
         assert_debug_snapshot!(res, @r###"
         Response {
@@ -628,7 +628,7 @@ mod tests {
         let res = super::handle_responses(
             vec![response1, response2, response3],
             &connector,
-            &mut None,
+            &None,
             &schema,
         )
         .await

@@ -8,6 +8,7 @@ use apollo_federation::sources::connect::Connector;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use opentelemetry::Key;
+use parking_lot::Mutex;
 use tower::BoxError;
 use tower::ServiceExt;
 use tracing::Instrument;
@@ -125,21 +126,18 @@ async fn execute(
     schema: &Valid<apollo_compiler::Schema>,
 ) -> Result<ConnectResponse, BoxError> {
     let context = request.context.clone();
-    let context2 = context.clone();
     let original_subgraph_name = connector.id.subgraph_name.to_string();
 
-    let mut debug = context
+    let debug = context
         .extensions()
-        .with_lock(|mut lock| lock.remove::<ConnectorContext>());
+        .with_lock(|lock| lock.get::<Arc<Mutex<ConnectorContext>>>().cloned());
 
-    let requests = make_requests(request, connector, &mut debug).map_err(BoxError::from)?;
+    let requests = make_requests(request, connector, &debug).map_err(BoxError::from)?;
 
     let tasks = requests.into_iter().map(move |(req, key)| {
         let context = context.clone();
         let original_subgraph_name = original_subgraph_name.clone();
         async move {
-            let context = context.clone();
-
             let client = http_client_factory.create(&original_subgraph_name);
             let req = HttpRequest {
                 http_request: req,
@@ -158,17 +156,9 @@ async fn execute(
         .await
         .map_err(BoxError::from)?;
 
-    let result = handle_responses(responses, connector, &mut debug, schema)
+    handle_responses(responses, connector, &debug, schema)
         .await
-        .map_err(BoxError::from);
-
-    if let Some(debug) = debug {
-        context2
-            .extensions()
-            .with_lock(|mut lock| lock.insert::<ConnectorContext>(debug));
-    }
-
-    result
+        .map_err(BoxError::from)
 }
 
 #[derive(Clone)]
