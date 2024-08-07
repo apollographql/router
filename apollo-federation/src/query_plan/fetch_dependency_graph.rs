@@ -949,7 +949,9 @@ impl FetchDependencyGraph {
         let mut redundant_edges = HashSet::new();
         self.collect_redundant_edges(node_index, &mut redundant_edges);
 
-        self.on_modification();
+        if !redundant_edges.is_empty() {
+            self.on_modification();
+        }
         for edge in redundant_edges {
             self.graph.remove_edge(edge);
         }
