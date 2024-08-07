@@ -23,15 +23,15 @@ struct QueryPlannerArgs {
     /// Enable @defer support.
     #[arg(long, default_value_t = false)]
     enable_defer: bool,
-    /// Turn off fragment reuse in subgraph queries.
-    #[arg(long = "no-reuse-fragments", default_value_t = true, action = clap::ArgAction::SetFalse)]
+    /// Reuse fragments to compress subgraph queries.
+    #[arg(long, default_value_t = false)]
     reuse_fragments: bool,
-    /// Generate fragments to compress subgraph queries. Implies --no-reuse-fragments.
+    /// Generate fragments to compress subgraph queries.
     #[arg(long, default_value_t = false)]
     generate_fragments: bool,
-    /// Turn off GraphQL validation check on generated subgraph queries.
-    #[arg(long = "no-subgraph-validation", default_value_t = true, action = clap::ArgAction::SetFalse)]
-    subgraph_validation: bool,
+    /// Run GraphQL validation check on generated subgraph queries. (default: true)
+    #[arg(long, default_missing_value = "true", require_equals = true, num_args = 0..=1)]
+    subgraph_validation: Option<bool>,
     /// Set the `debug.max_evaluated_plans` option.
     #[arg(long)]
     max_evaluated_plans: Option<NonZeroU32>,
@@ -109,9 +109,10 @@ enum Command {
 impl QueryPlannerArgs {
     fn apply(&self, config: &mut QueryPlannerConfig) {
         config.incremental_delivery.enable_defer = self.enable_defer;
+        // --generate-fragments trumps --reuse-fragments
         config.reuse_query_fragments = self.reuse_fragments && !self.generate_fragments;
         config.generate_query_fragments = self.generate_fragments;
-        config.subgraph_graphql_validation = self.subgraph_validation;
+        config.subgraph_graphql_validation = self.subgraph_validation.unwrap_or(true);
         if let Some(max_evaluated_plans) = self.max_evaluated_plans {
             config.debug.max_evaluated_plans = max_evaluated_plans;
         }
