@@ -1,9 +1,8 @@
-### `apollo.router.cache.storage.estimated_size` gauge ([PR #5770](https://github.com/apollographql/router/pull/5770))
+### New `apollo.router.cache.storage.estimated_size` gauge ([PR #5770](https://github.com/apollographql/router/pull/5770))
 
-Query planner cache entries may use an significant amount of memory in the Router.
-To help users understand and monitor this the Router now exposes a new metric `apollo.router.cache.storage.estimated_size`.
+The router supports the new metric `apollo.router.cache.storage.estimated_size` that helps users understand and monitor the amount of memory that query planner cache entries consume.
 
-This metric give an estimated size in bytes for the cache entry and has the following attributes:
+The `apollo.router.cache.storage.estimated_size` metric gives an estimated size in bytes of a cache entry. It has the following attributes:
 - `kind`: `query planner`.
 - `storage`: `memory`.
 
