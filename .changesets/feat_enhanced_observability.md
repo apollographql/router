@@ -10,18 +10,6 @@ This metric give an estimated size in bytes for the cache entry and has the foll
 Before using the estimate to decide whether to update the cache, users should validate that the estimate correlates with their pod's memory usage. 
 
 Usage scenario:
-* Your pods are being terminated due to memory pressure.
-* Add the following metrics to your monitoring system to track:
-  * `apollo.router.cache.storage.estimated_size`.
-  * `apollo_router_cache_size`.
-  * ratio of `apollo_router_cache_hits` - `apollo_router_cache_misses`.
-
-* Observe the `apollo.router.cache.storage.estimated_size` to see if it grows over time and correlates with pod memory usage.
-* Observe the ratio of cache hits to misses to determine if the cache is being effective.
-
-Remediation:
-* Adjust the cache size to lower if the cache reaches near 100% hit rate but the cache size is still growing.
-* Increase the pod memory to higher if cache hit rate is low and cache size is still growing.
-* Adjust the cache size to lower if the latency of query planning cache misses is acceptable and memory availability is limited.
+To learn how to troubleshoot with this metric, see the [Pods terminating due to memory pressure](https://www.apollographql.com/docs/router/containerization/kubernetes#pods-terminating-due-to-memory-pressure) guide in docs.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/5770
