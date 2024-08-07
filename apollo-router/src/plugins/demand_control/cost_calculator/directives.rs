@@ -23,7 +23,16 @@ use tower::BoxError;
 use super::DemandControlError;
 
 const COST_DIRECTIVE_NAME: Name = name!("cost");
+const COST_DIRECTIVE_DEFAULT_NAME: Name = name!("federation__cost");
+const COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME: Name = name!("weight");
+
 const LIST_SIZE_DIRECTIVE_NAME: Name = name!("listSize");
+const LIST_SIZE_DIRECTIVE_DEFAULT_NAME: Name = name!("federation__listSize");
+const LIST_SIZE_DIRECTIVE_ASSUMED_SIZE_ARGUMENT_NAME: Name = name!("assumedSize");
+const LIST_SIZE_DIRECTIVE_SLICING_ARGUMENTS_ARGUMENT_NAME: Name = name!("slicingArguments");
+const LIST_SIZE_DIRECTIVE_SIZED_FIELDS_ARGUMENT_NAME: Name = name!("sizedFields");
+const LIST_SIZE_DIRECTIVE_REQUIRE_ONE_SLICING_ARGUMENT_ARGUMENT_NAME: Name =
+    name!("requireOneSlicingArgument");
 
 pub(in crate::plugins::demand_control) fn get_apollo_directive_names(
     schema: &Schema,
@@ -45,7 +54,7 @@ pub(in crate::plugins::demand_control) fn get_apollo_directive_names(
 }
 
 pub(in crate::plugins::demand_control) struct CostDirective {
-    pub(in crate::plugins::demand_control) weight: i32,
+    weight: i32,
 }
 
 impl CostDirective {
@@ -79,9 +88,10 @@ impl CostDirective {
         directives: &DirectiveList,
     ) -> Option<Self> {
         directive_name_map
-            .get(COST_DIRECTIVE_NAME.as_str())
-            .and_then(|name| directives.get(name).or(directives.get("federation__cost")))
-            .and_then(|cost| cost.argument_by_name("weight"))
+            .get(&COST_DIRECTIVE_NAME)
+            .and_then(|name| directives.get(name))
+            .or(directives.get(&COST_DIRECTIVE_DEFAULT_NAME))
+            .and_then(|cost| cost.argument_by_name(&COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME))
             .and_then(|weight| weight.to_i32())
             .map(|weight| Self { weight })
     }
@@ -91,9 +101,10 @@ impl CostDirective {
         directives: &apollo_compiler::schema::DirectiveList,
     ) -> Option<Self> {
         directive_name_map
-            .get(COST_DIRECTIVE_NAME.as_str())
-            .and_then(|name| directives.get(name).or(directives.get("federation__cost")))
-            .and_then(|cost| cost.argument_by_name("weight"))
+            .get(&COST_DIRECTIVE_NAME)
+            .and_then(|name| directives.get(name))
+            .or(directives.get(&COST_DIRECTIVE_DEFAULT_NAME))
+            .and_then(|cost| cost.argument_by_name(&COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME))
             .and_then(|weight| weight.to_i32())
             .map(|weight| Self { weight })
     }
@@ -130,27 +141,23 @@ impl<'schema> ListSizeDirective<'schema> {
         definition: &'schema FieldDefinition,
     ) -> Result<Option<Self>, DemandControlError> {
         let directive = directive_name_map
-            .get(LIST_SIZE_DIRECTIVE_NAME.as_str())
-            .and_then(|name| {
-                definition
-                    .directives
-                    .get(name)
-                    .or(definition.directives.get("federation__listSize"))
-            });
+            .get(&LIST_SIZE_DIRECTIVE_NAME)
+            .and_then(|name| definition.directives.get(name))
+            .or(definition.directives.get(&LIST_SIZE_DIRECTIVE_DEFAULT_NAME));
         if let Some(directive) = directive {
             let assumed_size = directive
-                .argument_by_name("assumedSize")
+                .argument_by_name(&LIST_SIZE_DIRECTIVE_ASSUMED_SIZE_ARGUMENT_NAME)
                 .and_then(|arg| arg.to_i32());
             let slicing_arguments: Option<HashSet<&str>> = directive
-                .argument_by_name("slicingArguments")
+                .argument_by_name(&LIST_SIZE_DIRECTIVE_SLICING_ARGUMENTS_ARGUMENT_NAME)
                 .and_then(|arg| arg.as_list())
                 .map(|arg_list| arg_list.iter().flat_map(|arg| arg.as_str()).collect());
             let sized_fields = directive
-                .argument_by_name("sizedFields")
+                .argument_by_name(&LIST_SIZE_DIRECTIVE_SIZED_FIELDS_ARGUMENT_NAME)
                 .and_then(|arg| arg.as_list())
                 .map(|arg_list| arg_list.iter().flat_map(|arg| arg.as_str()).collect());
             let require_one_slicing_argument = directive
-                .argument_by_name("requireOneSlicingArgument")
+                .argument_by_name(&LIST_SIZE_DIRECTIVE_REQUIRE_ONE_SLICING_ARGUMENT_ARGUMENT_NAME)
                 .and_then(|arg| arg.to_bool())
                 .unwrap_or(true);
 
@@ -161,7 +168,6 @@ impl<'schema> ListSizeDirective<'schema> {
                     .filter(|arg| slicing_arguments.contains(arg.name.as_str()))
                     .collect();
                 if require_one_slicing_argument && used_slicing_arguments.len() != 1 {
-                    // TODO: Different error variant?
                     return Err(DemandControlError::QueryParseFailure(format!(
                         "Exactly one slicing argument is required, but found {}",
                         used_slicing_arguments.len()

@@ -98,6 +98,7 @@ impl StaticCostCalculator {
         let instance_count = if !field.ty().is_list() {
             1
         } else if let Some(value) = list_size_from_upstream {
+            // This is a sized field whose length is defined by the `@listSize` directive on the parent field
             value
         } else if let Some(expected_size) = list_size_directive
             .as_ref()
