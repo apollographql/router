@@ -136,6 +136,16 @@ impl BridgeQueryPlannerPool {
         let (v8_heap_used, _v8_heap_used_gauge) = Self::create_heap_used_gauge(&meter);
         let (v8_heap_total, _v8_heap_total_gauge) = Self::create_heap_total_gauge(&meter);
 
+        // initialize v8 metrics
+        if let Some(bridge_query_planner) = planners.first().cloned() {
+            Self::get_v8_metrics(
+                bridge_query_planner,
+                v8_heap_used.clone(),
+                v8_heap_total.clone(),
+            )
+            .await;
+        }
+
         Ok(Self {
             js_planners: planners,
             sender,
@@ -267,35 +277,62 @@ impl tower::Service<QueryPlannerRequest> for BridgeQueryPlannerPool {
 #[cfg(test)]
 
 mod tests {
-    use crate::Context;
+    use opentelemetry_sdk::metrics::data::Gauge;
 
     use super::*;
+    use crate::metrics::FutureMetricsExt;
+    use crate::spec::Query;
+    use crate::Context;
 
     #[tokio::test]
     async fn test_v8_metrics() {
-        let sdl = include_str!("../testdata/minimal_fed2_supergraph.graphql");
+        let sdl = include_str!("../testdata/supergraph.graphql");
         let config = Arc::default();
-        let schema = Schema::parse(sdl, &config).unwrap();
+        let schema = Arc::new(Schema::parse(sdl, &config).unwrap());
 
-        let mut pool =
-            BridgeQueryPlannerPool::new(Arc::new(schema), config, NonZeroUsize::new(2).unwrap())
+        async move {
+            let mut pool = BridgeQueryPlannerPool::new(
+                schema.clone(),
+                config.clone(),
+                NonZeroUsize::new(2).unwrap(),
+            )
+            .await
+            .unwrap();
+            let query = "query { me { name } }".to_string();
+
+            let doc = Query::parse_document(&query, None, &schema, &config).unwrap();
+            let context = Context::new();
+            context.extensions().with_lock(|mut lock| lock.insert(doc));
+
+            pool.call(QueryPlannerRequest::new(query, None, context))
                 .await
                 .unwrap();
-        pool.call(QueryPlannerRequest::new(
-            include_str!("../query_planner/testdata/query.graphql").to_string(),
-            None,
-            Context::new(),
-        ))
-        .await
-        .unwrap();
 
-        let metrics = crate::metrics::collect_metrics();
-        let heap_used = metrics.find("apollo.router.v8.heap.used").unwrap();
-        let heap_total = metrics.find("apollo.router.v8.heap.total").unwrap();
+            let metrics = crate::metrics::collect_metrics();
+            let heap_used = metrics.find("apollo.router.v8.heap.used").unwrap();
+            let heap_total = metrics.find("apollo.router.v8.heap.total").unwrap();
 
-        println!(
-            "got heap_used: {:?}, heap_total: {:?}",
-            heap_used, heap_total
-        );
+            println!(
+                "got heap_used: {:?}, heap_total: {:?}",
+                heap_used
+                    .data
+                    .as_any()
+                    .downcast_ref::<Gauge<u64>>()
+                    .unwrap()
+                    .data_points[0]
+                    .value,
+                heap_total
+                    .data
+                    .as_any()
+                    .downcast_ref::<Gauge<u64>>()
+                    .unwrap()
+                    .data_points[0]
+                    .value
+            );
+        }
+        .with_metrics()
+        .await;
+
+        panic!()
     }
 }
