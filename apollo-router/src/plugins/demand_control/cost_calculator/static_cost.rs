@@ -43,7 +43,7 @@ impl StaticCostCalculator {
         subgraph_schemas: Arc<SubgraphSchemas>,
         list_size: u32,
     ) -> Self {
-        let directive_name_map = get_apollo_directive_names(supergraph_schema).unwrap_or_default();
+        let directive_name_map = get_apollo_directive_names(supergraph_schema);
 
         Self {
             list_size,

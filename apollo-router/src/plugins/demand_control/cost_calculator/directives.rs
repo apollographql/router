@@ -15,7 +15,6 @@ use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
-use apollo_federation::error::FederationError;
 use apollo_federation::link::spec::APOLLO_SPEC_DOMAIN;
 use apollo_federation::link::Link;
 use tower::BoxError;
@@ -36,7 +35,7 @@ const LIST_SIZE_DIRECTIVE_REQUIRE_ONE_SLICING_ARGUMENT_ARGUMENT_NAME: Name =
 
 pub(in crate::plugins::demand_control) fn get_apollo_directive_names(
     schema: &Schema,
-) -> Result<HashMap<Name, Name>, FederationError> {
+) -> HashMap<Name, Name> {
     let mut hm: HashMap<Name, Name> = HashMap::new();
     for directive in &schema.schema_definition.directives {
         if directive.name.as_str() == "link" {
@@ -50,7 +49,7 @@ pub(in crate::plugins::demand_control) fn get_apollo_directive_names(
             }
         }
     }
-    Ok(hm)
+    hm
 }
 
 pub(in crate::plugins::demand_control) struct CostDirective {
