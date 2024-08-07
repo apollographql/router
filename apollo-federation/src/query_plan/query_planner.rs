@@ -778,7 +778,7 @@ fn compute_plan_for_defer_conditionals(
 pub(crate) struct RebasedFragments {
     original_fragments: NamedFragments,
     /// Map key: subgraph name
-    rebased_fragments: Arc<HashMap<Arc<str>, NamedFragments>>,
+    rebased_fragments: HashMap<Arc<str>, NamedFragments>,
 }
 
 impl RebasedFragments {
@@ -794,7 +794,7 @@ impl RebasedFragments {
         subgraph_name: impl Into<Arc<str>>,
         subgraph_schema: &ValidFederationSchema,
     ) -> &NamedFragments {
-        Arc::make_mut(&mut self.rebased_fragments)
+        self.rebased_fragments
             .entry(subgraph_name.into())
             .or_insert_with(|| {
                 self.original_fragments
