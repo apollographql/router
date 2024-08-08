@@ -137,6 +137,16 @@ impl PlannerMode {
                     "expected Rust QP instance for `experimental_query_planner_mode: both`",
                 ),
             },
+            QueryPlannerMode::BothBestEffort => {
+                if let Some(rust) = rust_planner {
+                    Self::Both {
+                        js: Self::js(&schema.raw_sdl, configuration, old_planner).await?,
+                        rust,
+                    }
+                } else {
+                    Self::Js(Self::js(&schema.raw_sdl, configuration, old_planner).await?)
+                }
+            }
         })
     }
 
@@ -149,6 +159,10 @@ impl PlannerMode {
             QueryPlannerMode::New | QueryPlannerMode::Both => {
                 Ok(Some(Self::rust(schema, configuration)?))
             }
+            QueryPlannerMode::BothBestEffort => match Self::rust(schema, configuration) {
+                Ok(planner) => Ok(Some(planner)),
+                Err(_) => Ok(None),
+            },
         }
     }
 

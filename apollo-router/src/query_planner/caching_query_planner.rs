@@ -62,6 +62,7 @@ pub(crate) enum ConfigMode {
     // for now use the JS config as it expected to be identical to the Rust one
     Rust(Arc<QueryPlannerConfig>),
     Both(Arc<QueryPlannerConfig>),
+    BothBestEffort(Arc<QueryPlannerConfig>),
     Js(Arc<QueryPlannerConfig>),
 }
 
@@ -134,6 +135,9 @@ where
             }
             crate::configuration::QueryPlannerMode::Both => {
                 ConfigMode::Both(Arc::new(configuration.js_query_planner_config()))
+            }
+            crate::configuration::QueryPlannerMode::BothBestEffort => {
+                ConfigMode::BothBestEffort(Arc::new(configuration.js_query_planner_config()))
             }
         };
         Ok(Self {

@@ -842,7 +842,8 @@ fn can_use_with_experimental_query_planner(
 
             Ok(())
         }
-        crate::configuration::QueryPlannerMode::Legacy => Ok(()),
+        crate::configuration::QueryPlannerMode::Legacy
+        | crate::configuration::QueryPlannerMode::BothBestEffort => Ok(()),
     }
 }
 #[cfg(test)]
