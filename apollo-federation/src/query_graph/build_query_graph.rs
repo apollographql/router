@@ -1902,7 +1902,8 @@ impl FederatedQueryGraphBuilder {
                                 }
                                 .into());
                             };
-                            if conditions.selections == followup_conditions.selections {
+
+                            if conditions == followup_conditions {
                                 continue;
                             }
                         }
@@ -1926,7 +1927,7 @@ impl FederatedQueryGraphBuilder {
                         // since we can do "start of query" -> C and that's always better.
                         if matches!(
                             followup_edge_weight.transition,
-                            QueryGraphEdgeTransition::SubgraphEnteringTransition
+                            QueryGraphEdgeTransition::RootTypeResolution { .. }
                         ) {
                             continue;
                         }
