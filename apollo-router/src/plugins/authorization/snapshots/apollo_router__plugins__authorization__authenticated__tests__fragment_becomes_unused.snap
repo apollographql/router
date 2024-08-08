@@ -1,0 +1,27 @@
+---
+source: apollo-router/src/plugins/authorization/authenticated.rs
+expression: "TestResult { query: QUERY, result: doc, paths }"
+---
+query:
+
+        query {
+            topProducts {
+                type
+                reviews {
+                    ...F
+                }
+            }
+        }
+
+        fragment F on Review {
+            body
+        }
+        
+filtered:
+query {
+  topProducts {
+    type
+  }
+}
+
+paths: ["/topProducts/reviews/@"]
