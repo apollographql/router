@@ -517,7 +517,7 @@ impl RedisCacheStorage {
         ttl: Option<Duration>,
     ) {
         let key = self.make_key(key);
-        tracing::info!("inserting into redis: {:?}", key);
+        tracing::trace!("inserting into redis: {:?}, {:?}", key, value);
         let expiration = ttl
             .as_ref()
             .or(self.ttl.as_ref())
@@ -535,7 +535,7 @@ impl RedisCacheStorage {
         data: &[(RedisKey<K>, RedisValue<V>)],
         ttl: Option<Duration>,
     ) {
-        tracing::info!("inserting into redis: {:#?}", data);
+        tracing::trace!("inserting into redis: {:#?}", data);
 
         let r = match ttl.as_ref().or(self.ttl.as_ref()) {
             None => self.inner.mset(data.to_owned()).await,
