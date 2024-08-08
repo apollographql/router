@@ -59,6 +59,9 @@ use super::SelectionMapperReturn;
 use super::SelectionOrSet;
 use super::SelectionSet;
 use crate::error::FederationError;
+use crate::operation::FragmentSpread;
+use crate::operation::FragmentSpreadData;
+use crate::operation::SelectionValue;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 
 #[derive(Debug)]
@@ -197,7 +200,7 @@ impl NamedFragments {
         // PORT_NOTE: The JS version asserts if `updated` is empty or not. But, we really want to
         // check the `updated` has the same set of fragments. To avoid performance hit, only the
         // size is checked here.
-        if updated.size() != self.size() {
+        if updated.len() != self.len() {
             return Err(FederationError::internal(
                 "Unexpected change in the number of fragments",
             ));
@@ -1133,14 +1136,14 @@ impl NamedFragments {
         // to further reduction.
         // - It is hard to avoid this chain reaction, since we need to account for the effects of
         //   normalization.
-        let mut last_size = self.size();
+        let mut last_size = self.len();
         let mut last_selection_set = selection_set.clone();
         while last_size > 0 {
             let new_selection_set =
                 self.reduce_inner(&last_selection_set, min_usage_to_optimize)?;
 
             // Reached a fix-point => stop
-            if self.size() == last_size {
+            if self.len() == last_size {
                 // Assumes that `new_selection_set` is the same as `last_selection_set` in this
                 // case.
                 break;
@@ -1159,7 +1162,7 @@ impl NamedFragments {
             // case without additional complexity.
 
             // Prepare the next iteration
-            last_size = self.size();
+            last_size = self.len();
             last_selection_set = new_selection_set;
         }
         Ok(last_selection_set)
@@ -1191,7 +1194,7 @@ impl NamedFragments {
         // - We take advantage of the fact that `NamedFragments` is already sorted in dependency
         //   order.
         // PORT_NOTE: The `computeFragmentsToKeep` function is implemented here.
-        let original_size = self.size();
+        let original_size = self.len();
         for fragment in self.iter_rev() {
             let usage_count = usages.get(&fragment.name).copied().unwrap_or_default();
             if usage_count >= min_usage_to_optimize {
@@ -1209,7 +1212,7 @@ impl NamedFragments {
         });
 
         // Short-circuiting: Nothing was dropped (fully used) => Nothing to change.
-        if self.size() == original_size {
+        if self.len() == original_size {
             return Ok(selection_set.clone());
         }
 
@@ -1543,6 +1546,25 @@ impl Operation {
         self.reuse_fragments_inner(fragments, Self::DEFAULT_MIN_USAGES_TO_OPTIMIZE)
     }
 
+    /// Optimize the parsed size of the operation by generating fragments based on the selections
+    /// in the operation.
+    pub(crate) fn generate_fragments(&mut self) -> Result<(), FederationError> {
+        // Currently, this method simply pulls out every inline fragment into a named fragment. If
+        // multiple inline fragments are the same, they use the same named fragment.
+        //
+        // This method can generate named fragments that are only used once. It's not ideal, but it
+        // also doesn't seem that bad. Avoiding this is possible but more work, and keeping this
+        // as simple as possible is a big benefit for now.
+        //
+        // When we have more advanced correctness testing, we can add more features to fragment
+        // generation, like factoring out partial repeated slices of selection sets or only
+        // introducing named fragments for patterns that occur more than once.
+        let mut generator = FragmentGenerator::default();
+        generator.visit_selection_set(&mut self.selection_set)?;
+        self.named_fragments = generator.into_inner();
+        Ok(())
+    }
+
     /// Used by legacy roundtrip tests.
     /// - This lowers `min_usages_to_optimize` to `1` in order to make it easier to write unit tests.
     #[cfg(test)]
@@ -1573,6 +1595,155 @@ impl Operation {
     }
 }
 
+/// Returns a consistent GraphQL name for the given index.
+fn fragment_name(mut index: usize) -> Name {
+    /// https://spec.graphql.org/draft/#NameContinue
+    const NAME_CHARS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+    /// https://spec.graphql.org/draft/#NameStart
+    const NAME_START_CHARS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_";
+
+    if index < NAME_START_CHARS.len() {
+        Name::new_static_unchecked(&NAME_START_CHARS[index..index + 1])
+    } else {
+        let mut s = String::new();
+
+        let i = index % NAME_START_CHARS.len();
+        s.push(NAME_START_CHARS.as_bytes()[i].into());
+        index /= NAME_START_CHARS.len();
+
+        while index > 0 {
+            let i = index % NAME_CHARS.len();
+            s.push(NAME_CHARS.as_bytes()[i].into());
+            index /= NAME_CHARS.len();
+        }
+
+        Name::new_unchecked(&s)
+    }
+}
+
+#[derive(Debug, Default)]
+struct FragmentGenerator {
+    fragments: NamedFragments,
+}
+
+impl FragmentGenerator {
+    fn next_name(&self) -> Name {
+        fragment_name(self.fragments.len())
+    }
+
+    /// Is a selection set worth using for a newly generated named fragment?
+    fn is_worth_using(selection_set: &SelectionSet) -> bool {
+        let mut iter = selection_set.iter();
+        let Some(first) = iter.next() else {
+            // An empty selection is not worth using (and invalid!)
+            return false;
+        };
+        let Selection::Field(field) = first else {
+            return true;
+        };
+        // If there's more than one selection, or one selection with a subselection,
+        // it's probably worth using
+        iter.next().is_some() || field.selection_set.is_some()
+    }
+
+    /// Modify the selection set so that eligible inline fragments are moved to named fragment spreads.
+    fn visit_selection_set(
+        &mut self,
+        selection_set: &mut SelectionSet,
+    ) -> Result<(), FederationError> {
+        let mut new_selection_set = SelectionSet::empty(
+            selection_set.schema.clone(),
+            selection_set.type_position.clone(),
+        );
+
+        for (_key, selection) in Arc::make_mut(&mut selection_set.selections).iter_mut() {
+            match selection {
+                SelectionValue::Field(mut field) => {
+                    if let Some(selection_set) = field.get_selection_set_mut() {
+                        self.visit_selection_set(selection_set)?;
+                    }
+                    new_selection_set
+                        .add_local_selection(&Selection::Field(Arc::clone(field.get())))?;
+                }
+                SelectionValue::FragmentSpread(frag) => {
+                    new_selection_set
+                        .add_local_selection(&Selection::FragmentSpread(Arc::clone(frag.get())))?;
+                }
+                SelectionValue::InlineFragment(frag)
+                    if !Self::is_worth_using(&frag.get().selection_set) =>
+                {
+                    new_selection_set
+                        .add_local_selection(&Selection::InlineFragment(Arc::clone(frag.get())))?;
+                }
+                SelectionValue::InlineFragment(mut candidate) => {
+                    self.visit_selection_set(candidate.get_selection_set_mut())?;
+
+                    let directives = &candidate.get().inline_fragment.directives;
+                    let skip_include = directives
+                        .iter()
+                        .map(|directive| match directive.name.as_str() {
+                            "skip" | "include" => Ok(directive.clone()),
+                            _ => Err(()),
+                        })
+                        .collect::<Result<executable::DirectiveList, _>>();
+
+                    // If there are any directives *other* than @skip and @include,
+                    // we can't just transfer them to the generated fragment spread,
+                    // so we have to keep this inline fragment.
+                    let Ok(skip_include) = skip_include else {
+                        new_selection_set.add_local_selection(&Selection::InlineFragment(
+                            Arc::clone(candidate.get()),
+                        ))?;
+                        continue;
+                    };
+
+                    let existing = self.fragments.iter().find(|existing| {
+                        existing.type_condition_position
+                            == candidate.get().inline_fragment.casted_type()
+                            && existing.selection_set == candidate.get().selection_set
+                    });
+
+                    let existing = if let Some(existing) = existing {
+                        existing
+                    } else {
+                        let name = self.next_name();
+                        self.fragments.insert(Fragment {
+                            schema: selection_set.schema.clone(),
+                            name: name.clone(),
+                            type_condition_position: candidate.get().inline_fragment.casted_type(),
+                            directives: Default::default(),
+                            selection_set: candidate.get().selection_set.clone(),
+                        });
+                        self.fragments.get(&name).unwrap()
+                    };
+                    new_selection_set.add_local_selection(&Selection::from(
+                        FragmentSpreadSelection {
+                            spread: FragmentSpread::new(FragmentSpreadData {
+                                schema: selection_set.schema.clone(),
+                                fragment_name: existing.name.clone(),
+                                type_condition_position: existing.type_condition_position.clone(),
+                                directives: skip_include.into(),
+                                fragment_directives: existing.directives.clone(),
+                                selection_id: crate::operation::SelectionId::new(),
+                            }),
+                            selection_set: existing.selection_set.clone(),
+                        },
+                    ))?;
+                }
+            }
+        }
+
+        *selection_set = new_selection_set;
+
+        Ok(())
+    }
+
+    /// Consumes the generator and returns the fragments it generated.
+    fn into_inner(self) -> NamedFragments {
+        self.fragments
+    }
+}
+
 //=============================================================================
 // Tests
 
@@ -1598,6 +1769,13 @@ mod tests {
             validate_operation(&$operation.schema, &optimized.to_string());
             insta::assert_snapshot!(optimized, @$expected)
         }};
+    }
+
+    #[test]
+    fn generated_fragment_names() {
+        assert_eq!(fragment_name(0), "a");
+        assert_eq!(fragment_name(100), "Vb");
+        assert_eq!(fragment_name(usize::MAX), "oS5Uz8g3Iqw");
     }
 
     #[test]
