@@ -548,7 +548,7 @@ pub(crate) async fn add_plugin(
         .create_instance(
             PluginInit::builder()
                 .config(plugin_config.clone())
-                .supergraph_sdl(schema.into())
+                .supergraph_sdl(schema)
                 .supergraph_schema(supergraph_schema)
                 .subgraph_schemas(subgraph_schemas)
                 .notify(notify.clone())
