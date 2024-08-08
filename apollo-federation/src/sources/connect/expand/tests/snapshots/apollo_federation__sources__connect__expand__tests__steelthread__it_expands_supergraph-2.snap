@@ -217,15 +217,17 @@ expression: connectors.by_service_name
             body: None,
         },
         selection: Path(
-            Var(
-                "$",
-                Key(
-                    Field(
-                        "phone",
+            PathSelection {
+                path: Var(
+                    "$",
+                    Key(
+                        Field(
+                            "phone",
+                        ),
+                        Empty,
                     ),
-                    Empty,
                 ),
-            ),
+            },
         ),
         config: None,
         entity_resolver: Some(

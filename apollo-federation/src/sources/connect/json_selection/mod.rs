@@ -1,6 +1,9 @@
 mod apply_to;
 mod graphql;
 mod helpers;
+mod immutable;
+mod js_literal;
+mod methods;
 mod parser;
 mod pretty;
 mod selection_set;

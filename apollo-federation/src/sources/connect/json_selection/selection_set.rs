@@ -18,14 +18,16 @@
 
 use std::collections::HashSet;
 
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::Node;
-use indexmap::IndexMap;
 use multimap::MultiMap;
 
-use super::TYPENAMES;
+use super::js_literal::JSLiteral;
+use super::parser::MethodArgs;
+use super::parser::PathList;
 use crate::sources::connect::json_selection::Alias;
 use crate::sources::connect::json_selection::NamedSelection;
 use crate::sources::connect::JSONSelection;
@@ -47,7 +49,7 @@ impl SubSelection {
     /// Apply a selection set to create a new [`SubSelection`]
     pub fn apply_selection_set(&self, selection_set: &SelectionSet) -> Self {
         let mut new_selections = Vec::new();
-        let mut dropped_fields = IndexMap::new();
+        let mut dropped_fields = IndexMap::default();
         let mut referenced_fields = HashSet::new();
         let field_map = map_fields_by_name(selection_set);
 
@@ -64,13 +66,18 @@ impl SubSelection {
                 Alias {
                     name: "__typename".to_string(),
                 },
-                PathSelection::Var(
-                    TYPENAMES.to_string(),
-                    Box::new(PathSelection::Key(
-                        Key::Field(selection_set.ty.to_string()),
-                        Box::new(PathSelection::Empty),
-                    )),
-                ),
+                PathSelection {
+                    path: PathList::Var(
+                        "$".to_string(),
+                        Box::new(PathList::Method(
+                            "echo".to_string(),
+                            Some(MethodArgs(vec![JSLiteral::String(
+                                selection_set.ty.to_string(),
+                            )])),
+                            Box::new(PathList::Empty),
+                        )),
+                    ),
+                },
             ));
         }
 
@@ -184,13 +191,26 @@ impl SubSelection {
 impl PathSelection {
     /// Apply a selection set to create a new [`PathSelection`]
     pub fn apply_selection_set(&self, selection_set: &SelectionSet) -> Self {
+        Self {
+            path: self.path.apply_selection_set(selection_set),
+        }
+    }
+}
+
+impl PathList {
+    pub fn apply_selection_set(&self, selection_set: &SelectionSet) -> Self {
         match self {
-            Self::Var(str, path) => Self::Var(
-                str.clone(),
+            Self::Var(name, path) => Self::Var(
+                name.clone(),
                 Box::new(path.apply_selection_set(selection_set)),
             ),
             Self::Key(key, path) => Self::Key(
                 key.clone(),
+                Box::new(path.apply_selection_set(selection_set)),
+            ),
+            Self::Method(method_name, args, path) => Self::Method(
+                method_name.clone(),
+                args.clone(),
                 Box::new(path.apply_selection_set(selection_set)),
             ),
             Self::Selection(sub) => Self::Selection(sub.apply_selection_set(selection_set)),
@@ -201,9 +221,9 @@ impl PathSelection {
 
 #[inline]
 fn key_name(path_selection: &PathSelection) -> Option<&str> {
-    match path_selection {
-        PathSelection::Key(Key::Field(name), _) => Some(name),
-        PathSelection::Key(Key::Quoted(name), _) => Some(name),
+    match &path_selection.path {
+        PathList::Key(Key::Field(name), _) => Some(name),
+        PathList::Key(Key::Quoted(name), _) => Some(name),
         _ => None,
     }
 }
@@ -306,7 +326,7 @@ mod tests {
             r###".result {
   z: a
   y: c
-  x: .e.f
+  x: e.f
   w: "i-j"
   v: {
     u: l
@@ -393,7 +413,7 @@ mod tests {
     __unused__i: i
     rest: *
   }
-  path_to_f: .c.f
+  path_to_f: c.f
   rest: *
 }"###
         );
@@ -558,10 +578,10 @@ mod tests {
         assert_eq!(
             transformed.to_string(),
             r###".result {
-  __typename: $typenames.T
+  __typename: $->echo("T")
   id
   author: {
-    __typename: $typenames.A
+    __typename: $->echo("A")
     id: authorId
   }
 }"###

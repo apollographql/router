@@ -78,10 +78,12 @@ expression: connectors.by_service_name
             body: None,
         },
         selection: Path(
-            Var(
-                "$",
-                Empty,
-            ),
+            PathSelection {
+                path: Var(
+                    "$",
+                    Empty,
+                ),
+            },
         ),
         config: None,
         entity_resolver: None,
