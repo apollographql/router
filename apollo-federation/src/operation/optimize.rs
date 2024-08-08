@@ -1546,7 +1546,19 @@ impl Operation {
         self.reuse_fragments_inner(fragments, Self::DEFAULT_MIN_USAGES_TO_OPTIMIZE)
     }
 
+    /// Optimize the parsed size of the operation by generating fragments based on the selections
+    /// in the operation.
     pub(crate) fn generate_fragments(&mut self) -> Result<(), FederationError> {
+        // Currently, this method simply pulls out every inline fragment into a named fragment. If
+        // multiple inline fragments are the same, they use the same named fragment.
+        //
+        // This method can generate named fragments that are only used once. It's not ideal, but it
+        // also doesn't seem that bad. Avoiding this is possible but more work, and keeping this
+        // as simple as possible is a big benefit for now.
+        //
+        // When we have more advanced correctness testing, we can add more features to fragment
+        // generation, like factoring out partial repeated slices of selection sets or only
+        // introducing named fragments for patterns that occur more than once.
         let mut generator = FragmentGenerator::default();
         generator.visit_selection_set(&mut self.selection_set)?;
         self.named_fragments = generator.into_inner();
