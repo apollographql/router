@@ -18,16 +18,19 @@ use crate::layers::ServiceExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::connectors::configuration::ConnectorsConfig;
+use crate::plugins::connectors::request_limit::RequestLimits;
 use crate::register_plugin;
 use crate::services::router::body::RouterBody;
 use crate::services::supergraph;
 
 const CONNECTORS_DEBUG_HEADER_NAME: &str = "Apollo-Connectors-Debugging";
 const CONNECTORS_DEBUG_ENV: &str = "APOLLO_CONNECTORS_DEBUGGING";
+const CONNECTORS_MAX_REQUESTS_ENV: &str = "APOLLO_CONNECTORS_MAX_REQUESTS";
 
 #[derive(Debug, Clone)]
 struct Connectors {
     debug_extensions: bool,
+    max_requests: Option<usize>,
 }
 
 #[async_trait::async_trait]
@@ -44,36 +47,56 @@ impl Plugin for Connectors {
             );
         }
 
-        Ok(Connectors { debug_extensions })
+        let max_requests = init
+            .config
+            .max_requests
+            .or(std::env::var(CONNECTORS_MAX_REQUESTS_ENV)
+                .ok()
+                .and_then(|v| v.parse().ok()));
+
+        Ok(Connectors {
+            debug_extensions,
+            max_requests,
+        })
     }
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         let conf_enabled = self.debug_extensions;
+        let max_requests = self.max_requests;
         service
             .map_future_with_request_data(
                 move |req: &supergraph::Request| {
-                    let is_enabled = conf_enabled
+                    let is_debug_enabled = conf_enabled
                         && req
                             .supergraph_request
                             .headers()
                             .get(CONNECTORS_DEBUG_HEADER_NAME)
                             == Some(&HeaderValue::from_static("true"));
-                    if is_enabled {
-                        req.context.extensions().with_lock(|mut lock| {
+
+                    req.context.extensions().with_lock(|mut lock| {
+                        lock.insert::<Arc<RequestLimits>>(Arc::new(
+                            RequestLimits::new(max_requests)
+                        ));
+                        if is_debug_enabled {
                             lock.insert::<Arc<Mutex<ConnectorContext>>>(Arc::new(Mutex::new(
                                 ConnectorContext::default(),
                             )));
-                        });
-                    }
+                        }
+                    });
 
-                    is_enabled
+                    is_debug_enabled
                 },
-                move |is_enabled: bool, f| async move {
+                move |is_debug_enabled: bool, f| async move {
                     let mut res: supergraph::ServiceResult = f.await;
 
                     res = match res {
                         Ok(mut res) => {
-                            if is_enabled {
+                            res.context.extensions().with_lock(|mut lock| {
+                                if let Some(limits) = lock.remove::<Arc<RequestLimits>>() {
+                                    limits.log();
+                                }
+                            });
+                            if is_debug_enabled {
                                 if let Some(debug) =
                                     res.context.extensions().with_lock(|mut lock| {
                                         lock.remove::<Arc<Mutex<ConnectorContext>>>()

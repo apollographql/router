@@ -597,6 +597,7 @@ dependencies = [
  "shellexpand",
  "similar",
  "static_assertions",
+ "str_inflector",
  "strum_macros 0.25.3",
  "sys-info",
  "tempfile",
