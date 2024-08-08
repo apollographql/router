@@ -23,6 +23,7 @@ use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphNodeType;
 use crate::query_plan::fetch_dependency_graph::compute_nodes_for_tree;
 use crate::query_plan::fetch_dependency_graph::FetchDependencyGraph;
+use crate::query_plan::fetch_dependency_graph::FetchDependencyGraphNodePath;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToCostProcessor;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToQueryPlanProcessor;
@@ -603,6 +604,7 @@ fn compute_root_serial_dependency_graph(
                 operation.root_kind,
                 &mut fetch_dependency_graph,
                 &prev_path,
+                parameters.config.type_conditioned_fetching,
             )?;
         } else {
             // PORT_NOTE: It is unclear if they correct thing to do here is get the next ID, use
@@ -640,6 +642,8 @@ pub(crate) fn compute_root_fetch_groups(
     root_kind: SchemaRootDefinitionKind,
     dependency_graph: &mut FetchDependencyGraph,
     path: &OpPathTree,
+    // TODO: this might belong somewhere else
+    type_conditioned_fetching_enabled: bool,
 ) -> Result<(), FederationError> {
     // The root of the pathTree is one of the "fake" root of the subgraphs graph,
     // which belongs to no subgraph but points to each ones.
@@ -665,11 +669,16 @@ pub(crate) fn compute_root_fetch_groups(
         let fetch_dependency_node =
             dependency_graph.get_or_create_root_node(subgraph_name, root_kind, root_type)?;
         snapshot!(dependency_graph, "tree_with_root_node");
+        let root_type = todo!();
         compute_nodes_for_tree(
             dependency_graph,
             &child.tree,
             fetch_dependency_node,
-            Default::default(),
+            FetchDependencyGraphNodePath::new(
+                dependency_graph.supergraph_schema.clone(),
+                type_conditioned_fetching_enabled,
+                root_type,
+            ),
             Default::default(),
             &Default::default(),
         )?;

@@ -205,7 +205,7 @@ type FetchDependencyGraphPetgraph =
 pub(crate) struct FetchDependencyGraph {
     /// The supergraph schema that generated the federated query graph.
     #[serde(skip)]
-    supergraph_schema: ValidFederationSchema,
+    pub(crate) supergraph_schema: ValidFederationSchema,
     /// The federated query graph that generated the fetches. (This also contains the subgraph
     /// schemas.)
     #[serde(skip)]
@@ -253,8 +253,9 @@ pub(crate) struct DeferredInfo {
 }
 
 // TODO: Write docstrings
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(crate) struct FetchDependencyGraphNodePath {
+    schema: ValidFederationSchema,
     pub(crate) full_path: Arc<OpPath>,
     path_in_node: Arc<OpPath>,
     response_path: Vec<FetchDataPathElement>,
@@ -448,8 +449,33 @@ impl ProcessingState {
 }
 
 impl FetchDependencyGraphNodePath {
+    pub(crate) fn new(
+        schema: ValidFederationSchema,
+        type_conditioned_fetching_enabled: bool,
+        root_type: CompositeTypeDefinitionPosition,
+    ) -> Self {
+        let root_possible_types: Vec<_> = if type_conditioned_fetching_enabled {
+            schema.possible_runtime_types(root_type).unwrap()
+        } else {
+            Default::default()
+        }
+        .into_iter()
+        .map(|pos| pos.get(schema.schema()).unwrap().clone())
+        .collect();
+
+        Self {
+            schema,
+            type_conditioned_fetching_enabled,
+            full_path: Default::default(),
+            path_in_node: Default::default(),
+            response_path: Default::default(),
+            possible_types: root_possible_types.clone(),
+            possible_types_after_last_field: root_possible_types,
+        }
+    }
     fn for_new_key_fetch(&self, new_context: Arc<OpPath>) -> Self {
         Self {
+            schema: self.schema.clone(),
             full_path: self.full_path.clone(),
             path_in_node: new_context,
             response_path: self.response_path.clone(),
@@ -463,20 +489,21 @@ impl FetchDependencyGraphNodePath {
         &self,
         element: Arc<OpPathElement>,
     ) -> Result<FetchDependencyGraphNodePath, FederationError> {
-        let response_path = self.updated_response_path(&element)?;
+        let response_path = self.updated_response_path(&element).unwrap();
         let new_possible_types = self.new_possible_types(&element);
         let possible_types_after_last_field = if let &OpPathElement::Field(_) = element.as_ref() {
-            new_possible_types
+            new_possible_types.clone()
         } else {
             self.possible_types_after_last_field.clone()
         };
 
         Ok(Self {
+            schema: self.schema.clone(),
             response_path,
             full_path: Arc::new(self.full_path.with_pushed(element.clone())),
             path_in_node: Arc::new(self.path_in_node.with_pushed(element)),
             type_conditioned_fetching_enabled: self.type_conditioned_fetching_enabled,
-            possible_types: self.possible_types.clone(),
+            possible_types: new_possible_types,
             possible_types_after_last_field,
         })
     }
@@ -491,7 +518,7 @@ impl FetchDependencyGraphNodePath {
                 None => self.possible_types.clone(),
                 Some(tcp) => {
                     let element_possible_types =
-                        f.schema().possible_runtime_types(tcp.clone()).unwrap();
+                        self.schema.possible_runtime_types(tcp.clone()).unwrap();
                     self.possible_types
                         .iter()
                         // TODO: O(n)
@@ -509,35 +536,41 @@ impl FetchDependencyGraphNodePath {
     }
 
     fn advance_field_type(&self, element: &Field) -> Vec<Node<ObjectType>> {
-        let schema = element.schema();
-        if schema
-            .get_type(element.name().clone())
-            .unwrap()
-            .is_composite_type()
+        if !element
+            .data()
+            .output_base_type()
+            .map(|base_type| base_type.is_composite_type())
+            .unwrap_or_default()
         {
+            dbg!(&element);
             return Default::default();
         }
 
+        dbg!(element.data().output_base_type(), &self.possible_types);
         let mut res = self
             .possible_types
             .clone()
             .into_iter()
-            .map(|pt| {
-                let fd = pt.fields.get(element.name()).unwrap();
-                let typ = schema.get_type(fd.name.clone()).unwrap();
-                schema
-                    .possible_runtime_types(typ.as_composite_type().unwrap())
+            .flat_map(|pt| {
+                let fd = pt.fields.get(dbg!(element.name())).unwrap();
+                let typ = self
+                    .schema
+                    .get_type(fd.ty.inner_named_type().clone())
+                    .unwrap()
+                    .as_composite_type()
+                    .unwrap();
+                self.schema
+                    .possible_runtime_types(typ)
                     .unwrap()
                     .iter()
-                    .map(|ctdp| (ctdp.get(schema.schema()).unwrap()).clone())
+                    .map(|ctdp| (ctdp.get(self.schema.schema()).unwrap()).clone())
                     .collect::<Vec<_>>()
             })
-            .flatten()
             .collect::<Vec<_>>();
 
         res.sort_by(|stuff, other_stuff| stuff.name.cmp(&other_stuff.name));
 
-        res
+        dbg!(res)
     }
 
     fn updated_response_path(
@@ -564,7 +597,7 @@ impl FetchDependencyGraphNodePath {
             new_path.push(FetchDataPathElement::Key(conditions, field.response_name()));
 
             // TODO: is there a simpler way to find a field’s type from `&Field`?
-            let mut type_ = &field.field_position.get(field.schema.schema())?.ty;
+            let mut type_ = &field.field_position.get(self.schema.schema())?.ty;
             loop {
                 match type_ {
                     schema::Type::Named(_) | schema::Type::NonNullNamed(_) => break,
@@ -4351,6 +4384,7 @@ fn path_for_parent(
     let filtered_path = path.path_in_node.filter_on_schema(parent_schema);
     let final_path = concat_op_paths(parent_path.deref(), &filtered_path);
     Ok(FetchDependencyGraphNodePath {
+        schema: dependency_graph.supergraph_schema.clone(),
         full_path: path.full_path.clone(),
         path_in_node: Arc::new(final_path),
         response_path: path.response_path.clone(),
@@ -4358,4 +4392,211 @@ fn path_for_parent(
         possible_types_after_last_field: path.possible_types_after_last_field.clone(),
         type_conditioned_fetching_enabled: path.type_conditioned_fetching_enabled,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::schema::position::InterfaceTypeDefinitionPosition;
+
+    use super::*;
+
+    #[test]
+    fn type_condition_fetching_disabled() {
+        let schema = apollo_compiler::Schema::parse_and_validate(
+            r#"
+                type Query {
+                    foo: Foo
+                }
+                interface Foo {
+                    bar: Bar
+                }
+                interface Bar {
+                    baz: String
+                }
+                type Foo_1 implements Foo {
+                    bar: Bar_1
+                    a: Int
+                }
+                type Foo_2 implements Foo {
+                    bar: Bar_2
+                    b: Int
+                }
+                type Bar_1 implements Bar {
+                    baz: String
+                    a: Int
+                }
+                type Bar_2 implements Bar {
+                    baz: String
+                    b: Int
+                }
+                type Bar_3 implements Bar {
+                    baz: String
+                }
+            "#,
+            "schema.graphql",
+        )
+        .unwrap();
+
+        let valid_schema = ValidFederationSchema::new(schema.clone()).unwrap();
+
+        let foo = object_field_element(&valid_schema, name!("Query"), name!("foo"));
+        let bar = interface_field_element(&valid_schema, name!("Foo"), name!("bar"));
+        let baz = interface_field_element(&valid_schema, name!("Bar"), name!("baz"));
+
+        let query_root = valid_schema
+            .get_type(name!("Query"))
+            .unwrap()
+            .as_composite_type()
+            .unwrap();
+
+        let path = FetchDependencyGraphNodePath::new(valid_schema, false, query_root);
+
+        let path = path.add(Arc::new(foo)).unwrap();
+        let path: FetchDependencyGraphNodePath = path.add(Arc::new(bar)).unwrap();
+        let path = path.add(Arc::new(baz)).unwrap();
+
+        assert_eq!("foo.bar.baz", &to_string(&path.response_path));
+    }
+
+    #[test]
+    fn type_condition_fetching_enabled() {
+        let schema = apollo_compiler::Schema::parse_and_validate(
+            r#"
+                type Query {
+                    foo: Foo
+                }
+                interface Foo {
+                    bar: Bar
+                }
+                interface Bar {
+                    baz: String
+                }
+                type Foo_1 implements Foo {
+                    bar: Bar_1
+                    a: Int
+                }
+                type Foo_2 implements Foo {
+                    bar: Bar_2
+                    b: Int
+                }
+                type Bar_1 implements Bar {
+                    baz: String
+                    a: Int
+                }
+                type Bar_2 implements Bar {
+                    baz: String
+                    b: Int
+                }
+                type Bar_3 implements Bar {
+                    baz: String
+                }
+            "#,
+            "schema.graphql",
+        )
+        .unwrap();
+
+        let valid_schema = ValidFederationSchema::new(schema.clone()).unwrap();
+
+        let foo = object_field_element(&valid_schema, name!("Query"), name!("foo"));
+        let bar = interface_field_element(&valid_schema, name!("Foo"), name!("bar"));
+        let baz = interface_field_element(&valid_schema, name!("Bar"), name!("baz"));
+
+        let query_root = valid_schema
+            .get_type(name!("Query"))
+            .unwrap()
+            .as_composite_type()
+            .unwrap();
+
+        let path = FetchDependencyGraphNodePath::new(valid_schema, true, query_root);
+
+        let path = path.add(Arc::new(foo)).unwrap();
+        let path = path.add(Arc::new(bar)).unwrap();
+        let path = path.add(Arc::new(baz)).unwrap();
+
+        assert_eq!(
+            "foo|[Foo_1,Foo_2].bar|[Bar_1,Bar_2].baz",
+            &to_string(&path.response_path)
+        );
+    }
+
+    fn object_field_element(
+        schema: &ValidFederationSchema,
+        object: apollo_compiler::Name,
+        field: apollo_compiler::Name,
+    ) -> OpPathElement {
+        OpPathElement::Field(super::Field::new(super::FieldData {
+            schema: schema.clone(),
+            field_position: ObjectTypeDefinitionPosition::new(object)
+                .field(field)
+                .into(),
+            alias: None,
+            arguments: Default::default(),
+            directives: Default::default(),
+            sibling_typename: None,
+        }))
+    }
+
+    fn interface_field_element(
+        schema: &ValidFederationSchema,
+        interface: apollo_compiler::Name,
+        field: apollo_compiler::Name,
+    ) -> OpPathElement {
+        OpPathElement::Field(super::Field::new(super::FieldData {
+            schema: schema.clone(),
+            field_position: InterfaceTypeDefinitionPosition::new(interface)
+                .field(field)
+                .into(),
+            alias: None,
+            arguments: Default::default(),
+            directives: Default::default(),
+            sibling_typename: None,
+        }))
+    }
+
+    fn inline_fragment_element(
+        schema: &ValidFederationSchema,
+        parent_type_name: apollo_compiler::Name,
+        type_condition_name: Option<apollo_compiler::Name>,
+    ) -> OpPathElement {
+        let parent_type = schema
+            .get_type(parent_type_name)
+            .unwrap()
+            .as_composite_type()
+            .unwrap();
+        let type_condition =
+            type_condition_name.map(|n| schema.get_type(n).unwrap().as_composite_type().unwrap());
+        OpPathElement::InlineFragment(super::InlineFragment::new(InlineFragmentData {
+            schema: schema.clone(),
+            parent_type_position: parent_type,
+            type_condition_position: type_condition,
+            directives: Default::default(),
+            selection_id: SelectionId::new(),
+        }))
+    }
+
+    fn to_string(response_path: &[FetchDataPathElement]) -> String {
+        dbg!(&response_path);
+        response_path
+            .iter()
+            .map(|element| match element {
+                FetchDataPathElement::Key(conditions, name) => {
+                    format!("{}{}", cond_to_string(conditions), name.to_string())
+                }
+                FetchDataPathElement::AnyIndex(conditions) => {
+                    format!("{}{}", cond_to_string(conditions), "@")
+                }
+                FetchDataPathElement::TypenameEquals(_) => {
+                    unimplemented!()
+                }
+            })
+            .join(".")
+    }
+
+    fn cond_to_string(conditions: &Vec<Name>) -> String {
+        if conditions.is_empty() {
+            return Default::default();
+        }
+
+        format!("|[{}]", conditions.iter().map(|n| n.to_string()).join(","))
+    }
 }

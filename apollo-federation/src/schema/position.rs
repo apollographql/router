@@ -188,7 +188,7 @@ impl TypeDefinitionPosition {
         )
     }
 
-    pub(crate) fn as_composite_type<'schema>(&self) -> Option<CompositeTypeDefinitionPosition> {
+    pub(crate) fn as_composite_type(&self) -> Option<CompositeTypeDefinitionPosition> {
         match self {
             TypeDefinitionPosition::Object(o) => Some(o.clone().into()),
             TypeDefinitionPosition::Interface(i) => Some(i.clone().into()),

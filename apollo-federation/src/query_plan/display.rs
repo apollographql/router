@@ -369,7 +369,7 @@ impl fmt::Display for FetchDataPathElement {
     }
 }
 
-fn write_conditions(conditions: &Vec<Name>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+fn write_conditions(conditions: &[Name], f: &mut fmt::Formatter<'_>) -> fmt::Result {
     if !conditions.is_empty() {
         write!(f, "|[on {}]", conditions.join(","))
     } else {
