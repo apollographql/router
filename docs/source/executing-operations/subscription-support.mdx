@@ -7,7 +7,7 @@ minVersion: 1.22.0
 
 <PremiumFeature>
 
-**For self-hosted routers, subscription support is an [Enterprise feature](../enterprise-features/).**
+**For self-hosted routers, subscription support is an [Enterprise feature](/router/enterprise-features/).**
 
 Subscription support is also available for cloud routers with a GraphOS Serverless or Dedicated plan. For cloud router subscription information, refer to [the cloud-specific docs](/graphos/operations/subscriptions).
 
@@ -54,9 +54,9 @@ Whenever your router updates its supergraph schema at runtime, it terminates all
 
 Before you add `Subscription` fields to your subgraphs, do all of the following in the order shown to prevent schema composition errors:
 
-1. Update your router instances to version `1.22.0` or later. [Download the latest version.](../quickstart/)
+1. Update your router instances to version `1.22.0` or later. [Download the latest version.](/router/quickstart/)
     - Previous versions of the router don't support subscription operations.
-1. Make sure your router is [connected to a GraphOS Enterprise organization](../enterprise-features/#enabling-enterprise-features).
+1. Make sure your router is [connected to a GraphOS Enterprise organization](/router/enterprise-features/#enabling-enterprise-features).
     - Subscription support is an Enterprise feature of self-hosted routers.
 1. **If you compose your router's supergraph schema with GraphOS** (instead of with the Rover CLI), [update your build pipeline](/graphos/graphs/updating#2-update-your-build-pipeline) to use Apollo Federation 2.4 or later.
     - Previous versions of Apollo Federation don't support subscription operations.
@@ -82,7 +82,7 @@ After you complete these prerequisites, you can safely [configure your router](#
 
 ## Router setup
 
-After completing all [prerequisites](#prerequisites), in your router's [YAML config file](../configuration/overview/#yaml-config-file), you configure how the router communicates with each of your subgraphs when executing GraphQL subscriptions.
+After completing all [prerequisites](#prerequisites), in your router's [YAML config file](/router/configuration/overview/#yaml-config-file), you configure how the router communicates with each of your subgraphs when executing GraphQL subscriptions.
 
 The router supports two popular [WebSocket protocols](#websocket-setup) for subscriptions, and it also provides support for an [HTTP-callback-based protocol](#http-callback-setup). Your router must use whichever protocol is expected by each subgraph.
 
@@ -146,7 +146,7 @@ The router provides support for receiving subgraph subscription events via HTTP 
 - The router doesn't need to maintain a persistent connection for each distinct subscription.
 - You can publish events directly to the router from a pubsub system, instead of routing those events through the subgraph.
 
-Callback mode requires your subgraph library to support the router's [HTTP callback protocol](./subscription-callback-protocol/).
+Callback mode requires your subgraph library to support the router's [HTTP callback protocol](/router/executing-operations/subscription-callback-protocol/).
 
 <Note>
 
@@ -334,7 +334,7 @@ content-type: application/json
 
 This example subscription only emits three events and then directly closes the connection.
 
-For more information on this multipart HTTP subscription protocol, see [this article](./subscription-multipart-protocol/).
+For more information on this multipart HTTP subscription protocol, see [this article](/router/executing-operations/subscription-multipart-protocol/).
 
 ## Subscription deduplication
 
@@ -380,7 +380,7 @@ Whenever your router's supergraph schema is updated, **the router terminates all
 Your router's supergraph schema is updated in the following cases:
 
 - Your router regularly polls GraphOS for its supergraph schema, and an updated schema becomes available.
-- Your router obtains its supergraph schema from a local file, which it watches for updates if the [`--hot-reload` option](../configuration/overview#--hr----hot-reload) is set.
+- Your router obtains its supergraph schema from a local file, which it watches for updates if the [`--hot-reload` option](/router/configuration/overview#--hr----hot-reload) is set.
 
 When the router terminates subscriptions this way, it sends the following as a final response payload to all active subscribing clients:
 
@@ -401,7 +401,7 @@ A client that receives this `SUBSCRIPTION_SCHEMA_RELOAD` error code can reconnec
 
 ### WebSocket auth support
 
-By default, if you've configured your router to [propagate](../configuration/header-propagation/) HTTP `Authorization` headers to your subgraph, then the router automatically sets corresponding `connectionParams` when initiating a WebSocket connection to that subgraph.
+By default, if you've configured your router to [propagate](/router/configuration/header-propagation/) HTTP `Authorization` headers to your subgraph, then the router automatically sets corresponding `connectionParams` when initiating a WebSocket connection to that subgraph.
 
 For example, when your router sends the [`connection_init` message](https://github.com/enisdenjo/graphql-ws/blob/master/PROTOCOL.md#connectioninit) to a subgraph, it includes the value of the `Authorization` header via the following payload:
 
@@ -413,7 +413,7 @@ For example, when your router sends the [`connection_init` message](https://gith
 }
 ```
 
-To specify a custom payload for  the`connection_init` message, you can write a [Rhai script](../customizations/rhai/) and use the `context` directly:
+To specify a custom payload for  the`connection_init` message, you can write a [Rhai script](/router/customizations/rhai/) and use the `context` directly:
 
 ```rhai
 fn subgraph_service(service, subgraph) {
