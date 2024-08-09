@@ -24,7 +24,7 @@ Services may have their own access controls, but enforcing authorization _in the
     clients -->|"⚠️Unauthorized <br/>request"| router;
   ```
 
-  - If every field in a particular subquery requires authorization, the router's [query planner](../customizations/overview#request-path) can _eliminate entire subgraph requests_ for unauthorized requests. For example, a request may have permission to view a particular user's posts on a social media platform but not have permission to view any of that user's personally identifiable information (PII). Check out [How it works](#how-it-works) to learn more.
+  - If every field in a particular subquery requires authorization, the router's [query planner](/router/customizations/overview#request-path) can _eliminate entire subgraph requests_ for unauthorized requests. For example, a request may have permission to view a particular user's posts on a social media platform but not have permission to view any of that user's personally identifiable information (PII). Check out [How it works](#how-it-works) to learn more.
 
   ```mermaid
   flowchart LR;
@@ -38,7 +38,7 @@ Services may have their own access controls, but enforcing authorization _in the
       router -.->|"❌ Unauthorized <br/> subquery"| serviceB;
     clients -->|"⚠️ Partially authorized <br/>request"| router;
   ```
-  - Also, [query deduplication](./traffic-shaping/#query-deduplication) groups requested fields based on their required authorization. Entire groups can be eliminated from the query plan if they don't have the correct authorization.
+  - Also, [query deduplication](/router/configuration/traffic-shaping/#query-deduplication) groups requested fields based on their required authorization. Entire groups can be eliminated from the query plan if they don't have the correct authorization.
 
 - **Declarative access rules**: You define access controls at the field level, and GraphOS [composes](#composition-and-federation) them across your services. These rules create graph-native governance without the need for an extra orchestration layer.
 
@@ -80,7 +80,7 @@ The GraphOS Router provides access controls via **authorization directives** tha
 
 - The [`@requiresScopes`](#requiresscopes) directive allows granular access control through the scopes you define.
 - The [`@authenticated`](#authenticated) directive allows access to the annotated field or type for _authenticated requests only_.
-- The [`@policy`](#policy) directive offloads authorization validation to a [Rhai script](../customizations/rhai/) or a [coprocessor](../customizations/coprocessor) and integrates the result in the router. It's useful when your authorization policies go beyond simple authentication and scopes.
+- The [`@policy`](#policy) directive offloads authorization validation to a [Rhai script](/router/customizations/rhai/) or a [coprocessor](/router/customizations/coprocessor) and integrates the result in the router. It's useful when your authorization policies go beyond simple authentication and scopes.
 
 For example, imagine you're building a social media platform that includes a `Users` subgraph. You can use the [`@requiresScopes`](#requiresscopes) directive to declare that viewing other users' information requires the `read:user` scope:
 
@@ -106,12 +106,12 @@ The router then enforces these directives on all incoming requests.
 
 <Note>
 
-Only the GraphOS Router supports authorization directives&mdash;[`@apollo/gateway`](/federation/v1/gateway/) does _not_. Check out the [migration guide](../migrating-from-gateway/) if you'd like to use them.
+Only the GraphOS Router supports authorization directives&mdash;[`@apollo/gateway`](/federation/v1/gateway/) does _not_. Check out the [migration guide](/router/migrating-from-gateway/) if you'd like to use them.
 
 </Note>
 
 Before using the authorization directives in your subgraph schemas, you must:
-- Validate that your GraphOS Router uses version `1.29.1` or later and is [connected to your GraphOS Enterprise organization](../enterprise-features/#enabling-enterprise-features)
+- Validate that your GraphOS Router uses version `1.29.1` or later and is [connected to your GraphOS Enterprise organization](/router/enterprise-features/#enabling-enterprise-features)
 - Include **[claims](#configure-request-claims)** in requests made to the router (for `@authenticated` and `@requiresScopes`)
 
 ### Configure request claims
@@ -120,13 +120,13 @@ Claims are the individual details of a request's authentication and scope. They 
 
 To provide the router with the claims it needs, you must either configure JSON Web Token (JWT) authentication or add an external coprocessor that adds claims to a request's context. In some cases (explained below), you may require both.
 
-- **JWT authentication configuration**: If you configure [JWT authentication](./authn-jwt), the GraphOS Router [automatically adds a JWT token's claims](./authn-jwt#working-with-jwt-claims) to the request's context at the `apollo_authentication::JWT::claims` key.
-- **Adding claims via coprocessor**:  If you can't use JWT authentication, you can [add claims with a coprocessor](../customizations/coprocessor#adding-authorization-claims-via-coprocessor). Coprocessors let you hook into the GraphOS Router's request-handling lifecycle with custom code.
-- **Augmenting JWT claims via coprocessor**: Your authorization policies may require information beyond what your JSON web tokens provide. For example, a token's claims may include user IDs, which you then use to look up user roles. For situations like this, you can [augment the claims](./authn-jwt#claim-augmentation-via-coprocessors) from your JSON web tokens with coprocessors.
+- **JWT authentication configuration**: If you configure [JWT authentication](/router/configuration/authn-jwt), the GraphOS Router [automatically adds a JWT token's claims](/router/configuration/authn-jwt#working-with-jwt-claims) to the request's context at the `apollo_authentication::JWT::claims` key.
+- **Adding claims via coprocessor**:  If you can't use JWT authentication, you can [add claims with a coprocessor](/router/customizations/coprocessor#adding-authorization-claims-via-coprocessor). Coprocessors let you hook into the GraphOS Router's request-handling lifecycle with custom code.
+- **Augmenting JWT claims via coprocessor**: Your authorization policies may require information beyond what your JSON web tokens provide. For example, a token's claims may include user IDs, which you then use to look up user roles. For situations like this, you can [augment the claims](/router/configuration/authn-jwt#claim-augmentation-via-coprocessors) from your JSON web tokens with coprocessors.
 
 ## Authorization directives
 
-Authorization directives are turned on by default. To disable them, include the following in your router's [YAML config file](./overview/):
+Authorization directives are turned on by default. To disable them, include the following in your router's [YAML config file](/router/configuration/overview/):
 
 ```yaml title="router.yaml"
 authorization:
@@ -169,7 +169,7 @@ claims["scope"] = "scope1 scope2 scope3"
 
 <ExpansionPanel title="What if my request scopes aren't in OAuth2 format?">
 
-If the `apollo_authentication::JWT::claims` object holds scopes in another format, for example, an array of strings, or at a key other than `"scope"`, you can edit the claims with a [Rhai script](../customizations/rhai).
+If the `apollo_authentication::JWT::claims` object holds scopes in another format, for example, an array of strings, or at a key other than `"scope"`, you can edit the claims with a [Rhai script](/router/customizations/rhai).
 
 The example below extracts an array of scopes from the `"roles"` claim and reformats them as a space-separated string.
 
@@ -479,7 +479,7 @@ If _every_ requested field requires authentication and a request is unauthentica
 
 </MinVersion>
 
-The `@policy` directive marks fields and types as restricted based on authorization policies evaluated in a [Rhai script](../customizations/rhai/) or [coprocessor](../customizations/coprocessor). This enables custom authorization validation beyond authentication and scopes. It is useful when we need more complex policy evaluation than verifying the presence of a claim value in a list (example: checking specific values in headers).
+The `@policy` directive marks fields and types as restricted based on authorization policies evaluated in a [Rhai script](/router/customizations/rhai/) or [coprocessor](/router/customizations/coprocessor). This enables custom authorization validation beyond authentication and scopes. It is useful when we need more complex policy evaluation than verifying the presence of a claim value in a list (example: checking specific values in headers).
 
 <Tip>
 
@@ -493,11 +493,11 @@ The `@policy` directive includes a `policies` argument that defines an array of 
 @policy(policies: [["roles:support"]])
 ```
 
-Using the `@policy` directive requires a [Supergraph plugin](../customizations/overview) to evaluate the authorization policies. This is useful to bridge router authorization with an existing authorization stack or link policy execution with lookups in a database.
+Using the `@policy` directive requires a [Supergraph plugin](/router/customizations/overview) to evaluate the authorization policies. This is useful to bridge router authorization with an existing authorization stack or link policy execution with lookups in a database.
 
 An overview of how `@policy` is processed through the router's request lifecycle:
 
-* At the [`RouterService` level](../customizations/overview#the-request-lifecycle), the GraphOS Router extracts the list of policies relevant to a request from the schema and then stores them in the request's context in `apollo_authorization::policies::required` as a map `policy -> null|true|false`.
+* At the [`RouterService` level](/router/customizations/overview#the-request-lifecycle), the GraphOS Router extracts the list of policies relevant to a request from the schema and then stores them in the request's context in `apollo_authorization::policies::required` as a map `policy -> null|true|false`.
 
 * At the `SupergraphService` level, you must provide a Rhai script or coprocessor to evaluate the map. 
 If the policy is validated, the script or coprocessor should set its value to `true` or otherwise set it to `false`. If the value is left to `null`, it will be treated as `false` by the router. Afterward, the router filters the requests' types and fields to only those where the policy is `true`.
@@ -522,7 +522,7 @@ scalar federation__Policy
 directive @policy(policies: [[federation__Policy!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 ```
 
-Using the `@policy` directive requires a [Supergraph plugin](../customizations/overview) to evaluate the authorization policies. You can do this with a [Rhai script](../customizations/rhai/) or [coprocessor](../customizations/coprocessor). Refer to the following [example use case](#example-policy-use-case) for more information. (Although a [native plugin](../customizations/native) can also evaluate authorization policies, we don't recommend using it.)
+Using the `@policy` directive requires a [Supergraph plugin](/router/customizations/overview) to evaluate the authorization policies. You can do this with a [Rhai script](/router/customizations/rhai/) or [coprocessor](/router/customizations/coprocessor). Refer to the following [example use case](#example-policy-use-case) for more information. (Although a [native plugin](/router/customizations/native) can also evaluate authorization policies, we don't recommend using it.)
 
 #### Combining policies with `AND`/`OR` logic
 
@@ -576,7 +576,7 @@ type Post {
 
 ```
 
-You can use a [coprocessor](../customizations/coprocessor) called at the Supergraph request stage to receive and execute the list of policies.
+You can use a [coprocessor](/router/customizations/coprocessor) called at the Supergraph request stage to receive and execute the list of policies.
 
 If you configure your router like this:
 
@@ -892,13 +892,13 @@ The response would include an `"UNAUTHORIZED_FIELD_OR_TYPE"` error at the `/post
 
 ## Query deduplication
 
-You can enable [query deduplication](../configuration/traffic-shaping/#query-deduplication) in the router to reduce redundant requests to a subgraph. The router does this by buffering similar queries and reusing the result.
+You can enable [query deduplication](/router/configuration/traffic-shaping/#query-deduplication) in the router to reduce redundant requests to a subgraph. The router does this by buffering similar queries and reusing the result.
 
 **Query deduplication takes authorization into account.** First, the router groups unauthenticated queries together. Then it groups authenticated queries by their required scope set. It uses these groups to execute queries efficiently when fulfilling requests.
 
 ## Introspection
 
-Introspection is turned off in the router by default, [as is best production practice](https://www.apollographql.com/blog/graphql/security/why-you-should-disable-graphql-introspection-in-production/). If you've chosen to [enable it](./overview/#introspection), keep in mind that **authorization directives don't affect introspection**. All fields that require authorization remain visible. However, directives applied to fields _aren't_ visible. If introspection might reveal too much information about internal types, then be sure it hasn't been enabled in your router configuration.
+Introspection is turned off in the router by default, [as is best production practice](https://www.apollographql.com/blog/graphql/security/why-you-should-disable-graphql-introspection-in-production/). If you've chosen to [enable it](/router/configuration/overview/#introspection), keep in mind that **authorization directives don't affect introspection**. All fields that require authorization remain visible. However, directives applied to fields _aren't_ visible. If introspection might reveal too much information about internal types, then be sure it hasn't been enabled in your router configuration.
 
 With introspection turned off, you can use GraphOS's [schema registry](/graphos/delivery/) to explore your supergraph schema and empower your teammates to do the same. If you want to completely remove fields from a graph rather than just preventing access (even with introspection on), consider building a [contract graph](/graphos/delivery/contracts/).
 
