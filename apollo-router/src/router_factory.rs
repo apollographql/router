@@ -532,9 +532,9 @@ caused by
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn add_plugin(
     name: String,
-
     factory: &PluginFactory,
     plugin_config: &Value,
     schema: Arc<String>,
