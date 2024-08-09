@@ -7,11 +7,11 @@
             "schema_path": "./supergraph.graphql",
             "configuration_path": "./configuration.yaml",
             "subgraphs": {
-                "accounts": {
+                "invalidation-subgraph-name-accounts": {
                     "requests": [
                         {
                             "request": {
-                                "body": {"query":"{me{name}}"}
+                                "body": {"query":"query InvalidationSubgraphName__invalidation_subgraph_name_accounts__0{me{name}}"}
                             },
                             "response": {
                                 "headers": {
@@ -28,7 +28,7 @@
         {
             "type": "Request",
             "request": {
-                "query": "{ me { name } }"
+                "query": "query InvalidationSubgraphName { me { name } }"
             },
             "expected_response": {
                 "data":{
@@ -41,11 +41,11 @@
         {
             "type": "ReloadSubgraphs",
             "subgraphs": {
-                "accounts": {
+                "invalidation-subgraph-name-accounts": {
                     "requests": [
                         {
                             "request": {
-                                "body": {"query":"mutation{updateMyAccount{name}}"}
+                                "body": {"query":"mutation InvalidationSubgraphName__invalidation_subgraph_name_accounts__0{updateMyAccount{name}}"}
                             },
                             "response": {
                                 "headers": {
@@ -56,7 +56,7 @@
                                     "extensions": {
                                         "invalidation": [{
                                             "kind": "subgraph",
-                                            "subgraph": "accounts"
+                                            "subgraph": "invalidation-subgraph-name-accounts"
                                         }]
                                     }
                                 }
@@ -69,7 +69,7 @@
         {
             "type": "Request",
             "request": {
-                "query": "{ me { name } }"
+                "query": "query InvalidationSubgraphName { me { name } }"
             },
             "expected_response": {
                 "data":{
@@ -82,7 +82,7 @@
         {
             "type": "Request",
             "request": {
-                "query": "mutation { updateMyAccount { name } }"
+                "query": "mutation InvalidationSubgraphName { updateMyAccount { name } }"
             },
             "expected_response": {
                 "data":{
@@ -95,15 +95,15 @@
         {
             "type": "ReloadSubgraphs",
             "subgraphs": {
-                "accounts": {
+                "invalidation-subgraph-name-accounts": {
                     "requests": [
                         {
                             "request": {
-                                "body": {"query":"{me{name}}"}
+                                "body": {"query":"query InvalidationSubgraphName__invalidation_subgraph_name_accounts__0{me{name}}"}
                             },
                             "response": {
                                 "headers": {
-                                    "Cache-Control": "public, max-age=10",
+                                    "Cache-Control": "no-store, max-age=0",
                                     "Content-Type": "application/json"
                                 },
                                 "body": {"data": { "me": { "name": "invalidation-subgraph2" } } }
@@ -116,7 +116,7 @@
         {
             "type": "Request",
             "request": {
-                "query": "{ me { name } }"
+                "query": "query InvalidationSubgraphName{ me { name } }"
             },
             "expected_response": {
                 "data":{
