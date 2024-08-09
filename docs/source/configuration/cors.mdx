@@ -13,7 +13,7 @@ description: Manage browser access to your Apollo GraphOS Router or Apollo Route
 
 </Note>
 
-By default, the router enables _only_ GraphOS Studio to initiate browser connections to it. If your supergraph serves data to other browser-based applications, you need to do one of the following in the `cors` section of your router's [YAML config file](./overview/#yaml-config-file):
+By default, the router enables _only_ GraphOS Studio to initiate browser connections to it. If your supergraph serves data to other browser-based applications, you need to do one of the following in the `cors` section of your router's [YAML config file](/router/configuration/overview/#yaml-config-file):
 
 * Add the origins of those web applications to the router's list of allowed `origins`.
     * Use this option if there is a known, finite list of web applications that consume your supergraph.
