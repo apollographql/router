@@ -90,6 +90,7 @@ impl SelectionId {
 /// This type is immutable and cheaply cloneable.
 #[derive(Clone, PartialEq, Eq, Default)]
 pub(crate) struct ArgumentList {
+    /// The inner list *must* be sorted with `sort_arguments`.
     inner: Option<Arc<[Node<executable::Argument>]>>,
 }
 
