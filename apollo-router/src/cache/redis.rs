@@ -562,16 +562,42 @@ impl RedisCacheStorage {
     }
 
     pub(crate) async fn delete<K: KeyType>(&self, keys: Vec<RedisKey<K>>) -> Option<u32> {
-        self.inner
-            .del(keys)
-            .await
+        let len = keys.len();
+        let mut h: HashMap<u16, Vec<String>> = HashMap::new();
+        for (index, key) in keys.into_iter().enumerate() {
+            let key = self.make_key(key);
+            let hash = ClusterRouting::hash_key(key.as_bytes());
+            let entry = h.entry(hash).or_default();
+            entry.push(key);
+        }
+
+        // then we query all the key groups at the same time
+        let results: Vec<Result<u32, RedisError>> =
+            futures::future::join_all(h.into_iter().map(|(_, keys)| self.inner.del(keys))).await;
+
+        let res = results
+            .into_iter()
+            .collect::<Result<Vec<u32>, RedisError>>()
             .map_err(|e| {
                 if !e.is_not_found() {
                     tracing::error!(error = %e, "redis del error");
                 }
                 e
             })
-            .ok()
+            .ok()?;
+
+        Some(res.into_iter().sum())
+
+        /*self.inner
+        .del(keys)
+        .await
+        .map_err(|e| {
+            if !e.is_not_found() {
+                tracing::error!(error = %e, "redis del error");
+            }
+            e
+        })
+        .ok()*/
     }
 
     pub(crate) fn scan(
