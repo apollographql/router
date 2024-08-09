@@ -147,19 +147,6 @@ impl NamedSelection {
         }
     }
 
-    /// Extracts the property path for a given named selection
-    ///
-    // TODO: Expand on what this means once I have a better understanding
-    pub(crate) fn property_path(&self) -> Vec<Key> {
-        match self {
-            NamedSelection::Field(_, name, _) => vec![Key::Field(name.to_string())],
-            NamedSelection::Quoted(_, _, Some(_)) => todo!(),
-            NamedSelection::Quoted(_, name, None) => vec![Key::Quoted(name.to_string())],
-            NamedSelection::Path(_, path) => path.collect_paths(),
-            NamedSelection::Group(alias, _) => vec![Key::Field(alias.name.to_string())],
-        }
-    }
-
     /// Find the next subselection, if present
     pub(crate) fn next_subselection(&self) -> Option<&SubSelection> {
         match self {
@@ -293,13 +280,13 @@ impl PathSelection {
     ///
     /// This method attempts to collect as many paths as possible, shorting out once
     /// a non path selection is encountered.
-    pub(crate) fn collect_paths(&self) -> Vec<Key> {
+    pub(crate) fn collect_paths(&self) -> Vec<&Key> {
         let mut results = Vec::new();
 
         // Collect as many as possible
         let mut current = self;
         while let Self::Key(key, rest) = current {
-            results.push(key.clone());
+            results.push(key);
 
             current = rest;
         }

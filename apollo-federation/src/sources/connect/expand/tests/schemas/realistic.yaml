@@ -13,6 +13,12 @@ subgraphs:
           @source(name: "example", http: { baseURL: "http://example" })
 
         type Query {
+          filterUsersByEmailDomain(email: EmailAddress!): [User]
+            @connect(source: "example", http: { GET: "/filter/users", body: "emailDomain: $$args.email" }, selection: """
+              id
+              name
+            """)
+
           usersByCompany(company: CompanyInput!): [User]
             @connect(source: "example", http: { GET: "/by-company/{$$args.company.name}" }, selection: """
               id

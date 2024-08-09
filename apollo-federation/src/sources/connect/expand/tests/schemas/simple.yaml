@@ -26,7 +26,7 @@ subgraphs:
           c: String @external
           d: String
             @requires(fields: "c")
-            @connect(source: "example", http: { GET: "/{$$this.c}/d" }, selection: "$")
+            @connect(source: "example", http: { GET: "/{$$this.c}/d", body: "with_b: $$this.b" }, selection: "$")
         }
 
   graphql:

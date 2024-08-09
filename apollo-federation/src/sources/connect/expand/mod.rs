@@ -176,6 +176,7 @@ mod helpers {
     use apollo_compiler::ast::FieldDefinition;
     use apollo_compiler::ast::InputValueDefinition;
     use apollo_compiler::ast::Value;
+    use apollo_compiler::collections::HashSet;
     use apollo_compiler::name;
     use apollo_compiler::schema::Component;
     use apollo_compiler::schema::ComponentName;
@@ -206,6 +207,8 @@ mod helpers {
     use crate::schema::position::TypeDefinitionPosition;
     use crate::schema::FederationSchema;
     use crate::schema::ValidFederationSchema;
+    use crate::sources::connect::json_selection::ExtractParameters;
+    use crate::sources::connect::json_selection::StaticParameter;
     use crate::sources::connect::url_template::Parameter;
     use crate::sources::connect::ConnectSpecDefinition;
     use crate::sources::connect::Connector;
@@ -390,6 +393,10 @@ mod helpers {
             connector: &Connector,
             arguments: &[Node<InputValueDefinition>],
         ) -> Result<(), FederationError> {
+            // The body of the request might include references to input arguments / sibling fields
+            // that will need to be handled, so we extract any referenced variables now
+            let body_parameters = extract_params_from_body(connector)?;
+
             let parameters = connector
                 .transport
                 .connect_template
@@ -399,7 +406,7 @@ mod helpers {
                         "could not extract path template parameters: {e}"
                     ))
                 })?;
-            for parameter in parameters {
+            for parameter in Iterator::chain(body_parameters.iter(), &parameters) {
                 match parameter {
                     // Ensure that input arguments are carried over to the new schema, including
                     // any types associated with them.
@@ -407,7 +414,7 @@ mod helpers {
                         // Get the argument type
                         let arg = arguments
                             .iter()
-                            .find(|a| a.name.as_str() == argument)
+                            .find(|a| a.name.as_str() == *argument)
                             .ok_or(FederationError::internal(format!(
                                 "could not find argument: {argument}"
                             )))?;
@@ -460,6 +467,10 @@ mod helpers {
             let parent_type = self.original_schema.get_type(parent_type_name)?;
             let output_type = to_schema.get_type(output_type_name)?;
 
+            // The body of the request might include references to input arguments / sibling fields
+            // that will need to be handled, so we extract any referenced variables now
+            let body_parameters = extract_params_from_body(connector)?;
+
             let parameters = connector
                 .transport
                 .connect_template
@@ -472,7 +483,7 @@ mod helpers {
             // We'll need to collect all synthesized keys for the output type, adding a federation
             // `@key` directive once completed.
             let mut keys = Vec::new();
-            for parameter in parameters {
+            for parameter in Iterator::chain(body_parameters.iter(), &parameters) {
                 match parameter {
                     // Arguments should be added to the synthesized key, since they are mandatory
                     // to resolving the output type. The synthesized key should only include the portions
@@ -783,6 +794,41 @@ mod helpers {
 
             Ok(())
         }
+    }
+
+    fn extract_params_from_body(
+        connector: &Connector,
+    ) -> Result<HashSet<Parameter>, FederationError> {
+        let body_parameters = connector
+            .transport
+            .body
+            .as_ref()
+            .and_then(JSONSelection::extract_parameters)
+            .unwrap_or_default();
+
+        body_parameters
+            .iter()
+            .map(|StaticParameter { name, paths }| {
+                let mut parts = paths.iter();
+                let field = parts.next().ok_or(FederationError::internal(
+                    "expected parameter in JSONSelection to contain a field",
+                ))?;
+
+                match *name {
+                    "$args" => Ok(Parameter::Argument {
+                        argument: field,
+                        paths: parts.copied().collect(),
+                    }),
+                    "$this" => Ok(Parameter::Sibling {
+                        field,
+                        paths: parts.copied().collect(),
+                    }),
+                    other => Err(FederationError::internal(format!(
+                        "got unsupported parameter: {other}"
+                    ))),
+                }
+            })
+            .collect::<Result<HashSet<_>, _>>()
     }
 }
 

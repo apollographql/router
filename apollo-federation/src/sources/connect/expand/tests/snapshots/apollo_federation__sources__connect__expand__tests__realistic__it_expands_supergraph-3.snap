@@ -38,8 +38,28 @@ scalar join__FieldSet
 scalar join__DirectiveArguments
 
 enum join__Graph {
+  CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0 @join__graph(name: "connectors_Query_filterUsersByEmailDomain_0", url: "none")
   CONNECTORS_QUERY_USER_0 @join__graph(name: "connectors_Query_user_0", url: "none")
   CONNECTORS_QUERY_USERSBYCOMPANY_0 @join__graph(name: "connectors_Query_usersByCompany_0", url: "none")
+}
+
+scalar EmailAddress @join__type(graph: CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0) @join__type(graph: CONNECTORS_QUERY_USER_0)
+
+type User @join__type(graph: CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0) @join__type(graph: CONNECTORS_QUERY_USER_0, key: "id") @join__type(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0) {
+  id: ID! @join__field(graph: CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0) @join__field(graph: CONNECTORS_QUERY_USER_0) @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0)
+  name: String @join__field(graph: CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0) @join__field(graph: CONNECTORS_QUERY_USER_0) @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0)
+  address: Address @join__field(graph: CONNECTORS_QUERY_USER_0)
+  company: CompanyInfo @join__field(graph: CONNECTORS_QUERY_USER_0) @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0)
+  email: EmailAddress @join__field(graph: CONNECTORS_QUERY_USER_0)
+  phone: String @join__field(graph: CONNECTORS_QUERY_USER_0)
+  username: String @join__field(graph: CONNECTORS_QUERY_USER_0)
+  website: String @join__field(graph: CONNECTORS_QUERY_USER_0)
+}
+
+type Query @join__type(graph: CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0) @join__type(graph: CONNECTORS_QUERY_USER_0) @join__type(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0) {
+  filterUsersByEmailDomain(email: EmailAddress!): [User] @join__field(graph: CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0)
+  user(id: ID!): User @join__field(graph: CONNECTORS_QUERY_USER_0)
+  usersByCompany(company: CompanyInput!): [User] @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0)
 }
 
 type AddressGeo @join__type(graph: CONNECTORS_QUERY_USER_0) {
@@ -55,29 +75,11 @@ type Address @join__type(graph: CONNECTORS_QUERY_USER_0) {
   zipcode: String @join__field(graph: CONNECTORS_QUERY_USER_0)
 }
 
-scalar EmailAddress @join__type(graph: CONNECTORS_QUERY_USER_0)
-
 type CompanyInfo @join__type(graph: CONNECTORS_QUERY_USER_0) @join__type(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0) {
   bs: String @join__field(graph: CONNECTORS_QUERY_USER_0) @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0)
   catchPhrase: String @join__field(graph: CONNECTORS_QUERY_USER_0) @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0)
   email: EmailAddress @join__field(graph: CONNECTORS_QUERY_USER_0)
   name: String @join__field(graph: CONNECTORS_QUERY_USER_0) @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0)
-}
-
-type User @join__type(graph: CONNECTORS_QUERY_USER_0, key: "id") @join__type(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0) {
-  address: Address @join__field(graph: CONNECTORS_QUERY_USER_0)
-  company: CompanyInfo @join__field(graph: CONNECTORS_QUERY_USER_0) @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0)
-  email: EmailAddress @join__field(graph: CONNECTORS_QUERY_USER_0)
-  id: ID! @join__field(graph: CONNECTORS_QUERY_USER_0) @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0)
-  name: String @join__field(graph: CONNECTORS_QUERY_USER_0) @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0)
-  phone: String @join__field(graph: CONNECTORS_QUERY_USER_0)
-  username: String @join__field(graph: CONNECTORS_QUERY_USER_0)
-  website: String @join__field(graph: CONNECTORS_QUERY_USER_0)
-}
-
-type Query @join__type(graph: CONNECTORS_QUERY_USER_0) @join__type(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0) {
-  user(id: ID!): User @join__field(graph: CONNECTORS_QUERY_USER_0)
-  usersByCompany(company: CompanyInput!): [User] @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0)
 }
 
 input CompanyInput @join__type(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0) {
