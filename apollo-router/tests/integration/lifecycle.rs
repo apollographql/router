@@ -518,6 +518,14 @@ async fn fed1_schema_with_both_best_effort_qp() {
         .build()
         .await;
     router.start().await;
+    router
+        .assert_log_contains(
+            "Failed to initialize the new query planner, falling back to legacy: \
+             The supergraph schema failed to produce a valid API schema: \
+             Supergraphs composed with federation version 1 are not supported. \
+             Please recompose your supergraph with federation version 2 or greater",
+        )
+        .await;
     router.assert_started().await;
     router.execute_default_query().await;
     router.graceful_shutdown().await;

@@ -4407,7 +4407,7 @@ expression: "&schema"
           "type": "string"
         },
         {
-          "description": "Use primarily the Javascript-based implementation, but also schedule on a best-effort basis background jobs to run the Rust implementation and compare results, logging warnings if the implementations disagree.\n\nFalls back to `legacy` if the the new planner does not support the schema (such as using legacy Apollo Federation 1)",
+          "description": "Use primarily the Javascript-based implementation, but also schedule on a best-effort basis background jobs to run the Rust implementation and compare results, logging warnings if the implementations disagree.\n\nFalls back to `legacy` with a warning if the the new planner does not support the schema (such as using legacy Apollo Federation 1)",
           "enum": [
             "both_best_effort"
           ],

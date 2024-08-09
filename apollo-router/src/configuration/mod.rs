@@ -240,7 +240,8 @@ pub(crate) enum QueryPlannerMode {
     /// to run the Rust implementation and compare results,
     /// logging warnings if the implementations disagree.
     ///
-    /// Falls back to `legacy` if the the new planner does not support the schema
+    /// Falls back to `legacy` with a warning
+    /// if the the new planner does not support the schema
     /// (such as using legacy Apollo Federation 1)
     BothBestEffort,
 }

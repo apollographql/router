@@ -161,7 +161,13 @@ impl PlannerMode {
             }
             QueryPlannerMode::BothBestEffort => match Self::rust(schema, configuration) {
                 Ok(planner) => Ok(Some(planner)),
-                Err(_) => Ok(None),
+                Err(error) => {
+                    tracing::warn!(
+                        "Failed to initialize the new query planner, \
+                         falling back to legacy: {error}"
+                    );
+                    Ok(None)
+                }
             },
         }
     }
