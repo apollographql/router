@@ -144,8 +144,9 @@ impl Query {
                             let mut parameters = FormatParameters {
                                 variables: &variables,
                                 schema,
-                                errors: Vec::new(),
+                                nullification_errors: Vec::new(),
                                 nullified: Vec::new(),
+                                validation_errors: Vec::new(),
                             };
                             // Detect if root __typename is asked in the original query (the qp doesn't put root __typename in subselections)
                             // cf https://github.com/apollographql/router/issues/1677
@@ -174,10 +175,18 @@ impl Query {
                                 },
                             );
 
-                            if !parameters.errors.is_empty() {
-                                if let Ok(value) = serde_json_bytes::to_value(&parameters.errors) {
+                            if !parameters.nullification_errors.is_empty() {
+                                if let Ok(value) =
+                                    serde_json_bytes::to_value(&parameters.nullification_errors)
+                                {
                                     response.extensions.insert("valueCompletion", value);
                                 }
+                            }
+
+                            if !parameters.validation_errors.is_empty() {
+                                response
+                                    .errors
+                                    .extend(parameters.validation_errors.drain(..));
                             }
 
                             return parameters.nullified;
@@ -211,8 +220,9 @@ impl Query {
                     let mut parameters = FormatParameters {
                         variables: &all_variables,
                         schema,
-                        errors: Vec::new(),
+                        nullification_errors: Vec::new(),
                         nullified: Vec::new(),
+                        validation_errors: Vec::new(),
                     };
 
                     response.data = Some(
@@ -228,10 +238,18 @@ impl Query {
                             Err(InvalidValue) => Value::Null,
                         },
                     );
-                    if !parameters.errors.is_empty() {
-                        if let Ok(value) = serde_json_bytes::to_value(&parameters.errors) {
+                    if !parameters.nullification_errors.is_empty() {
+                        if let Ok(value) =
+                            serde_json_bytes::to_value(&parameters.nullification_errors)
+                        {
                             response.extensions.insert("valueCompletion", value);
                         }
+                    }
+
+                    if !parameters.validation_errors.is_empty() {
+                        response
+                            .errors
+                            .extend(parameters.validation_errors.drain(..));
                     }
 
                     return parameters.nullified;
@@ -409,7 +427,7 @@ impl Query {
                                 ),
                                 _ => todo!(),
                             };
-                            parameters.errors.push(Error {
+                            parameters.nullification_errors.push(Error {
                                 message,
                                 path: Some(Path::from_response_slice(path)),
                                 ..Error::default()
@@ -478,6 +496,11 @@ impl Query {
                 if opt.is_some() {
                     *output = input.clone();
                 } else {
+                    parameters.validation_errors.push(Error {
+                        message: "Expected an Int".to_string(),
+                        path: Some(Path::from_response_slice(path)),
+                        ..Error::default()
+                    });
                     *output = Value::Null;
                 }
                 Ok(())
@@ -486,6 +509,11 @@ impl Query {
                 if input.as_f64().is_some() {
                     *output = input.clone();
                 } else {
+                    parameters.validation_errors.push(Error {
+                        message: "Expected a Float".to_string(),
+                        path: Some(Path::from_response_slice(path)),
+                        ..Error::default()
+                    });
                     *output = Value::Null;
                 }
                 Ok(())
@@ -494,6 +522,11 @@ impl Query {
                 if input.as_bool().is_some() {
                     *output = input.clone();
                 } else {
+                    parameters.validation_errors.push(Error {
+                        message: "Expected a Boolean".to_string(),
+                        path: Some(Path::from_response_slice(path)),
+                        ..Error::default()
+                    });
                     *output = Value::Null;
                 }
                 Ok(())
@@ -502,6 +535,11 @@ impl Query {
                 if input.as_str().is_some() {
                     *output = input.clone();
                 } else {
+                    parameters.validation_errors.push(Error {
+                        message: "Expected a String".to_string(),
+                        path: Some(Path::from_response_slice(path)),
+                        ..Error::default()
+                    });
                     *output = Value::Null;
                 }
                 Ok(())
@@ -510,6 +548,11 @@ impl Query {
                 if input.is_string() || input.is_i64() || input.is_u64() || input.is_f64() {
                     *output = input.clone();
                 } else {
+                    parameters.validation_errors.push(Error {
+                        message: "Expected an Id".to_string(),
+                        path: Some(Path::from_response_slice(path)),
+                        ..Error::default()
+                    });
                     *output = Value::Null;
                 }
                 Ok(())
@@ -529,11 +572,21 @@ impl Query {
                                     *output = input.clone();
                                     Ok(())
                                 } else {
+                                    parameters.validation_errors.push(Error {
+                                        message: "Expected a valid enum value".to_string(),
+                                        path: Some(Path::from_response_slice(path)),
+                                        ..Error::default()
+                                    });
                                     *output = Value::Null;
                                     Ok(())
                                 }
                             }
                             None => {
+                                parameters.validation_errors.push(Error {
+                                    message: "Expected a valid enum value".to_string(),
+                                    path: Some(Path::from_response_slice(path)),
+                                    ..Error::default()
+                                });
                                 *output = Value::Null;
                                 Ok(())
                             }
@@ -691,7 +744,7 @@ impl Query {
                             output.insert((*field_name).clone(), Value::Null);
                         }
                         if field_type.is_non_null() {
-                            parameters.errors.push(Error {
+                            parameters.nullification_errors.push(Error {
                                 message: format!(
                                     "Cannot return null for non-nullable field {current_type}.{}",
                                     field_name.as_str()
@@ -842,7 +895,7 @@ impl Query {
                             output.insert(field_name.clone(), Value::String(root_type_name.into()));
                         }
                     } else if field_type.is_non_null() {
-                        parameters.errors.push(Error {
+                        parameters.nullification_errors.push(Error {
                             message: format!(
                                 "Cannot return null for non-nullable field {}.{field_name_str}",
                                 root_type_name
@@ -1093,7 +1146,8 @@ impl Query {
 /// Intermediate structure for arguments passed through the entire formatting
 struct FormatParameters<'a> {
     variables: &'a Object,
-    errors: Vec<Error>,
+    nullification_errors: Vec<Error>,
+    validation_errors: Vec<Error>,
     nullified: Vec<Path>,
     schema: &'a ApiSchema,
 }
