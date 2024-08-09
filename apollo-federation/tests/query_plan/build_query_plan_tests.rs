@@ -812,6 +812,105 @@ fn test_merging_fetches_do_not_create_cycle_in_fetch_dependency_graph() {
           }
         "#,
         @r###"
-        "###
+    QueryPlan {
+      Sequence {
+        Fetch(service: "S") {
+          {
+            start {
+              __typename
+              id
+            }
+          }
+        },
+        Parallel {
+          Sequence {
+            Flatten(path: "start") {
+              Fetch(service: "B") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    u {
+                      __typename
+                      id
+                    }
+                  }
+                }
+              },
+            },
+            Flatten(path: "start.u") {
+              Fetch(service: "A") {
+                {
+                  ... on U {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on U {
+                    b
+                    a
+                  }
+                }
+              },
+            },
+          },
+          Flatten(path: "start") {
+            Fetch(service: "A") {
+              {
+                ... on T {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on T {
+                  u {
+                    __typename
+                    id
+                    b
+                    a
+                  }
+                }
+              }
+            },
+          },
+        },
+        Flatten(path: "start.u") {
+          Fetch(service: "C") {
+            {
+              ... on U {
+                __typename
+                a
+                b
+                id
+              }
+            } =>
+            {
+              ... on U {
+                w {
+                  y {
+                    y1
+                    y2
+                    y3
+                  }
+                  id
+                  w1
+                  w2
+                  w3
+                  w4
+                  w5
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
     );
 }

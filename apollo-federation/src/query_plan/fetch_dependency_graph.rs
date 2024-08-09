@@ -1451,7 +1451,9 @@ impl FetchDependencyGraph {
         // subgraph name, but have no worries for `mergeAt` since it contains either number of
         // field names, and the later is restricted by graphQL so as to not be an issue.
         let mut by_subgraphs = MultiMap::new();
-        for node_index in self.graph.node_indices() {
+        let sorted_nodes = petgraph::algo::toposort(&self.graph, None)
+            .map_err(|_| FederationError::internal("Failed to sort nodes due to cycle(s)"))?;
+        for node_index in sorted_nodes {
             let node = self.node_weight(node_index)?;
             // We exclude nodes without inputs because that's what we look for. In practice, this
             // mostly just exclude root nodes, which we don't really want to bother with anyway.
