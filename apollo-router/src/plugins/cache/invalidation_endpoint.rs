@@ -87,7 +87,7 @@ impl Service<router::Request> for InvalidationService {
         Box::pin(
             async move {
                 let (parts, body) = req.router_request.into_parts();
-                if !parts.headers.contains_key(AUTHORIZATION) {
+                /*if !parts.headers.contains_key(AUTHORIZATION) {
                     return Ok(router::Response {
                         response: http::Response::builder()
                             .status(StatusCode::UNAUTHORIZED)
@@ -95,7 +95,7 @@ impl Service<router::Request> for InvalidationService {
                             .map_err(BoxError::from)?,
                         context: req.context,
                     });
-                }
+                }*/
                 match parts.method {
                     Method::POST => {
                         let body = Into::<RouterBody>::into(body)
