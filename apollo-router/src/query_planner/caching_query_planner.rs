@@ -24,7 +24,9 @@ use tower_service::Service;
 use tracing::Instrument;
 
 use super::fetch::QueryHash;
+use crate::cache::estimate_size;
 use crate::cache::storage::InMemoryCache;
+use crate::cache::storage::ValueType;
 use crate::cache::DeduplicatingCache;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
@@ -687,6 +689,17 @@ pub(crate) struct WarmUpCachingQueryKey {
     pub(crate) introspection: bool,
 }
 
+impl ValueType for Result<QueryPlannerContent, Arc<QueryPlannerError>> {
+    fn estimated_size(&self) -> Option<usize> {
+        match self {
+            Ok(QueryPlannerContent::Plan { plan }) => Some(plan.estimated_size()),
+            Ok(QueryPlannerContent::Response { response }) => Some(estimate_size(response)),
+            Ok(QueryPlannerContent::IntrospectionDisabled) => None,
+            Err(e) => Some(estimate_size(e)),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use mockall::mock;
@@ -838,6 +851,7 @@ mod tests {
                     .into(),
                     query: Arc::new(Query::empty()),
                     query_metrics: Default::default(),
+                    estimated_size: Default::default(),
                 };
                 let qp_content = QueryPlannerContent::Plan {
                     plan: Arc::new(query_plan),

@@ -936,25 +936,6 @@ impl Selection {
         }
     }
 
-    fn collect_used_fragment_names(&self, aggregator: &mut HashMap<Name, i32>) {
-        match self {
-            Selection::Field(field_selection) => {
-                if let Some(s) = field_selection.selection_set.clone() {
-                    s.collect_used_fragment_names(aggregator)
-                }
-            }
-            Selection::InlineFragment(inline) => {
-                inline.selection_set.collect_used_fragment_names(aggregator);
-            }
-            Selection::FragmentSpread(fragment) => {
-                let current_count = aggregator
-                    .entry(fragment.spread.fragment_name.clone())
-                    .or_default();
-                *current_count += 1;
-            }
-        }
-    }
-
     pub(crate) fn with_updated_selection_set(
         &self,
         selection_set: Option<SelectionSet>,
@@ -1037,22 +1018,6 @@ impl Selection {
             }
         }
     }
-
-    pub(crate) fn for_each_element(
-        &self,
-        parent_type_position: CompositeTypeDefinitionPosition,
-        callback: &mut impl FnMut(OpPathElement) -> Result<(), FederationError>,
-    ) -> Result<(), FederationError> {
-        match self {
-            Selection::Field(field_selection) => field_selection.for_each_element(callback),
-            Selection::InlineFragment(inline_fragment_selection) => {
-                inline_fragment_selection.for_each_element(callback)
-            }
-            Selection::FragmentSpread(fragment_spread_selection) => {
-                fragment_spread_selection.for_each_element(parent_type_position, callback)
-            }
-        }
-    }
 }
 
 impl From<FieldSelection> for Selection {
@@ -1121,18 +1086,6 @@ impl Fragment {
                 schema,
             )?,
         })
-    }
-
-    // PORT NOTE: in JS code this is stored on the fragment
-    pub(crate) fn fragment_usages(&self) -> HashMap<Name, i32> {
-        let mut usages = HashMap::new();
-        self.selection_set.collect_used_fragment_names(&mut usages);
-        usages
-    }
-
-    // PORT NOTE: in JS code this is stored on the fragment
-    pub(crate) fn collect_used_fragment_names(&self, aggregator: &mut HashMap<Name, i32>) {
-        self.selection_set.collect_used_fragment_names(aggregator)
     }
 
     fn has_defer(&self) -> bool {
@@ -1653,22 +1606,6 @@ impl FragmentSpreadSelection {
         }
         self.selection_set.any_element(predicate)
     }
-
-    pub(crate) fn for_each_element(
-        &self,
-        parent_type_position: CompositeTypeDefinitionPosition,
-        callback: &mut impl FnMut(OpPathElement) -> Result<(), FederationError>,
-    ) -> Result<(), FederationError> {
-        let inline_fragment = InlineFragment::new(InlineFragmentData {
-            schema: self.spread.schema.clone(),
-            parent_type_position,
-            type_condition_position: Some(self.spread.type_condition_position.clone()),
-            directives: self.spread.directives.clone(),
-            selection_id: self.spread.selection_id.clone(),
-        });
-        callback(inline_fragment.into())?;
-        self.selection_set.for_each_element(callback)
-    }
 }
 
 impl FragmentSpreadData {
@@ -2130,7 +2067,7 @@ impl SelectionSet {
                     // if we don't expand fragments, we need to normalize it
                     let normalized_fragment_spread = FragmentSpreadSelection::from_fragment_spread(
                         fragment_spread_selection,
-                        &fragment,
+                        fragment,
                     )?;
                     destination.push(Selection::FragmentSpread(Arc::new(
                         normalized_fragment_spread,
@@ -2725,12 +2662,6 @@ impl SelectionSet {
         Ok(())
     }
 
-    pub(crate) fn collect_used_fragment_names(&self, aggregator: &mut HashMap<Name, i32>) {
-        self.selections
-            .iter()
-            .for_each(|(_, s)| s.collect_used_fragment_names(aggregator));
-    }
-
     /// Removes the @defer directive from all selections without removing that selection.
     fn without_defer(&mut self) {
         for (_key, mut selection) in Arc::make_mut(&mut self.selections).iter_mut() {
@@ -2986,19 +2917,6 @@ impl SelectionSet {
             }
         }
         Ok(false)
-    }
-
-    /// Runs the given callback for all elements in the selection set and their descendants. Note
-    /// that fragment spread selections are converted to inline fragment elements, and their
-    /// fragment selection sets are recursed into.
-    pub(crate) fn for_each_element(
-        &self,
-        callback: &mut impl FnMut(OpPathElement) -> Result<(), FederationError>,
-    ) -> Result<(), FederationError> {
-        for selection in self.selections.values() {
-            selection.for_each_element(self.type_position.clone(), callback)?
-        }
-        Ok(())
     }
 }
 
@@ -3315,17 +3233,6 @@ impl FieldSelection {
         }
         Ok(false)
     }
-
-    pub(crate) fn for_each_element(
-        &self,
-        callback: &mut impl FnMut(OpPathElement) -> Result<(), FederationError>,
-    ) -> Result<(), FederationError> {
-        callback(self.field.clone().into())?;
-        if let Some(selection_set) = &self.selection_set {
-            selection_set.for_each_element(callback)?;
-        }
-        Ok(())
-    }
 }
 
 impl Field {
@@ -3489,14 +3396,6 @@ impl InlineFragmentSelection {
         }
         self.selection_set.any_element(predicate)
     }
-
-    pub(crate) fn for_each_element(
-        &self,
-        callback: &mut impl FnMut(OpPathElement) -> Result<(), FederationError>,
-    ) -> Result<(), FederationError> {
-        callback(self.inline_fragment.clone().into())?;
-        self.selection_set.for_each_element(callback)
-    }
 }
 
 /// This uses internal copy-on-write optimization to make `Clone` cheap.
@@ -3525,7 +3424,7 @@ impl NamedFragments {
         self.fragments.len() == 0
     }
 
-    pub(crate) fn size(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.fragments.len()
     }
 
@@ -3562,23 +3461,12 @@ impl NamedFragments {
         }
     }
 
-    pub(crate) fn get(&self, name: &Name) -> Option<Node<Fragment>> {
-        self.fragments.get(name).cloned()
+    pub(crate) fn get(&self, name: &str) -> Option<&Node<Fragment>> {
+        self.fragments.get(name)
     }
 
-    pub(crate) fn contains(&self, name: &Name) -> bool {
+    pub(crate) fn contains(&self, name: &str) -> bool {
         self.fragments.contains_key(name)
-    }
-
-    /**
-     * Collect the usages of fragments that are used within the selection of other fragments.
-     */
-    pub(crate) fn collect_used_fragment_names(&self, aggregator: &mut HashMap<Name, i32>) {
-        for fragment in self.fragments.values() {
-            fragment
-                .selection_set
-                .collect_used_fragment_names(aggregator);
-        }
     }
 
     /// JS PORT NOTE: In JS implementation this method was named mapInDependencyOrder and accepted a lambda to
@@ -3601,7 +3489,7 @@ impl NamedFragments {
         //       the outcome of `map_to_expanded_selection_sets`.
         let mut fragments_map: IndexMap<Name, FragmentDependencies> = IndexMap::default();
         for fragment in fragments.values() {
-            let mut fragment_usages: HashMap<Name, i32> = HashMap::new();
+            let mut fragment_usages = HashMap::new();
             NamedFragments::collect_fragment_usages(&fragment.selection_set, &mut fragment_usages);
             let usages: Vec<Name> = fragment_usages.keys().cloned().collect::<Vec<Name>>();
             fragments_map.insert(
@@ -3644,10 +3532,10 @@ impl NamedFragments {
         mapped_fragments
     }
 
-    // JS PORT - we need to calculate those for both executable::SelectionSet and SelectionSet
+    /// Just like our `SelectionSet::used_fragments`, but with apollo-compiler types
     fn collect_fragment_usages(
         selection_set: &executable::SelectionSet,
-        aggregator: &mut HashMap<Name, i32>,
+        aggregator: &mut HashMap<Name, u32>,
     ) {
         selection_set.selections.iter().for_each(|s| match s {
             executable::Selection::Field(f) => {
@@ -3691,52 +3579,57 @@ impl NamedFragments {
     }
 }
 
-/// Tracks fragments from the original operation, along with versions rebased on other subgraphs.
-// XXX(@goto-bus-stop): improve/replace/reduce this structure. My notes:
-// This gets cloned only in recursive query planning. Then whenever `.for_subgraph()` ends up being
-// called, it always clones the `rebased_fragments` map. `.for_subgraph()` is called whenever the
-// plan is turned into plan nodes by the FetchDependencyGraphToQueryPlanProcessor.
-// This suggests that we can remove the Arc wrapper for `rebased_fragments` because we end up cloning the inner data anyways.
-//
-// This data structure is also used as an argument in several `crate::operation` functions. This
-// seems wrong. The only useful method on this structure is `.for_subgraph()`, which is only used
-// by the fetch dependency graph when creating plan nodes. That necessarily implies that all other
-// uses of this structure only access `.original_fragments`. In that case, we should pass around
-// the `NamedFragments` itself, not this wrapper structure.
-//
-// `.for_subgraph()` also requires a mutable reference to fill in the data. But
-// `.rebased_fragments` is really a cache, so requiring a mutable reference isn't an ideal API.
-// Conceptually you are just computing something and getting the result. Perhaps we can use a
-// concurrent map, or prepopulate the HashMap for all subgraphs, or precompute the whole thing for
-// all subgraphs (or precompute a hash map of subgraph names to OnceLocks).
-#[derive(Clone)]
-pub(crate) struct RebasedFragments {
-    pub(crate) original_fragments: NamedFragments,
-    // JS PORT NOTE: In JS implementation values were optional
-    /// Map key: subgraph name
-    rebased_fragments: Arc<HashMap<Arc<str>, NamedFragments>>,
+// Collect fragment usages from operation types.
+
+impl Selection {
+    fn collect_used_fragment_names(&self, aggregator: &mut HashMap<Name, u32>) {
+        match self {
+            Selection::Field(field_selection) => {
+                if let Some(s) = &field_selection.selection_set {
+                    s.collect_used_fragment_names(aggregator)
+                }
+            }
+            Selection::InlineFragment(inline) => {
+                inline.selection_set.collect_used_fragment_names(aggregator);
+            }
+            Selection::FragmentSpread(fragment) => {
+                let current_count = aggregator
+                    .entry(fragment.spread.fragment_name.clone())
+                    .or_default();
+                *current_count += 1;
+            }
+        }
+    }
 }
 
-impl RebasedFragments {
-    pub(crate) fn new(fragments: NamedFragments) -> Self {
-        Self {
-            original_fragments: fragments,
-            rebased_fragments: Arc::new(HashMap::new()),
+impl SelectionSet {
+    pub(crate) fn collect_used_fragment_names(&self, aggregator: &mut HashMap<Name, u32>) {
+        for s in self.selections.values() {
+            s.collect_used_fragment_names(aggregator);
         }
     }
 
-    pub(crate) fn for_subgraph(
-        &mut self,
-        subgraph_name: impl Into<Arc<str>>,
-        subgraph_schema: &ValidFederationSchema,
-    ) -> &NamedFragments {
-        Arc::make_mut(&mut self.rebased_fragments)
-            .entry(subgraph_name.into())
-            .or_insert_with(|| {
-                self.original_fragments
-                    .rebase_on(subgraph_schema)
-                    .unwrap_or_default()
-            })
+    pub(crate) fn used_fragments(&self) -> HashMap<Name, u32> {
+        let mut usages = HashMap::new();
+        self.collect_used_fragment_names(&mut usages);
+        usages
+    }
+}
+
+impl Fragment {
+    pub(crate) fn collect_used_fragment_names(&self, aggregator: &mut HashMap<Name, u32>) {
+        self.selection_set.collect_used_fragment_names(aggregator)
+    }
+}
+
+impl NamedFragments {
+    /// Collect the usages of fragments that are used within the selection of other fragments.
+    pub(crate) fn collect_used_fragment_names(&self, aggregator: &mut HashMap<Name, u32>) {
+        for fragment in self.fragments.values() {
+            fragment
+                .selection_set
+                .collect_used_fragment_names(aggregator);
+        }
     }
 }
 

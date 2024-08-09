@@ -1453,3 +1453,288 @@ fn it_require_of_multiple_field_when_one_is_also_a_key_to_reach_another() {
       "###
     );
 }
+
+#[test]
+fn it_handles_multiple_requires_with_multiple_fetches() {
+    let planner = planner!(
+        s1: r#"
+            type Query {
+              t: T
+            }
+
+            interface I {
+              id: ID!
+              name: String!
+            }
+
+            type T implements I @key(fields: "id") {
+              id: ID!
+              name: String! @shareable
+              x: X @shareable
+              v: V @shareable
+            }
+
+            type U implements I @key(fields: "id") {
+              id: ID!
+              name: String! @external
+            }
+
+            type V @key(fields: "id") @key(fields: "internalID") {
+              id: ID!
+              internalID: ID!
+            }
+
+            type X @key(fields: "t { id }") {
+              t: T!
+              isX: Boolean!
+            }
+        "#,
+        s2: r#"
+            type V @key(fields: "id") {
+              id: ID!
+              internalID: ID! @shareable
+              y: Y! @shareable
+              zz: [Z!] @external
+            }
+
+            type Z {
+              u: U! @external
+            }
+
+            type Y @key(fields: "id") {
+              id: ID!
+              isY: Boolean! @external
+            }
+
+            interface I {
+              id: ID!
+              name: String!
+            }
+
+            type T implements I @key(fields: "id") {
+              id: ID!
+              name: String! @external
+              x: X @external
+              v: V @external
+              foo: [String!]! @requires(fields: "x { isX }\nv { y { isY } }")
+              bar: [I!]! @requires(fields: "x { isX }\nv { y { isY } zz { u { id } } }")
+            }
+
+            type X {
+              isX: Boolean! @external
+            }
+
+            type U implements I @key(fields: "id") {
+              id: ID!
+              name: String! @external
+            }
+        "#,
+        s3: r#"
+            type V @key(fields: "internalID") {
+              internalID: ID!
+              y: Y! @shareable
+            }
+
+            type Y @key(fields: "id") {
+              id: ID!
+              isY: Boolean!
+            }
+        "#,
+        s4: r#"
+            type V @key(fields: "id") @key(fields: "internalID") {
+              id: ID!
+              internalID: ID!
+              zz: [Z!] @override(from: "s1")
+            }
+
+            type Z {
+              free: Boolean
+              u: U!
+              v: V!
+            }
+
+            interface I {
+              id: ID!
+              name: String!
+            }
+
+            type T implements I @key(fields: "id") {
+              id: ID!
+              name: String! @shareable
+              x: X @shareable
+              v: V @shareable
+            }
+
+            type X @key(fields: "t { id }", resolvable: false) {
+              t: T! @external
+            }
+
+            type U implements I @key(fields: "id") {
+              id: ID!
+              name: String! @override(from: "s1")
+            }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+        {
+            t {
+                foo
+                bar {
+                    name
+                }
+            }
+        }
+        "#,
+
+        @r###"
+        QueryPlan {
+          Sequence {
+            Fetch(service: "s1") {
+              {
+                t {
+                  __typename
+                  id
+                  x {
+                    isX
+                  }
+                  v {
+                    __typename
+                    internalID
+                  }
+                }
+              }
+            },
+            Flatten(path: "t") {
+              Fetch(service: "s4") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    v {
+                      __typename
+                      internalID
+                      zz {
+                        u {
+                          id
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+            },
+            Flatten(path: "t.v") {
+              Fetch(service: "s3") {
+                {
+                  ... on V {
+                    __typename
+                    internalID
+                  }
+                } =>
+                {
+                  ... on V {
+                    y {
+                      isY
+                    }
+                  }
+                }
+              },
+            },
+            Parallel {
+              Sequence {
+                Flatten(path: "t") {
+                  Fetch(service: "s2") {
+                    {
+                      ... on T {
+                        __typename
+                        x {
+                          isX
+                        }
+                        v {
+                          y {
+                            isY
+                          }
+                          zz {
+                            u {
+                              id
+                            }
+                          }
+                        }
+                        id
+                      }
+                    } =>
+                    {
+                      ... on T {
+                        bar {
+                          __typename
+                          ... on T {
+                            __typename
+                            id
+                          }
+                          ... on U {
+                            __typename
+                            id
+                          }
+                        }
+                      }
+                    }
+                  },
+                },
+                Flatten(path: "t.bar.@") {
+                  Fetch(service: "s4") {
+                    {
+                      ... on T {
+                        __typename
+                        id
+                      }
+                      ... on U {
+                        __typename
+                        id
+                      }
+                    } =>
+                    {
+                      ... on T {
+                        name
+                      }
+                      ... on U {
+                        name
+                      }
+                    }
+                  },
+                },
+              },
+              Flatten(path: "t") {
+                Fetch(service: "s2") {
+                  {
+                    ... on T {
+                      __typename
+                      x {
+                        isX
+                      }
+                      v {
+                        y {
+                          isY
+                        }
+                      }
+                      id
+                    }
+                  } =>
+                  {
+                    ... on T {
+                      foo
+                    }
+                  }
+                },
+              },
+            },
+          },
+        }
+      "###
+    );
+}
