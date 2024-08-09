@@ -33,20 +33,22 @@ use crate::query_planner::QueryPlan;
 
 pub(crate) struct StaticCostCalculator {
     list_size: u32,
+    supergraph_schema: Arc<Valid<Schema>>,
     subgraph_schemas: Arc<SubgraphSchemas>,
     directive_name_map: HashMap<Name, Name>,
 }
 
 impl StaticCostCalculator {
     pub(crate) fn new(
-        supergraph_schema: &Valid<Schema>,
+        supergraph_schema: Arc<Valid<Schema>>,
         subgraph_schemas: Arc<SubgraphSchemas>,
         list_size: u32,
     ) -> Self {
-        let directive_name_map = get_apollo_directive_names(supergraph_schema);
+        let directive_name_map = get_apollo_directive_names(&supergraph_schema);
 
         Self {
             list_size,
+            supergraph_schema,
             subgraph_schemas,
             directive_name_map,
         }
@@ -457,41 +459,99 @@ impl StaticCostCalculator {
         request: &ExecutableDocument,
         response: &Response,
     ) -> Result<f64, DemandControlError> {
-        let mut visitor = ResponseCostCalculator::new();
+        let mut visitor = ResponseCostCalculator::new(&self.supergraph_schema);
         visitor.visit(request, response);
         Ok(visitor.cost)
     }
 }
 
-pub(crate) struct ResponseCostCalculator {
+pub(crate) struct ResponseCostCalculator<'a> {
     pub(crate) cost: f64,
+    schema: &'a Valid<Schema>,
+    directive_name_map: HashMap<Name, Name>,
 }
 
-impl ResponseCostCalculator {
-    pub(crate) fn new() -> Self {
-        Self { cost: 0.0 }
+impl<'schema> ResponseCostCalculator<'schema> {
+    pub(crate) fn new(schema: &'schema Valid<Schema>) -> Self {
+        let directive_name_map = get_apollo_directive_names(&schema);
+
+        Self {
+            cost: 0.0,
+            schema,
+            directive_name_map,
+        }
+    }
+
+    fn score_argument(&self, argument: &InputValueDefinition) -> f64 {
+        let mut cost = 0.0;
+        let cost_directive = CostDirective::from_argument(&self.directive_name_map, argument);
+        if let Some(ty) = self
+            .schema
+            .types
+            .get(argument.ty.inner_named_type().as_str())
+        {
+            match ty {
+                apollo_compiler::schema::ExtendedType::InputObject(inner_arguments) => {
+                    cost = cost_directive.map_or(1.0, |cost| cost.weight());
+                    for inner_argument in inner_arguments.fields.values() {
+                        cost += self.score_argument(inner_argument);
+                    }
+                }
+
+                apollo_compiler::schema::ExtendedType::Scalar(_)
+                | apollo_compiler::schema::ExtendedType::Enum(_) => {
+                    cost = cost_directive.map_or(0.0, |cost| cost.weight())
+                }
+
+                apollo_compiler::schema::ExtendedType::Object(_)
+                | apollo_compiler::schema::ExtendedType::Interface(_)
+                | apollo_compiler::schema::ExtendedType::Union(_) => {
+                    // These aren't allowed in this position
+                }
+            }
+        }
+
+        cost
     }
 }
 
-impl ResponseVisitor for ResponseCostCalculator {
+impl<'schema> ResponseVisitor for ResponseCostCalculator<'schema> {
     fn visit_field(
         &mut self,
         request: &ExecutableDocument,
-        _ty: &NamedType,
+        parent_ty: &NamedType,
         field: &Field,
         value: &Value,
     ) {
+        tracing::debug!(
+            "Currrent cost: {}. Visiting response field {} -> {}",
+            self.cost,
+            parent_ty,
+            field.name,
+        );
+        // TODO: Remove unwraps
+        let ty = field.inner_type_def(self.schema).unwrap();
+        let definition = self.schema.type_field(parent_ty, &field.name).unwrap();
+        let cost_directive = CostDirective::from_field(&self.directive_name_map, definition)
+            .or(CostDirective::from_type(&self.directive_name_map, ty));
+
         match value {
-            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
+                self.cost += cost_directive.map_or(0.0, |cost| cost.weight());
+            }
             Value::Array(items) => {
                 for item in items {
-                    self.visit_field(request, field.ty().inner_named_type(), field, item);
+                    self.visit_field(request, parent_ty, field, item);
                 }
             }
             Value::Object(children) => {
-                self.cost += 1.0;
+                self.cost += cost_directive.map_or(1.0, |cost| cost.weight());
                 self.visit_selections(request, &field.selection_set, children);
             }
+        }
+
+        for argument in &definition.arguments {
+            self.cost += self.score_argument(argument);
         }
     }
 }
@@ -534,9 +594,13 @@ mod tests {
     fn estimated_cost(schema_str: &str, query_str: &str) -> f64 {
         let (schema, query) =
             parse_schema_and_operation(schema_str, query_str, &Default::default());
-        StaticCostCalculator::new(schema.supergraph_schema(), Default::default(), 100)
-            .estimated(&query.executable, schema.supergraph_schema(), true)
-            .unwrap()
+        StaticCostCalculator::new(
+            Arc::new(schema.supergraph_schema().clone()),
+            Default::default(),
+            100,
+        )
+        .estimated(&query.executable, schema.supergraph_schema(), true)
+        .unwrap()
     }
 
     /// Estimate cost of an operation on a plain, non-federated schema.
@@ -549,7 +613,7 @@ mod tests {
             "query.graphql",
         )
         .unwrap();
-        StaticCostCalculator::new(&schema, Default::default(), 100)
+        StaticCostCalculator::new(Arc::new(schema.clone()), Default::default(), 100)
             .estimated(&query, &schema, true)
             .unwrap()
     }
@@ -564,7 +628,7 @@ mod tests {
         let query_plan = planner.build_query_plan(&query.executable, None).unwrap();
 
         let calculator = StaticCostCalculator::new(
-            schema.supergraph_schema(),
+            Arc::new(schema.supergraph_schema().clone()),
             Arc::new(
                 planner
                     .subgraph_schemas()
@@ -582,9 +646,13 @@ mod tests {
         let (schema, query) =
             parse_schema_and_operation(schema_str, query_str, &Default::default());
         let response = Response::from_bytes("test", Bytes::from(response_bytes)).unwrap();
-        StaticCostCalculator::new(schema.supergraph_schema(), Default::default(), 100)
-            .actual(&query.executable, &response)
-            .unwrap()
+        StaticCostCalculator::new(
+            Arc::new(schema.supergraph_schema().clone()),
+            Default::default(),
+            100,
+        )
+        .actual(&query.executable, &response)
+        .unwrap()
     }
 
     #[test]
@@ -734,15 +802,15 @@ mod tests {
         let schema = include_str!("./fixtures/federated_ships_schema.graphql");
         let query = include_str!("./fixtures/federated_ships_deferred_query.graphql");
         let (schema, query) = parse_schema_and_operation(schema, query, &Default::default());
+        let schema = Arc::new(schema.supergraph_schema().clone());
 
         let conservative_estimate =
-            StaticCostCalculator::new(schema.supergraph_schema(), Default::default(), 100)
-                .estimated(&query.executable, schema.supergraph_schema(), true)
+            StaticCostCalculator::new(schema.clone(), Default::default(), 100)
+                .estimated(&query.executable, &schema, true)
                 .unwrap();
-        let narrow_estimate =
-            StaticCostCalculator::new(schema.supergraph_schema(), Default::default(), 5)
-                .estimated(&query.executable, schema.supergraph_schema(), true)
-                .unwrap();
+        let narrow_estimate = StaticCostCalculator::new(schema.clone(), Default::default(), 5)
+            .estimated(&query.executable, &schema, true)
+            .unwrap();
 
         assert_eq!(conservative_estimate, 10200.0);
         assert_eq!(narrow_estimate, 35.0);
@@ -752,17 +820,21 @@ mod tests {
     async fn custom_cost_query() {
         let schema = include_str!("./fixtures/custom_cost_schema.graphql");
         let query = include_str!("./fixtures/custom_cost_query.graphql");
+        let response = include_bytes!("./fixtures/custom_cost_response.json");
 
         assert_eq!(estimated_cost(schema, query), 127.0);
         assert_eq!(planned_cost(schema, query).await, 127.0);
+        assert_eq!(actual_cost(schema, query, response), 125.0);
     }
 
     #[test(tokio::test)]
     async fn custom_cost_query_with_renamed_directives() {
         let schema = include_str!("./fixtures/custom_cost_schema_with_renamed_directives.graphql");
         let query = include_str!("./fixtures/custom_cost_query.graphql");
+        let response = include_bytes!("./fixtures/custom_cost_response.json");
 
         assert_eq!(estimated_cost(schema, query), 127.0);
         assert_eq!(planned_cost(schema, query).await, 127.0);
+        assert_eq!(actual_cost(schema, query, response), 125.0);
     }
 }

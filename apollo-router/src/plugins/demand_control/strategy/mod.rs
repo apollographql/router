@@ -97,7 +97,7 @@ impl StrategyFactory {
             StrategyConfig::StaticEstimated { list_size, max } => Arc::new(StaticEstimated {
                 max: *max,
                 cost_calculator: StaticCostCalculator::new(
-                    &self.supergraph_schema,
+                    self.supergraph_schema.clone(),
                     self.subgraph_schemas.clone(),
                     *list_size,
                 ),
