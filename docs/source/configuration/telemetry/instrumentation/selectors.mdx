@@ -57,8 +57,8 @@ The supergraph service is executed after query parsing but before query executio
 | `request_header`   | Yes         |                                                       | The name of a request header                                                      |
 | `response_header`  | Yes         |                                                       | The name of a response header                                                     |
 | `is_primary_response` | No       | `true`\|`false`                                       | Boolean returning true if it's the primary response and not events like subscription events or deferred responses |
-| `response_data`    | Yes         |                                                       | JSON path into the supergraph response body data (it might impact performance)   |
-| `response_errors`  | Yes         |                                                       | JSON path into the supergraph response body errors (it might impact performance) |
+| `response_data`    | Yes         |                                                       | JSON Path into the supergraph response body data (it might impact performance)   |
+| `response_errors`  | Yes         |                                                       | JSON Path into the supergraph response body errors (it might impact performance) |
 | `request_context`  | Yes         |                                                       | The name of a request context key                                                 |
 | `response_context` | Yes         |                                                       | The name of a response context key                                                |
 | `on_graphql_error` | No          | `true`\|`false`                                       | Boolean set to true if the response payload contains a GraphQL error              |
@@ -78,8 +78,8 @@ The subgraph service executes multiple times during query execution, with each e
 | `subgraph_query`            | Yes         | `string`         | The GraphQL query to the subgraph                                              |
 | `subgraph_name`             | No          | `true`\|`false`  | The subgraph name                                                              |
 | `subgraph_query_variable`   | Yes         |                  | The name of a subgraph query variable                                          |
-| `subgraph_response_data`    | Yes         |                  | JSON path into the subgraph response body data (it might impact performance)   |
-| `subgraph_response_errors`  | Yes         |                  | JSON path into the subgraph response body errors (it might impact performance) |
+| `subgraph_response_data`    | Yes         |                  | JSON Path into the subgraph response body data (it might impact performance)   |
+| `subgraph_response_errors`  | Yes         |                  | JSON Path into the subgraph response body errors (it might impact performance) |
 | `subgraph_request_header`   | Yes         |                  | The name of a subgraph request header                                          |
 | `subgraph_response_header`  | Yes         |                  | The name of a subgraph response header                                         |
 | `subgraph_response_status`  | Yes         | `code`\|`reason` | The status of a subgraph response                                              |
