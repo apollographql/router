@@ -473,7 +473,7 @@ pub(crate) struct ResponseCostCalculator<'a> {
 
 impl<'schema> ResponseCostCalculator<'schema> {
     pub(crate) fn new(schema: &'schema Valid<Schema>) -> Self {
-        let directive_name_map = get_apollo_directive_names(&schema);
+        let directive_name_map = get_apollo_directive_names(schema);
 
         Self {
             cost: 0.0,
