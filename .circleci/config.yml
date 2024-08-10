@@ -238,10 +238,12 @@ commands:
               - equal: [ *windows_test_executor, << parameters.platform >> ]
           steps:
             - run:
-                name: Install CMake
+                name: Install CMake and LIBCLANG
                 command: |
                   choco install cmake.install -y
                   echo 'export PATH="/c/Program Files/CMake/bin:$PATH"' >> "$BASH_ENV"
+                  choco install llvm -y
+                  echo 'export LIBCLANG_PATH="/c/Program Files/LLVM/bin"' >> "$BASH_ENV"
                   exit $LASTEXITCODE
       - when:
           condition:
@@ -501,6 +503,8 @@ commands:
             # TODO: remove this workaround once we update to Xcode >= 15.1.0 
             # See: https://github.com/apollographql/router/pull/5462
             RUST_LIB_BACKTRACE: 0
+            # See https://aws.github.io/aws-lc-rs/resources.html?highlight=AWS_LC_SYS_NO_ASM#troubleshooting
+            AWS_LC_SYS_NO_ASM: 1
           command: xtask test --workspace --locked --features ci
       - run:
           name: Delete large files from cache
