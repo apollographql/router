@@ -21,6 +21,7 @@ use opentelemetry::global;
 use pin_project_lite::pin_project;
 use rustls::ClientConfig;
 use rustls::RootCertStore;
+use rustls_pki_types::CertificateDer;
 use schemars::JsonSchema;
 use tower::util::Either;
 use tower::BoxError;
@@ -178,11 +179,11 @@ impl HttpClientService {
 
         for cert in rustls_native_certs::load_native_certs().expect("could not load platform certs")
         {
-            let cert = rustls::Certificate(cert.0);
-            match roots.add(&cert) {
+            let cert = CertificateDer::from(cert.as_ref());
+            match roots.add(cert.clone()) {
                 Ok(_) => valid_count += 1,
                 Err(err) => {
-                    tracing::trace!("invalid cert der {:?}", cert.0);
+                    tracing::trace!("invalid cert der {:?}", cert);
                     tracing::debug!("certificate parsing failed: {:?}", err);
                     invalid_count += 1
                 }
@@ -202,13 +203,15 @@ pub(crate) fn generate_tls_client_config(
     tls_cert_store: RootCertStore,
     client_cert_config: Option<&TlsClientAuth>,
 ) -> Result<rustls::ClientConfig, BoxError> {
-    let tls_builder = rustls::ClientConfig::builder().with_safe_defaults();
+    let tls_builder =
+        ClientConfig::builder_with_provider(rustls::crypto::aws_lc_rs::default_provider().into())
+            .with_safe_default_protocol_versions()?;
     Ok(match client_cert_config {
         Some(client_auth_config) => tls_builder
             .with_root_certificates(tls_cert_store)
             .with_client_auth_cert(
                 client_auth_config.certificate_chain.clone(),
-                client_auth_config.key.clone(),
+                client_auth_config.key.clone_key(),
             )?,
         None => tls_builder
             .with_root_certificates(tls_cert_store)

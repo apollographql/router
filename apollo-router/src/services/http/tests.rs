@@ -22,11 +22,12 @@ use hyper_rustls::TlsAcceptor;
 #[cfg(unix)]
 use hyperlocal::UnixServerExt;
 use mime::APPLICATION_JSON;
-use rustls::server::AllowAnyAuthenticatedClient;
-use rustls::Certificate;
-use rustls::PrivateKey;
+use rustls::server::WebPkiClientVerifier;
+use rustls::ClientConfig;
 use rustls::RootCertStore;
 use rustls::ServerConfig;
+use rustls_pki_types::CertificateDer;
+use rustls_pki_types::PrivateKeyDer;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use tokio::io::AsyncWriteExt;
@@ -52,8 +53,8 @@ use crate::TestHarness;
 
 async fn tls_server(
     listener: tokio::net::TcpListener,
-    certificates: Vec<Certificate>,
-    key: PrivateKey,
+    certificates: Vec<CertificateDer<'static>>,
+    key: PrivateKeyDer<'static>,
     body: &'static str,
 ) {
     let acceptor = TlsAcceptor::builder()
@@ -202,23 +203,27 @@ async fn tls_custom_root() {
 
 async fn tls_server_with_client_auth(
     listener: tokio::net::TcpListener,
-    certificates: Vec<Certificate>,
-    key: PrivateKey,
-    client_root: Certificate,
+    certificates: Vec<CertificateDer<'static>>,
+    key: PrivateKeyDer<'static>,
+    client_root: CertificateDer<'static>,
     body: &'static str,
 ) {
     let mut client_auth_roots = RootCertStore::empty();
-    client_auth_roots.add(&client_root).unwrap();
+    client_auth_roots.add(client_root).unwrap();
 
-    let client_auth = AllowAnyAuthenticatedClient::new(client_auth_roots).boxed();
-
+    let client_auth = WebPkiClientVerifier::builder(Arc::from(client_auth_roots))
+        .build()
+        .unwrap();
     let acceptor = TlsAcceptor::builder()
         .with_tls_config(
-            ServerConfig::builder()
-                .with_safe_defaults()
-                .with_client_cert_verifier(client_auth)
-                .with_single_cert(certificates, key)
-                .unwrap(),
+            ServerConfig::builder_with_provider(
+                rustls::crypto::aws_lc_rs::default_provider().into(),
+            )
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_client_cert_verifier(client_auth)
+            .with_single_cert(certificates, key)
+            .unwrap(),
         )
         .with_all_versions_alpn()
         .with_incoming(AddrIncoming::from_listener(listener).unwrap());
@@ -344,9 +349,11 @@ async fn test_subgraph_h2c() {
     let subgraph_service = HttpClientService::new(
         "test",
         Http2Config::Http2Only,
-        rustls::ClientConfig::builder()
-            .with_safe_defaults()
+        ClientConfig::builder_with_provider(rustls::crypto::aws_lc_rs::default_provider().into())
+            .with_safe_default_protocol_versions()
+            .unwrap()
             .with_native_roots()
+            .unwrap()
             .with_no_client_auth(),
     )
     .expect("can create a HttpService");
@@ -420,9 +427,11 @@ async fn test_compressed_request_response_body() {
     let subgraph_service = HttpClientService::new(
         "test",
         Http2Config::Http2Only,
-        rustls::ClientConfig::builder()
-            .with_safe_defaults()
+        ClientConfig::builder_with_provider(rustls::crypto::aws_lc_rs::default_provider().into())
+            .with_safe_default_protocol_versions()
+            .unwrap()
             .with_native_roots()
+            .unwrap()
             .with_no_client_auth(),
     )
     .expect("can create a HttpService");

@@ -83,10 +83,12 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
         http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
         http_connector.enforce_http(false);
 
-        let tls_config = rustls::ClientConfig::builder()
-            .with_safe_defaults()
-            .with_native_roots()
-            .with_no_client_auth();
+        let tls_config = rustls::ClientConfig::builder_with_provider(
+            rustls::crypto::aws_lc_rs::default_provider().into(),
+        )
+        .with_safe_default_protocol_versions()?
+        .with_native_roots()?
+        .with_no_client_auth();
 
         let builder = hyper_rustls::HttpsConnectorBuilder::new()
             .with_tls_config(tls_config)

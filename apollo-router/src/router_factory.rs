@@ -9,6 +9,7 @@ use http::StatusCode;
 use indexmap::IndexMap;
 use multimap::MultiMap;
 use rustls::RootCertStore;
+use rustls_pki_types::CertificateDer;
 use serde_json::Map;
 use serde_json::Value;
 use tower::service_fn;
@@ -503,7 +504,7 @@ pub(crate) fn create_certificate_store(
     })?;
     for certificate in certificates {
         store
-            .add(&certificate)
+            .add(certificate)
             .map_err(|e| ConfigurationError::CertificateAuthorities {
                 error: format!("could not add certificate to root store: {e}"),
             })?;
@@ -517,7 +518,7 @@ pub(crate) fn create_certificate_store(
     }
 }
 
-fn load_certs(certificates: &str) -> io::Result<Vec<rustls::Certificate>> {
+fn load_certs(certificates: &str) -> io::Result<Vec<CertificateDer<'static>>> {
     tracing::debug!("loading root certificates");
 
     // Load and return certificate.
@@ -527,7 +528,7 @@ fn load_certs(certificates: &str) -> io::Result<Vec<rustls::Certificate>> {
             "failed to load certificate".to_string(),
         )
     })?;
-    Ok(certs.into_iter().map(rustls::Certificate).collect())
+    Ok(certs.into_iter().map(CertificateDer::from).collect())
 }
 
 /// test only helper method to create a router factory in integration tests

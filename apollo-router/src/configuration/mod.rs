@@ -18,12 +18,12 @@ pub(crate) use persisted_queries::PersistedQueries;
 #[cfg(test)]
 pub(crate) use persisted_queries::PersistedQueriesSafelist;
 use regex::Regex;
-use rustls::Certificate;
-use rustls::PrivateKey;
 use rustls::ServerConfig;
 use rustls_pemfile::certs;
 use rustls_pemfile::read_one;
 use rustls_pemfile::Item;
+use rustls_pki_types::CertificateDer;
+use rustls_pki_types::PrivateKeyDer;
 use schemars::gen::SchemaGenerator;
 use schemars::schema::ObjectValidation;
 use schemars::schema::Schema;
@@ -1255,40 +1255,53 @@ pub(crate) struct Tls {
 }
 
 /// Configuration options pertaining to the supergraph server component.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct TlsSupergraph {
     /// server certificate in PEM format
     #[serde(deserialize_with = "deserialize_certificate", skip_serializing)]
     #[schemars(with = "String")]
-    pub(crate) certificate: Certificate,
+    pub(crate) certificate: CertificateDer<'static>,
     /// server key in PEM format
     #[serde(deserialize_with = "deserialize_key", skip_serializing)]
     #[schemars(with = "String")]
-    pub(crate) key: PrivateKey,
+    pub(crate) key: PrivateKeyDer<'static>,
     /// list of certificate authorities in PEM format
     #[serde(deserialize_with = "deserialize_certificate_chain", skip_serializing)]
     #[schemars(with = "String")]
-    pub(crate) certificate_chain: Vec<Certificate>,
+    pub(crate) certificate_chain: Vec<CertificateDer<'static>>,
+}
+
+impl Clone for TlsSupergraph {
+    fn clone(&self) -> Self {
+        Self {
+            certificate: self.certificate.clone(),
+            key: self.key.clone_key(),
+            certificate_chain: self.certificate_chain.clone(),
+        }
+    }
 }
 
 impl TlsSupergraph {
-    pub(crate) fn tls_config(&self) -> Result<Arc<rustls::ServerConfig>, ApolloRouterError> {
+    pub(crate) fn tls_config(&self) -> Result<Arc<ServerConfig>, ApolloRouterError> {
         let mut certificates = vec![self.certificate.clone()];
         certificates.extend(self.certificate_chain.iter().cloned());
 
-        let mut config = ServerConfig::builder()
-            .with_safe_defaults()
-            .with_no_client_auth()
-            .with_single_cert(certificates, self.key.clone())
-            .map_err(ApolloRouterError::Rustls)?;
+        let mut config = ServerConfig::builder_with_provider(
+            rustls::crypto::aws_lc_rs::default_provider().into(),
+        )
+        .with_safe_default_protocol_versions()
+        .map_err(ApolloRouterError::Rustls)?
+        .with_no_client_auth()
+        .with_single_cert(certificates, self.key.clone_key())
+        .map_err(ApolloRouterError::Rustls)?;
         config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
 
         Ok(Arc::new(config))
     }
 }
 
-fn deserialize_certificate<'de, D>(deserializer: D) -> Result<Certificate, D::Error>
+fn deserialize_certificate<'de, D>(deserializer: D) -> Result<CertificateDer<'static>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -1307,7 +1320,9 @@ where
         })
 }
 
-fn deserialize_certificate_chain<'de, D>(deserializer: D) -> Result<Vec<Certificate>, D::Error>
+fn deserialize_certificate_chain<'de, D>(
+    deserializer: D,
+) -> Result<Vec<CertificateDer<'static>>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -1316,7 +1331,7 @@ where
     load_certs(&data).map_err(serde::de::Error::custom)
 }
 
-fn deserialize_key<'de, D>(deserializer: D) -> Result<PrivateKey, D::Error>
+fn deserialize_key<'de, D>(deserializer: D) -> Result<PrivateKeyDer<'static>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -1325,20 +1340,20 @@ where
     load_key(&data).map_err(serde::de::Error::custom)
 }
 
-pub(crate) fn load_certs(data: &str) -> io::Result<Vec<Certificate>> {
+pub(crate) fn load_certs(data: &str) -> io::Result<Vec<CertificateDer<'static>>> {
     certs(&mut BufReader::new(data.as_bytes()))
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid cert"))
-        .map(|mut certs| certs.drain(..).map(Certificate).collect())
+        .map(|mut certs| certs.drain(..).map(CertificateDer::from).collect())
 }
 
-pub(crate) fn load_key(data: &str) -> io::Result<PrivateKey> {
+pub(crate) fn load_key(data: &str) -> io::Result<PrivateKeyDer<'static>> {
     let mut reader = BufReader::new(data.as_bytes());
     let mut key_iterator = iter::from_fn(|| read_one(&mut reader).transpose());
 
     let private_key = match key_iterator.next() {
-        Some(Ok(Item::RSAKey(key))) => PrivateKey(key),
-        Some(Ok(Item::PKCS8Key(key))) => PrivateKey(key),
-        Some(Ok(Item::ECKey(key))) => PrivateKey(key),
+        Some(Ok(Item::RSAKey(key))) => PrivateKeyDer::Pkcs1(key.into()),
+        Some(Ok(Item::PKCS8Key(key))) => PrivateKeyDer::Pkcs8(key.into()),
+        Some(Ok(Item::ECKey(key))) => PrivateKeyDer::Sec1(key.into()),
         Some(Err(e)) => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -1400,17 +1415,26 @@ impl Default for TlsClient {
 }
 
 /// TLS client authentication
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct TlsClientAuth {
     /// list of certificates in PEM format
     #[serde(deserialize_with = "deserialize_certificate_chain", skip_serializing)]
     #[schemars(with = "String")]
-    pub(crate) certificate_chain: Vec<Certificate>,
+    pub(crate) certificate_chain: Vec<CertificateDer<'static>>,
     /// key in PEM format
     #[serde(deserialize_with = "deserialize_key", skip_serializing)]
     #[schemars(with = "String")]
-    pub(crate) key: PrivateKey,
+    pub(crate) key: PrivateKeyDer<'static>,
+}
+
+impl Clone for TlsClientAuth {
+    fn clone(&self) -> Self {
+        Self {
+            certificate_chain: self.certificate_chain.clone(),
+            key: self.key.clone_key(),
+        }
+    }
 }
 
 /// Configuration options pertaining to the sandbox page.

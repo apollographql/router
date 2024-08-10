@@ -24,6 +24,7 @@ use mediatype::MediaType;
 use mime::APPLICATION_JSON;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
+use rustls::ClientConfig;
 use rustls::RootCertStore;
 use serde::Serialize;
 use tokio::select;
@@ -180,21 +181,25 @@ pub(crate) fn generate_tls_client_config(
     tls_cert_store: Option<RootCertStore>,
     client_cert_config: Option<&TlsClientAuth>,
 ) -> Result<rustls::ClientConfig, BoxError> {
-    let tls_builder = rustls::ClientConfig::builder().with_safe_defaults();
+    let tls_builder =
+        ClientConfig::builder_with_provider(rustls::crypto::aws_lc_rs::default_provider().into())
+            .with_safe_default_protocol_versions()?;
     Ok(match (tls_cert_store, client_cert_config) {
-        (None, None) => tls_builder.with_native_roots().with_no_client_auth(),
+        (None, None) => tls_builder.with_native_roots()?.with_no_client_auth(),
         (Some(store), None) => tls_builder
             .with_root_certificates(store)
             .with_no_client_auth(),
-        (None, Some(client_auth_config)) => tls_builder.with_native_roots().with_client_auth_cert(
-            client_auth_config.certificate_chain.clone(),
-            client_auth_config.key.clone(),
-        )?,
+        (None, Some(client_auth_config)) => {
+            tls_builder.with_native_roots()?.with_client_auth_cert(
+                client_auth_config.certificate_chain.clone(),
+                client_auth_config.key.clone_key(),
+            )?
+        }
         (Some(store), Some(client_auth_config)) => tls_builder
             .with_root_certificates(store)
             .with_client_auth_cert(
                 client_auth_config.certificate_chain.clone(),
-                client_auth_config.key.clone(),
+                client_auth_config.key.clone_key(),
             )?,
     })
 }
