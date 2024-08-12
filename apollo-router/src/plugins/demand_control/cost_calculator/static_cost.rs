@@ -197,7 +197,7 @@ impl StaticCostCalculator {
                 })?;
             arguments_cost += score_argument(
                 &argument.value,
-                &argument_definition,
+                argument_definition,
                 schema,
                 &self.directive_name_map,
             )?;
@@ -523,51 +523,25 @@ impl<'schema> ResponseVisitor for ResponseCostCalculator<'schema> {
         field: &Field,
         value: &Value,
     ) {
-        tracing::debug!(
-            "Currrent cost: {}. Visiting response field {} -> {}",
-            self.cost,
-            parent_ty,
-            field.name,
-        );
-        // TODO: Remove unwraps
-        let ty = field.inner_type_def(self.schema).unwrap();
-        let definition = self.schema.type_field(parent_ty, &field.name).unwrap();
-        let cost_directive = CostDirective::from_field(&self.directive_name_map, definition)
-            .or(CostDirective::from_type(&self.directive_name_map, ty));
+        self.visit_list_item(request, parent_ty, field, value);
 
-        match value {
-            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
-                self.cost += cost_directive.map_or(0.0, |cost| cost.weight());
-            }
-            Value::Array(items) => {
-                for item in items {
-                    self.visit_list_item(request, parent_ty, field, item);
-                }
-            }
-            Value::Object(children) => {
-                self.cost += cost_directive.map_or(1.0, |cost| cost.weight());
-                self.visit_selections(request, &field.selection_set, children);
-            }
-        }
-
+        let definition = self.schema.type_field(parent_ty, &field.name);
         for argument in &field.arguments {
-            tracing::debug!("Scoring argument {}", argument.name);
-            let argument_definition = definition
-                .argument_by_name(&argument.name)
-                .ok_or_else(|| {
-                    DemandControlError::QueryParseFailure(format!(
-                        "Argument {} of field {} is missing a definition in the schema",
-                        argument.name, field.name
-                    ))
-                })
-                .unwrap();
-            self.cost += score_argument(
-                &argument.value,
-                argument_definition,
-                self.schema,
-                &self.directive_name_map,
-            )
-            .unwrap();
+            if let Ok(Some(argument_definition)) = definition
+                .as_ref()
+                .map(|def| def.argument_by_name(&argument.name))
+            {
+                if let Ok(score) = score_argument(
+                    &argument.value,
+                    argument_definition,
+                    self.schema,
+                    &self.directive_name_map,
+                ) {
+                    self.cost += score;
+                }
+            } else {
+                tracing::warn!("Failed to get schema definition for argument {} of field {}. The resulting actual cost will be a partial result.", argument.name, field.name)
+            }
         }
     }
 
@@ -578,17 +552,13 @@ impl<'schema> ResponseVisitor for ResponseCostCalculator<'schema> {
         field: &apollo_compiler::executable::Field,
         value: &Value,
     ) {
-        tracing::debug!(
-            "Currrent cost: {}. Visiting response field {} -> {}",
-            self.cost,
-            parent_ty,
-            field.name,
-        );
-        // TODO: Remove unwraps
-        let ty = field.inner_type_def(self.schema).unwrap();
-        let definition = self.schema.type_field(parent_ty, &field.name).unwrap();
-        let cost_directive = CostDirective::from_field(&self.directive_name_map, definition)
-            .or(CostDirective::from_type(&self.directive_name_map, ty));
+        let ty = field.inner_type_def(self.schema);
+        let definition = self.schema.type_field(parent_ty, &field.name);
+        let cost_directive = definition
+            .as_ref()
+            .ok()
+            .and_then(|def| CostDirective::from_field(&self.directive_name_map, def))
+            .or(ty.and_then(|t| CostDirective::from_type(&self.directive_name_map, t)));
 
         match value {
             Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
