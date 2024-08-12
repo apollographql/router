@@ -194,8 +194,6 @@ async fn handle_request(
                             "origin" = origin,
                             "subgraph.name" = subgraph.clone()
                         );
-                    } else {
-                        tracing::info!("scanning did not find keys");
                     }
                 }
             }
