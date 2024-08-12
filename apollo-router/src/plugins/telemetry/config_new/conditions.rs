@@ -81,7 +81,6 @@ where
                     }
                     Ok(())
                 },
-                
             },
             Condition::Exists(sel) => {
                 match restricted_stage {
