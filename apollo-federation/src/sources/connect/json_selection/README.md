@@ -489,8 +489,7 @@ type User @key(fields: "id") {
 ```
 
 In addition to variables like `$this` and `$args`, a special `$` variable is
-always bound to the value received by the closest enclosing `{...}` selection
-set, which allows you to transform input data that looks like this
+always bound to the value received by the closest enclosing `SubSelection`, which allows you to transform input data that looks like this
 
 ```json
 {
