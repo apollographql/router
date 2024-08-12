@@ -140,7 +140,7 @@ type Query
   fieldWithListSize: [String!]
     @join__field(graph: SUBGRAPHWITHLISTSIZE)
     @listSize(assumedSize: 2000, requireOneSlicingArgument: false)
-  fieldWithDynamicListSize(first: Int!): SizedField
+  fieldWithDynamicListSize(first: Int = 10): SizedField
     @join__field(graph: SUBGRAPHWITHLISTSIZE)
     @listSize(
       slicingArguments: ["first"]

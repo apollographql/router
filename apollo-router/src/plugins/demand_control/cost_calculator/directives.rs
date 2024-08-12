@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::DirectiveList;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::InputValueDefinition;
@@ -13,7 +12,6 @@ use apollo_compiler::parser::Parser;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
-use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_federation::link::spec::APOLLO_SPEC_DOMAIN;
 use apollo_federation::link::Link;
@@ -147,7 +145,7 @@ impl<'schema> ListSizeDirective<'schema> {
             let assumed_size = directive
                 .argument_by_name(&LIST_SIZE_DIRECTIVE_ASSUMED_SIZE_ARGUMENT_NAME)
                 .and_then(|arg| arg.to_i32());
-            let slicing_arguments: Option<HashSet<&str>> = directive
+            let slicing_argument_names: Option<HashSet<&str>> = directive
                 .argument_by_name(&LIST_SIZE_DIRECTIVE_SLICING_ARGUMENTS_ARGUMENT_NAME)
                 .and_then(|arg| arg.as_list())
                 .map(|arg_list| arg_list.iter().flat_map(|arg| arg.as_str()).collect());
@@ -160,23 +158,36 @@ impl<'schema> ListSizeDirective<'schema> {
                 .and_then(|arg| arg.to_bool())
                 .unwrap_or(true);
 
-            if let Some(slicing_arguments) = slicing_arguments.as_ref() {
-                let used_slicing_arguments: Vec<&Node<Argument>> = field
-                    .arguments
-                    .iter()
-                    .filter(|arg| slicing_arguments.contains(arg.name.as_str()))
-                    .collect();
-                if require_one_slicing_argument && used_slicing_arguments.len() != 1 {
+            let mut slicing_arguments: HashMap<&str, i32> = HashMap::new();
+            if let Some(slicing_argument_names) = slicing_argument_names.as_ref() {
+                // First, collect the default values for each argument
+                for argument in &definition.arguments {
+                    if slicing_argument_names.contains(argument.name.as_str()) {
+                        if let Some(numeric_value) =
+                            argument.default_value.as_ref().and_then(|v| v.to_i32())
+                        {
+                            slicing_arguments.insert(&argument.name, numeric_value);
+                        }
+                    }
+                }
+                // Then, overwrite any default values with the actual values passed in the query
+                for argument in &field.arguments {
+                    if slicing_argument_names.contains(argument.name.as_str()) {
+                        if let Some(numeric_value) = argument.value.to_i32() {
+                            slicing_arguments.insert(&argument.name, numeric_value);
+                        }
+                    }
+                }
+
+                if require_one_slicing_argument && slicing_arguments.len() != 1 {
                     return Err(DemandControlError::QueryParseFailure(format!(
                         "Exactly one slicing argument is required, but found {}",
-                        used_slicing_arguments.len()
+                        slicing_arguments.len()
                     )));
                 }
             }
-            let expected_size = assumed_size.or(Self::size_from_slicing_arguments(
-                field,
-                slicing_arguments.as_ref(),
-            ));
+
+            let expected_size = slicing_arguments.values().max().cloned().or(assumed_size);
 
             Ok(Some(Self {
                 expected_size,
@@ -184,27 +195,6 @@ impl<'schema> ListSizeDirective<'schema> {
             }))
         } else {
             Ok(None)
-        }
-    }
-
-    fn size_from_slicing_arguments(
-        field: &Field,
-        slicing_arguments: Option<&HashSet<&str>>,
-    ) -> Option<i32> {
-        if let Some(slicing_arguments) = slicing_arguments {
-            let mut size_from_slicing_arguments = 0;
-            for arg in field
-                .arguments
-                .iter()
-                .filter(|arg| slicing_arguments.contains(arg.name.as_str()))
-            {
-                if let Some(v) = arg.value.to_i32() {
-                    size_from_slicing_arguments = size_from_slicing_arguments.max(v);
-                }
-            }
-            Some(size_from_slicing_arguments)
-        } else {
-            None
         }
     }
 

@@ -916,4 +916,16 @@ mod tests {
         assert_eq!(planned_cost(schema, query).await, 127.0);
         assert_eq!(actual_cost(schema, query, response), 125.0);
     }
+
+    #[test(tokio::test)]
+    async fn custom_cost_query_with_default_slicing_argument() {
+        let schema = include_str!("./fixtures/custom_cost_schema.graphql");
+        let query =
+            include_str!("./fixtures/custom_cost_query_with_default_slicing_argument.graphql");
+        let response = include_bytes!("./fixtures/custom_cost_response.json");
+
+        assert_eq!(estimated_cost(schema, query), 132.0);
+        assert_eq!(planned_cost(schema, query).await, 132.0);
+        assert_eq!(actual_cost(schema, query, response), 125.0);
+    }
 }
