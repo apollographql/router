@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use apollo_compiler::ast;
 use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::executable::ExecutableDocument;
@@ -10,8 +11,10 @@ use apollo_compiler::executable::InlineFragment;
 use apollo_compiler::executable::Operation;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
+use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use serde_json_bytes::Value;
 
@@ -132,8 +135,15 @@ impl StaticCostCalculator {
             list_size_directive.as_ref(),
         )?;
 
-        for argument in &definition.arguments {
-            type_cost += self.score_argument(argument, schema)?;
+        for argument in &field.arguments {
+            let argument_definition =
+                definition.argument_by_name(&argument.name).ok_or_else(|| {
+                    DemandControlError::QueryParseFailure(format!(
+                        "Argument {} of field {} is missing a definition in the schema",
+                        argument.name, field.name
+                    ))
+                })?;
+            type_cost += self.score_argument(&argument.value, &argument_definition, schema)?;
         }
 
         let mut requirements_cost = 0.0;
@@ -170,37 +180,53 @@ impl StaticCostCalculator {
 
     fn score_argument(
         &self,
-        argument: &InputValueDefinition,
+        argument: &apollo_compiler::ast::Value,
+        argument_definition: &Node<InputValueDefinition>,
         schema: &Valid<Schema>,
     ) -> Result<f64, DemandControlError> {
-        let cost_directive = CostDirective::from_argument(&self.directive_name_map, argument);
-        if let Some(ty) = schema.types.get(argument.ty.inner_named_type().as_str()) {
-            match ty {
-                apollo_compiler::schema::ExtendedType::InputObject(inner_arguments) => {
-                    let mut cost = cost_directive.map_or(1.0, |cost| cost.weight());
-                    for inner_argument in inner_arguments.fields.values() {
-                        cost += self.score_argument(inner_argument, schema)?;
-                    }
-                    Ok(cost)
-                }
+        let cost_directive =
+            CostDirective::from_argument(&self.directive_name_map, argument_definition);
+        let ty = schema
+            .types
+            .get(argument_definition.ty.inner_named_type().as_str())
+            .ok_or_else(|| {
+                DemandControlError::QueryParseFailure(format!(
+                    "Argument {} was found in query, but its type ({}) was not found in the schema",
+                    argument_definition.name,
+                    argument_definition.ty.inner_named_type()
+                ))
+            })?;
 
-                apollo_compiler::schema::ExtendedType::Scalar(_)
-                | apollo_compiler::schema::ExtendedType::Enum(_) => Ok(cost_directive.map_or(0.0, |cost| cost.weight())),
+        match (argument, ty) {
+            (_, ExtendedType::Interface(_))
+            | (_, ExtendedType::Object(_))
+            | (_, ExtendedType::Union(_)) => Err(DemandControlError::QueryParseFailure(
+                format!("Argument {} has type {}, but objects, interfaces, and unions are disallowed in this position", argument_definition.name, argument_definition.ty.inner_named_type())
+            )),
 
-                apollo_compiler::schema::ExtendedType::Object(_)
-                | apollo_compiler::schema::ExtendedType::Interface(_)
-                | apollo_compiler::schema::ExtendedType::Union(_) => {
-                    Err(DemandControlError::QueryParseFailure(
-                        format!("Argument {} has type {}, but objects, interfaces, and unions are disallowed in this position", argument.name, argument.ty.inner_named_type())
-                    ))
+            (ast::Value::Object(inner_args), ExtendedType::InputObject(inner_arg_defs)) => {
+                let mut cost = cost_directive.map_or(1.0, |cost| cost.weight());
+                for (arg_name, arg_val) in inner_args {
+                    let arg_def = inner_arg_defs.fields.get(arg_name).ok_or_else(|| {
+                        DemandControlError::QueryParseFailure(format!(
+                            "Argument {} was found in query, but its type ({}) was not found in the schema",
+                            argument_definition.name,
+                            argument_definition.ty.inner_named_type()
+                        ))
+                    })?;
+                    cost += self.score_argument(arg_val, arg_def, schema)?;
                 }
+                Ok(cost)
             }
-        } else {
-            Err(DemandControlError::QueryParseFailure(format!(
-                "Argument {} was found in query, but its type ({}) was not found in the schema",
-                argument.name,
-                argument.ty.inner_named_type()
-            )))
+            (ast::Value::List(inner_args), _) => {
+                let mut cost = cost_directive.map_or(0.0, |cost| cost.weight());
+                for arg_val in inner_args {
+                    cost += self.score_argument(arg_val, argument_definition, schema)?;
+                }
+                Ok(cost)
+            }
+            (ast::Value::Null, _) => Ok(0.0),
+            _ => Ok(cost_directive.map_or(0.0, |cost| cost.weight()))
         }
     }
 
@@ -724,7 +750,7 @@ mod tests {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_input_object_query.graphql");
 
-        assert_eq!(basic_estimated_cost(schema, query), 2.0)
+        assert_eq!(basic_estimated_cost(schema, query), 4.0)
     }
 
     #[test]

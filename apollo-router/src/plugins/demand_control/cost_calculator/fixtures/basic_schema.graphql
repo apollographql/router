@@ -35,4 +35,6 @@ input InnerInput {
 
 input OuterInput {
   inner: InnerInput
+  inner2: InnerInput
+  listOfInner: [InnerInput!]
 }
