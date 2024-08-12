@@ -13,6 +13,7 @@ use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::query_planner::BridgeQueryPlanner;
+use crate::query_planner::PlannerMode;
 use crate::services::execution;
 use crate::services::http;
 use crate::services::router;
@@ -92,9 +93,11 @@ impl<T: Plugin> PluginTestHarness<T> {
             let schema = Schema::parse(schema, &config).unwrap();
             let sdl = schema.raw_sdl.clone();
             let supergraph = schema.supergraph_schema().clone();
-            let planner = BridgeQueryPlanner::new(schema.into(), Arc::new(config), None)
-                .await
-                .unwrap();
+            let rust_planner = PlannerMode::maybe_rust(&schema, &config).unwrap();
+            let planner =
+                BridgeQueryPlanner::new(schema.into(), Arc::new(config), None, rust_planner)
+                    .await
+                    .unwrap();
             (sdl, supergraph, planner.subgraph_schemas())
         } else {
             (

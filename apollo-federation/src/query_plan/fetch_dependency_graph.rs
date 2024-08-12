@@ -14,6 +14,7 @@ use apollo_compiler::ast::Type;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
+use apollo_compiler::executable::DirectiveList;
 use apollo_compiler::executable::VariableDefinition;
 use apollo_compiler::name;
 use apollo_compiler::schema;
@@ -28,6 +29,7 @@ use petgraph::visit::EdgeRef;
 use petgraph::visit::IntoNodeReferences;
 use serde::Serialize;
 
+use super::query_planner::SubgraphOperationCompression;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::graphql_definition::DeferDirectiveArguments;
@@ -38,11 +40,11 @@ use crate::operation::InlineFragment;
 use crate::operation::InlineFragmentData;
 use crate::operation::InlineFragmentSelection;
 use crate::operation::Operation;
-use crate::operation::RebasedFragments;
 use crate::operation::Selection;
 use crate::operation::SelectionId;
 use crate::operation::SelectionMap;
 use crate::operation::SelectionSet;
+use crate::operation::VariableCollector;
 use crate::operation::TYPENAME_FIELD;
 use crate::query_graph::extract_subgraphs_from_supergraph::FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME;
 use crate::query_graph::extract_subgraphs_from_supergraph::FEDERATION_REPRESENTATIONS_VAR_NAME;
@@ -666,7 +668,9 @@ impl FetchDependencyGraph {
         //    keeping nodes separated when they have a different path in their parent
         //    allows to keep that "path in parent" more precisely,
         //    which is important for some case of @requires).
-        for existing_id in self.children_of(parent.parent_node_id) {
+        for existing_id in
+            FetchDependencyGraph::sorted_nodes(self.children_of(parent.parent_node_id))
+        {
             let existing = self.node_weight(existing_id)?;
             // we compare the subgraph names last because on average it improves performance
             if existing.merge_at.as_deref() == Some(merge_at)
@@ -727,6 +731,7 @@ impl FetchDependencyGraph {
 
     /// Adds another node as a parent of `child`,
     /// meaning that this fetch should happen after the provided one.
+    /// Assumption: The parent node is not a descendant of the child.
     fn add_parent(&mut self, child_id: NodeIndex, parent_relation: ParentRelation) {
         let ParentRelation {
             parent_node_id,
@@ -736,8 +741,8 @@ impl FetchDependencyGraph {
             return;
         }
         assert!(
-            !self.graph.contains_edge(child_id, parent_node_id),
-            "Node {parent_node_id:?} is a child of {child_id:?}: \
+            !self.is_descendant_of(parent_node_id, child_id),
+            "Node {parent_node_id:?} is a descendant of {child_id:?}: \
              adding it as parent would create a cycle"
         );
         self.on_modification();
@@ -792,15 +797,7 @@ impl FetchDependencyGraph {
     }
 
     fn is_descendant_of(&self, node_id: NodeIndex, maybe_ancestor_id: NodeIndex) -> bool {
-        if node_id == maybe_ancestor_id {
-            return true;
-        }
-        for child_id in self.children_of(node_id) {
-            if self.is_descendant_of(child_id, maybe_ancestor_id) {
-                return true;
-            }
-        }
-        false
+        petgraph::algo::has_path_connecting(&self.graph, maybe_ancestor_id, node_id, None)
     }
 
     /// Returns whether `node_id` is both a child of `maybe_parent_id` but also if we can show that the
@@ -893,6 +890,27 @@ impl FetchDependencyGraph {
             })
     }
 
+    /// By default, petgraph iterates over the nodes in the order of their node indices, but if
+    /// we retrieve node iterator based on the edges (e.g. children of/parents of), then resulting
+    /// iteration order is unspecified. In practice, it appears that edges are iterated in the
+    /// *reverse* iteration order.
+    ///
+    /// Since this behavior can affect the query plans, we can use this method to explicitly sort
+    /// the iterator to ensure we consistently follow the node index order.
+    ///
+    /// NOTE: In JS implementation, whenever we remove/merge nodes, we always shift left remaining
+    /// nodes so there are no gaps in the node IDs and the newly created nodes are always created
+    /// with the largest IDs. RS implementation has different behavior - whenever nodes are removed,
+    /// their IDs are later reused by petgraph so we no longer have guarantee that node with the
+    /// largest ID is the last node that was created. Due to the above, sorting by node IDs may still
+    /// result in different iteration order than the JS code, but in practice might be enough to
+    /// ensure correct plans.
+    fn sorted_nodes<'graph>(
+        nodes: impl Iterator<Item = NodeIndex> + 'graph,
+    ) -> impl Iterator<Item = NodeIndex> + 'graph {
+        nodes.sorted_by_key(|n| n.index())
+    }
+
     fn type_for_fetch_inputs(
         &self,
         type_name: &Name,
@@ -903,7 +921,13 @@ impl FetchDependencyGraph {
             .try_into()?)
     }
 
-    /// Find redundant edges coming out of a node. See `remove_redundant_edges`.
+    /// Find redundant edges coming out of a node. See `remove_redundant_edges`. This method assumes
+    /// that the underlying graph does not have any cycles between nodes.
+    ///
+    /// PORT NOTE: JS implementation performs in-place removal of edges when finding the redundant
+    /// edges. In RS implementation we first collect the edges and then remove them. This has a side
+    /// effect that if we ever end up with a cycle in a graph (which is an invalid state), this method
+    /// may result in infinite loop.
     fn collect_redundant_edges(&self, node_index: NodeIndex, acc: &mut HashSet<EdgeIndex>) {
         let mut stack = vec![];
         for start_index in self.children_of(node_index) {
@@ -912,7 +936,6 @@ impl FetchDependencyGraph {
                 for edge in self.graph.edges_connecting(node_index, v) {
                     acc.insert(edge.id());
                 }
-
                 stack.extend(self.children_of(v));
             }
         }
@@ -926,6 +949,9 @@ impl FetchDependencyGraph {
         let mut redundant_edges = HashSet::new();
         self.collect_redundant_edges(node_index, &mut redundant_edges);
 
+        if !redundant_edges.is_empty() {
+            self.on_modification();
+        }
         for edge in redundant_edges {
             self.graph.remove_edge(edge);
         }
@@ -984,9 +1010,11 @@ impl FetchDependencyGraph {
             self.collect_redundant_edges(node_index, &mut redundant_edges);
         }
 
-        for edge in redundant_edges {
-            // PORT_NOTE: JS version calls `FetchGroup.removeChild`, which calls onModification.
+        // PORT_NOTE: JS version calls `FetchGroup.removeChild`, which calls onModification.
+        if !redundant_edges.is_empty() {
             self.on_modification();
+        }
+        for edge in redundant_edges {
             self.graph.remove_edge(edge);
         }
 
@@ -1423,7 +1451,9 @@ impl FetchDependencyGraph {
         // subgraph name, but have no worries for `mergeAt` since it contains either number of
         // field names, and the later is restricted by graphQL so as to not be an issue.
         let mut by_subgraphs = MultiMap::new();
-        for node_index in self.graph.node_indices() {
+        let sorted_nodes = petgraph::algo::toposort(&self.graph, None)
+            .map_err(|_| FederationError::internal("Failed to sort nodes due to cycle(s)"))?;
+        for node_index in sorted_nodes {
             let node = self.node_weight(node_index)?;
             // We exclude nodes without inputs because that's what we look for. In practice, this
             // mostly just exclude root nodes, which we don't really want to bother with anyway.
@@ -2128,18 +2158,17 @@ impl FetchDependencyGraph {
         let node = self.node_weight(node_id)?;
         let parent = self.node_weight(parent_relation.parent_node_id)?;
         let Some(parent_op_path) = &parent_relation.path_in_parent else {
-            return Err(FederationError::internal("Parent operation path is empty"));
+            return Ok(false);
         };
         let type_at_path = self.type_at_path(
             &parent.selection_set.selection_set.type_position,
             &parent.selection_set.selection_set.schema,
             parent_op_path,
         )?;
-        let new_node_is_unneeded = parent_relation.path_in_parent.is_some()
-            && node
-                .selection_set
-                .selection_set
-                .can_rebase_on(&type_at_path, &parent.selection_set.selection_set.schema)?;
+        let new_node_is_unneeded = node
+            .selection_set
+            .selection_set
+            .can_rebase_on(&type_at_path, &parent.selection_set.selection_set.schema)?;
         Ok(new_node_is_unneeded)
     }
 
@@ -2325,7 +2354,8 @@ impl FetchDependencyGraphNode {
         query_graph: &QueryGraph,
         handled_conditions: &Conditions,
         variable_definitions: &[Node<VariableDefinition>],
-        fragments: Option<&mut RebasedFragments>,
+        operation_directives: &Arc<DirectiveList>,
+        operation_compression: &mut SubgraphOperationCompression,
         operation_name: Option<Name>,
     ) -> Result<Option<super::PlanNode>, FederationError> {
         if self.selection_set.selection_set.selections.is_empty() {
@@ -2346,18 +2376,34 @@ impl FetchDependencyGraphNode {
             .transpose()?;
         let subgraph_schema = query_graph.schema_by_source(&self.subgraph_name)?;
 
+        // Narrow down the variable definitions to only the ones used in the subgraph operation.
+        let variable_definitions = {
+            let mut collector = VariableCollector::new();
+            collector.visit_directive_list(operation_directives);
+            collector.visit_selection_set(&selection);
+            let used_variables = collector.into_inner();
+
+            variable_definitions
+                .iter()
+                .filter(|variable| used_variables.contains(&variable.name))
+                .cloned()
+                .collect::<Vec<_>>()
+        };
         let variable_usages = {
-            let set = selection.used_variables();
-            let mut list = set.into_iter().cloned().collect::<Vec<_>>();
+            let mut list = variable_definitions
+                .iter()
+                .map(|var_def| var_def.name.clone())
+                .collect::<Vec<_>>();
             list.sort();
             list
         };
 
-        let mut operation = if self.is_entity_fetch {
+        let operation = if self.is_entity_fetch {
             operation_for_entities_fetch(
                 subgraph_schema,
                 selection,
                 variable_definitions,
+                operation_directives,
                 &operation_name,
             )?
         } else {
@@ -2366,14 +2412,12 @@ impl FetchDependencyGraphNode {
                 self.root_kind,
                 selection,
                 variable_definitions,
+                operation_directives,
                 &operation_name,
             )?
         };
-        if let Some(fragments) = fragments
-            .map(|rebased| rebased.for_subgraph(self.subgraph_name.clone(), subgraph_schema))
-        {
-            operation.reuse_fragments(fragments)?;
-        }
+        let operation =
+            operation_compression.compress(&self.subgraph_name, subgraph_schema, operation)?;
         let operation_document = operation.try_into()?;
 
         let node = super::PlanNode::Fetch(Box::new(super::FetchNode {
@@ -2535,19 +2579,11 @@ impl FetchDependencyGraphNode {
 fn operation_for_entities_fetch(
     subgraph_schema: &ValidFederationSchema,
     selection_set: SelectionSet,
-    all_variable_definitions: &[Node<VariableDefinition>],
+    mut variable_definitions: Vec<Node<VariableDefinition>>,
+    operation_directives: &Arc<DirectiveList>,
     operation_name: &Option<Name>,
 ) -> Result<Operation, FederationError> {
-    let mut variable_definitions: Vec<Node<VariableDefinition>> =
-        Vec::with_capacity(all_variable_definitions.len() + 1);
-    variable_definitions.push(representations_variable_definition(subgraph_schema)?);
-    let used_variables = selection_set.used_variables();
-    variable_definitions.extend(
-        all_variable_definitions
-            .iter()
-            .filter(|definition| used_variables.contains(&definition.name))
-            .cloned(),
-    );
+    variable_definitions.insert(0, representations_variable_definition(subgraph_schema)?);
 
     let query_type_name = subgraph_schema.schema().root_operation(OperationType::Query).ok_or_else(||
     SingleFederationError::InvalidSubgraph {
@@ -2611,7 +2647,7 @@ fn operation_for_entities_fetch(
         root_kind: SchemaRootDefinitionKind::Query,
         name: operation_name.clone(),
         variables: Arc::new(variable_definitions),
-        directives: Default::default(),
+        directives: Arc::clone(operation_directives),
         selection_set,
         named_fragments: Default::default(),
     })
@@ -2621,22 +2657,16 @@ fn operation_for_query_fetch(
     subgraph_schema: &ValidFederationSchema,
     root_kind: SchemaRootDefinitionKind,
     selection_set: SelectionSet,
-    variable_definitions: &[Node<VariableDefinition>],
+    variable_definitions: Vec<Node<VariableDefinition>>,
+    operation_directives: &Arc<DirectiveList>,
     operation_name: &Option<Name>,
 ) -> Result<Operation, FederationError> {
-    let used_variables = selection_set.used_variables();
-    let variable_definitions = variable_definitions
-        .iter()
-        .filter(|definition| used_variables.contains(&definition.name))
-        .cloned()
-        .collect();
-
     Ok(Operation {
         schema: subgraph_schema.clone(),
         root_kind,
         name: operation_name.clone(),
         variables: Arc::new(variable_definitions),
-        directives: Default::default(),
+        directives: Arc::clone(operation_directives),
         selection_set,
         named_fragments: Default::default(),
     })
