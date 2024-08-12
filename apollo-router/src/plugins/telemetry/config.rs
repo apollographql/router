@@ -322,6 +322,9 @@ pub(crate) struct RequestPropagation {
     #[schemars(with = "String")]
     #[serde(deserialize_with = "deserialize_option_header_name")]
     pub(crate) header_name: Option<HeaderName>,
+
+    /// The trace ID format that will be used when propagating to subgraph services.
+    pub(crate) format: TraceIdFormat,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]

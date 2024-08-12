@@ -4625,12 +4625,17 @@ expression: "&schema"
     "RequestPropagation": {
       "additionalProperties": false,
       "properties": {
+        "format": {
+          "$ref": "#/definitions/TraceIdFormat",
+          "description": "#/definitions/TraceIdFormat"
+        },
         "header_name": {
           "description": "Choose the header name to expose trace_id (default: apollo-trace-id)",
           "type": "string"
         }
       },
       "required": [
+        "format",
         "header_name"
       ],
       "type": "object"
