@@ -10,4 +10,6 @@ The router now correctly propagates trace IDs when using the `propagation.reques
           header_name: "id_from_header"
 ```
 
+Previously, trace IDs weren't transferred to the root span of the request, causing spans to be incorrectly attributed to new traces.
+ 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/5802
