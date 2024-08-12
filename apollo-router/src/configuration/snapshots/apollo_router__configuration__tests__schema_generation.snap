@@ -2134,6 +2134,17 @@ expression: "&schema"
       ],
       "type": "string"
     },
+    "DisplayTraceIdFormat": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/TraceIdFormat",
+          "description": "#/definitions/TraceIdFormat"
+        },
+        {
+          "type": "boolean"
+        }
+      ]
+    },
     "Enabled": {
       "enum": [
         "enabled"
@@ -2547,8 +2558,8 @@ expression: "&schema"
           "type": "boolean"
         },
         "format": {
-          "$ref": "#/definitions/TraceIdFormat2",
-          "description": "#/definitions/TraceIdFormat2"
+          "$ref": "#/definitions/TraceIdFormat",
+          "description": "#/definitions/TraceIdFormat"
         },
         "header_name": {
           "description": "Choose the header name to expose trace_id (default: apollo-trace-id)",
@@ -4395,7 +4406,7 @@ expression: "&schema"
       "description": "Query planner modes.",
       "oneOf": [
         {
-          "description": "Use the new Rust-based implementation.",
+          "description": "Use the new Rust-based implementation.\n\nRaises an error at Router startup if the the new planner does not support the schema (such as using legacy Apollo Federation 1)",
           "enum": [
             "new"
           ],
@@ -4409,9 +4420,16 @@ expression: "&schema"
           "type": "string"
         },
         {
-          "description": "Use Rust-based and Javascript-based implementations side by side, logging warnings if the implementations disagree.",
+          "description": "Use primarily the Javascript-based implementation, but also schedule background jobs to run the Rust implementation and compare results, logging warnings if the implementations disagree.\n\nRaises an error at Router startup if the the new planner does not support the schema (such as using legacy Apollo Federation 1)",
           "enum": [
             "both"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Use primarily the Javascript-based implementation, but also schedule on a best-effort basis background jobs to run the Rust implementation and compare results, logging warnings if the implementations disagree.\n\nFalls back to `legacy` with a warning if the the new planner does not support the schema (such as using legacy Apollo Federation 1)",
+          "enum": [
+            "both_best_effort"
           ],
           "type": "string"
         }
@@ -7202,27 +7220,16 @@ expression: "&schema"
     "TraceIdFormat": {
       "oneOf": [
         {
-          "description": "Open Telemetry trace ID, a hex string.",
+          "description": "Format the Trace ID as a hexadecimal number\n\n(e.g. Trace ID 16 -> 00000000000000000000000000000010)",
           "enum": [
-            "open_telemetry"
+            "hexadecimal"
           ],
           "type": "string"
         },
         {
-          "description": "Datadog trace ID, a u64.",
-          "enum": [
-            "datadog"
-          ],
-          "type": "string"
-        }
-      ]
-    },
-    "TraceIdFormat2": {
-      "oneOf": [
-        {
           "description": "Format the Trace ID as a hexadecimal number\n\n(e.g. Trace ID 16 -> 00000000000000000000000000000010)",
           "enum": [
-            "hexadecimal"
+            "open_telemetry"
           ],
           "type": "string"
         },
@@ -7237,6 +7244,13 @@ expression: "&schema"
           "description": "Datadog",
           "enum": [
             "datadog"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "UUID format with dashes (eg. 67e55044-10b1-426f-9247-bb680e5fe0c8)",
+          "enum": [
+            "uuid"
           ],
           "type": "string"
         }
@@ -8187,9 +8201,8 @@ expression: "&schema"
                   "type": "boolean"
                 },
                 "display_trace_id": {
-                  "default": true,
-                  "description": "Include the trace id (if any) with the log event. (default: true)",
-                  "type": "boolean"
+                  "$ref": "#/definitions/DisplayTraceIdFormat",
+                  "description": "#/definitions/DisplayTraceIdFormat"
                 }
               },
               "type": "object"
@@ -8285,9 +8298,8 @@ expression: "&schema"
                   "type": "boolean"
                 },
                 "display_trace_id": {
-                  "default": false,
-                  "description": "Include the trace id (if any) with the log event. (default: false)",
-                  "type": "boolean"
+                  "$ref": "#/definitions/DisplayTraceIdFormat",
+                  "description": "#/definitions/DisplayTraceIdFormat"
                 }
               },
               "type": "object"
