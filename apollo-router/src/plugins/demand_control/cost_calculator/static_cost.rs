@@ -41,6 +41,57 @@ pub(crate) struct StaticCostCalculator {
     directive_name_map: HashMap<Name, Name>,
 }
 
+fn score_argument(
+    argument: &apollo_compiler::ast::Value,
+    argument_definition: &Node<InputValueDefinition>,
+    schema: &Valid<Schema>,
+    directive_name_map: &HashMap<Name, Name>,
+) -> Result<f64, DemandControlError> {
+    let cost_directive = CostDirective::from_argument(directive_name_map, argument_definition);
+    let ty = schema
+        .types
+        .get(argument_definition.ty.inner_named_type().as_str())
+        .ok_or_else(|| {
+            DemandControlError::QueryParseFailure(format!(
+                "Argument {} was found in query, but its type ({}) was not found in the schema",
+                argument_definition.name,
+                argument_definition.ty.inner_named_type()
+            ))
+        })?;
+
+    match (argument, ty) {
+        (_, ExtendedType::Interface(_))
+        | (_, ExtendedType::Object(_))
+        | (_, ExtendedType::Union(_)) => Err(DemandControlError::QueryParseFailure(
+            format!("Argument {} has type {}, but objects, interfaces, and unions are disallowed in this position", argument_definition.name, argument_definition.ty.inner_named_type())
+        )),
+
+        (ast::Value::Object(inner_args), ExtendedType::InputObject(inner_arg_defs)) => {
+            let mut cost = cost_directive.map_or(1.0, |cost| cost.weight());
+            for (arg_name, arg_val) in inner_args {
+                let arg_def = inner_arg_defs.fields.get(arg_name).ok_or_else(|| {
+                    DemandControlError::QueryParseFailure(format!(
+                        "Argument {} was found in query, but its type ({}) was not found in the schema",
+                        argument_definition.name,
+                        argument_definition.ty.inner_named_type()
+                    ))
+                })?;
+                cost += score_argument(arg_val, arg_def, schema, directive_name_map)?;
+            }
+            Ok(cost)
+        }
+        (ast::Value::List(inner_args), _) => {
+            let mut cost = cost_directive.map_or(0.0, |cost| cost.weight());
+            for arg_val in inner_args {
+                cost += score_argument(arg_val, argument_definition, schema, directive_name_map)?;
+            }
+            Ok(cost)
+        }
+        (ast::Value::Null, _) => Ok(0.0),
+        _ => Ok(cost_directive.map_or(0.0, |cost| cost.weight()))
+    }
+}
+
 impl StaticCostCalculator {
     pub(crate) fn new(
         supergraph_schema: Arc<Valid<Schema>>,
@@ -135,6 +186,7 @@ impl StaticCostCalculator {
             list_size_directive.as_ref(),
         )?;
 
+        let mut arguments_cost = 0.0;
         for argument in &field.arguments {
             let argument_definition =
                 definition.argument_by_name(&argument.name).ok_or_else(|| {
@@ -143,7 +195,12 @@ impl StaticCostCalculator {
                         argument.name, field.name
                     ))
                 })?;
-            type_cost += self.score_argument(&argument.value, &argument_definition, schema)?;
+            arguments_cost += score_argument(
+                &argument.value,
+                &argument_definition,
+                schema,
+                &self.directive_name_map,
+            )?;
         }
 
         let mut requirements_cost = 0.0;
@@ -165,69 +222,18 @@ impl StaticCostCalculator {
             }
         }
 
-        let cost = (instance_count as f64) * type_cost + requirements_cost;
+        let cost = (instance_count as f64) * type_cost + arguments_cost + requirements_cost;
         tracing::debug!(
-            "Field {} cost breakdown: (count) {} * (type cost) {} + (requirements) {} = {}",
+            "Field {} cost breakdown: (count) {} * (type cost) {} + (arguments) {} + (requirements) {} = {}",
             field.name,
             instance_count,
             type_cost,
+            arguments_cost,
             requirements_cost,
             cost
         );
 
         Ok(cost)
-    }
-
-    fn score_argument(
-        &self,
-        argument: &apollo_compiler::ast::Value,
-        argument_definition: &Node<InputValueDefinition>,
-        schema: &Valid<Schema>,
-    ) -> Result<f64, DemandControlError> {
-        let cost_directive =
-            CostDirective::from_argument(&self.directive_name_map, argument_definition);
-        let ty = schema
-            .types
-            .get(argument_definition.ty.inner_named_type().as_str())
-            .ok_or_else(|| {
-                DemandControlError::QueryParseFailure(format!(
-                    "Argument {} was found in query, but its type ({}) was not found in the schema",
-                    argument_definition.name,
-                    argument_definition.ty.inner_named_type()
-                ))
-            })?;
-
-        match (argument, ty) {
-            (_, ExtendedType::Interface(_))
-            | (_, ExtendedType::Object(_))
-            | (_, ExtendedType::Union(_)) => Err(DemandControlError::QueryParseFailure(
-                format!("Argument {} has type {}, but objects, interfaces, and unions are disallowed in this position", argument_definition.name, argument_definition.ty.inner_named_type())
-            )),
-
-            (ast::Value::Object(inner_args), ExtendedType::InputObject(inner_arg_defs)) => {
-                let mut cost = cost_directive.map_or(1.0, |cost| cost.weight());
-                for (arg_name, arg_val) in inner_args {
-                    let arg_def = inner_arg_defs.fields.get(arg_name).ok_or_else(|| {
-                        DemandControlError::QueryParseFailure(format!(
-                            "Argument {} was found in query, but its type ({}) was not found in the schema",
-                            argument_definition.name,
-                            argument_definition.ty.inner_named_type()
-                        ))
-                    })?;
-                    cost += self.score_argument(arg_val, arg_def, schema)?;
-                }
-                Ok(cost)
-            }
-            (ast::Value::List(inner_args), _) => {
-                let mut cost = cost_directive.map_or(0.0, |cost| cost.weight());
-                for arg_val in inner_args {
-                    cost += self.score_argument(arg_val, argument_definition, schema)?;
-                }
-                Ok(cost)
-            }
-            (ast::Value::Null, _) => Ok(0.0),
-            _ => Ok(cost_directive.map_or(0.0, |cost| cost.weight()))
-        }
     }
 
     fn score_fragment_spread(
@@ -507,38 +513,6 @@ impl<'schema> ResponseCostCalculator<'schema> {
             directive_name_map,
         }
     }
-
-    fn score_argument(&self, argument: &InputValueDefinition) -> f64 {
-        let mut cost = 0.0;
-        let cost_directive = CostDirective::from_argument(&self.directive_name_map, argument);
-        if let Some(ty) = self
-            .schema
-            .types
-            .get(argument.ty.inner_named_type().as_str())
-        {
-            match ty {
-                apollo_compiler::schema::ExtendedType::InputObject(inner_arguments) => {
-                    cost = cost_directive.map_or(1.0, |cost| cost.weight());
-                    for inner_argument in inner_arguments.fields.values() {
-                        cost += self.score_argument(inner_argument);
-                    }
-                }
-
-                apollo_compiler::schema::ExtendedType::Scalar(_)
-                | apollo_compiler::schema::ExtendedType::Enum(_) => {
-                    cost = cost_directive.map_or(0.0, |cost| cost.weight())
-                }
-
-                apollo_compiler::schema::ExtendedType::Object(_)
-                | apollo_compiler::schema::ExtendedType::Interface(_)
-                | apollo_compiler::schema::ExtendedType::Union(_) => {
-                    // These aren't allowed in this position
-                }
-            }
-        }
-
-        cost
-    }
 }
 
 impl<'schema> ResponseVisitor for ResponseCostCalculator<'schema> {
@@ -567,7 +541,7 @@ impl<'schema> ResponseVisitor for ResponseCostCalculator<'schema> {
             }
             Value::Array(items) => {
                 for item in items {
-                    self.visit_field(request, parent_ty, field, item);
+                    self.visit_list_item(request, parent_ty, field, item);
                 }
             }
             Value::Object(children) => {
@@ -576,8 +550,59 @@ impl<'schema> ResponseVisitor for ResponseCostCalculator<'schema> {
             }
         }
 
-        for argument in &definition.arguments {
-            self.cost += self.score_argument(argument);
+        for argument in &field.arguments {
+            tracing::debug!("Scoring argument {}", argument.name);
+            let argument_definition = definition
+                .argument_by_name(&argument.name)
+                .ok_or_else(|| {
+                    DemandControlError::QueryParseFailure(format!(
+                        "Argument {} of field {} is missing a definition in the schema",
+                        argument.name, field.name
+                    ))
+                })
+                .unwrap();
+            self.cost += score_argument(
+                &argument.value,
+                argument_definition,
+                self.schema,
+                &self.directive_name_map,
+            )
+            .unwrap();
+        }
+    }
+
+    fn visit_list_item(
+        &mut self,
+        request: &apollo_compiler::ExecutableDocument,
+        parent_ty: &apollo_compiler::executable::NamedType,
+        field: &apollo_compiler::executable::Field,
+        value: &Value,
+    ) {
+        tracing::debug!(
+            "Currrent cost: {}. Visiting response field {} -> {}",
+            self.cost,
+            parent_ty,
+            field.name,
+        );
+        // TODO: Remove unwraps
+        let ty = field.inner_type_def(self.schema).unwrap();
+        let definition = self.schema.type_field(parent_ty, &field.name).unwrap();
+        let cost_directive = CostDirective::from_field(&self.directive_name_map, definition)
+            .or(CostDirective::from_type(&self.directive_name_map, ty));
+
+        match value {
+            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
+                self.cost += cost_directive.map_or(0.0, |cost| cost.weight());
+            }
+            Value::Array(items) => {
+                for item in items {
+                    self.visit_list_item(request, parent_ty, field, item);
+                }
+            }
+            Value::Object(children) => {
+                self.cost += cost_directive.map_or(1.0, |cost| cost.weight());
+                self.visit_selections(request, &field.selection_set, children);
+            }
         }
     }
 }
@@ -681,6 +706,23 @@ mod tests {
         .unwrap()
     }
 
+    /// Actual cost of an operation on a plain, non-federated schema.
+    fn basic_actual_cost(schema_str: &str, query_str: &str, response_bytes: &'static [u8]) -> f64 {
+        let schema =
+            apollo_compiler::Schema::parse_and_validate(schema_str, "schema.graphqls").unwrap();
+        let query = apollo_compiler::ExecutableDocument::parse_and_validate(
+            &schema,
+            query_str,
+            "query.graphql",
+        )
+        .unwrap();
+        let response = Response::from_bytes("test", Bytes::from(response_bytes)).unwrap();
+
+        StaticCostCalculator::new(Arc::new(schema.clone()), Default::default(), 100)
+            .actual(&query, &response)
+            .unwrap()
+    }
+
     #[test]
     fn query_cost() {
         let schema = include_str!("./fixtures/basic_schema.graphql");
@@ -751,6 +793,17 @@ mod tests {
         let query = include_str!("./fixtures/basic_input_object_query.graphql");
 
         assert_eq!(basic_estimated_cost(schema, query), 4.0)
+    }
+
+    #[test]
+    fn input_object_cost_with_returned_objects() {
+        let schema = include_str!("./fixtures/basic_schema.graphql");
+        let query = include_str!("./fixtures/basic_input_object_query_2.graphql");
+        let response = include_bytes!("./fixtures/basic_input_object_response.json");
+
+        assert_eq!(basic_estimated_cost(schema, query), 104.0);
+        // The cost of the arguments from the query should be included when scoring the response
+        assert_eq!(basic_actual_cost(schema, query, response), 7.0);
     }
 
     #[test]
