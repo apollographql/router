@@ -19,7 +19,7 @@ struct Partial<Plan, Element> {
 // that implements all three methods.
 pub trait PlanBuilder<Plan, Element> {
     /// `add_to_plan`: how to obtain a new plan by taking some plan and adding a new element to it.
-    fn add_to_plan(&mut self, plan: &Plan, elem: Element) -> Plan;
+    fn add_to_plan(&mut self, plan: &Plan, elem: Element) -> Result<Plan, FederationError>;
 
     /// `compute_plan_cost`: how to compute the cost of a plan.
     fn compute_plan_cost(&mut self, plan: &mut Plan) -> Result<QueryPlanCost, FederationError>;
@@ -158,7 +158,7 @@ where
 
         let picked_index = pick_next(index, next_choices);
         let Extracted { extracted, is_last } = extract(picked_index, next_choices);
-        let mut new_partial_plan = plan_builder.add_to_plan(&partial_plan, extracted);
+        let mut new_partial_plan = plan_builder.add_to_plan(&partial_plan, extracted)?;
         let cost = plan_builder.compute_plan_cost(&mut new_partial_plan)?;
 
         if !is_last {
@@ -252,7 +252,11 @@ mod tests {
     }
 
     impl<'a> PlanBuilder<Plan, Element> for TestPlanBuilder<'a> {
-        fn add_to_plan(&mut self, partial_plan: &Plan, new_element: Element) -> Plan {
+        fn add_to_plan(
+            &mut self,
+            partial_plan: &Plan,
+            new_element: Element,
+        ) -> Result<Plan, FederationError> {
             let new_plan: Plan = partial_plan
                 .iter()
                 .cloned()
@@ -261,7 +265,7 @@ mod tests {
             if new_plan.len() == self.target_len {
                 self.generated.push(new_plan.clone())
             }
-            new_plan
+            Ok(new_plan)
         }
 
         fn compute_plan_cost(&mut self, plan: &mut Plan) -> Result<QueryPlanCost, FederationError> {
