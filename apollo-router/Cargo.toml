@@ -137,7 +137,6 @@ notify = { version = "6.1.1", default-features = false, features = [
 ] }
 nu-ansi-term = "0.49"
 num-traits = "0.2.19"
-str_inflector = "0.12.0"
 once_cell = "1.19.0"
 
 # Any package that starts with `opentelemetry` needs to be updated with care

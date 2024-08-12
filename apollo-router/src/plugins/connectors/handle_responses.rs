@@ -4,12 +4,12 @@ use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
 use apollo_federation::sources::connect::ApplyTo;
 use apollo_federation::sources::connect::Connector;
-use inflector::cases::screamingsnakecase::to_screaming_snake_case;
 use parking_lot::Mutex;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 
 use crate::graphql;
+use crate::graphql::ErrorExtension;
 use crate::plugins::connectors::error::Error as ConnectorError;
 use crate::plugins::connectors::make_requests::ResponseKey;
 use crate::plugins::connectors::make_requests::ResponseTypeName;
@@ -53,7 +53,7 @@ pub(crate) async fn handle_responses(
         let mut error = None;
         let response_key = response.1;
         match response.0 {
-            Err(e) => error = Some((e.to_string(), to_screaming_snake_case(&format!("{:?}", e)))),
+            Err(e) => error = Some((e.to_string(), e.extension_code())),
             Ok(response) => {
                 let (parts, body) = response.into_parts();
                 let body = &hyper::body::to_bytes(body).await.map_err(|_| {
