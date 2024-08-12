@@ -48,12 +48,20 @@ pub(crate) async fn handle_responses(
     let mut data = serde_json_bytes::Map::new();
     let mut errors = Vec::new();
     let count = responses.len();
+    struct ErrorInput {
+        message: String,
+        code: String,
+    }
 
-    for response in responses {
+    for (fetch_result, response_key) in responses {
         let mut error = None;
-        let response_key = response.1;
-        match response.0 {
-            Err(e) => error = Some((e.to_string(), e.extension_code())),
+        match fetch_result {
+            Err(e) => {
+                error = Some(ErrorInput {
+                    message: e.to_string(),
+                    code: e.extension_code(),
+                })
+            }
             Ok(response) => {
                 let (parts, body) = response.into_parts();
                 let body = &hyper::body::to_bytes(body).await.map_err(|_| {
@@ -61,14 +69,12 @@ pub(crate) async fn handle_responses(
                 })?;
 
                 if parts.status.is_success() {
-                    let Ok(json_data) = serde_json::from_slice::<Value>(body) else {
+                    let json_data = serde_json::from_slice::<Value>(body).map_err(|e| {
                         if let Some(debug) = debug {
                             debug.lock().push_invalid_response(&parts, body);
                         }
-                        return Err(InvalidResponseBody(
-                            "couldn't deserialize response body".into(),
-                        ));
-                    };
+                        InvalidResponseBody(format!("couldn't deserialize response body: {e}"))
+                    })?;
 
                     let mut res_data = {
                         // TODO: caching of the transformed JSONSelection with the selection set applied?
@@ -162,10 +168,10 @@ pub(crate) async fn handle_responses(
                         }
                     }
                 } else {
-                    error = Some((
-                        format!("http error: {}", parts.status),
-                        format!("{}", parts.status.as_u16()),
-                    ));
+                    error = Some(ErrorInput {
+                        message: format!("http error: {}", parts.status),
+                        code: format!("{}", parts.status.as_u16()),
+                    });
                     if let Some(ref debug) = debug {
                         match serde_json::from_slice(body) {
                             Ok(json_data) => {
@@ -180,7 +186,7 @@ pub(crate) async fn handle_responses(
             }
         }
 
-        if let Some(error_to_push) = error {
+        if let Some(error) = error {
             match response_key {
                 // add a null to the "_entities" array at the right index
                 ResponseKey::Entity { index, .. } | ResponseKey::EntityField { index, .. } => {
@@ -197,9 +203,9 @@ pub(crate) async fn handle_responses(
 
             errors.push(
                 graphql::Error::builder()
-                    .message(error_to_push.0)
+                    .message(error.message)
                     // todo path: ["_entities", i, "???"]
-                    .extension_code(error_to_push.1)
+                    .extension_code(error.code)
                     .extension("connector", connector.id.label.clone())
                     .build(),
             );
