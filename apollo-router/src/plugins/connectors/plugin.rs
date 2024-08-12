@@ -25,7 +25,7 @@ use crate::services::supergraph;
 
 const CONNECTORS_DEBUG_HEADER_NAME: &str = "Apollo-Connectors-Debugging";
 const CONNECTORS_DEBUG_ENV: &str = "APOLLO_CONNECTORS_DEBUGGING";
-const CONNECTORS_MAX_REQUESTS_ENV: &str = "APOLLO_CONNECTORS_MAX_REQUESTS";
+const CONNECTORS_MAX_REQUESTS_ENV: &str = "APOLLO_CONNECTORS_MAX_REQUESTS_PER_OPERATION";
 
 #[derive(Debug, Clone)]
 struct Connectors {
@@ -49,7 +49,7 @@ impl Plugin for Connectors {
 
         let max_requests = init
             .config
-            .max_requests
+            .max_requests_per_operation_per_source
             .or(std::env::var(CONNECTORS_MAX_REQUESTS_ENV)
                 .ok()
                 .and_then(|v| v.parse().ok()));

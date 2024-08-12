@@ -1750,7 +1750,7 @@ expression: "&schema"
           "description": "Enables connector debugging information on response extensions if the feature is enabled",
           "type": "boolean"
         },
-        "max_requests": {
+        "max_requests_per_operation_per_source": {
           "default": null,
           "description": "The maximum number of requests for a connector source",
           "format": "uint",
@@ -5396,7 +5396,7 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Configuration for a `@source` directive",
       "properties": {
-        "max_requests": {
+        "max_requests_per_operation": {
           "default": null,
           "description": "The maximum number of requests for this source",
           "format": "uint",

@@ -250,7 +250,7 @@ async fn max_requests() {
         Default::default(),
         Some(json!({
           "preview_connectors": {
-            "max_requests": 2
+            "max_requests_per_operation_per_source": 2
           }
         })),
         |_| {},
@@ -312,7 +312,7 @@ async fn source_max_requests() {
               "connectors": {
                 "sources": {
                   "json": {
-                    "max_requests": 2,
+                    "max_requests_per_operation": 2,
                   }
                 }
               }

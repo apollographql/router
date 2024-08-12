@@ -24,7 +24,7 @@ pub(crate) struct ConnectorsConfig {
 
     /// The maximum number of requests for a connector source
     #[serde(default)]
-    pub(crate) max_requests: Option<usize>,
+    pub(crate) max_requests_per_operation_per_source: Option<usize>,
 }
 
 /// Configuration for a connector subgraph
@@ -47,7 +47,7 @@ pub(crate) struct SourceConfiguration {
     pub(crate) override_url: Option<Url>,
 
     /// The maximum number of requests for this source
-    pub(crate) max_requests: Option<usize>,
+    pub(crate) max_requests_per_operation: Option<usize>,
 }
 
 /// Modifies connectors with values from the configuration
@@ -72,7 +72,7 @@ pub(crate) fn apply_config(config: &Configuration, mut connectors: Connectors) -
             if let Some(url) = source_config.override_url.as_ref() {
                 connector.transport.source_url = Some(url.clone());
             }
-            if let Some(max_requests) = source_config.max_requests {
+            if let Some(max_requests) = source_config.max_requests_per_operation {
                 connector.max_requests = Some(max_requests);
             }
         }
