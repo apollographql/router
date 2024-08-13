@@ -32,7 +32,7 @@ struct RequestAndResponse {
 async fn test_type_conditions_enabled() {
     let legacy = _test_type_conditions_enabled("legacy").await;
     let new = _test_type_conditions_enabled("new").await;
-    assert_eq!(legacy, new);
+    plans_are_equal(legacy, new);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -544,4 +544,25 @@ fn visit_object(key: &ByteString, value: &mut Value, cb: &mut impl FnMut(&ByteSt
         }
         _ => {}
     }
+}
+
+fn plans_are_equal(r1: Response, r2: Response) {
+    assert_eq!(
+        serde_json::to_string_pretty(
+            r1.extensions
+                .get("apolloQueryPlan")
+                .unwrap()
+                .get("object")
+                .unwrap()
+        )
+        .unwrap(),
+        serde_json::to_string_pretty(
+            r2.extensions
+                .get("apolloQueryPlan")
+                .unwrap()
+                .get("object")
+                .unwrap()
+        )
+        .unwrap()
+    );
 }

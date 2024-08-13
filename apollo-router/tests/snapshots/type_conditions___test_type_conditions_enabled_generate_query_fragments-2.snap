@@ -8,7 +8,7 @@ expression: response
   },
   "errors": [
     {
-      "message": "couldn't find mock for query {\"query\":\"query Search__searchSubgraph__0 {\\n  search {\\n    __typename\\n    ... on MovieResult {\\n      sections {\\n        __typename\\n        ... on EntityCollectionSection {\\n          __typename\\n          id\\n        }\\n        ... on GallerySection {\\n          __typename\\n          id\\n        }\\n      }\\n      id\\n    }\\n    ... on ArticleResult {\\n      id\\n      sections {\\n        __typename\\n        ... on GallerySection {\\n          __typename\\n          id\\n        }\\n        ... on EntityCollectionSection {\\n          __typename\\n          id\\n        }\\n      }\\n    }\\n  }\\n}\\n\",\"operationName\":\"Search__searchSubgraph__0\"}",
+      "message": "couldn't find mock for query {\"query\":\"{ search { __typename ... on MovieResult { sections { __typename ... on EntityCollectionSection { __typename id } ... on GallerySection { __typename id } } id } ... on ArticleResult { id sections { __typename ... on GallerySection { __typename id } ... on EntityCollectionSection { __typename id } } } } }\",\"operationName\":\"Search__searchSubgraph__0\"}",
       "extensions": {
         "code": "FETCH_ERROR"
       }

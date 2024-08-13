@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::task::Poll;
 
+use apollo_compiler::ast::Definition;
 use apollo_compiler::ast::Document;
 use futures::future;
 use http::HeaderMap;
@@ -39,7 +40,15 @@ pub struct MockSubgraph {
 impl MockSubgraph {
     pub fn new(mocks: MockResponses) -> Self {
         Self {
-            mocks: Arc::new(mocks),
+            mocks: Arc::new(
+                mocks
+                    .into_iter()
+                    .map(|(mut req, res)| {
+                        normalize(&mut req);
+                        (req, res)
+                    })
+                    .collect(),
+            ),
             extensions: None,
             subscription_stream: None,
             map_request_fn: None,
@@ -123,12 +132,21 @@ impl MockSubgraphBuilder {
     }
 }
 
-// Normalize queries so that spaces don't have an impact on the cache
+// Normalize queries so that spaces and operation names
+// don't have an impact on the cache
 fn normalize(request: &mut Request) {
+    let mut doc = Document::parse(request.query.clone().unwrap(), "request").unwrap();
+
+    doc.definitions.first_mut().map(|d| {
+        if let Definition::OperationDefinition(ref mut op) = d {
+            let o = op.make_mut();
+            o.name.take();
+        }
+    }
+    );
+
     request.query = Some(
-        Document::parse(request.query.clone().unwrap(), "request")
-            .unwrap()
-            .to_string(),
+        doc.serialize().no_indent().to_string(),
     );
 }
 
