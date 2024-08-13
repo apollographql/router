@@ -38,6 +38,15 @@ impl JSONSelection {
         })
     }
 
+    pub fn is_empty(&self) -> bool {
+        match self {
+            JSONSelection::Named(subselect) => {
+                subselect.selections.is_empty() && subselect.star.is_none()
+            }
+            JSONSelection::Path(path) => path == &PathSelection::Empty,
+        }
+    }
+
     pub fn parse(input: &str) -> IResult<&str, Self> {
         alt((
             all_consuming(map(

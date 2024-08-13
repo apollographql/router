@@ -69,7 +69,16 @@ pub(super) fn validate_body_selection(
 
     let selection_str = require_value_is_str(&selection_node, &coordinate, &schema.sources)?;
 
-    if selection_str.is_empty() {
+    let (_rest, selection) = JSONSelection::parse(selection_str).map_err(|err| Message {
+        code: Code::InvalidJsonSelection,
+        message: format!("{coordinate} is not a valid JSONSelection: {err}",),
+        locations: selection_node
+            .line_column_range(&schema.sources)
+            .into_iter()
+            .collect(),
+    })?;
+
+    if selection.is_empty() {
         return Err(Message {
             code: Code::InvalidJsonSelection,
             message: format!("{coordinate} is empty"),
@@ -80,7 +89,7 @@ pub(super) fn validate_body_selection(
         });
     }
 
-    // TODO: parse and validate JSONSelection
+    // TODO: validate JSONSelection
     Ok(())
 }
 
@@ -115,7 +124,21 @@ fn get_json_selection<'a>(
         source_map,
     )?;
 
-    if selection_str.is_empty() {
+    let (_rest, selection) = JSONSelection::parse(selection_str).map_err(|err| Message {
+        code: Code::InvalidJsonSelection,
+        message: format!(
+            "{coordinate} is not a valid JSONSelection: {err}",
+            coordinate =
+                connect_directive_selection_coordinate(&connect_directive.name, object, field_name),
+        ),
+        locations: selection_arg
+            .value
+            .line_column_range(source_map)
+            .into_iter()
+            .collect(),
+    })?;
+
+    if selection.is_empty() {
         return Err(Message {
             code: Code::InvalidJsonSelection,
             message: format!(
@@ -134,19 +157,6 @@ fn get_json_selection<'a>(
         });
     }
 
-    let (_rest, selection) = JSONSelection::parse(selection_str).map_err(|err| Message {
-        code: Code::InvalidJsonSelection,
-        message: format!(
-            "{coordinate} is not a valid JSONSelection: {err}",
-            coordinate =
-                connect_directive_selection_coordinate(&connect_directive.name, object, field_name),
-        ),
-        locations: selection_arg
-            .value
-            .line_column_range(source_map)
-            .into_iter()
-            .collect(),
-    })?;
     Ok((&selection_arg.value, selection))
 }
 

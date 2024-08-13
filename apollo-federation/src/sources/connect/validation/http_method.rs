@@ -5,7 +5,6 @@ use super::Code;
 use super::Message;
 use super::Name;
 use super::Value;
-use crate::sources::connect::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_DELETE_METHOD_NAME;
 use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_GET_METHOD_NAME;
 use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_PATCH_METHOD_NAME;
@@ -59,10 +58,4 @@ pub(super) fn get_http_methods_arg(http_arg: &[(Name, Node<Value>)]) -> Vec<&(Na
             .contains(method)
         })
         .collect()
-}
-
-pub(super) fn get_http_body_arg(http_arg: &[(Name, Node<Value>)]) -> Option<&(Name, Node<Value>)> {
-    http_arg
-        .iter()
-        .find(|(name, _)| name == &CONNECT_BODY_ARGUMENT_NAME)
 }

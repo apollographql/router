@@ -9,7 +9,7 @@ type Query {
   resources: [String!]!
     @connect(
       source: "v2"
-      http: { POST: "/resources", body: "" }
-      selection: ""
+      http: { POST: "/resources", body: "  " }
+      selection: "# comment"
     )
 }

@@ -3,4 +3,4 @@ source: apollo-federation/src/sources/connect/validation/mod.rs
 expression: "format!(\"{:?}\", errors)"
 input_file: apollo-federation/src/sources/connect/validation/test_data/validation/empty_selection.graphql
 ---
-[Message { code: InvalidJsonSelection, message: "`@connect(selection:)` on `Query.resources` is empty", locations: [LineColumn { line: 13, column: 18 }..LineColumn { line: 13, column: 20 }] }, Message { code: InvalidJsonSelection, message: "`@connect(http: {body:})` on `Query.resources` is empty", locations: [LineColumn { line: 12, column: 35 }..LineColumn { line: 12, column: 43 }] }]
+[Message { code: InvalidJsonSelection, message: "`@connect(selection:)` on `Query.resources` is empty", locations: [LineColumn { line: 13, column: 18 }..LineColumn { line: 13, column: 29 }] }, Message { code: InvalidJsonSelection, message: "`@connect(http: {body:})` on `Query.resources` is empty", locations: [LineColumn { line: 12, column: 35 }..LineColumn { line: 12, column: 45 }] }]
