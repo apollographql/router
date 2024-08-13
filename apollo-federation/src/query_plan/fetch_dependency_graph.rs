@@ -2284,8 +2284,8 @@ impl std::fmt::Display for FetchDependencyGraphEdge {
     }
 }
 
-// GraphViz output for QueryGraph
 impl FetchDependencyGraph {
+    // GraphViz output for FetchDependencyGraph
     pub fn to_dot(&self) -> String {
         fn label_node(node_id: NodeIndex, node: &FetchDependencyGraphNode) -> String {
             let label_str = node.multiline_display(node_id).to_string();
