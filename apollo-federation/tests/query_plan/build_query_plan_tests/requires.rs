@@ -1647,6 +1647,29 @@ fn it_handles_multiple_requires_with_multiple_fetches() {
               },
             },
             Parallel {
+              Flatten(path: "t") {
+                Fetch(service: "s2") {
+                  {
+                    ... on T {
+                      __typename
+                      x {
+                        isX
+                      }
+                      v {
+                        y {
+                          isY
+                        }
+                      }
+                      id
+                    }
+                  } =>
+                  {
+                    ... on T {
+                      foo
+                    }
+                  }
+                },
+              },
               Sequence {
                 Flatten(path: "t") {
                   Fetch(service: "s2") {
@@ -1707,29 +1730,6 @@ fn it_handles_multiple_requires_with_multiple_fetches() {
                       }
                     }
                   },
-                },
-              },
-              Flatten(path: "t") {
-                Fetch(service: "s2") {
-                  {
-                    ... on T {
-                      __typename
-                      x {
-                        isX
-                      }
-                      v {
-                        y {
-                          isY
-                        }
-                      }
-                      id
-                    }
-                  } =>
-                  {
-                    ... on T {
-                      foo
-                    }
-                  }
                 },
               },
             },
