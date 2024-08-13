@@ -572,7 +572,7 @@ impl RedisCacheStorage {
 
         // then we query all the key groups at the same time
         let results: Vec<Result<u32, RedisError>> =
-            futures::future::join_all(h.into_iter().map(|(_, keys)| self.inner.del(keys))).await;
+            futures::future::join_all(h.into_values().map(|keys| self.inner.del(keys))).await;
         let mut total = 0u32;
 
         for res in results {
