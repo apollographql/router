@@ -135,7 +135,7 @@ To prevent transient errors from affecting the cache for a long duration, subgra
 
 ### Cached entities with unavailable subgraph
 
-If some entities were obtained from the cache, but the subgraphs that provided them are unavailable, the router will return a response with the cached entities, and the other entities nullified, along with an error message for the nullified entities.
+If some entities were obtained from the cache, but the subgraphs that provided them are unavailable, the router will return a response with the cached entities, and the other entities nullified (schema permitting), along with an error message for the nullified entities.
 
 ### Authorization and entity caching
 
