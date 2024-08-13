@@ -14,34 +14,6 @@
     )
 )]
 
-/* TODO:
-
-## @connect
-
-- http:
-  - URL path template valid syntax
-  - body is valid syntax
-- selection
-  - Valid syntax
-- If entity: true
-  - Field arguments must match fields in type (and @key if present)
-  - Required for types with @key (eventually with @finder)
-
-## HTTPHeaderMapping
-
-- name: is unique
-
-## Output selection
-
-- Empty composite selection
-- Leaf with selections
-
-## Input selections (URL path templates and bodies)
-
-- Missing $args
-- Missing $this
-
-*/
 mod coordinates;
 mod entity;
 mod extended_type;
@@ -410,7 +382,7 @@ mod test_validate_source {
         insta::with_settings!({prepend_module_to_snapshot => false}, {
             glob!("test_data", "validation/*.graphql", |path| {
                 let schema = read_to_string(path).unwrap();
-                let schema = Schema::parse(schema, "test.graphql").unwrap();
+                let schema = Schema::parse(schema, path).unwrap();
                 let errors = validate(schema);
                 assert_snapshot!(format!("{:?}", errors));
             });

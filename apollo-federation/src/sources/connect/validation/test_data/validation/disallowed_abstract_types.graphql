@@ -15,7 +15,7 @@ type Query {
       """
     )
   search(title: String): [Media]
-    @connect(http: { GET: "http://127.0.0.1:8000/media" }, selection: "")
+    @connect(http: { GET: "http://127.0.0.1:8000/media" }, selection: "$")
 }
 
 interface Product {

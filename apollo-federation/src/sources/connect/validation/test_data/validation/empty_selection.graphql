@@ -1,7 +1,7 @@
 extend schema
   @link(
     url: "https://specs.apollo.dev/connect/v0.1"
-    import: ["@source", "@connect"]
+    import: ["@connect", "@source"]
   )
   @source(name: "v2", http: { baseURL: "http://127.0.0.1" })
 
@@ -9,7 +9,7 @@ type Query {
   resources: [String!]!
     @connect(
       source: "v2"
-      http: { GET: "/resources", DELETE: "/resource" }
-      selection: "$"
+      http: { POST: "/resources", body: "  " }
+      selection: "# comment"
     )
 }

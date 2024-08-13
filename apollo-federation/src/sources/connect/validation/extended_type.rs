@@ -22,11 +22,13 @@ use super::http_headers::validate_headers_arg;
 use super::http_method::get_http_methods_arg;
 use super::http_method::validate_http_method_arg;
 use super::parse_url;
+use super::selection::validate_body_selection;
 use super::selection::validate_selection;
 use super::source_name::validate_source_name_arg;
 use super::source_name::SourceName;
 use super::Code;
 use super::Message;
+use crate::sources::connect::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
 
@@ -213,6 +215,15 @@ fn validate_field(
             ),
         )
     });
+
+    if let Some((_, body)) = http_arg
+        .iter()
+        .find(|(name, _)| name == &CONNECT_BODY_ARGUMENT_NAME)
+    {
+        if let Err(err) = validate_body_selection(connect_directive, object, field, schema, body) {
+            errors.push(err);
+        }
+    }
 
     if let Some(source_name) = connect_directive
         .arguments
