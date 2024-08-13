@@ -133,6 +133,10 @@ The Router currently cannot know which types or fields should be cached, so it r
 
 To prevent transient errors from affecting the cache for a long duration, subgraph responses with errors are not cached.
 
+### Cached entities with unavailable subgraph
+
+If some entities were obtained from the cache, but the subgraphs that provided them are unavailable, the router will return a response with the cached entities, and the other entities nullified (schema permitting), along with an error message for the nullified entities.
+
 ### Authorization and entity caching
 
 When used alongside the router's [authorization directives](./authorization), cache entries are separated by authorization context. If a query contains fields that need a specific scope, the requests providing that scope have different cache entries from those not providing the scope. This means that data requiring authorization can still be safely cached and even shared across users, without needing invalidation when a user's roles change because their requests are automatically directed to a different part of the cache.
