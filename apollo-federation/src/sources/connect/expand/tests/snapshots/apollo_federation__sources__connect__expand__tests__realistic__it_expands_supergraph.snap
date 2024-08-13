@@ -32,6 +32,7 @@ input CompanyInput {
 scalar EmailAddress
 
 type Query {
+  filterUsersByEmailDomain(email: EmailAddress!): [User]
   usersByCompany(company: CompanyInput!): [User]
   user(id: ID!): User
 }

@@ -199,7 +199,29 @@ expression: connectors.by_service_name
             },
             method: Get,
             headers: {},
-            body: None,
+            body: Some(
+                Named(
+                    SubSelection {
+                        selections: [
+                            Path(
+                                Alias {
+                                    name: "with_b",
+                                },
+                                Var(
+                                    "$this",
+                                    Key(
+                                        Field(
+                                            "b",
+                                        ),
+                                        Empty,
+                                    ),
+                                ),
+                            ),
+                        ],
+                        star: None,
+                    },
+                ),
+            ),
         },
         selection: Path(
             Var(
