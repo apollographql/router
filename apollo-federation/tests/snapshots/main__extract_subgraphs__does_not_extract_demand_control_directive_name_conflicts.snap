@@ -59,8 +59,10 @@ scalar federation__FieldSet
 
 scalar federation__Scope
 
+scalar ExpensiveInt
+
 type Query {
-  a: Int
+  a: ExpensiveInt
   _service: _Service!
 }
 

@@ -524,7 +524,7 @@ fn does_not_extract_demand_control_directive_name_conflicts() {
           query: Query
         }
         
-        directive @cost(name: String!) on FIELD_DEFINITION
+        directive @cost(name: String!) on FIELD_DEFINITION | SCALAR
         
         directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
         
@@ -575,12 +575,15 @@ fn does_not_extract_demand_control_directive_name_conflicts() {
           """
           EXECUTION
         }
+
+        scalar ExpensiveInt @cost(name: "expensiveInt")
+          @join__type(graph: SUBGRAPH_A)
         
         type Query
           @join__type(graph: SUBGRAPH_A)
           @join__type(graph: SUBGRAPH_B)
         {
-          a: Int @join__field(graph: SUBGRAPH_A) @cost(name: "cost")
+          a: ExpensiveInt @join__field(graph: SUBGRAPH_A) @cost(name: "cost")
           b: [Int] @join__field(graph: SUBGRAPH_B) @listSize(name: "listSize")
         }
     "#)
