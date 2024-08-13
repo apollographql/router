@@ -9,4 +9,4 @@ supergraph:
         ttl: 10s
 
 experimental_query_planner_mode: new
-experimental_apollo_metrics_generation_mode: new
+apollo_metrics_generation_mode: new

@@ -727,7 +727,7 @@ impl Conf {
         match configuration.apollo_plugins.plugins.get("telemetry") {
             Some(telemetry_config) => {
                 match serde_json::from_value::<Conf>(telemetry_config.clone()) {
-                    Ok(conf) => conf.apollo.experimental_apollo_metrics_reference_mode,
+                    Ok(conf) => conf.apollo.metrics_reference_mode,
                     _ => ApolloMetricsReferenceMode::default(),
                 }
             }
@@ -741,10 +741,7 @@ impl Conf {
         match configuration.apollo_plugins.plugins.get("telemetry") {
             Some(telemetry_config) => {
                 match serde_json::from_value::<Conf>(telemetry_config.clone()) {
-                    Ok(conf) => {
-                        conf.apollo
-                            .experimental_apollo_signature_normalization_algorithm
-                    }
+                    Ok(conf) => conf.apollo.signature_normalization_algorithm,
                     _ => ApolloSignatureNormalizationAlgorithm::default(),
                 }
             }

@@ -163,7 +163,7 @@ pub struct Configuration {
 
     /// Set the Apollo usage report signature and referenced field generation implementation to use.
     #[serde(default)]
-    pub(crate) experimental_apollo_metrics_generation_mode: ApolloMetricsGenerationMode,
+    pub(crate) apollo_metrics_generation_mode: ApolloMetricsGenerationMode,
 
     /// Set the query planner implementation to use.
     #[serde(default)]
@@ -271,7 +271,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             experimental_chaos: Chaos,
             batching: Batching,
             experimental_type_conditioned_fetching: bool,
-            experimental_apollo_metrics_generation_mode: ApolloMetricsGenerationMode,
+            apollo_metrics_generation_mode: ApolloMetricsGenerationMode,
             experimental_query_planner_mode: QueryPlannerMode,
         }
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
@@ -291,8 +291,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             persisted_queries: ad_hoc.persisted_queries,
             limits: ad_hoc.limits,
             experimental_chaos: ad_hoc.experimental_chaos,
-            experimental_apollo_metrics_generation_mode: ad_hoc
-                .experimental_apollo_metrics_generation_mode,
+            apollo_metrics_generation_mode: ad_hoc.apollo_metrics_generation_mode,
             experimental_type_conditioned_fetching: ad_hoc.experimental_type_conditioned_fetching,
             experimental_query_planner_mode: ad_hoc.experimental_query_planner_mode,
             plugins: ad_hoc.plugins,
@@ -340,7 +339,7 @@ impl Configuration {
         uplink: Option<UplinkConfig>,
         experimental_type_conditioned_fetching: Option<bool>,
         batching: Option<Batching>,
-        experimental_apollo_metrics_generation_mode: Option<ApolloMetricsGenerationMode>,
+        apollo_metrics_generation_mode: Option<ApolloMetricsGenerationMode>,
         experimental_query_planner_mode: Option<QueryPlannerMode>,
     ) -> Result<Self, ConfigurationError> {
         let notify = Self::notify(&apollo_plugins)?;
@@ -356,8 +355,7 @@ impl Configuration {
             persisted_queries: persisted_query.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
-            experimental_apollo_metrics_generation_mode:
-                experimental_apollo_metrics_generation_mode.unwrap_or_default(),
+            apollo_metrics_generation_mode: apollo_metrics_generation_mode.unwrap_or_default(),
             experimental_query_planner_mode: experimental_query_planner_mode.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
@@ -460,7 +458,7 @@ impl Configuration {
         uplink: Option<UplinkConfig>,
         batching: Option<Batching>,
         experimental_type_conditioned_fetching: Option<bool>,
-        experimental_apollo_metrics_generation_mode: Option<ApolloMetricsGenerationMode>,
+        apollo_metrics_generation_mode: Option<ApolloMetricsGenerationMode>,
         experimental_query_planner_mode: Option<QueryPlannerMode>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
@@ -472,8 +470,7 @@ impl Configuration {
             cors: cors.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
-            experimental_apollo_metrics_generation_mode:
-                experimental_apollo_metrics_generation_mode.unwrap_or_default(),
+            apollo_metrics_generation_mode: apollo_metrics_generation_mode.unwrap_or_default(),
             experimental_query_planner_mode: experimental_query_planner_mode.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
@@ -576,10 +573,10 @@ impl Configuration {
         }
 
         if self.experimental_query_planner_mode == QueryPlannerMode::New
-            && self.experimental_apollo_metrics_generation_mode != ApolloMetricsGenerationMode::New
+            && self.apollo_metrics_generation_mode != ApolloMetricsGenerationMode::New
         {
             return Err(ConfigurationError::InvalidConfiguration {
-                message: "`experimental_query_planner_mode: new` requires `experimental_apollo_metrics_generation_mode: new`",
+                message: "`experimental_query_planner_mode: new` requires `apollo_metrics_generation_mode: new`",
                 error: "either change to some other query planner mode, or change to new metrics generation".into()
             });
         }
@@ -598,25 +595,23 @@ impl Configuration {
 
         if let Some(config) = apollo_telemetry_config {
             if matches!(
-                config.experimental_apollo_signature_normalization_algorithm,
+                config.signature_normalization_algorithm,
                 ApolloSignatureNormalizationAlgorithm::Enhanced
-            ) && self.experimental_apollo_metrics_generation_mode
-                != ApolloMetricsGenerationMode::New
+            ) && self.apollo_metrics_generation_mode != ApolloMetricsGenerationMode::New
             {
                 return Err(ConfigurationError::InvalidConfiguration {
-                    message: "`experimental_apollo_signature_normalization_algorithm: enhanced` requires `experimental_apollo_metrics_generation_mode: new`",
+                    message: "`signature_normalization_algorithm: enhanced` requires `apollo_metrics_generation_mode: new`",
                     error: "either change to the legacy signature normalization mode, or change to new metrics generation".into()
                 });
             }
 
             if matches!(
-                config.experimental_apollo_metrics_reference_mode,
+                config.metrics_reference_mode,
                 ApolloMetricsReferenceMode::Extended
-            ) && self.experimental_apollo_metrics_generation_mode
-                != ApolloMetricsGenerationMode::New
+            ) && self.apollo_metrics_generation_mode != ApolloMetricsGenerationMode::New
             {
                 return Err(ConfigurationError::InvalidConfiguration {
-                    message: "`experimental_apollo_metrics_reference_mode: extended` requires `experimental_apollo_metrics_generation_mode: new`",
+                    message: "`metrics_reference_mode: extended` requires `apollo_metrics_generation_mode: new`",
                     error: "either change to the standard reference generation mode, or change to new metrics generation".into()
                 });
             };

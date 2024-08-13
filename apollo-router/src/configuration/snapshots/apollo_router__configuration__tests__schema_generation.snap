@@ -1664,14 +1664,6 @@ expression: "&schema"
           "$ref": "#/definitions/ErrorsConfiguration",
           "description": "#/definitions/ErrorsConfiguration"
         },
-        "experimental_apollo_metrics_reference_mode": {
-          "$ref": "#/definitions/ApolloMetricsReferenceMode",
-          "description": "#/definitions/ApolloMetricsReferenceMode"
-        },
-        "experimental_apollo_signature_normalization_algorithm": {
-          "$ref": "#/definitions/ApolloSignatureNormalizationAlgorithm",
-          "description": "#/definitions/ApolloSignatureNormalizationAlgorithm"
-        },
         "experimental_local_field_metrics": {
           "default": false,
           "description": "Enable field metrics that are generated without FTV1 to be sent to Apollo Studio.",
@@ -1694,6 +1686,10 @@ expression: "&schema"
           "$ref": "#/definitions/SamplerOption",
           "description": "#/definitions/SamplerOption"
         },
+        "metrics_reference_mode": {
+          "$ref": "#/definitions/ApolloMetricsReferenceMode",
+          "description": "#/definitions/ApolloMetricsReferenceMode"
+        },
         "send_headers": {
           "$ref": "#/definitions/ForwardHeaders",
           "description": "#/definitions/ForwardHeaders"
@@ -1701,6 +1697,10 @@ expression: "&schema"
         "send_variable_values": {
           "$ref": "#/definitions/ForwardValues",
           "description": "#/definitions/ForwardValues"
+        },
+        "signature_normalization_algorithm": {
+          "$ref": "#/definitions/ApolloSignatureNormalizationAlgorithm",
+          "description": "#/definitions/ApolloSignatureNormalizationAlgorithm"
         }
       },
       "type": "object"
@@ -8266,6 +8266,10 @@ expression: "&schema"
   },
   "description": "The configuration for the router.\n\nCan be created through `serde::Deserialize` from various formats, or inline in Rust code with `serde_json::json!` and `serde_json::from_value`.",
   "properties": {
+    "apollo_metrics_generation_mode": {
+      "$ref": "#/definitions/ApolloMetricsGenerationMode",
+      "description": "#/definitions/ApolloMetricsGenerationMode"
+    },
     "apq": {
       "$ref": "#/definitions/Apq",
       "description": "#/definitions/Apq"
@@ -8293,10 +8297,6 @@ expression: "&schema"
     "csrf": {
       "$ref": "#/definitions/CSRFConfig",
       "description": "#/definitions/CSRFConfig"
-    },
-    "experimental_apollo_metrics_generation_mode": {
-      "$ref": "#/definitions/ApolloMetricsGenerationMode",
-      "description": "#/definitions/ApolloMetricsGenerationMode"
     },
     "experimental_chaos": {
       "$ref": "#/definitions/Chaos",

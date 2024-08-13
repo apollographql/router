@@ -387,9 +387,9 @@ impl InstrumentData {
             apollo.router.config.apollo_telemetry_options,
             "$.telemetry.apollo",
             opt.signature_normalization_algorithm,
-            "$.experimental_apollo_signature_normalization_algorithm",
+            "$.signature_normalization_algorithm",
             opt.metrics_reference_mode,
-            "$.experimental_apollo_metrics_reference_mode"
+            "$.metrics_reference_mode"
         );
 
         // We need to update the entry we just made because the selected strategy is a named object in the config.

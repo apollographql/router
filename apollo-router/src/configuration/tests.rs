@@ -1156,20 +1156,20 @@ fn it_requires_rust_apollo_metrics_generation_for_enhanced_signature_normalizati
         "telemetry".to_string(),
         serde_json::json! {{
             "apollo": {
-                "experimental_apollo_signature_normalization_algorithm": "enhanced"
+                "signature_normalization_algorithm": "enhanced"
             }
         }},
     );
 
     let error = Configuration::builder()
-        .experimental_apollo_metrics_generation_mode(ApolloMetricsGenerationMode::Both)
+        .apollo_metrics_generation_mode(ApolloMetricsGenerationMode::Both)
         .apollo_plugins(plugins_config)
         .build()
         .expect_err("Must have an error because we have conflicting config options");
 
     assert_eq!(
         error.to_string(),
-        String::from("`experimental_apollo_signature_normalization_algorithm: enhanced` requires `experimental_apollo_metrics_generation_mode: new`: either change to the legacy signature normalization mode, or change to new metrics generation")
+        String::from("`signature_normalization_algorithm: enhanced` requires `apollo_metrics_generation_mode: new`: either change to the legacy signature normalization mode, or change to new metrics generation")
     );
 }
 
@@ -1180,19 +1180,19 @@ fn it_requires_rust_apollo_metrics_generation_for_extended_references() {
         "telemetry".to_string(),
         serde_json::json! {{
             "apollo": {
-                "experimental_apollo_metrics_reference_mode": "extended"
+                "metrics_reference_mode": "extended"
             }
         }},
     );
 
     let error = Configuration::builder()
-        .experimental_apollo_metrics_generation_mode(ApolloMetricsGenerationMode::Both)
+        .apollo_metrics_generation_mode(ApolloMetricsGenerationMode::Both)
         .apollo_plugins(plugins_config)
         .build()
         .expect_err("Must have an error because we have conflicting config options");
 
     assert_eq!(
         error.to_string(),
-        String::from("`experimental_apollo_metrics_reference_mode: extended` requires `experimental_apollo_metrics_generation_mode: new`: either change to the standard reference generation mode, or change to new metrics generation")
+        String::from("`metrics_reference_mode: extended` requires `apollo_metrics_generation_mode: new`: either change to the standard reference generation mode, or change to new metrics generation")
     );
 }

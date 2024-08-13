@@ -506,8 +506,7 @@ impl BridgeQueryPlanner {
 
         // the `statsReportKey` field should match the original query instead of the filtered query, to index them all under the same query
         let operation_signature = if matches!(
-            self.configuration
-                .experimental_apollo_metrics_generation_mode,
+            self.configuration.apollo_metrics_generation_mode,
             ApolloMetricsGenerationMode::Legacy | ApolloMetricsGenerationMode::Both
         ) && original_query != filtered_query
         {
@@ -536,8 +535,7 @@ impl BridgeQueryPlanner {
                 }
 
                 if matches!(
-                    self.configuration
-                        .experimental_apollo_metrics_generation_mode,
+                    self.configuration.apollo_metrics_generation_mode,
                     ApolloMetricsGenerationMode::New | ApolloMetricsGenerationMode::Both
                 ) {
                     // If the query is filtered, we want to generate the signature using the original query and generate the
@@ -567,8 +565,7 @@ impl BridgeQueryPlanner {
                     // https://github.com/apollographql/router/issues/4837
                     let is_empty_operation_name = operation.map_or(false, |s| s.is_empty());
                     let is_in_both_metrics_mode = matches!(
-                        self.configuration
-                            .experimental_apollo_metrics_generation_mode,
+                        self.configuration.apollo_metrics_generation_mode,
                         ApolloMetricsGenerationMode::Both
                     );
                     if !is_empty_operation_name && is_in_both_metrics_mode {
@@ -626,8 +623,7 @@ impl BridgeQueryPlanner {
                             );
                         }
                     } else if matches!(
-                        self.configuration
-                            .experimental_apollo_metrics_generation_mode,
+                        self.configuration.apollo_metrics_generation_mode,
                         ApolloMetricsGenerationMode::New
                     ) {
                         usage_reporting.stats_report_key =
