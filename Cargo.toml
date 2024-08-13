@@ -76,6 +76,3 @@ sha1 = "0.10.6"
 tempfile = "3.10.1"
 tokio = { version = "1.36.0", features = ["full"] }
 tower = { version = "0.4.13", features = ["full"] }
-
-[profile.release]
-debug = true
