@@ -142,12 +142,9 @@ fn normalize(request: &mut Request) {
             let o = op.make_mut();
             o.name.take();
         }
-    }
-    );
+    });
 
-    request.query = Some(
-        doc.serialize().no_indent().to_string(),
-    );
+    request.query = Some(doc.serialize().no_indent().to_string());
 }
 
 impl Service<SubgraphRequest> for MockSubgraph {

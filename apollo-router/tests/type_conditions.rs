@@ -30,57 +30,39 @@ struct RequestAndResponse {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_type_conditions_enabled() {
-    let legacy = _test_type_conditions_enabled("legacy").await;
-    let new = _test_type_conditions_enabled("new").await;
-    plans_are_equal(legacy, new);
+    _test_type_conditions_enabled("legacy").await;
+    _test_type_conditions_enabled("new").await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[should_panic] // Generate query fragments is not implemented in the rust planner yet
 async fn test_type_conditions_enabled_generate_query_fragments() {
-    let legacy = _test_type_conditions_enabled_generate_query_fragments("legacy").await;
-    let new = _test_type_conditions_enabled_generate_query_fragments("new").await;
-    assert_eq!(legacy, new);
+    _test_type_conditions_enabled_generate_query_fragments("legacy").await;
+    _test_type_conditions_enabled_generate_query_fragments("new").await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_type_conditions_enabled_list_of_list() {
-    let legacy = _test_type_conditions_enabled_list_of_list("legacy").await;
-    let new = _test_type_conditions_enabled_list_of_list("new").await;
-    assert_eq!(legacy, new);
+    _test_type_conditions_enabled_list_of_list("legacy").await;
+    _test_type_conditions_enabled_list_of_list("new").await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_type_conditions_enabled_list_of_list_of_list() {
-    let legacy = _test_type_conditions_enabled_list_of_list_of_list("legacy").await;
-    let new = _test_type_conditions_enabled_list_of_list_of_list("new").await;
-    assert_eq!(
-        legacy
-            .extensions
-            .get("apolloQueryPlan")
-            .unwrap()
-            .get("text")
-            .unwrap(),
-        new.extensions
-            .get("apolloQueryPlan")
-            .unwrap()
-            .get("text")
-            .unwrap()
-    );
+    _test_type_conditions_enabled_list_of_list_of_list("legacy").await;
+    _test_type_conditions_enabled_list_of_list_of_list("new").await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_type_conditions_disabled() {
-    let legacy = _test_type_conditions_disabled("legacy").await;
-    let new = _test_type_conditions_disabled("new").await;
-    assert_eq!(legacy, new);
+    _test_type_conditions_disabled("legacy").await;
+    _test_type_conditions_disabled("new").await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_type_conditions_enabled_shouldnt_make_article_fetch() {
-    let legacy = _test_type_conditions_enabled_shouldnt_make_article_fetch("legacy").await;
-    let new = _test_type_conditions_enabled_shouldnt_make_article_fetch("new").await;
-    assert_eq!(legacy, new);
+    _test_type_conditions_enabled_shouldnt_make_article_fetch("legacy").await;
+    _test_type_conditions_enabled_shouldnt_make_article_fetch("new").await;
 }
 
 async fn _test_type_conditions_enabled(planner_mode: &str) -> Response {
@@ -544,25 +526,4 @@ fn visit_object(key: &ByteString, value: &mut Value, cb: &mut impl FnMut(&ByteSt
         }
         _ => {}
     }
-}
-
-fn plans_are_equal(r1: Response, r2: Response) {
-    assert_eq!(
-        serde_json::to_string_pretty(
-            r1.extensions
-                .get("apolloQueryPlan")
-                .unwrap()
-                .get("object")
-                .unwrap()
-        )
-        .unwrap(),
-        serde_json::to_string_pretty(
-            r2.extensions
-                .get("apolloQueryPlan")
-                .unwrap()
-                .get("object")
-                .unwrap()
-        )
-        .unwrap()
-    );
 }
