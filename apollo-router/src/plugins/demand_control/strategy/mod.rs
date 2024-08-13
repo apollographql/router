@@ -99,8 +99,7 @@ impl StrategyFactory {
                     self.supergraph_schema.clone(),
                     self.subgraph_schemas.clone(),
                     *list_size,
-                )
-                .unwrap(), // TODO: Push this upstream to the plugin where we have a result
+                ),
             }),
             #[cfg(test)]
             StrategyConfig::Test { stage, error } => Arc::new(test::Test {

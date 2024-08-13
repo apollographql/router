@@ -95,12 +95,12 @@ impl StaticCostCalculator {
         supergraph_schema: Arc<DemandControlledSchema>,
         subgraph_schemas: Arc<HashMap<String, DemandControlledSchema>>,
         list_size: u32,
-    ) -> Result<Self, DemandControlError> {
-        Ok(Self {
+    ) -> Self {
+        Self {
             list_size,
             supergraph_schema,
             subgraph_schemas,
-        })
+        }
     }
 
     /// Scores a field within a GraphQL operation, handling some expected cases where
@@ -600,8 +600,7 @@ mod tests {
             parse_schema_and_operation(schema_str, query_str, &Default::default());
         let schema =
             DemandControlledSchema::new(Arc::new(schema.supergraph_schema().clone())).unwrap();
-        let calculator =
-            StaticCostCalculator::new(Arc::new(schema), Default::default(), 100).unwrap();
+        let calculator = StaticCostCalculator::new(Arc::new(schema), Default::default(), 100);
 
         calculator
             .estimated(&query.executable, &calculator.supergraph_schema, true)
@@ -619,8 +618,7 @@ mod tests {
         )
         .unwrap();
         let schema = DemandControlledSchema::new(Arc::new(schema)).unwrap();
-        let calculator =
-            StaticCostCalculator::new(Arc::new(schema), Default::default(), 100).unwrap();
+        let calculator = StaticCostCalculator::new(Arc::new(schema), Default::default(), 100);
 
         calculator
             .estimated(&query, &calculator.supergraph_schema, true)
@@ -650,8 +648,7 @@ mod tests {
             Arc::new(schema),
             Arc::new(demand_controlled_subgraph_schemas),
             100,
-        )
-        .unwrap();
+        );
 
         calculator.rust_planned(&query_plan).unwrap()
     }
@@ -663,7 +660,6 @@ mod tests {
         let schema =
             DemandControlledSchema::new(Arc::new(schema.supergraph_schema().clone())).unwrap();
         StaticCostCalculator::new(Arc::new(schema), Default::default(), 100)
-            .unwrap()
             .actual(&query.executable, &response)
             .unwrap()
     }
@@ -682,7 +678,6 @@ mod tests {
 
         let schema = DemandControlledSchema::new(Arc::new(schema)).unwrap();
         StaticCostCalculator::new(Arc::new(schema), Default::default(), 100)
-            .unwrap()
             .actual(&query, &response)
             .unwrap()
     }
@@ -849,13 +844,12 @@ mod tests {
             DemandControlledSchema::new(Arc::new(schema.supergraph_schema().clone())).unwrap(),
         );
 
-        let calculator =
-            StaticCostCalculator::new(schema.clone(), Default::default(), 100).unwrap();
+        let calculator = StaticCostCalculator::new(schema.clone(), Default::default(), 100);
         let conservative_estimate = calculator
             .estimated(&query.executable, &calculator.supergraph_schema, true)
             .unwrap();
 
-        let calculator = StaticCostCalculator::new(schema.clone(), Default::default(), 5).unwrap();
+        let calculator = StaticCostCalculator::new(schema.clone(), Default::default(), 5);
         let narrow_estimate = calculator
             .estimated(&query.executable, &calculator.supergraph_schema, true)
             .unwrap();

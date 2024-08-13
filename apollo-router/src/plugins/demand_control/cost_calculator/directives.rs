@@ -1,7 +1,6 @@
-use std::collections::HashSet;
-
 use ahash::HashMap;
 use ahash::HashMapExt;
+use ahash::HashSet;
 use apollo_compiler::ast::DirectiveList;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::InputValueDefinition;
