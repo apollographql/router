@@ -15,6 +15,8 @@ telemetry:
           format: uuid
 ```
 
-Note that incoming requests must some form of UUID either with or without dashes.
+Note that incoming requests must be some form of UUID, either with or without dashes.
+
+To learn about supported formats, go to [`request` configuration reference](https://apollographql.com/docs/router/configuration/telemetry/exporters/tracing/overview#request-configuration-reference) docs. 
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/5803
