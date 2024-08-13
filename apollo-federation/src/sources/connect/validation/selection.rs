@@ -217,7 +217,7 @@ impl<'schema> GroupVisitor<Group<'schema>, Field<'schema>> for SelectionValidato
 
     /// Get all the fields for an object type / selection.
     /// Returns an error if a selection points at a field which does not exist on the schema.
-    fn enter_group(&mut self, group: Group<'schema>) -> Result<Vec<Field<'schema>>, Self::Error> {
+    fn enter_group(&mut self, group: &Group<'schema>) -> Result<Vec<Field<'schema>>, Self::Error> {
         self.path.push(PathPart::Field {
             definition: group.definition,
             ty: group.ty,
