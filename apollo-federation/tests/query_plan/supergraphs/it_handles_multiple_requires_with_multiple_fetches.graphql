@@ -1,0 +1,130 @@
+# Composed from subgraphs with hash: 461e4a611a1faf2558d6ee6e3de4af24a043fc16
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+{
+  query: Query
+}
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+interface I
+  @join__type(graph: S1)
+  @join__type(graph: S2)
+  @join__type(graph: S4)
+{
+  id: ID!
+  name: String!
+}
+
+scalar join__FieldSet
+
+enum join__Graph {
+  S1 @join__graph(name: "s1", url: "none")
+  S2 @join__graph(name: "s2", url: "none")
+  S3 @join__graph(name: "s3", url: "none")
+  S4 @join__graph(name: "s4", url: "none")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+type Query
+  @join__type(graph: S1)
+  @join__type(graph: S2)
+  @join__type(graph: S3)
+  @join__type(graph: S4)
+{
+  t: T @join__field(graph: S1)
+}
+
+type T implements I
+  @join__implements(graph: S1, interface: "I")
+  @join__implements(graph: S2, interface: "I")
+  @join__implements(graph: S4, interface: "I")
+  @join__type(graph: S1, key: "id")
+  @join__type(graph: S2, key: "id")
+  @join__type(graph: S4, key: "id")
+{
+  id: ID!
+  name: String! @join__field(graph: S1) @join__field(graph: S2, external: true) @join__field(graph: S4)
+  x: X @join__field(graph: S1) @join__field(graph: S2, external: true) @join__field(graph: S4)
+  v: V @join__field(graph: S1) @join__field(graph: S2, external: true) @join__field(graph: S4)
+  foo: [String!]! @join__field(graph: S2, requires: "x { isX }\nv { y { isY } }")
+  bar: [I!]! @join__field(graph: S2, requires: "x { isX }\nv { y { isY } zz { u { id } } }")
+}
+
+type U implements I
+  @join__implements(graph: S1, interface: "I")
+  @join__implements(graph: S2, interface: "I")
+  @join__implements(graph: S4, interface: "I")
+  @join__type(graph: S1, key: "id")
+  @join__type(graph: S2, key: "id")
+  @join__type(graph: S4, key: "id")
+{
+  id: ID!
+  name: String! @join__field(graph: S1, external: true) @join__field(graph: S2, external: true) @join__field(graph: S4, override: "s1")
+}
+
+type V
+  @join__type(graph: S1, key: "id")
+  @join__type(graph: S1, key: "internalID")
+  @join__type(graph: S2, key: "id")
+  @join__type(graph: S3, key: "internalID")
+  @join__type(graph: S4, key: "id")
+  @join__type(graph: S4, key: "internalID")
+{
+  id: ID! @join__field(graph: S1) @join__field(graph: S2) @join__field(graph: S4)
+  internalID: ID!
+  y: Y! @join__field(graph: S2) @join__field(graph: S3)
+  zz: [Z!] @join__field(graph: S2, external: true) @join__field(graph: S4, override: "s1")
+}
+
+type X
+  @join__type(graph: S1, key: "t { id }")
+  @join__type(graph: S2)
+  @join__type(graph: S4, key: "t { id }", resolvable: false)
+{
+  t: T! @join__field(graph: S1) @join__field(graph: S4, external: true)
+  isX: Boolean! @join__field(graph: S1) @join__field(graph: S2, external: true)
+}
+
+type Y
+  @join__type(graph: S2, key: "id")
+  @join__type(graph: S3, key: "id")
+{
+  id: ID!
+  isY: Boolean! @join__field(graph: S2, external: true) @join__field(graph: S3)
+}
+
+type Z
+  @join__type(graph: S2)
+  @join__type(graph: S4)
+{
+  u: U! @join__field(graph: S2, external: true) @join__field(graph: S4)
+  free: Boolean @join__field(graph: S4)
+  v: V! @join__field(graph: S4)
+}

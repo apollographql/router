@@ -1,10 +1,10 @@
 ---
 title: Router Tracing
-subtitle: Collect tracing information from the Apollo Router
-description: Collect and export tracing information from the Apollo Router. Supports OpenTelemetry Protocol (OTLP), Datadog, New Relic, Jaeger, Zipkin.
+subtitle: Collect tracing information from the router
+description: Collect and export tracing information from the Apollo GraphOS Router or Apollo Router Core. Supports OpenTelemetry Protocol (OTLP), Datadog, New Relic, Jaeger, Zipkin.
 ---
 
-The Apollo Router supports collection of traces with [OpenTelemetry](https://opentelemetry.io/), with exporters for:
+The GraphOS Router and Apollo Router Core support collection of traces with [OpenTelemetry](https://opentelemetry.io/), with exporters for:
 
 * [Jaeger](./jaeger)
 * [Zipkin](./zipkin)
@@ -12,13 +12,13 @@ The Apollo Router supports collection of traces with [OpenTelemetry](https://ope
 * [New Relic](./new-relic)
 * [OpenTelemetry Protocol (OTLP)](./otlp) over HTTP or gRPC
 
-The Apollo Router generates [**spans**](../../instrumentation/spans) that include the various phases of serving a request and associated dependencies. This is useful for showing how response time is affected by:
+The router generates [**spans**](../../instrumentation/spans) that include the various phases of serving a request and associated dependencies. This is useful for showing how response time is affected by:
 
 * Sub-request response times
 * Query shape (sub-request dependencies)
-* Apollo Router post-processing
+* Router post-processing
 
-Span data is sent to a collector such as [Jaeger](https://www.jaegertracing.io/), which can assemble spans into a gantt chart for analysis.
+Span data is sent to a collector such as [Jaeger](https://www.jaegertracing.io/), which can assemble spans into a Gantt chart for analysis.
 
 <Tip>
 
@@ -227,4 +227,4 @@ Using this configuration you will have a response header called `my-trace-id` co
 ## Related topics
 
 * [Connecting OpenTelemetry traces to Prometheus](/technotes/TN0003-opentelemetry-traces-to-prometheus)
-* [Sending Apollo Router traces and metrics to APM tools using OpenTelemetry](/technotes/TN0015-router-to-apm-via-opentelemetry/)
+* [Sending router traces and metrics to APM tools using OpenTelemetry](/technotes/TN0015-router-to-apm-via-opentelemetry/)

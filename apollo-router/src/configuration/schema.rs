@@ -161,8 +161,12 @@ pub(crate) fn validate_yaml_configuration(
                         let offset = start_marker
                             .line()
                             .saturating_sub(NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY);
-
-                        let lines = yaml_split_by_lines[offset..end_marker.line()]
+                        let end = if end_marker.line() > yaml_split_by_lines.len() {
+                            yaml_split_by_lines.len()
+                        } else {
+                            end_marker.line()
+                        };
+                        let lines = yaml_split_by_lines[offset..end]
                             .iter()
                             .map(|line| format!("  {line}"))
                             .join("\n");

@@ -1,0 +1,23 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
+description: Query Aliases histogram with value from context
+expression: "&metrics.all()"
+info:
+  telemetry:
+    instrumentation:
+      instruments:
+        supergraph:
+          query.aliases:
+            description: The aliases of the query
+            value:
+              query: aliases
+            unit: unit
+            type: histogram
+---
+- name: query.aliases
+  description: The aliases of the query
+  unit: unit
+  data:
+    datapoints:
+      - sum: 1
+        attributes: {}

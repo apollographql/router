@@ -48,6 +48,7 @@ pub struct Request {
 
     pub context: Context,
 
+    // FIXME for router 2.x
     /// Name of the subgraph, it's an Option to not introduce breaking change
     pub(crate) subgraph_name: Option<String>,
     /// Channel to send the subscription stream to listen on events coming from subgraph in a task
@@ -162,7 +163,9 @@ assert_impl_all!(Response: Send);
 #[non_exhaustive]
 pub struct Response {
     pub response: http::Response<graphql::Response>,
-
+    // FIXME for router 2.x
+    /// Name of the subgraph, it's an Option to not introduce breaking change
+    pub(crate) subgraph_name: Option<String>,
     pub context: Context,
 }
 
@@ -175,8 +178,13 @@ impl Response {
     pub(crate) fn new_from_response(
         response: http::Response<graphql::Response>,
         context: Context,
+        subgraph_name: String,
     ) -> Response {
-        Self { response, context }
+        Self {
+            response,
+            context,
+            subgraph_name: Some(subgraph_name),
+        }
     }
 
     /// This is the constructor (or builder) to use when constructing a real Response.
@@ -193,6 +201,7 @@ impl Response {
         status_code: Option<StatusCode>,
         context: Context,
         headers: Option<http::HeaderMap<http::HeaderValue>>,
+        subgraph_name: Option<String>,
     ) -> Response {
         // Build a response
         let res = graphql::Response::builder()
@@ -211,7 +220,11 @@ impl Response {
 
         *response.headers_mut() = headers.unwrap_or_default();
 
-        Self { response, context }
+        Self {
+            response,
+            context,
+            subgraph_name,
+        }
     }
 
     /// This is the constructor (or builder) to use when constructing a "fake" Response.
@@ -230,6 +243,7 @@ impl Response {
         status_code: Option<StatusCode>,
         context: Option<Context>,
         headers: Option<http::HeaderMap<http::HeaderValue>>,
+        subgraph_name: Option<String>,
     ) -> Response {
         Response::new(
             label,
@@ -240,6 +254,7 @@ impl Response {
             status_code,
             context.unwrap_or_default(),
             headers,
+            subgraph_name,
         )
     }
 
@@ -260,6 +275,7 @@ impl Response {
         status_code: Option<StatusCode>,
         context: Option<Context>,
         headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
+        subgraph_name: Option<String>,
     ) -> Result<Response, BoxError> {
         Ok(Response::new(
             label,
@@ -270,6 +286,7 @@ impl Response {
             status_code,
             context.unwrap_or_default(),
             Some(header_map(headers)?),
+            subgraph_name,
         ))
     }
 
@@ -281,6 +298,7 @@ impl Response {
         errors: Vec<Error>,
         status_code: Option<StatusCode>,
         context: Context,
+        subgraph_name: Option<String>,
     ) -> Result<Response, BoxError> {
         Ok(Response::new(
             Default::default(),
@@ -291,6 +309,7 @@ impl Response {
             status_code,
             context,
             Default::default(),
+            subgraph_name,
         ))
     }
 }

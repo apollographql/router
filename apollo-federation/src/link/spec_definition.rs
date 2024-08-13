@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::schema::Name;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
 
 use crate::error::FederationError;
@@ -180,6 +180,17 @@ impl<T: SpecDefinition> SpecDefinitions<T> {
 
     pub(crate) fn find(&self, requested: &Version) -> Option<&T> {
         self.definitions.get(requested)
+    }
+
+    pub(crate) fn find_for_federation_version(&self, federation_version: &Version) -> Option<&T> {
+        for definition in self.definitions.values() {
+            if let Some(minimum_federation_version) = definition.minimum_federation_version() {
+                if minimum_federation_version >= federation_version {
+                    return Some(definition);
+                }
+            }
+        }
+        None
     }
 
     pub(crate) fn versions(&self) -> Keys<Version, T> {

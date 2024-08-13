@@ -36,6 +36,7 @@ where
 }
 
 /// [`Service`] for mapping futures with request data. See [`ServiceBuilderExt::map_future_with_request_data()`](crate::layers::ServiceBuilderExt::map_future_with_request_data()).
+#[derive(Clone)]
 pub struct MapFutureWithRequestDataService<S, RF, MF> {
     inner: S,
     req_fn: RF,

@@ -1,6 +1,5 @@
 use std::ops::Deref;
 
-use apollo_compiler::NodeStr;
 use apollo_federation::query_plan::FetchDataPathElement;
 use apollo_federation::query_plan::FetchDataRewrite;
 
@@ -42,7 +41,7 @@ const SUBGRAPH2: &str = r#"
 
 #[test]
 #[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
+// TODO: investigate this failure (fetch node for `iFromS1.y` is missing)
 fn can_use_a_key_on_an_interface_object_type() {
     let planner = planner!(
         S1: SUBGRAPH1,
@@ -93,10 +92,6 @@ fn can_use_a_key_on_an_interface_object_type() {
 }
 
 #[test]
-#[should_panic(
-    expected = r#"Cannot add selection of field "I.__typename" to selection set of parent type "I" that is potentially an interface object type at runtime"#
-)]
-// TODO: investigate this failure
 fn can_use_a_key_on_an_interface_object_from_an_interface_object_type() {
     let planner = planner!(
         S1: SUBGRAPH1,
@@ -178,9 +173,6 @@ fn only_uses_an_interface_object_if_it_can() {
 }
 
 #[test]
-#[should_panic(
-    expected = "Cannot add selection of field \"I.__typename\" to selection set of parent type \"I\" that is potentially an interface object type at runtime"
-)]
 fn does_not_rely_on_an_interface_object_directly_for_typename() {
     let planner = planner!(
         S1: SUBGRAPH1,
@@ -231,10 +223,8 @@ fn does_not_rely_on_an_interface_object_directly_for_typename() {
 }
 
 #[test]
-#[should_panic(
-    expected = r#"Cannot add selection of field "I.__typename" to selection set of parent type "I" that is potentially an interface object type at runtime"#
-)]
-// TODO: investigate this failure
+#[should_panic(expected = r#"snapshot assertion"#)]
+// TODO: investigate this failure (missing fetch node for `iFromS2 { ... on I { y } }`)
 fn does_not_rely_on_an_interface_object_directly_if_a_specific_implementation_is_requested() {
     let planner = planner!(
         S1: SUBGRAPH1,
@@ -305,6 +295,7 @@ fn does_not_rely_on_an_interface_object_directly_if_a_specific_implementation_is
 
 #[test]
 #[should_panic(expected = "snapshot assertion")]
+// TODO: investigate this failure (fetch node for `iFromS1.y` is missing)
 fn can_use_a_key_on_an_interface_object_type_even_for_a_concrete_implementation() {
     let planner = planner!(
         S1: SUBGRAPH1,
@@ -366,7 +357,7 @@ fn can_use_a_key_on_an_interface_object_type_even_for_a_concrete_implementation(
             assert_eq!(v.path.len(), 1);
             match &v.path[0] {
                 FetchDataPathElement::TypenameEquals(typename) => {
-                    assert_eq!(typename, &NodeStr::new("A"))
+                    assert_eq!(*typename, apollo_compiler::name!("A"))
                 }
                 _ => unreachable!("Expected FetchDataPathElement::TypenameEquals path"),
             }
@@ -377,10 +368,6 @@ fn can_use_a_key_on_an_interface_object_type_even_for_a_concrete_implementation(
 }
 
 #[test]
-#[should_panic(
-    expected = r#"Cannot add selection of field "I.__typename" to selection set of parent type "I" that is potentially an interface object type at runtime"#
-)]
-// TODO: investigate this failure
 fn handles_query_of_an_interface_field_for_a_specific_implementation_when_query_starts_with_interface_object(
 ) {
     let planner = planner!(
@@ -436,10 +423,8 @@ fn handles_query_of_an_interface_field_for_a_specific_implementation_when_query_
 }
 
 #[test]
-#[should_panic(
-    expected = r#"Cannot add selection of field "I.__typename" to selection set of parent type "I" that is potentially an interface object type at runtime"#
-)]
-// TODO: investigate this failure
+#[should_panic(expected = r#"snapshot assertion"#)]
+// TODO: investigate this failure (missing fetch node for "everything.@ { ... on I { expansiveField } }")
 fn it_avoids_buffering_interface_object_results_that_may_have_to_be_filtered_with_lists() {
     let planner = planner!(
         S1: r#"
@@ -533,6 +518,7 @@ fn it_avoids_buffering_interface_object_results_that_may_have_to_be_filtered_wit
 
 #[test]
 #[should_panic(expected = "snapshot assertion")]
+// TODO: investigate this failure (missing fetch nodes for i.x and i.y)
 fn it_handles_requires_on_concrete_type_of_field_provided_by_interface_object() {
     let planner = planner!(
         S1: r#"
@@ -628,7 +614,7 @@ fn it_handles_requires_on_concrete_type_of_field_provided_by_interface_object() 
 
 #[test]
 #[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
+// TODO: investigate this failure (missing fetch node for `i.t.relatedIs.id`)
 fn it_handles_interface_object_in_nested_entity() {
     let planner = planner!(
         S1: r#"

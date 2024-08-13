@@ -6,7 +6,6 @@ use derivative::Derivative;
 use derive_more::Display;
 use derive_more::From;
 use futures::prelude::*;
-use thiserror::Error;
 
 use crate::router::Event;
 use crate::router::Event::NoMoreLicense;
@@ -20,12 +19,6 @@ use crate::uplink::UplinkConfig;
 const APOLLO_ROUTER_LICENSE_INVALID: &str = "APOLLO_ROUTER_LICENSE_INVALID";
 
 type LicenseStream = Pin<Box<dyn Stream<Item = License> + Send>>;
-
-#[derive(Debug, Display, From, Error)]
-enum Error {
-    /// The license is invalid.
-    InvalidLicense,
-}
 
 /// License controls availability of certain features of the Router.
 /// This API experimental and is subject to change outside of semver.

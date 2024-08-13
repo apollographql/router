@@ -128,7 +128,7 @@ async fn test_validation_error() {
           }
         },
         {
-          "message": "Field \"topProducts\" of type \"Product\" must have a selection of subfields. Did you mean \"topProducts { ... }\"?",
+          "message": "Field \"topProducts\" of type \"Query\" must have a selection of subfields. Did you mean \"topProducts { ... }\"?",
           "locations": [
             {
               "line": 1,

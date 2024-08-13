@@ -1,0 +1,13 @@
+query EnumVarQuery($nonNullEnumInput: SomeEnum!, $nullableEnumInput: SomeEnum, $enumInputList: [SomeEnum], $enumInputListOfLists: [[SomeEnum]], $enumInputObject: EnumInputType, $enumInputObjectList: [EnumInputType], $enumInputObjectListOfLists: [[EnumInputType]]) {
+  enumUsageQuery(
+    nonNullEnumInput: $nonNullEnumInput, 
+    nullableEnumInput: $nullableEnumInput, 
+    enumInputList: $enumInputList,
+    enumInputListOfLists: $enumInputListOfLists,
+    enumInputObject: $enumInputObject,
+    enumInputObjectList: $enumInputObjectList,
+    enumInputObjectListOfLists: $enumInputObjectListOfLists,
+  ) {
+    id
+  }
+}

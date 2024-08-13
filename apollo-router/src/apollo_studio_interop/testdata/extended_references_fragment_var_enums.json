@@ -1,0 +1,43 @@
+{
+  "nonNullEnumInput": "SOME_VALUE_1",
+  "nullableEnumInput": "SOME_VALUE_2",
+  "enumInputList": ["SOME_VALUE_3", "SOME_VALUE_4"],
+  "enumInputListOfLists": [["SOME_VALUE_5"], ["SOME_VALUE_6", "SOME_VALUE_7"]],
+  "enumInputObject": { 
+    "enumInput": "SOME_VALUE_8",
+    "nullableEnumInput": "SOME_VALUE_9",
+    "enumListInput": ["SOME_VALUE_10", "SOME_VALUE_11"],
+    "enumListOfListInput": [[], ["SOME_VALUE_12", "SOME_VALUE_13"]],
+    "nestedEnumType": {
+      "someEnum": "SOME_VALUE_14",
+      "someNullableEnum": "SOME_VALUE_15",
+      "someEnumList": ["SOME_VALUE_16"],
+      "someEnumListOfList": [["SOME_VALUE_17", "SOME_VALUE_18"]]
+    }
+  },
+  "enumInputObjectList": [
+    { 
+      "enumInput": "SOME_VALUE_19",
+      "enumListInput": ["SOME_VALUE_20", "SOME_VALUE_21"]
+    },
+    { 
+      "enumInput": "SOME_VALUE_22",
+      "nullableEnumInput": "SOME_VALUE_23",
+      "enumListInput": ["SOME_VALUE_24"],
+      "enumListOfListInput": [[], ["SOME_VALUE_25"]],
+      "nestedEnumType": {
+        "someEnum": "SOME_VALUE_26",
+        "someNullableEnum": "SOME_VALUE_27",
+        "someEnumList": ["SOME_VALUE_28"],
+        "someEnumListOfList": [["SOME_VALUE_29", "SOME_VALUE_30"]]
+      }
+    }
+  ],
+  "enumInputObjectListOfLists": [
+    [],
+    [{ 
+      "enumInput": "SOME_VALUE_31",
+      "enumListInput": ["SOME_VALUE_32", "SOME_VALUE_33"]
+    }]
+  ]
+}

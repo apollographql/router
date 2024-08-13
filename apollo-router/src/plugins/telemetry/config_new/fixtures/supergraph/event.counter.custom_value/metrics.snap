@@ -1,0 +1,25 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
+description: on_graphql_error attribute
+expression: "&metrics.all()"
+info:
+  telemetry:
+    instrumentation:
+      instruments:
+        default_requirement_level: none
+        supergraph:
+          custom_counter:
+            description: count of requests
+            type: counter
+            unit: unit
+            value:
+              event_custom:
+                response_data: $.price
+---
+- name: custom_counter
+  description: count of requests
+  unit: unit
+  data:
+    datapoints:
+      - value: 5
+        attributes: {}

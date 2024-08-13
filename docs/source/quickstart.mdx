@@ -1,18 +1,19 @@
 ---
-title: Apollo Router Quickstart
-subtitle: Run the Apollo Router with Apollo-hosted subgraphs
-description: This quickstart tutorial walks you through installing the Apollo Router and running it in front of some Apollo-hosted example subgraphs.
+title: Router Quickstart
+subtitle: Run the router with GraphOS and Apollo-hosted subgraphs
+description: This quickstart tutorial walks you through installing the Apollo GraphOS Router or Apollo Router Core and running it with GraphOS and some example Apollo-hosted subgraphs.
 ---
 
 import ElasticNotice from '../shared/elastic-notice.mdx';
 
-Hello! This tutorial walks you through installing the Apollo Router and running it in front of some Apollo-hosted example subgraphs.
+Hello! This tutorial walks you through installing the router (GraphOS Router or Apollo Router Core) and running it in with GraphOS and some example Apollo-hosted subgraphs.
 
-> **This quickstart helps you run a _self-hosted_ instance of the Apollo Router.** If you [create a cloud supergraph](/graphos/quickstart/cloud/) with Apollo GraphOS, Apollo provisions and hosts your supergraph's router for you.
+> **This quickstart helps you run a _self-hosted_ instance of the router.** If you [create a cloud supergraph](/graphos/quickstart/cloud/) with Apollo GraphOS, Apollo provisions and hosts your supergraph's GraphOS 
+Router for you.
 >
 > Cloud supergraphs are recommended for organizations that don't need to host their router in their own infrastructure.
 
-## 1. Download and extract the Apollo Router binary
+## 1. Download and extract the router binary
 
 <ElasticNotice />
 
@@ -22,7 +23,7 @@ Hello! This tutorial walks you through installing the Apollo Router and running 
 
 #### Automatic download (Linux, OSX, WSL)
 
-If you have a bash-compatible terminal, you can download the latest version of the Apollo Router directly to your current directory with the following command:
+If you have a bash-compatible terminal, you can download the latest version of the Apollo Router Core directly to your current directory with the following command:
 
 ```bash
 curl -sSL https://router.apollo.dev/download/nix/latest | sh
@@ -30,14 +31,14 @@ curl -sSL https://router.apollo.dev/download/nix/latest | sh
 
 #### Manual download
 
-Go to the Apollo Router's [GitHub Releases page](https://github.com/apollographql/router/releases) and download the latest `.tar.gz` file that matches your system. Currently, tarballs are available for the following:
+Go to the Apollo Router Core's [GitHub Releases page](https://github.com/apollographql/router/releases) and download the latest `.tar.gz` file that matches your system. Currently, tarballs are available for the following:
 
 * Linux (x86_64)
 * Linux (aarch64)
 * macOS (Apple Silicon)
 * Windows (x86_64)
 
-If a tarball for your system or architecture isn't available, you can [build and run Apollo Router from source](https://github.com/apollographql/router/blob/HEAD/DEVELOPMENT.md#development-1).  You can also [open an issue on GitHub](https://github.com/apollographql/router/issues/new/choose) to request the addition of new architectures.
+If a tarball for your system or architecture isn't available, you can [build and run the router from source](https://github.com/apollographql/router/blob/HEAD/DEVELOPMENT.md#development-1).  You can also [open an issue on GitHub](https://github.com/apollographql/router/issues/new/choose) to request the addition of new architectures.
 
 After downloading, extract the file by running the following from a new project directory, substituting the path to the tarball:
 
@@ -49,7 +50,7 @@ If you omit the `--strip-components=1` option, the `router` executable is instal
 
 ### Running the binary
 
-You can now run the Apollo Router from your project's root directory with the following command:
+You can now run the router from your project's root directory with the following command:
 
 ```bash
 ./router
@@ -82,12 +83,12 @@ Apollo Router <version> // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://g
 
     $ curl -L https://supergraph.demo.starstuff.dev/ > starstuff.graphql
 
-  2. Run the Apollo Router in development mode with the supergraph schema:
+  2. Run the router in development mode with the supergraph schema:
 
     $ ./router --dev --supergraph starstuff.graphql
 ```
 
-This is because Apollo Router requires a supergraph schema and we aren't providing it one! Let's fix that.
+This is because router requires a supergraph schema and we aren't providing it one! Let's fix that.
 
 ## 2. Download the example supergraph schema
 
@@ -199,7 +200,7 @@ The console output should look like the following:
 2022-06-29T22:23:25.774334Z  INFO apollo_router::axum_http_server_factory: GraphQL endpoint exposed at http://127.0.0.1:4000/ 🚀
 ```
 
-That's it! Running the Router with the `--dev` flag enables a development mode that exposes [Apollo Sandbox](/graphos/explorer/sandbox/) so you can run queries against the Apollo Router.
+That's it! Running the router with the `--dev` flag enables a development mode that exposes [Apollo Sandbox](/graphos/explorer/sandbox/) so you can run queries against the router.
 
 <Caution>
 
@@ -213,7 +214,7 @@ Visit `http://127.0.0.1:4000` to open Apollo Sandbox, inspect your entire superg
 
 ## Next steps
 
-Now that you know how to run the Apollo Router with a supergraph schema, you can:
+Now that you know how to run the router with a supergraph schema, you can:
 
 * Set up [managed federation](/federation/managed-federation/overview)
 * Learn about [additional configuration options](./configuration/overview)

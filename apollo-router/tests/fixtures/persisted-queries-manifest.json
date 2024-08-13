@@ -1,0 +1,12 @@
+{
+  "format": "apollo-persisted-query-manifest",
+  "version": 1,
+  "operations": [
+    {
+      "id": "5678",
+      "name": "typename",
+      "type": "query",
+      "body": "query { typename }"
+    }
+  ]
+}

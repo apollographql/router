@@ -1,0 +1,44 @@
+---
+source: apollo-router/src/apollo_studio_interop/tests.rs
+expression: "&generated"
+---
+referenced_input_fields:
+  InputType:
+    enumInput:
+      referenced: true
+      null_reference: true
+      undefined_reference: false
+    inputBoolean:
+      referenced: false
+      null_reference: false
+      undefined_reference: true
+    inputInt:
+      referenced: true
+      null_reference: false
+      undefined_reference: false
+    inputString:
+      referenced: true
+      null_reference: false
+      undefined_reference: false
+    listInput:
+      referenced: true
+      null_reference: false
+      undefined_reference: false
+    nestedType:
+      referenced: true
+      null_reference: false
+      undefined_reference: false
+    nestedTypeList:
+      referenced: false
+      null_reference: false
+      undefined_reference: true
+  NestedInputType:
+    someFloat:
+      referenced: true
+      null_reference: false
+      undefined_reference: false
+    someNullableFloat:
+      referenced: true
+      null_reference: true
+      undefined_reference: false
+referenced_enums: {}

@@ -1,0 +1,102 @@
+schema {
+  query: Query
+}
+
+extend schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/federation/v2.5")
+
+directive @link(
+  url: String
+  as: String
+  for: link__Purpose
+  import: [link__Import]
+) repeatable on SCHEMA
+
+directive @federation__key(
+  fields: federation__FieldSet!
+  resolvable: Boolean = true
+) repeatable on OBJECT | INTERFACE
+
+directive @federation__requires(
+  fields: federation__FieldSet!
+) on FIELD_DEFINITION
+
+directive @federation__provides(
+  fields: federation__FieldSet!
+) on FIELD_DEFINITION
+
+directive @federation__external(reason: String) on OBJECT | FIELD_DEFINITION
+
+directive @federation__tag(
+  name: String!
+) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
+
+directive @federation__extends on OBJECT | INTERFACE
+
+directive @federation__shareable on OBJECT | FIELD_DEFINITION
+
+directive @federation__inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+directive @federation__override(from: String!) on FIELD_DEFINITION
+
+directive @federation__composeDirective(name: String) repeatable on SCHEMA
+
+directive @federation__interfaceObject on OBJECT
+
+directive @federation__authenticated on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
+
+directive @federation__requiresScopes(
+  scopes: [[federation__Scope!]!]!
+) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
+
+scalar link__Import
+
+enum link__Purpose {
+  """
+  \`SECURITY\` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  \`EXECUTION\` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar federation__FieldSet
+
+scalar federation__Scope
+
+type Query {
+  a(input: Input @federation__inaccessible): A
+  b: B @federation__inaccessible
+}
+
+type A @federation__key(fields: "id") {
+  id: ID!
+  c: Int @federation__inaccessible
+  d: Enum @federation__inaccessible
+}
+
+type B implements Interface @federation__inaccessible {
+  b: Scalar
+}
+
+enum Enum @federation__inaccessible {
+  A
+  B
+  C @federation__inaccessible
+}
+
+input Input @federation__inaccessible {
+  a: Int @federation__inaccessible
+  b: String
+}
+
+scalar Scalar @federation__inaccessible
+
+interface Interface @federation__inaccessible {
+  b: Scalar @federation__inaccessible
+}
+
+union Union @federation__inaccessible = A | B

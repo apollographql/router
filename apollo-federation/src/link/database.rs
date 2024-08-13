@@ -62,7 +62,7 @@ pub fn links_metadata(schema: &Schema) -> Result<Option<LinksMetadata>, LinkErro
             .insert(link.url.identity.clone(), Arc::clone(&link))
             .is_some()
         {
-            // TODO: we may want to lessen that limitation at some point. Including the same feature for 2 different major versions should be ok.
+            // XXX(Sylvain): We may want to loosen this limitation at some point. Including the same feature for 2 different major versions should be ok.
             return Err(LinkError::BootstrapError(format!(
                 "duplicate @link inclusion of specification \"{}\"",
                 link.url.identity

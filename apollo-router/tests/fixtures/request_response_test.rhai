@@ -92,10 +92,25 @@ fn process_subgraph_request(request) {
     process_common_request(false, request.subgraph);
 }
 
-fn process_common_response(response) {
-    if response.context.entries != () {
-        throw(`context entries: expected: (), actual: ${response.context.entries}`);
+fn test_response_is_primary(response) {
+    if !response.is_primary() {
+        throw #{
+            status: 500,
+            message: "should be primary"
+        };
     }
+}
+
+fn test_response_is_not_primary(response) {
+    if response.is_primary() {
+        throw #{
+            status: 500,
+            message: "should not be primary"
+        };
+    }
+}
+
+fn test_response_body(response) {
     if response.body.label != () {
         throw(`label: expected: (), actual: ${response.body.label}`);
     }
@@ -108,21 +123,9 @@ fn process_common_response(response) {
     if response.body.extensions != #{} {
         throw(`query: expected: #{}, actual: ${response.body.extensions}`);
     }
-    if type_of(response.id) != "string" {
-        throw(`query: expected: "string", actual: ${type_of(response.id)}`);
-    }
 }
 
-fn process_supergraph_response(response) {
-    process_common_response(response);
-}
-
-fn process_execution_response(response) {
-    process_common_response(response);
-}
-
-fn process_subgraph_response(response) {
-    process_common_response(response);
+fn test_response_status_code(response) {
     if type_of(response.status_code) != "http::status::StatusCode" {
         throw(`status_code: expected: "http::status::StatusCode", actual: ${type_of(response.status_code)}`);
     }
@@ -132,6 +135,56 @@ fn process_subgraph_response(response) {
     if response.status_code != status_code_from_int(200) {
         throw(`status_code: expected: 200, actual: ${response.status_code}`);
     }
+}
+
+fn process_common_response(response) {
+    if response.context.entries != () {
+        throw(`context entries: expected: (), actual: ${response.context.entries}`);
+    }
+    if type_of(response.id) != "string" {
+        throw(`query: expected: "string", actual: ${type_of(response.id)}`);
+    }
+}
+
+fn process_router_response(response) {
+    test_response_is_primary(response);
+    process_common_response(response);
+    test_response_status_code(response);
+}
+
+fn process_router_chunked_response(response) {
+    test_response_is_not_primary(response);
+    process_common_response(response);
+}
+
+fn process_supergraph_response(response) {
+    test_response_is_primary(response);
+    process_common_response(response);
+    test_response_body(response);
+}
+
+fn process_supergraph_deferred_response(response) {
+    test_response_is_not_primary(response);
+    process_common_response(response);
+    test_response_body(response);
+}
+
+fn process_execution_response(response) {
+    test_response_is_primary(response);
+    process_common_response(response);
+    test_response_body(response);
+}
+
+fn process_execution_deferred_response(response) {
+    test_response_is_not_primary(response);
+    process_common_response(response);
+    test_response_body(response);
+}
+
+fn process_subgraph_response(response) {
+    process_common_response(response);
+    test_response_body(response);
+    test_response_status_code(response);
 }
 
 fn process_subgraph_response_om_forbidden(response) {
@@ -182,40 +235,3 @@ fn process_subgraph_response_om_missing_message(response) {
         status: 400,
     };
 }
-
-fn process_supergraph_response_is_primary(response) {
-    if !response.is_primary() {
-        throw #{
-            status: 500,
-            message: "should be primary"
-        };
-    }
-}
-
-fn process_execution_response_is_primary(response) {
-    if !response.is_primary() {
-        throw #{
-            status: 500,
-            message: "should be primary"
-        };
-    }
-}
-
-fn process_supergraph_deferred_response_is_not_primary(response) {
-    if response.is_primary() {
-        throw #{
-            status: 500,
-            message: "should not be primary"
-        };
-    }
-}
-
-fn process_execution_deferred_response_is_not_primary(response) {
-    if response.is_primary() {
-        throw #{
-            status: 500,
-            message: "should not be primary"
-        };
-    }
-}
-

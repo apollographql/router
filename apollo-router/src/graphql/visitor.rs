@@ -53,10 +53,10 @@ pub(crate) trait ResponseVisitor {
         }
 
         if let Some(Value::Object(children)) = &response.data {
-            if let Some(operation) = &request.anonymous_operation {
+            if let Some(operation) = &request.operations.anonymous {
                 self.visit_selections(request, &operation.selection_set, children);
             }
-            for operation in request.named_operations.values() {
+            for operation in request.operations.named.values() {
                 self.visit_selections(request, &operation.selection_set, children);
             }
         }

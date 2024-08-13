@@ -7,5 +7,4 @@ telemetry:
           type: counter
           unit: "unit"
           value:
-            field_custom:
-              list_length: value
+            list_length: value

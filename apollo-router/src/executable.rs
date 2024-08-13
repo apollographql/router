@@ -2,8 +2,6 @@
 
 use std::cell::Cell;
 use std::env;
-use std::ffi::OsStr;
-use std::fmt;
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -19,7 +17,6 @@ use clap::Args;
 use clap::CommandFactory;
 use clap::Parser;
 use clap::Subcommand;
-use directories::ProjectDirs;
 #[cfg(any(feature = "dhat-heap", feature = "dhat-ad-hoc"))]
 use once_cell::sync::OnceCell;
 use regex::Captures;
@@ -314,43 +311,6 @@ impl Opt {
     }
 }
 
-/// Wrapper so that clap can display the default config path in the help message.
-/// Uses ProjectDirs to get the default location.
-#[derive(Debug)]
-struct ProjectDir {
-    path: Option<PathBuf>,
-}
-
-impl Default for ProjectDir {
-    fn default() -> Self {
-        let dirs = ProjectDirs::from("com", "Apollo", "Federation");
-        Self {
-            path: dirs.map(|dirs| dirs.config_dir().to_path_buf()),
-        }
-    }
-}
-
-impl From<&OsStr> for ProjectDir {
-    fn from(s: &OsStr) -> Self {
-        Self {
-            path: Some(PathBuf::from(s)),
-        }
-    }
-}
-
-impl fmt::Display for ProjectDir {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.path {
-            None => {
-                write!(f, "Unknown, -p option must be used.")
-            }
-            Some(path) => {
-                write!(f, "{}", path.to_string_lossy())
-            }
-        }
-    }
-}
-
 /// This is the main router entrypoint.
 ///
 /// Starts a Tokio runtime and runs a Router in it based on command-line options.
@@ -521,22 +481,23 @@ impl Executable {
             }
             (Some(config), None) => config,
             #[allow(clippy::blocks_in_conditions)]
-            _ => match opt.config_path.as_ref().map(|path| {
-                let path = if path.is_relative() {
-                    current_directory.join(path)
-                } else {
-                    path.to_path_buf()
-                };
+            _ => opt
+                .config_path
+                .as_ref()
+                .map(|path| {
+                    let path = if path.is_relative() {
+                        current_directory.join(path)
+                    } else {
+                        path.to_path_buf()
+                    };
 
-                ConfigurationSource::File {
-                    path,
-                    watch: opt.hot_reload,
-                    delay: None,
-                }
-            }) {
-                Some(configuration) => configuration,
-                None => Default::default(),
-            },
+                    ConfigurationSource::File {
+                        path,
+                        watch: opt.hot_reload,
+                        delay: None,
+                    }
+                })
+                .unwrap_or_default(),
         };
 
         let apollo_telemetry_msg = if opt.anonymous_telemetry_disabled {

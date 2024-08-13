@@ -1,18 +1,22 @@
 ---
-title: The Apollo Router
-subtitle: High-performance routing for self-hosted supergraphs
-description: Distribute operations efficiently across microservices in your federated GraphQL API with the Apollo Router. Configure caching, security features, and more.
+title: Self-Hosted Router
+subtitle: High-performance routing with self-hosted supergraph runtimes
+description: Distribute operations efficiently across microservices in your federated GraphQL API with the Apollo GraphOS Router or Apollo Router Core. Configure caching, security features, and more.
 ---
 
 import { Link } from 'gatsby';
 
-**The Apollo Router** is a configurable, high-performance router for your federated GraphQL API (also known as a [supergraph](/graphos/graphs/#self-hosted-supergraphs)):
+> 💡 Not self-hosting your router? Get started with [Cloud Router](/graphos/quickstart/cloud/).
+
+GraphOS Router is a scalable runtime for supergraphs that's fully integrated with GraphOS and based on the Apollo Router Core.
+
+A self-hosted GraphOS Router or Apollo Router Core enables full management of your supergraph runtime infrastructure and deployments.
 
 ```mermaid
 flowchart LR;
   clients(Clients);
   subgraph "Your infrastructure";
-  router(["<b>Apollo Router</b>"]);
+  router(["<b>Router</b>"]);
   serviceB[Products<br/>API];
   serviceC[Reviews<br/>API];
   router -->|Sub-query| serviceB & serviceC;
@@ -21,11 +25,12 @@ flowchart LR;
   class clients secondary;
 ```
 
-The Apollo Router intelligently distributes inbound queries across your GraphQL-powered microservices, enabling clients to fetch data from multiple sources with a single request.
+The router intelligently distributes inbound queries across your GraphQL-powered microservices, enabling clients to fetch data from multiple sources with a single request.
 
-> Learn about the [distinction between the Apollo Router and API gateways](/technotes/TN0037-api-gateways/).
+> Learn about the [distinction between the router and an API gateway](/technotes/TN0037-api-gateways/).
 
-If you have an existing federated graph that currently uses `@apollo/gateway`, you can move to the Apollo Router without changing any other part of your graph.
+
+If you have an existing federated graph that currently uses `@apollo/gateway`, you can move to the router without changing any other part of your graph.
 
 <p>
   <Button
@@ -36,7 +41,7 @@ If you have an existing federated graph that currently uses `@apollo/gateway`, y
       marginRight: '10px'
     }}
   >
-    Try out the Apollo Router!
+    Try out the GraphOS Router!
   </Button>
   <Button
     colorScheme="gray"
@@ -47,9 +52,10 @@ If you have an existing federated graph that currently uses `@apollo/gateway`, y
   </Button>
 </p>
 
-> **This documentation helps you run a _self-hosted_ instance of the Apollo Router.** If you [create a cloud supergraph](/graphos/quickstart/cloud/) with Apollo GraphOS, Apollo provisions and hosts your router for you.
+> **This documentation helps you run a _self-hosted_ instance of a router.** If you [create a cloud supergraph](/graphos/quickstart/cloud/) with Apollo GraphOS, Apollo provisions and hosts a GraphOS Router for you.
 >
 > Cloud supergraphs are recommended for organizations that don't need to host their router in their own infrastructure.
+
 
 ## Features
 

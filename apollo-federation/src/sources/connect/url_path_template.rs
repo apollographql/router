@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::fmt::Display;
 
-use indexmap::IndexMap;
+use apollo_compiler::collections::IndexMap;
 use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
@@ -80,7 +80,7 @@ impl URLPathTemplate {
             }
         }
 
-        let mut query = IndexMap::new();
+        let mut query = IndexMap::default();
 
         if let Some(query_suffix) = query_suffix {
             for query_part in query_suffix.split('&') {

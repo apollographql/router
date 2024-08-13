@@ -1,0 +1,32 @@
+telemetry:
+  exporters:
+    tracing:
+      experimental_response_trace_id:
+        enabled: true
+        header_name: apollo-custom-trace-id
+        format: datadog
+      common:
+        service_name: router
+      datadog:
+        enabled: true
+        enable_span_mapping: true
+        batch_processor:
+          scheduled_delay: 100ms
+        resource_mapping:
+          router: graphql.operation.name
+          supergraph: override.name
+
+  instrumentation:
+    spans:
+      mode: spec_compliant
+      router:
+        attributes:
+          graphql.operation.name:
+            operation_name: string
+      supergraph:
+        attributes:
+          override.name: overridden
+
+
+
+

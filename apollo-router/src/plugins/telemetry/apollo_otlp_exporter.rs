@@ -38,11 +38,11 @@ use crate::plugins::telemetry::apollo::router_id;
 use crate::plugins::telemetry::apollo_exporter::get_uname;
 use crate::plugins::telemetry::apollo_exporter::ROUTER_REPORT_TYPE_TRACES;
 use crate::plugins::telemetry::apollo_exporter::ROUTER_TRACING_PROTOCOL_OTLP;
+use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
+use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::GLOBAL_TRACER_NAME;
-use crate::plugins::telemetry::SUBGRAPH_SPAN_NAME;
-use crate::plugins::telemetry::SUPERGRAPH_SPAN_NAME;
 
 /// The Apollo Otlp exporter is a thin wrapper around the OTLP SpanExporter.
 #[derive(Clone, Derivative)]

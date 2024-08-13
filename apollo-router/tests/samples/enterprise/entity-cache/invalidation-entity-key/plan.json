@@ -1,0 +1,245 @@
+{
+    "enterprise": true,
+    "redis": true,
+    "actions": [
+        {
+            "type": "Start",
+            "schema_path": "./supergraph.graphql",
+            "configuration_path": "./configuration.yaml",
+            "subgraphs": {
+                "invalidation-entity-key-products": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query":"query InvalidationEntityKey__invalidation_entity_key_products__0{topProducts{__typename upc}}",
+                                    "operationName": "InvalidationEntityKey__invalidation_entity_key_products__0"
+                                }
+                            },
+                            "response": {
+                                "headers": {
+                                    "Cache-Control": "public, max-age=10",
+                                    "Content-Type": "application/json"
+                                },
+                                "body": {"data": { "topProducts": [{ "__typename": "Product", "upc": "0" }, { "__typename": "Product", "upc": "1"} ] } }
+                            }
+                        }
+                    ]
+                },
+                "invalidation-entity-key-reviews": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query":"query InvalidationEntityKey__invalidation_entity_key_reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{body}}}}",
+                                    "operationName": "InvalidationEntityKey__invalidation_entity_key_reviews__1",
+                                    "variables":{"representations":[{"upc":"0","__typename":"Product"},{"upc":"1","__typename":"Product"}]}
+                                }
+                            },
+                            "response": {
+                                "headers": {
+                                    "Cache-Control": "public, max-age=10",
+                                    "Content-Type": "application/json"
+                                },
+                                "body": {"data": { "_entities": [
+                                    {
+                                        "reviews": [
+                                            { "body": "A"},
+                                            { "body": "B"}
+                                        ]
+                                    },
+                                    {
+                                        "reviews": [
+                                            { "body": "C"}
+                                        ]
+                                    }]
+                                }}
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "Request",
+            "request": {
+                "query": "query InvalidationEntityKey { topProducts { reviews { body } } }"
+            },
+            "expected_response": {
+                "data":{
+                    "topProducts": [{
+                        "reviews": [{
+                            "body": "A"
+                        },{
+                            "body": "B"
+                        }]
+                    },
+                    {
+                        "reviews": [{
+                            "body": "C"
+                        }]
+                    }]
+                }
+            }
+        },
+        {
+            "type": "ReloadSubgraphs",
+            "subgraphs": {
+                "invalidation-entity-key-reviews": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query":"mutation InvalidationEntityKey__invalidation_entity_key_reviews__0{invalidateProductReview}"
+                                }
+                            },
+                            "response": {
+                                "headers": {
+                                    "Content-Type": "application/json"
+                                },
+                                "body": {
+                                    "data": { "invalidateProductReview": 1 },
+                                    "extensions": {
+                                        "invalidation": [{
+                                            "kind": "entity",
+                                            "subgraph": "invalidation-entity-key-reviews",
+                                            "type": "Product",
+                                            "key": {
+                                                "upc": "1"
+                                            }
+                                        }]
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "request": {
+                                "body": {
+                                    "query":"query InvalidationEntityKey__invalidation_entity_key_reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{body}}}}",
+                                    "variables":{"representations":[{"upc":"1","__typename":"Product"}]}
+                                }
+                            },
+                            "response": {
+                                "status": 500,
+                                "headers": {
+                                    "Cache-Control": "public, max-age=10",
+                                    "Content-Type": "application/json"
+                                },
+                                "body": {}
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "Request",
+            "request": {
+                "query": "query InvalidationEntityKey { topProducts { reviews { body } } }"
+            },
+            "expected_response": {
+                "data":{
+                    "topProducts": [{
+                        "reviews": [{
+                            "body": "A"
+                        },{
+                            "body": "B"
+                        }]
+                    },
+                    {
+                        "reviews": [{
+                            "body": "C"
+                        }]
+                    }]
+                }
+            }
+        },
+        {
+            "type": "Request",
+            "request": {
+                "query": "mutation InvalidationEntityKey { invalidateProductReview }"
+            },
+            "expected_response": {
+                "data":{
+                    "invalidateProductReview": 1
+                }
+            }
+        },
+        {
+            "type": "Request",
+            "request": {
+                "query": "query InvalidationEntityKey { topProducts { reviews { body } } }"
+            },
+            "expected_response":{
+                "data":{
+                    "topProducts":[{"reviews":null},{"reviews":null}]
+                },
+                "errors":[
+                    {
+                        "message":"HTTP fetch failed from 'invalidation-entity-key-reviews': 500: Internal Server Error",
+                        "extensions":{"code":"SUBREQUEST_HTTP_ERROR","service":"invalidation-entity-key-reviews","reason":"500: Internal Server Error","http":{"status":500}}
+                    },
+                    {
+                        "message":"service 'invalidation-entity-key-reviews' response was malformed: {}",
+                        "extensions":{"service":"invalidation-entity-key-reviews","reason":"{}","code":"SUBREQUEST_MALFORMED_RESPONSE"}
+                    }
+                ]
+            }
+        },
+        {
+            "type": "ReloadSubgraphs",
+            "subgraphs": {
+                "invalidation-entity-key-reviews": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query":"query InvalidationEntityKey__invalidation_entity_key_reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{body}}}}",
+                                    "variables":{"representations":[{"upc":"1","__typename":"Product"}]}
+                                }
+                            },
+                            "response": {
+                                "headers": {
+                                    "Cache-Control": "public, max-age=10",
+                                    "Content-Type": "application/json"
+                                },
+                                "body": {"data": { "_entities": [
+                                    {
+                                        "reviews": [
+                                            { "body": "C"}
+                                        ]
+                                    }]
+                                }}
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "Request",
+            "request": {
+                "query": "query InvalidationEntityKey { topProducts { reviews { body } } }"
+            },
+            "expected_response": {
+                "data":{
+                    "topProducts": [{
+                        "reviews": [{
+                            "body": "A"
+                        },{
+                            "body": "B"
+                        }]
+                    },
+                    {
+                        "reviews": [{
+                            "body": "C"
+                        }]
+                    }]
+                }
+            }
+        },
+        {
+            "type": "Stop"
+        }
+    ]
+}

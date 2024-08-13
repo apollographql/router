@@ -1,0 +1,6 @@
+# Note that the contents should be same as https://github.com/apollographql/router/blob/main/rust-toolchain.toml
+
+[toolchain]
+# renovate-automation: rustc version
+channel = "1.76.0"
+components = [ "rustfmt", "clippy" ]

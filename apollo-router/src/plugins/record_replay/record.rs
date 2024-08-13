@@ -19,6 +19,7 @@ use crate::plugin::PluginInit;
 use crate::services::execution;
 use crate::services::external::externalize_header_map;
 use crate::services::router;
+use crate::services::router::body::RouterBody;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::query::Query;
@@ -66,10 +67,7 @@ impl Plugin for Record {
             enabled: init.config.enabled,
             supergraph_sdl: init.supergraph_sdl.clone(),
             storage_path: storage_path.clone().into(),
-            schema: Arc::new(Schema::parse(
-                init.supergraph_sdl.clone().as_str(),
-                &Default::default(),
-            )?),
+            schema: Arc::new(Schema::parse_arc(init.supergraph_sdl, &Default::default())?),
         };
 
         if init.config.enabled {
@@ -138,7 +136,7 @@ impl Plugin for Record {
                         context: res.context,
                         response: http::Response::from_parts(
                             parts,
-                            hyper::Body::wrap_stream(stream),
+                            RouterBody::wrap_stream(stream).into_inner(),
                         ),
                     })
                 }

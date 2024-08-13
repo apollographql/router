@@ -20,7 +20,7 @@ pub(super) struct MapField {
 
 impl MapField {
     pub(super) fn new(map_field: MapFieldRaw) -> UploadResult<Self> {
-        let mut files_order = IndexSet::new();
+        let mut files_order = IndexSet::default();
         let mut map_per_variable: MapPerVariable = HashMap::new();
         for (filename, paths) in map_field.into_iter() {
             for path in paths.into_iter() {
@@ -60,7 +60,7 @@ impl MapField {
         &self,
         variable_names: impl IntoIterator<Item = &'a ByteString>,
     ) -> MapFieldRaw {
-        let mut subgraph_map: MapFieldRaw = IndexMap::new();
+        let mut subgraph_map: MapFieldRaw = IndexMap::default();
         for variable_name in variable_names.into_iter() {
             let variable_name = variable_name.as_str();
             if let Some(variable_map) = self.per_variable.get(variable_name) {

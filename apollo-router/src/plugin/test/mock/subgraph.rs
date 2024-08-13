@@ -182,7 +182,7 @@ impl Service<SubgraphRequest> for MockSubgraph {
             let http_response = http_response_builder
                 .body(response.clone())
                 .expect("Response is serializable; qed");
-            SubgraphResponse::new_from_response(http_response, req.context)
+            SubgraphResponse::new_from_response(http_response, req.context, "test".to_string())
         } else {
             let error = crate::error::Error::builder()
                 .message(format!(

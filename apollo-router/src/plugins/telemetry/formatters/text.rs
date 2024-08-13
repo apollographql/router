@@ -6,6 +6,7 @@ use std::fmt;
 use nu_ansi_term::Color;
 use nu_ansi_term::Style;
 use opentelemetry::sdk::Resource;
+use opentelemetry::OrderMap;
 use serde_json::Value;
 use tracing_core::Event;
 use tracing_core::Field;
@@ -24,12 +25,15 @@ use tracing_subscriber::registry::SpanRef;
 
 use super::get_trace_and_span_id;
 use super::EventFormatter;
+use super::APOLLO_PRIVATE_PREFIX;
 use super::EXCLUDED_ATTRIBUTES;
+use crate::plugins::telemetry::config::TraceIdFormat;
+use crate::plugins::telemetry::config_new::logging::DisplayTraceIdFormat;
 use crate::plugins::telemetry::config_new::logging::TextFormat;
+use crate::plugins::telemetry::dynamic_attribute::EventAttributes;
 use crate::plugins::telemetry::dynamic_attribute::LogAttributes;
 use crate::plugins::telemetry::formatters::to_list;
 use crate::plugins::telemetry::otel::OtelData;
-use crate::plugins::telemetry::tracing::APOLLO_PRIVATE_PREFIX;
 
 pub(crate) struct Text {
     #[allow(dead_code)]
@@ -322,7 +326,24 @@ where
 
         if let Some(ref span) = current_span {
             if let Some((trace_id, span_id)) = get_trace_and_span_id(span) {
-                if self.config.display_trace_id {
+                let trace_id = match self.config.display_trace_id {
+                    DisplayTraceIdFormat::Bool(true)
+                    | DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::Hexadecimal)
+                    | DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::OpenTelemetry) => {
+                        Some(TraceIdFormat::Hexadecimal.format(trace_id))
+                    }
+                    DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::Decimal) => {
+                        Some(TraceIdFormat::Decimal.format(trace_id))
+                    }
+                    DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::Datadog) => {
+                        Some(TraceIdFormat::Datadog.format(trace_id))
+                    }
+                    DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::Uuid) => {
+                        Some(TraceIdFormat::Uuid.format(trace_id))
+                    }
+                    DisplayTraceIdFormat::Bool(false) => None,
+                };
+                if let Some(trace_id) = trace_id {
                     write!(writer, "trace_id: {} ", trace_id)?;
                 }
                 if self.config.display_span_id {
@@ -364,9 +385,24 @@ where
         if let Some(span) = ctx.event_span(event) {
             let mut extensions = span.extensions_mut();
             let otel_data = extensions.get_mut::<OtelData>();
-            if let Some(event_attributes) = otel_data.and_then(|od| od.event_attributes.take()) {
+            let attrs = otel_data.and_then(|od| od.event_attributes.take());
+            let event_attributes = match attrs {
+                Some(attrs) => Some(attrs),
+                None => {
+                    let event_attributes = extensions.get_mut::<EventAttributes>();
+                    event_attributes.map(|event_attributes| {
+                        OrderMap::from_iter(
+                            event_attributes
+                                .take()
+                                .into_iter()
+                                .map(|kv| (kv.key, kv.value)),
+                        )
+                    })
+                }
+            };
+            if let Some(event_attributes) = event_attributes {
                 for (key, value) in event_attributes {
-                    default_visitor.log_debug_attrs(key.as_str(), &value.as_str());
+                    default_visitor.log_debug_attrs(key.as_str(), &value);
                 }
             }
         }
@@ -482,7 +518,7 @@ impl<'a> DefaultVisitor<'a> {
         Style::new()
     }
 
-    fn log_debug_attrs(&mut self, field_name: &str, value: &dyn fmt::Debug) {
+    fn log_debug_attrs(&mut self, field_name: &str, value: &opentelemetry::Value) {
         let style = self.dimmed();
 
         self.result = write!(self.writer, "{}", style.prefix());
@@ -494,14 +530,14 @@ impl<'a> DefaultVisitor<'a> {
         self.result = match field_name {
             name if name.starts_with("r#") => write!(
                 self.writer,
-                "{}{}{:?}",
+                "{}{}{}",
                 self.italic().paint(&name[2..]),
                 self.dimmed().paint("="),
                 value
             ),
             name => write!(
                 self.writer,
-                "{}{}{:?}",
+                "{}{}{}",
                 self.italic().paint(name),
                 self.dimmed().paint("="),
                 value

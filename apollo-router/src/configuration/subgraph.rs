@@ -92,7 +92,7 @@ where
     T: Default + Serialize + JsonSchema,
 {
     #[allow(dead_code)]
-    fn get(&self, subgraph_name: &str) -> &T {
+    pub(crate) fn get(&self, subgraph_name: &str) -> &T {
         self.subgraphs.get(subgraph_name).unwrap_or(&self.all)
     }
 }

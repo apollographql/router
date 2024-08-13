@@ -37,6 +37,7 @@ struct SubscriptionPayload {
     errors: Vec<graphql::Error>,
 }
 
+#[derive(Debug)]
 enum MessageKind {
     Heartbeat,
     Message(graphql::Response),

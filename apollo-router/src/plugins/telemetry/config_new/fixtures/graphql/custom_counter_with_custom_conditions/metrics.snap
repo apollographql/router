@@ -11,7 +11,7 @@ info:
             description: count of requests
             type: counter
             unit: unit
-            value: field_unit
+            value: unit
             attributes:
               graphql.field.name: true
             condition:

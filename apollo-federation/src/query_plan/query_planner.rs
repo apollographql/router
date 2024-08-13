@@ -2,24 +2,21 @@ use std::cell::Cell;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
-use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::schema::Name;
+use apollo_compiler::collections::HashMap;
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
-use apollo_compiler::NodeStr;
-use indexmap::IndexMap;
-use indexmap::IndexSet;
-use petgraph::csr::NodeIndex;
-use petgraph::stable_graph::IndexType;
+use apollo_compiler::Name;
+use itertools::Itertools;
+use serde::Serialize;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
-use crate::link::federation_spec_definition::FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC;
-use crate::link::spec::Identity;
 use crate::operation::normalize_operation;
 use crate::operation::NamedFragments;
-use crate::operation::RebasedFragments;
+use crate::operation::Operation;
 use crate::operation::SelectionSet;
 use crate::query_graph::build_federated_query_graph;
 use crate::query_graph::path_tree::OpPathTree;
@@ -46,6 +43,7 @@ use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
+use crate::utils::logging::snapshot;
 use crate::ApiSchemaOptions;
 use crate::Supergraph;
 
@@ -170,7 +168,7 @@ impl Default for QueryPlannerDebugConfig {
 }
 
 // PORT_NOTE: renamed from PlanningStatistics in the JS codebase.
-#[derive(Debug, PartialEq, Default)]
+#[derive(Debug, PartialEq, Default, Serialize)]
 pub struct QueryPlanningStatistics {
     pub evaluated_plan_count: Cell<usize>,
 }
@@ -189,7 +187,8 @@ pub struct QueryPlanner {
     federated_query_graph: Arc<QueryGraph>,
     supergraph_schema: ValidFederationSchema,
     api_schema: ValidFederationSchema,
-    subgraph_federation_spec_definitions: Arc<IndexMap<NodeStr, &'static FederationSpecDefinition>>,
+    subgraph_federation_spec_definitions:
+        Arc<IndexMap<Arc<str>, &'static FederationSpecDefinition>>,
     /// A set of the names of interface types for which at least one subgraph use an
     /// @interfaceObject to abstract that interface.
     interface_types_with_interface_objects: IndexSet<InterfaceTypeDefinitionPosition>,
@@ -201,6 +200,10 @@ pub struct QueryPlanner {
 }
 
 impl QueryPlanner {
+    #[cfg_attr(
+        feature = "snapshot_tracing",
+        tracing::instrument(level = "trace", skip_all, name = "QueryPlanner::new")
+    )]
     pub fn new(
         supergraph: &Supergraph,
         config: QueryPlannerConfig,
@@ -219,17 +222,6 @@ impl QueryPlanner {
             Some(true),
         )?;
 
-        let metadata = supergraph_schema.metadata().unwrap();
-
-        let federation_link = metadata.for_identity(&Identity::federation_identity());
-        let interface_object_directive =
-            federation_link.map_or(FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC, |link| {
-                link.directive_name_in_schema(&FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC)
-            });
-
-        let is_interface_object =
-            |ty: &ExtendedType| ty.is_object() && ty.directives().has(&interface_object_directive);
-
         let interface_types_with_interface_objects = supergraph
             .schema
             .get_types()
@@ -237,16 +229,28 @@ impl QueryPlanner {
                 TypeDefinitionPosition::Interface(interface_position) => Some(interface_position),
                 _ => None,
             })
-            .filter(|position| {
-                query_graph.subgraphs().any(|(_name, schema)| {
-                    schema
-                        .schema()
-                        .types
-                        .get(&position.type_name)
-                        .is_some_and(is_interface_object)
-                })
+            .map(|position| {
+                let is_interface_object = query_graph
+                    .subgraphs()
+                    .map(|(_name, schema)| {
+                        let Some(position) = schema.try_get_type(position.type_name.clone()) else {
+                            return Ok(false);
+                        };
+                        schema.is_interface_object_type(position)
+                    })
+                    .process_results(|mut iter| iter.any(|b| b))?;
+                Ok::<_, FederationError>((position, is_interface_object))
             })
-            .collect::<IndexSet<_>>();
+            .process_results(|iter| {
+                iter.flat_map(|(position, is_interface_object)| {
+                    if is_interface_object {
+                        Some(position)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<IndexSet<_>>()
+            })?;
 
         let is_inconsistent = |position: AbstractTypeDefinitionPosition| {
             let mut sources = query_graph.subgraphs().filter_map(|(_name, subgraph)| {
@@ -307,27 +311,32 @@ impl QueryPlanner {
         })
     }
 
-    pub fn subgraph_schemas(&self) -> &IndexMap<NodeStr, ValidFederationSchema> {
+    pub fn subgraph_schemas(&self) -> &IndexMap<Arc<str>, ValidFederationSchema> {
         self.federated_query_graph.subgraph_schemas()
     }
 
     // PORT_NOTE: this receives an `Operation` object in JS which is a concept that doesn't exist in apollo-rs.
+    #[cfg_attr(
+        feature = "snapshot_tracing",
+        tracing::instrument(level = "trace", skip_all, name = "QueryPlanner::build_query_plan")
+    )]
     pub fn build_query_plan(
         &self,
         document: &Valid<ExecutableDocument>,
         operation_name: Option<Name>,
     ) -> Result<QueryPlan, FederationError> {
         let operation = document
-            .get_operation(operation_name.as_ref().map(|name| name.as_str()))
+            .operations
+            .get(operation_name.as_ref().map(|name| name.as_str()))
             // TODO(@goto-bus-stop) this is not an internal error, but a user error
             .map_err(|_| FederationError::internal("requested operation does not exist"))?;
 
         if operation.selection_set.selections.is_empty() {
             // This should never happen because `operation` comes from a known-valid document.
-            return Err(SingleFederationError::InvalidGraphQL {
-                message: "Invalid operation: empty selection set".to_string(),
-            }
-            .into());
+            // TODO(@goto-bus-stop) it's probably fair to panic here :)
+            return Err(FederationError::internal(
+                "Invalid operation: empty selection set",
+            ));
         }
 
         let is_subscription = operation.is_subscription();
@@ -342,7 +351,7 @@ impl QueryPlanner {
                 let node = FetchNode {
                     subgraph_name: subgraph_name.clone(),
                     operation_document: document.clone(),
-                    operation_name: operation.name.as_deref().cloned(),
+                    operation_name: operation.name.clone(),
                     operation_kind: operation.operation_type,
                     id: None,
                     variable_usages: operation
@@ -360,7 +369,6 @@ impl QueryPlanner {
             }
         }
 
-        let reuse_query_fragments = self.config.reuse_query_fragments;
         let normalized_operation = normalize_operation(
             operation,
             NamedFragments::new(&document.fragments, &self.api_schema),
@@ -404,6 +412,16 @@ impl QueryPlanner {
             return Ok(QueryPlan::default());
         }
 
+        snapshot!(
+            "NormalizedOperation",
+            serde_json_bytes::json!({
+                "original": &operation.serialize().to_string(),
+                "normalized": &normalized_operation.to_string()
+            })
+            .to_string(),
+            "normalized operation"
+        );
+
         let Some(root) = self
             .federated_query_graph
             .root_kinds_to_nodes()?
@@ -415,22 +433,25 @@ impl QueryPlanner {
             );
         };
 
-        let rebased_fragments = if reuse_query_fragments {
+        let operation_compression = if self.config.generate_query_fragments {
+            SubgraphOperationCompression::GenerateFragments
+        } else if self.config.reuse_query_fragments {
             // For all subgraph fetches we query `__typename` on every abstract types (see
             // `FetchDependencyGraphNode::to_plan_node`) so if we want to have a chance to reuse
             // fragments, we should make sure those fragments also query `__typename` for every
             // abstract type.
-            Some(RebasedFragments::new(
+            SubgraphOperationCompression::ReuseFragments(RebasedFragments::new(
                 normalized_operation
                     .named_fragments
                     .add_typename_field_for_abstract_types_in_named_fragments()?,
             ))
         } else {
-            None
+            SubgraphOperationCompression::Disabled
         };
-        let processor = FetchDependencyGraphToQueryPlanProcessor::new(
-            operation.variables.clone(),
-            rebased_fragments,
+        let mut processor = FetchDependencyGraphToQueryPlanProcessor::new(
+            normalized_operation.variables.clone(),
+            normalized_operation.directives.clone(),
+            operation_compression,
             operation.name.clone(),
             assigned_defer_labels,
         );
@@ -438,7 +459,6 @@ impl QueryPlanner {
             supergraph_schema: self.supergraph_schema.clone(),
             federated_query_graph: self.federated_query_graph.clone(),
             operation: Arc::new(normalized_operation),
-            processor,
             head: *root,
             // PORT_NOTE(@goto-bus-stop): In JS, `root` is a `RootVertex`, which is dynamically
             // checked at various points in query planning. This is our Rust equivalent of that.
@@ -456,7 +476,7 @@ impl QueryPlanner {
             Some(defer_conditions) if !defer_conditions.is_empty() => {
                 compute_plan_for_defer_conditionals(&mut parameters, defer_conditions)?
             }
-            _ => compute_plan_internal(&mut parameters, has_defers)?,
+            _ => compute_plan_internal(&mut parameters, &mut processor, has_defers)?,
         };
 
         let root_node = match root_node {
@@ -500,10 +520,14 @@ impl QueryPlanner {
             None => None,
         };
 
-        Ok(QueryPlan {
+        let plan = QueryPlan {
             node: root_node,
             statistics,
-        })
+        };
+
+        snapshot!(plan, "query plan");
+
+        Ok(plan)
     }
 
     /// Get Query Planner's API Schema.
@@ -561,7 +585,7 @@ fn compute_root_serial_dependency_graph(
             // }
             // then we should _not_ merge the 2 `mut1` fields (contrarily to what happens on queried fields).
 
-            prev_path = OpPathTree::merge(&prev_path, &new_path);
+            Arc::make_mut(&mut prev_path).extend(&new_path);
             fetch_dependency_graph = FetchDependencyGraph::new(
                 supergraph_schema.clone(),
                 federated_query_graph.clone(),
@@ -591,16 +615,20 @@ fn compute_root_serial_dependency_graph(
     Ok(digest)
 }
 
-fn only_root_subgraph(graph: &FetchDependencyGraph) -> Result<NodeIndex, FederationError> {
+fn only_root_subgraph(graph: &FetchDependencyGraph) -> Result<Arc<str>, FederationError> {
     let mut iter = graph.root_node_by_subgraph_iter();
-    let (Some((_, index)), None) = (iter.next(), iter.next()) else {
+    let (Some((name, _)), None) = (iter.next(), iter.next()) else {
         return Err(FederationError::internal(format!(
             "{graph} should have only one root."
         )));
     };
-    Ok(index.index() as u32)
+    Ok(name.clone())
 }
 
+#[cfg_attr(
+    feature = "snapshot_tracing",
+    tracing::instrument(level = "trace", skip_all, name = "compute_root_fetch_groups")
+)]
 pub(crate) fn compute_root_fetch_groups(
     root_kind: SchemaRootDefinitionKind,
     dependency_graph: &mut FetchDependencyGraph,
@@ -629,6 +657,7 @@ pub(crate) fn compute_root_fetch_groups(
         };
         let fetch_dependency_node =
             dependency_graph.get_or_create_root_node(subgraph_name, root_kind, root_type)?;
+        snapshot!(dependency_graph, "tree_with_root_node");
         compute_nodes_for_tree(
             dependency_graph,
             &child.tree,
@@ -645,8 +674,17 @@ fn compute_root_parallel_dependency_graph(
     parameters: &QueryPlanningParameters,
     has_defers: bool,
 ) -> Result<FetchDependencyGraph, FederationError> {
+    snapshot!(
+        "FetchDependencyGraph",
+        "Empty",
+        "Starting process to construct a parallel fetch dependency graph"
+    );
     let selection_set = parameters.operation.selection_set.clone();
     let best_plan = compute_root_parallel_best_plan(parameters, selection_set, has_defers)?;
+    snapshot!(
+        best_plan.fetch_dependency_graph,
+        "Plan returned from compute_root_parallel_best_plan"
+    );
     Ok(best_plan.fetch_dependency_graph)
 }
 
@@ -672,6 +710,7 @@ fn compute_root_parallel_best_plan(
 
 fn compute_plan_internal(
     parameters: &mut QueryPlanningParameters,
+    processor: &mut FetchDependencyGraphToQueryPlanProcessor,
     has_defers: bool,
 ) -> Result<Option<PlanNode>, FederationError> {
     let root_kind = parameters.operation.root_kind;
@@ -683,11 +722,9 @@ fn compute_plan_internal(
         let mut primary_selection = None::<SelectionSet>;
         for mut dependency_graph in dependency_graphs {
             let (local_main, local_deferred) =
-                dependency_graph.process(&mut parameters.processor, root_kind)?;
+                dependency_graph.process(&mut *processor, root_kind)?;
             main = match main {
-                Some(unlocal_main) => parameters
-                    .processor
-                    .reduce_sequence([Some(unlocal_main), local_main]),
+                Some(unlocal_main) => processor.reduce_sequence([Some(unlocal_main), local_main]),
                 None => local_main,
             };
             deferred.extend(local_deferred);
@@ -705,7 +742,11 @@ fn compute_plan_internal(
     } else {
         let mut dependency_graph = compute_root_parallel_dependency_graph(parameters, has_defers)?;
 
-        let (main, deferred) = dependency_graph.process(&mut parameters.processor, root_kind)?;
+        let (main, deferred) = dependency_graph.process(&mut *processor, root_kind)?;
+        snapshot!(
+            dependency_graph,
+            "Plan after calling FetchDependencyGraph::process"
+        );
         // XXX(@goto-bus-stop) Maybe `.defer_tracking` should be on the return value of `process()`..?
         let primary_selection = dependency_graph.defer_tracking.primary_selection;
 
@@ -718,9 +759,7 @@ fn compute_plan_internal(
         let Some(primary_selection) = primary_selection else {
             unreachable!("Should have had a primary selection created");
         };
-        parameters
-            .processor
-            .reduce_defer(main, &primary_selection, deferred)
+        processor.reduce_defer(main, &primary_selection, deferred)
     }
 }
 
@@ -733,6 +772,67 @@ fn compute_plan_for_defer_conditionals(
         message: String::from("@defer is currently not supported"),
     }
     .into())
+}
+
+/// Tracks fragments from the original operation, along with versions rebased on other subgraphs.
+pub(crate) struct RebasedFragments {
+    original_fragments: NamedFragments,
+    /// Map key: subgraph name
+    rebased_fragments: HashMap<Arc<str>, NamedFragments>,
+}
+
+impl RebasedFragments {
+    fn new(fragments: NamedFragments) -> Self {
+        Self {
+            original_fragments: fragments,
+            rebased_fragments: Default::default(),
+        }
+    }
+
+    fn for_subgraph(
+        &mut self,
+        subgraph_name: impl Into<Arc<str>>,
+        subgraph_schema: &ValidFederationSchema,
+    ) -> &NamedFragments {
+        self.rebased_fragments
+            .entry(subgraph_name.into())
+            .or_insert_with(|| {
+                self.original_fragments
+                    .rebase_on(subgraph_schema)
+                    .unwrap_or_default()
+            })
+    }
+}
+
+pub(crate) enum SubgraphOperationCompression {
+    ReuseFragments(RebasedFragments),
+    GenerateFragments,
+    Disabled,
+}
+
+impl SubgraphOperationCompression {
+    /// Compress a subgraph operation.
+    pub(crate) fn compress(
+        &mut self,
+        subgraph_name: &Arc<str>,
+        subgraph_schema: &ValidFederationSchema,
+        operation: Operation,
+    ) -> Result<Operation, FederationError> {
+        match self {
+            Self::ReuseFragments(fragments) => {
+                let rebased = fragments.for_subgraph(Arc::clone(subgraph_name), subgraph_schema);
+                let mut operation = operation;
+                operation.reuse_fragments(rebased)?;
+                Ok(operation)
+            }
+            Self::GenerateFragments => {
+                let mut operation = operation;
+                operation.generate_fragments()?;
+                Ok(operation)
+            }
+            Self::Disabled => Ok(operation),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -995,10 +1095,7 @@ type User
         "###);
     }
 
-    // TODO: This fails with "Subgraph unexpectedly does not use federation spec"
-    // which seems...unusual
     #[test]
-    #[ignore]
     fn plan_simple_root_field_query_for_multiple_subgraphs() {
         let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
         let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
@@ -1022,26 +1119,70 @@ type User
         .unwrap();
         let plan = planner.build_query_plan(&document, None).unwrap();
         insta::assert_snapshot!(plan, @r###"
-        QueryPlan {
-          Parallel {
-            Fetch(service: "accounts") {
-              {
+              QueryPlan {
+                Parallel {
+                  Fetch(service: "accounts") {
+                    {
                       userById(id: 1) {
-                  name
-                  email
-                }
+                        name
+                        email
+                      }
+                    }
+                  },
+                  Sequence {
+                    Fetch(service: "reviews") {
+                      {
+                        bestRatedProducts {
+                          __typename
+                          id
+                          ... on Book {
+                            __typename
+                            id
+                            reviews {
+                              rating
+                            }
+                          }
+                          ... on Movie {
+                            __typename
+                            id
+                            reviews {
+                              rating
+                            }
+                          }
+                        }
+                      }
+                    },
+                    Flatten(path: "bestRatedProducts.@") {
+                      Fetch(service: "products") {
+                        {
+                          ... on Book {
+                            __typename
+                            id
+                            reviews {
+                              rating
+                            }
+                          }
+                          ... on Movie {
+                            __typename
+                            id
+                            reviews {
+                              rating
+                            }
+                          }
+                        } =>
+                        {
+                          ... on Book {
+                            avg_rating
+                          }
+                          ... on Movie {
+                            avg_rating
+                          }
+                        }
+                      },
+                    },
+                  },
+                },
               }
-            }
-            Fetch(service: "products") {
-              {
-                      bestRatedProducts {
-                  id
-                  avg_rating
-                }
-              }
-            }
-          }
-        }
         "###);
     }
 
@@ -1268,6 +1409,53 @@ type User
               name
               email
               id
+            }
+          },
+        }
+        "###);
+    }
+
+    #[test]
+    fn drop_operation_root_level_typename() {
+        let subgraph1 = Subgraph::parse_and_expand(
+            "Subgraph1",
+            "https://Subgraph1",
+            r#"
+                type Query {
+                    t: T
+                }
+
+                type T @key(fields: "id") {
+                    id: ID!
+                    x: Int
+                }
+            "#,
+        )
+        .unwrap();
+        let subgraphs = vec![&subgraph1];
+        let supergraph = Supergraph::compose(subgraphs).unwrap();
+        let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
+        let document = ExecutableDocument::parse_and_validate(
+            planner.api_schema().schema(),
+            r#"
+                query {
+                    __typename
+                    t {
+                        x
+                    }
+                }
+            "#,
+            "operation.graphql",
+        )
+        .unwrap();
+        let plan = planner.build_query_plan(&document, None).unwrap();
+        insta::assert_snapshot!(plan, @r###"
+        QueryPlan {
+          Fetch(service: "Subgraph1") {
+            {
+              t {
+                x
+              }
             }
           },
         }

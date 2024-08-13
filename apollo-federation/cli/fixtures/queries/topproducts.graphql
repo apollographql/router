@@ -1,0 +1,11 @@
+query TopProducts($first: Int) { 
+    topProducts(first: $first) { 
+        upc 
+        name 
+        reviews { 
+            id 
+            product { name } 
+            author { id name } 
+        } 
+    } 
+}

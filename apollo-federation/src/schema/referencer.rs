@@ -1,6 +1,6 @@
-use apollo_compiler::schema::Name;
-use indexmap::IndexMap;
-use indexmap::IndexSet;
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
+use apollo_compiler::Name;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;

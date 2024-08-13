@@ -9,6 +9,7 @@ use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
 use displaydoc::Display;
+use http::header;
 use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
@@ -51,6 +52,7 @@ use crate::plugins::authentication::jwks::JwkSetInfo;
 use crate::plugins::authentication::jwks::JwksConfig;
 use crate::register_plugin;
 use crate::services::router;
+use crate::services::APPLICATION_JSON_HEADER_VALUE;
 use crate::Context;
 
 mod jwks;
@@ -569,6 +571,7 @@ fn authenticate(
                     .build(),
             )
             .status_code(status)
+            .header(header::CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone())
             .context(context)
             .build();
         ControlFlow::Break(response)

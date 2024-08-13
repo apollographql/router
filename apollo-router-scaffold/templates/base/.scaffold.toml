@@ -18,6 +18,12 @@ Created new Apollo Router project '{{name}}'.
 > Read [our licensing page](https://www.apollographql.com/docs/resources/elastic-license-v2-faq/) for more details.
 """
 
+[hooks]
+post = [
+    "mv Cargo.template.toml Cargo.toml",
+    "mv xtask/Cargo.template.toml xtask/Cargo.toml",
+]
+
 [parameters]
 [parameters.name]
 type = "string"

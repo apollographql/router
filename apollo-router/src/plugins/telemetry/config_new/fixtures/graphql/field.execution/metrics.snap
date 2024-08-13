@@ -10,6 +10,7 @@ info:
           field.execution: true
 ---
 - name: graphql.field.execution
+  description: Number of times a field is used.
   data:
     datapoints:
       - value: 1

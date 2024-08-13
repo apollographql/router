@@ -7,7 +7,8 @@
 //!  - router
 //!  - execution
 //!  - subgraph (multiple in parallel if multiple subgraphs are accessed)
-//!  stages.
+//!
+//! stages.
 //!
 //! A plugin can choose to interact with the flow of requests at any or all of these stages of
 //! processing. At each stage a [`Service`] is provided which provides an appropriate
@@ -718,6 +719,7 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
     fn as_any(&self) -> &dyn std::any::Any;
 
     /// Support downcasting
+    #[cfg(test)]
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 }
 
@@ -765,6 +767,7 @@ where
         self
     }
 
+    #[cfg(test)]
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }

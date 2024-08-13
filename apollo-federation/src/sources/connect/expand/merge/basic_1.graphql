@@ -1,0 +1,41 @@
+type Query {
+  i: I
+  u: U
+  f(x: ID, y: YInput): T
+}
+
+interface I {
+  id: ID!
+}
+
+type A implements I {
+  id: ID!
+  a: S
+}
+
+type B implements I {
+  id: ID!
+  b: E
+}
+
+union U = A | B
+
+scalar S
+
+enum E {
+  A
+  B
+}
+
+type T {
+  x: ID
+  y: Y
+}
+
+type Y {
+  z: ID
+}
+
+input YInput {
+  z: ID
+}

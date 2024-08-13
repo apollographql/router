@@ -14,6 +14,7 @@ use futures::stream;
 use futures::StreamExt;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde::Serialize;
 use thiserror::Error;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -43,6 +44,7 @@ pub(crate) struct CostContext {
     pub(crate) estimated: f64,
     pub(crate) actual: f64,
     pub(crate) result: &'static str,
+    pub(crate) strategy: &'static str,
 }
 
 impl Default for CostContext {
@@ -51,6 +53,7 @@ impl Default for CostContext {
             estimated: 0.0,
             actual: 0.0,
             result: "COST_OK",
+            strategy: "COST_STRATEGY_UNKNOWN",
         }
     }
 }
@@ -97,9 +100,9 @@ pub(crate) enum StrategyConfig {
     },
 }
 
-#[derive(Copy, Clone, Debug, Deserialize, JsonSchema, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, JsonSchema, Eq, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-enum Mode {
+pub(crate) enum Mode {
     Measure,
     Enforce,
 }
@@ -313,12 +316,14 @@ impl Plugin for DemandControl {
 
     fn subgraph_service(
         &self,
-        _subgraph_name: &str,
+        subgraph_name: &str,
         service: subgraph::BoxService,
     ) -> subgraph::BoxService {
         if !self.config.enabled {
             service
         } else {
+            let subgraph_name = subgraph_name.to_owned();
+            let subgraph_name_map_fut = subgraph_name.to_owned();
             ServiceBuilder::new()
                 .checkpoint(move |req: subgraph::Request| {
                     let strategy = req.context.extensions().with_lock(|lock| {
@@ -336,18 +341,22 @@ impl Plugin for DemandControl {
                                 )
                                 .context(req.context.clone())
                                 .extensions(crate::json_ext::Object::new())
+                                .subgraph_name(subgraph_name.clone())
                                 .build(),
                         ),
                     })
                 })
                 .map_future_with_request_data(
-                    |req: &subgraph::Request| {
+                    move |req: &subgraph::Request| {
                         //TODO convert this to expect
-                        req.executable_document.clone().unwrap_or_else(|| {
-                            Arc::new(Valid::assume_valid(ExecutableDocument::new()))
-                        })
+                        (
+                            subgraph_name_map_fut.clone(),
+                            req.executable_document.clone().unwrap_or_else(|| {
+                                Arc::new(Valid::assume_valid(ExecutableDocument::new()))
+                            }),
+                        )
                     },
-                    |req: Arc<Valid<ExecutableDocument>>, fut| async move {
+                    |(subgraph_name, req): (String, Arc<Valid<ExecutableDocument>>), fut| async move {
                         let resp: subgraph::Response = fut.await?;
                         let strategy = resp.context.extensions().with_lock(|lock| {
                             lock.get::<Strategy>().expect("must have strategy").clone()
@@ -359,6 +368,7 @@ impl Plugin for DemandControl {
                                     err.into_graphql_errors()
                                         .expect("must be able to convert to graphql error"),
                                 )
+                                .subgraph_name(subgraph_name)
                                 .context(resp.context.clone())
                                 .extensions(Object::new())
                                 .build(),

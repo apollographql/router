@@ -1,0 +1,3 @@
+query BasicInputObjectQuery {
+  getScalarByObject(args: { inner: { id: 1 } })
+}

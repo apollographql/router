@@ -6,4 +6,4 @@ telemetry:
           description: "count of requests"
           type: counter
           unit: "unit"
-          value: field_unit
+          value: unit

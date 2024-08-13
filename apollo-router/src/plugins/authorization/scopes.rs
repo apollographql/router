@@ -13,7 +13,7 @@ use apollo_compiler::ast;
 use apollo_compiler::executable;
 use apollo_compiler::schema;
 use apollo_compiler::schema::Implementers;
-use apollo_compiler::schema::Name;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
 use tower::BoxError;
 
@@ -26,7 +26,7 @@ use crate::spec::TYPENAME;
 
 pub(crate) struct ScopeExtractionVisitor<'a> {
     schema: &'a schema::Schema,
-    fragments: HashMap<&'a ast::Name, &'a Node<executable::Fragment>>,
+    fragments: HashMap<&'a Name, &'a Node<executable::Fragment>>,
     pub(crate) extracted_scopes: HashSet<String>,
     requires_scopes_directive_name: String,
     entity_query: bool,
@@ -204,14 +204,14 @@ fn scopes_sets_argument(directive: &ast::Directive) -> impl Iterator<Item = Hash
 
 pub(crate) struct ScopeFilteringVisitor<'a> {
     schema: &'a schema::Schema,
-    fragments: HashMap<&'a ast::Name, &'a ast::FragmentDefinition>,
-    implementers_map: &'a HashMap<Name, Implementers>,
+    fragments: HashMap<&'a Name, &'a ast::FragmentDefinition>,
+    implementers_map: &'a apollo_compiler::collections::HashMap<Name, Implementers>,
     request_scopes: HashSet<String>,
     pub(crate) query_requires_scopes: bool,
     pub(crate) unauthorized_paths: Vec<Path>,
     // store the error paths from fragments so we can  add them at
     // the point of application
-    fragments_unauthorized_paths: HashMap<&'a ast::Name, Vec<Path>>,
+    fragments_unauthorized_paths: HashMap<&'a Name, Vec<Path>>,
     current_path: Path,
     requires_scopes_directive_name: String,
     dry_run: bool,
@@ -221,7 +221,7 @@ impl<'a> ScopeFilteringVisitor<'a> {
     pub(crate) fn new(
         schema: &'a schema::Schema,
         executable: &'a ast::Document,
-        implementers_map: &'a HashMap<Name, Implementers>,
+        implementers_map: &'a apollo_compiler::collections::HashMap<Name, Implementers>,
         scopes: HashSet<String>,
         dry_run: bool,
     ) -> Option<Self> {

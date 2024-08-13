@@ -1,0 +1,10 @@
+telemetry:
+  instrumentation:
+    instruments:
+      supergraph:
+        'query.height':
+          description: 'The height of the query'
+          value:
+            query: height
+          unit: unit
+          type: histogram

@@ -119,21 +119,29 @@ impl DefaultForLevel for RouterAttributes {
 pub(crate) struct SupergraphAttributes {
     /// The GraphQL document being executed.
     /// Examples:
-    /// * query findBookById { bookById(id: ?) { name } }
+    ///
+    /// * `query findBookById { bookById(id: ?) { name } }`
+    ///
     /// Requirement level: Recommended
     #[serde(rename = "graphql.document")]
     pub(crate) graphql_document: Option<bool>,
+
     /// The name of the operation being executed.
     /// Examples:
+    ///
     /// * findBookById
+    ///
     /// Requirement level: Recommended
     #[serde(rename = "graphql.operation.name")]
     pub(crate) graphql_operation_name: Option<bool>,
+
     /// The type of the operation being executed.
     /// Examples:
+    ///
     /// * query
     /// * subscription
     /// * mutation
+    ///
     /// Requirement level: Recommended
     #[serde(rename = "graphql.operation.type")]
     pub(crate) graphql_operation_type: Option<bool>,
@@ -172,27 +180,38 @@ impl DefaultForLevel for SupergraphAttributes {
 pub(crate) struct SubgraphAttributes {
     /// The name of the subgraph
     /// Examples:
+    ///
     /// * products
+    ///
     /// Requirement level: Required
     #[serde(rename = "subgraph.name")]
     subgraph_name: Option<bool>,
+
     /// The GraphQL document being executed.
     /// Examples:
-    /// * query findBookById { bookById(id: ?) { name } }
+    ///
+    /// * `query findBookById { bookById(id: ?) { name } }`
+    ///
     /// Requirement level: Recommended
     #[serde(rename = "subgraph.graphql.document")]
     graphql_document: Option<bool>,
+
     /// The name of the operation being executed.
     /// Examples:
+    ///
     /// * findBookById
+    ///
     /// Requirement level: Recommended
     #[serde(rename = "subgraph.graphql.operation.name")]
     graphql_operation_name: Option<bool>,
+
     /// The type of the operation being executed.
     /// Examples:
+    ///
     /// * query
     /// * subscription
     /// * mutation
+    ///
     /// Requirement level: Recommended
     #[serde(rename = "subgraph.graphql.operation.type")]
     graphql_operation_type: Option<bool>,
@@ -237,82 +256,102 @@ impl DefaultForLevel for SubgraphAttributes {
 pub(crate) struct HttpCommonAttributes {
     /// Describes a class of error the operation ended with.
     /// Examples:
+    ///
     /// * timeout
     /// * name_resolution_error
     /// * 500
+    ///
     /// Requirement level: Conditionally Required: If request has ended with an error.
     #[serde(rename = "error.type")]
     pub(crate) error_type: Option<bool>,
 
     /// The size of the request payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the Content-Length header. For requests using transport encoding, this should be the compressed size.
     /// Examples:
+    ///
     /// * 3495
+    ///
     /// Requirement level: Recommended
     #[serde(rename = "http.request.body.size")]
     pub(crate) http_request_body_size: Option<bool>,
 
     /// HTTP request method.
     /// Examples:
+    ///
     /// * GET
     /// * POST
     /// * HEAD
+    ///
     /// Requirement level: Required
     #[serde(rename = "http.request.method")]
     pub(crate) http_request_method: Option<bool>,
 
     /// Original HTTP method sent by the client in the request line.
     /// Examples:
+    ///
     /// * GeT
     /// * ACL
     /// * foo
+    ///
     /// Requirement level: Conditionally Required (If and only if it’s different than http.request.method)
     #[serde(rename = "http.request.method.original", skip)]
     pub(crate) http_request_method_original: Option<bool>,
 
     /// The size of the response payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the Content-Length header. For requests using transport encoding, this should be the compressed size.
     /// Examples:
+    ///
     /// * 3495
+    ///
     /// Requirement level: Recommended
     #[serde(rename = "http.response.body.size")]
     pub(crate) http_response_body_size: Option<bool>,
 
     /// HTTP response status code.
     /// Examples:
+    ///
     /// * 200
+    ///
     /// Requirement level: Conditionally Required: If and only if one was received/sent.
     #[serde(rename = "http.response.status_code")]
     pub(crate) http_response_status_code: Option<bool>,
 
     /// OSI application layer or non-OSI equivalent.
     /// Examples:
+    ///
     /// * http
     /// * spdy
+    ///
     /// Requirement level: Recommended: if not default (http).
     #[serde(rename = "network.protocol.name")]
     pub(crate) network_protocol_name: Option<bool>,
 
     /// Version of the protocol specified in network.protocol.name.
     /// Examples:
+    ///
     /// * 1.0
     /// * 1.1
     /// * 2
     /// * 3
+    ///
     /// Requirement level: Recommended
     #[serde(rename = "network.protocol.version")]
     pub(crate) network_protocol_version: Option<bool>,
 
     /// OSI transport layer.
     /// Examples:
+    ///
     /// * tcp
     /// * udp
+    ///
     /// Requirement level: Conditionally Required
     #[serde(rename = "network.transport")]
     pub(crate) network_transport: Option<bool>,
 
     /// OSI network layer or non-OSI equivalent.
     /// Examples:
+    ///
     /// * ipv4
     /// * ipv6
+    ///
     /// Requirement level: Recommended
     #[serde(rename = "network.type")]
     pub(crate) network_type: Option<bool>,
@@ -373,89 +412,115 @@ impl DefaultForLevel for HttpCommonAttributes {
 pub(crate) struct HttpServerAttributes {
     /// Client address - domain name if available without reverse DNS lookup, otherwise IP address or Unix domain socket name.
     /// Examples:
+    ///
     /// * 83.164.160.102
+    ///
     /// Requirement level: Recommended
     #[serde(rename = "client.address", skip)]
     pub(crate) client_address: Option<bool>,
     /// The port of the original client behind all proxies, if known (e.g. from Forwarded or a similar header). Otherwise, the immediate client peer port.
     /// Examples:
+    ///
     /// * 65123
+    ///
     /// Requirement level: Recommended
     #[serde(rename = "client.port", skip)]
     pub(crate) client_port: Option<bool>,
     /// The matched route (path template in the format used by the respective server framework).
     /// Examples:
+    ///
     /// * /graphql
+    ///
     /// Requirement level: Conditionally Required: If and only if it’s available
     #[serde(rename = "http.route")]
     pub(crate) http_route: Option<bool>,
     /// Local socket address. Useful in case of a multi-IP host.
     /// Examples:
+    ///
     /// * 10.1.2.80
     /// * /tmp/my.sock
+    ///
     /// Requirement level: Opt-In
     #[serde(rename = "network.local.address")]
     pub(crate) network_local_address: Option<bool>,
     /// Local socket port. Useful in case of a multi-port host.
     /// Examples:
+    ///
     /// * 65123
+    ///
     /// Requirement level: Opt-In
     #[serde(rename = "network.local.port")]
     pub(crate) network_local_port: Option<bool>,
     /// Peer address of the network connection - IP address or Unix domain socket name.
     /// Examples:
+    ///
     /// * 10.1.2.80
     /// * /tmp/my.sock
+    ///
     /// Requirement level: Recommended
     #[serde(rename = "network.peer.address")]
     pub(crate) network_peer_address: Option<bool>,
     /// Peer port number of the network connection.
     /// Examples:
+    ///
     /// * 65123
+    ///
     /// Requirement level: Recommended
     #[serde(rename = "network.peer.port")]
     pub(crate) network_peer_port: Option<bool>,
     /// Name of the local HTTP server that received the request.
     /// Examples:
+    ///
     /// * example.com
     /// * 10.1.2.80
     /// * /tmp/my.sock
+    ///
     /// Requirement level: Recommended
     #[serde(rename = "server.address")]
     pub(crate) server_address: Option<bool>,
     /// Port of the local HTTP server that received the request.
     /// Examples:
+    ///
     /// * 80
     /// * 8080
     /// * 443
+    ///
     /// Requirement level: Recommended
     #[serde(rename = "server.port")]
     pub(crate) server_port: Option<bool>,
     /// The URI path component
     /// Examples:
+    ///
     /// * /search
+    ///
     /// Requirement level: Required
     #[serde(rename = "url.path")]
     pub(crate) url_path: Option<bool>,
     /// The URI query component
     /// Examples:
+    ///
     /// * q=OpenTelemetry
+    ///
     /// Requirement level: Conditionally Required: If and only if one was received/sent.
     #[serde(rename = "url.query")]
     pub(crate) url_query: Option<bool>,
 
     /// The URI scheme component identifying the used protocol.
     /// Examples:
+    ///
     /// * http
     /// * https
+    ///
     /// Requirement level: Required
     #[serde(rename = "url.scheme")]
     pub(crate) url_scheme: Option<bool>,
 
     /// Value of the HTTP User-Agent header sent by the client.
     /// Examples:
+    ///
     /// * CERN-LineMode/2.15
     /// * libwww/2.17b3
+    ///
     /// Requirement level: Recommended
     #[serde(rename = "user_agent.original")]
     pub(crate) user_agent_original: Option<bool>,
@@ -584,10 +649,12 @@ impl Selectors for HttpCommonAttributes {
                 .get(&CONTENT_LENGTH)
                 .and_then(|h| h.to_str().ok())
             {
-                attrs.push(KeyValue::new(
-                    HTTP_REQUEST_BODY_SIZE,
-                    content_length.to_string(),
-                ));
+                if let Ok(content_length) = content_length.parse::<i64>() {
+                    attrs.push(KeyValue::new(
+                        HTTP_REQUEST_BODY_SIZE,
+                        opentelemetry::Value::I64(content_length),
+                    ));
+                }
             }
         }
         if let Some(true) = &self.network_protocol_name {
@@ -630,10 +697,12 @@ impl Selectors for HttpCommonAttributes {
                 .get(&CONTENT_LENGTH)
                 .and_then(|h| h.to_str().ok())
             {
-                attrs.push(KeyValue::new(
-                    HTTP_RESPONSE_BODY_SIZE,
-                    content_length.to_string(),
-                ));
+                if let Ok(content_length) = content_length.parse::<i64>() {
+                    attrs.push(KeyValue::new(
+                        HTTP_RESPONSE_BODY_SIZE,
+                        opentelemetry::Value::I64(content_length),
+                    ));
+                }
             }
         }
 
@@ -1045,7 +1114,7 @@ mod test {
             let span_context = SpanContext::new(
                 TraceId::from_u128(42),
                 SpanId::from_u64(42),
-                TraceFlags::default(),
+                TraceFlags::default().with_sampled(true),
                 false,
                 TraceState::default(),
             );
@@ -1349,7 +1418,7 @@ mod test {
                 .iter()
                 .find(|key_val| key_val.key == HTTP_REQUEST_BODY_SIZE)
                 .map(|key_val| &key_val.value),
-            Some(&"256".into())
+            Some(&256.into())
         );
     }
 
@@ -1374,7 +1443,7 @@ mod test {
                 .iter()
                 .find(|key_val| key_val.key == HTTP_RESPONSE_BODY_SIZE)
                 .map(|key_val| &key_val.value),
-            Some(&"256".into())
+            Some(&256.into())
         );
     }
 

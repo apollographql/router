@@ -100,6 +100,7 @@ mod test {
     use crate::services::HasSchema;
     use crate::services::PluggableSupergraphServiceBuilder;
     use crate::services::SupergraphRequest;
+    use crate::spec::Schema;
     use crate::Configuration;
 
     static UNREDACTED_PRODUCT_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
@@ -191,8 +192,9 @@ mod test {
 
         let schema =
             include_str!("../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql");
+        let schema = Schema::parse(schema, &Default::default()).unwrap();
         let planner = BridgeQueryPlannerPool::new(
-            schema.to_string(),
+            schema.into(),
             Default::default(),
             NonZeroUsize::new(1).unwrap(),
         )

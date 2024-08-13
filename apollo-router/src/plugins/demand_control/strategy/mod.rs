@@ -26,8 +26,9 @@ mod test;
 #[derive(Clone)]
 pub(crate) struct Strategy {
     inner: Arc<dyn StrategyImpl>,
-    mode: Mode,
+    pub(crate) mode: Mode,
 }
+
 impl Strategy {
     pub(crate) fn on_execution_request(
         &self,

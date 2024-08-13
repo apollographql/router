@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::time::Duration;
 
 use ::serde::Deserialize;
 use access_json::JSONQuery;
@@ -10,9 +9,7 @@ use multimap::MultiMap;
 use opentelemetry::sdk::metrics::reader::AggregationSelector;
 use opentelemetry::sdk::metrics::Aggregation;
 use opentelemetry::sdk::metrics::InstrumentKind;
-use opentelemetry::sdk::resource::ResourceDetector;
 use opentelemetry::sdk::Resource;
-use opentelemetry::KeyValue;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -34,6 +31,7 @@ use crate::Context;
 use crate::ListenAddr;
 
 pub(crate) mod apollo;
+pub(crate) mod local_type_stats;
 pub(crate) mod otlp;
 pub(crate) mod prometheus;
 pub(crate) mod span_metrics_exporter;
@@ -436,40 +434,6 @@ pub(crate) struct MetricsBuilder {
     pub(crate) custom_endpoints: MultiMap<ListenAddr, Endpoint>,
     pub(crate) apollo_metrics_sender: Sender,
     pub(crate) resource: Resource,
-}
-
-struct ConfigResourceDetector(MetricsCommon);
-
-impl ResourceDetector for ConfigResourceDetector {
-    fn detect(&self, _timeout: Duration) -> Resource {
-        let mut resource = Resource::new(
-            vec![
-                self.0.service_name.clone().map(|service_name| {
-                    KeyValue::new(
-                        opentelemetry_semantic_conventions::resource::SERVICE_NAME,
-                        service_name,
-                    )
-                }),
-                self.0.service_namespace.clone().map(|service_namespace| {
-                    KeyValue::new(
-                        opentelemetry_semantic_conventions::resource::SERVICE_NAMESPACE,
-                        service_namespace,
-                    )
-                }),
-            ]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>(),
-        );
-        resource = resource.merge(&mut Resource::new(
-            self.0
-                .resource
-                .clone()
-                .into_iter()
-                .map(|(k, v)| KeyValue::new(k, v)),
-        ));
-        resource
-    }
 }
 
 impl MetricsBuilder {

@@ -52,10 +52,10 @@ where
                 if req.router_request.method() != Method::GET
                     && !content_type_is_json(req.router_request.headers())
                 {
-                    let response: http::Response<hyper::Body> = http::Response::builder()
+                    let response: http::Response<crate::services::router::Body> = http::Response::builder()
                         .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
                         .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(hyper::Body::from(
+                        .body(crate::services::router::Body::from(
                             serde_json::json!({
                                 "errors": [
                                     graphql::Error::builder()

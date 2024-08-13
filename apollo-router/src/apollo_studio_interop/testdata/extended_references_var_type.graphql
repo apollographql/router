@@ -1,0 +1,5 @@
+query InputTypeVariablesQuery($input: InputType!) {
+  inputTypeQuery(input: $input) {
+    enumResponse
+  }
+}

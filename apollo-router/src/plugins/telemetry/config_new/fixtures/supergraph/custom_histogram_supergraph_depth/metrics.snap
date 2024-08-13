@@ -1,0 +1,23 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
+description: Query Depth histogram with value from context
+expression: "&metrics.all()"
+info:
+  telemetry:
+    instrumentation:
+      instruments:
+        supergraph:
+          query.depth:
+            description: The depth of the query
+            value:
+              query: depth
+            unit: unit
+            type: histogram
+---
+- name: query.depth
+  description: The depth of the query
+  unit: unit
+  data:
+    datapoints:
+      - sum: 2
+        attributes: {}

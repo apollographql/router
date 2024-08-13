@@ -1,5 +1,4 @@
 //! Configuration for apollo telemetry exporter.
-use std::error::Error;
 use std::fmt::Debug;
 use std::io::Write;
 use std::str::FromStr;
@@ -25,13 +24,12 @@ use serde::ser::SerializeStruct;
 use serde_json::Value;
 use sys_info::hostname;
 use tokio::sync::mpsc;
-use tokio::task::JoinError;
-use tonic::codegen::http::uri::InvalidUri;
 use tower::BoxError;
 use url::Url;
 
 use super::apollo::Report;
 use super::apollo::SingleReport;
+use super::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
 const BACKOFF_INCREMENT: Duration = Duration::from_millis(50);
@@ -95,6 +93,7 @@ pub(crate) struct ApolloExporter {
     client: Client,
     strip_traces: AtomicBool,
     studio_backoff: Mutex<Instant>,
+    metrics_reference_mode: ApolloMetricsReferenceMode,
 }
 
 impl ApolloExporter {
@@ -104,6 +103,7 @@ impl ApolloExporter {
         apollo_key: &str,
         apollo_graph_ref: &str,
         schema_id: &str,
+        metrics_reference_mode: ApolloMetricsReferenceMode,
     ) -> Result<ApolloExporter, BoxError> {
         let header = proto::reports::ReportHeader {
             graph_ref: apollo_graph_ref.to_string(),
@@ -132,6 +132,7 @@ impl ApolloExporter {
             header,
             strip_traces: Default::default(),
             studio_backoff: Mutex::new(Instant::now()),
+            metrics_reference_mode,
         })
     }
 
@@ -202,10 +203,16 @@ impl ApolloExporter {
             ));
         }
 
+        let extended_references_enabled = matches!(
+            self.metrics_reference_mode,
+            ApolloMetricsReferenceMode::Extended
+        );
+
         tracing::debug!("submitting report: {:?}", report);
         // Protobuf encode message
         let mut content = BytesMut::new();
-        let mut proto_report = report.build_proto_report(self.header.clone());
+        let mut proto_report =
+            report.build_proto_report(self.header.clone(), extended_references_enabled);
         prost::Message::encode(&proto_report, &mut content)
             .map_err(|e| ApolloExportError::ClientError(e.to_string()))?;
         // Create a gzip encoder
@@ -304,7 +311,8 @@ impl ApolloExporter {
                             "The number of reports submitted to Studio by the Router",
                             1,
                             report.type = report_type,
-                            report.protocol = ROUTER_TRACING_PROTOCOL_APOLLO
+                            report.protocol = ROUTER_TRACING_PROTOCOL_APOLLO,
+                            report.extended_references_enabled = extended_references_enabled
                         );
                         if has_traces && !self.strip_traces.load(Ordering::SeqCst) {
                             // If we had traces then maybe disable sending traces from this exporter based on the response.
@@ -361,70 +369,6 @@ pub(crate) mod proto {
     pub(crate) mod reports {
         #![allow(clippy::derive_partial_eq_without_eq)]
         tonic::include_proto!("reports");
-    }
-}
-
-/// Reporting Error type
-#[derive(Debug)]
-pub(crate) struct ReporterError {
-    source: Box<dyn Error + Send + Sync + 'static>,
-    msg: String,
-}
-
-impl std::error::Error for ReporterError {}
-
-impl From<InvalidUri> for ReporterError {
-    fn from(error: InvalidUri) -> Self {
-        ReporterError {
-            msg: error.to_string(),
-            source: Box::new(error),
-        }
-    }
-}
-
-impl From<tonic::transport::Error> for ReporterError {
-    fn from(error: tonic::transport::Error) -> Self {
-        ReporterError {
-            msg: error.to_string(),
-            source: Box::new(error),
-        }
-    }
-}
-
-impl From<std::io::Error> for ReporterError {
-    fn from(error: std::io::Error) -> Self {
-        ReporterError {
-            msg: error.to_string(),
-            source: Box::new(error),
-        }
-    }
-}
-
-impl From<sys_info::Error> for ReporterError {
-    fn from(error: sys_info::Error) -> Self {
-        ReporterError {
-            msg: error.to_string(),
-            source: Box::new(error),
-        }
-    }
-}
-
-impl From<JoinError> for ReporterError {
-    fn from(error: JoinError) -> Self {
-        ReporterError {
-            msg: error.to_string(),
-            source: Box::new(error),
-        }
-    }
-}
-
-impl std::fmt::Display for ReporterError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(
-            f,
-            "ReporterError: source: {}, message: {}",
-            self.source, self.msg
-        )
     }
 }
 

@@ -1,0 +1,30 @@
+telemetry:
+  instrumentation:
+    spans:
+      mode: spec_compliant
+    events:
+      router:
+        # Standard events
+        request: info
+        response: info
+        error: info
+  exporters:
+    tracing:
+      propagation:
+        trace_context: true
+        jaeger: true
+      jaeger:
+        enabled: true
+        batch_processor:
+          scheduled_delay: 100ms
+        agent:
+          endpoint: default
+    logging:
+      experimental_when_header:
+        - name: content-type
+          value: "application/json"
+          body: true
+      stdout:
+        format:
+          json:
+            display_trace_id: uuid

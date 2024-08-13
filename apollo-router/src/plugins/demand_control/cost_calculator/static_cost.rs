@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::executable::ExecutableDocument;
 use apollo_compiler::executable::Field;
@@ -98,6 +99,10 @@ impl StaticCostCalculator {
             should_estimate_requires,
         )?;
 
+        for argument in &field.definition.arguments {
+            type_cost += Self::score_argument(argument, schema)?;
+        }
+
         let mut requirements_cost = 0.0;
         if should_estimate_requires {
             // If the field is marked with `@requires`, the required selection may not be included
@@ -127,6 +132,40 @@ impl StaticCostCalculator {
         );
 
         Ok(cost)
+    }
+
+    fn score_argument(
+        argument: &InputValueDefinition,
+        schema: &Valid<Schema>,
+    ) -> Result<f64, DemandControlError> {
+        if let Some(ty) = schema.types.get(argument.ty.inner_named_type().as_str()) {
+            match ty {
+                apollo_compiler::schema::ExtendedType::InputObject(inner_arguments) => {
+                    let mut cost = 1.0;
+                    for inner_argument in inner_arguments.fields.values() {
+                        cost += Self::score_argument(inner_argument, schema)?;
+                    }
+                    Ok(cost)
+                }
+
+                apollo_compiler::schema::ExtendedType::Scalar(_)
+                | apollo_compiler::schema::ExtendedType::Enum(_) => Ok(0.0),
+
+                apollo_compiler::schema::ExtendedType::Object(_)
+                | apollo_compiler::schema::ExtendedType::Interface(_)
+                | apollo_compiler::schema::ExtendedType::Union(_) => {
+                    Err(DemandControlError::QueryParseFailure(
+                        format!("Argument {} has type {}, but objects, interfaces, and unions are disallowed in this position", argument.name, argument.ty.inner_named_type())
+                    ))
+                }
+            }
+        } else {
+            Err(DemandControlError::QueryParseFailure(format!(
+                "Argument {} was found in query, but its type ({}) was not found in the schema",
+                argument.name,
+                argument.ty.inner_named_type()
+            )))
+        }
     }
 
     fn score_fragment_spread(
@@ -351,10 +390,10 @@ impl StaticCostCalculator {
         should_estimate_requires: bool,
     ) -> Result<f64, DemandControlError> {
         let mut cost = 0.0;
-        if let Some(op) = &query.anonymous_operation {
+        if let Some(op) = &query.operations.anonymous {
             cost += self.score_operation(op, schema, query, should_estimate_requires)?;
         }
-        for (_name, op) in query.named_operations.iter() {
+        for (_name, op) in query.operations.named.iter() {
             cost += self.score_operation(op, schema, query, should_estimate_requires)?;
         }
         Ok(cost)
@@ -431,7 +470,7 @@ mod tests {
         query_str: &str,
         config: &Configuration,
     ) -> (spec::Schema, ParsedDocument) {
-        let schema = spec::Schema::parse_test(schema_str, config).unwrap();
+        let schema = spec::Schema::parse(schema_str, config).unwrap();
         let query = Query::parse_document(query_str, None, &schema, config).unwrap();
         (schema, query)
     }
@@ -462,9 +501,9 @@ mod tests {
 
     async fn planned_cost(schema_str: &str, query_str: &str) -> f64 {
         let config: Arc<Configuration> = Arc::new(Default::default());
-        let (_schema, query) = parse_schema_and_operation(schema_str, query_str, &config);
+        let (schema, query) = parse_schema_and_operation(schema_str, query_str, &config);
 
-        let mut planner = BridgeQueryPlanner::new(schema_str.to_string(), config.clone(), None)
+        let mut planner = BridgeQueryPlanner::new(schema.into(), config.clone(), None, None)
             .await
             .unwrap();
 
@@ -560,6 +599,14 @@ mod tests {
         let query = include_str!("./fixtures/basic_nested_list_query.graphql");
 
         assert_eq!(basic_estimated_cost(schema, query), 10100.0)
+    }
+
+    #[test]
+    fn input_object_cost() {
+        let schema = include_str!("./fixtures/basic_schema.graphql");
+        let query = include_str!("./fixtures/basic_input_object_query.graphql");
+
+        assert_eq!(basic_estimated_cost(schema, query), 2.0)
     }
 
     #[test]

@@ -443,5 +443,16 @@ per_type_stat:
           - 1
 extended_references: ~
 local_per_type_stat: {}
-limits_stats: ~
+limits_stats:
+  strategy: ""
+  cost_estimated:
+    - 0
+  max_cost_estimated: 0
+  cost_actual:
+    - 0
+  max_cost_actual: 0
+  depth: 4
+  height: 7
+  alias_count: 0
+  root_field_count: 1
 operation_count: 0

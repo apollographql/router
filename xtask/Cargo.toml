@@ -37,9 +37,10 @@ serde_json = "1"
 tar = "0.4"
 tempfile = "3"
 tinytemplate = "1.2.1"
-tokio = "1.36.0"
+tokio = { version = "1.36.0", features = ["full"] }
 which = "6.0.1"
 walkdir = "2.4.0"
+xshell = "0.2.6"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 base64 = "0.21"

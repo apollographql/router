@@ -16,6 +16,7 @@ use rand::RngCore;
 use super::map_field::MapFieldRaw;
 use super::MultipartRequest;
 use super::Result as UploadResult;
+use crate::services::router::body::RouterBody;
 
 #[derive(Clone, Debug)]
 pub(super) struct MultipartFormData {
@@ -46,7 +47,7 @@ impl MultipartFormData {
 
     pub(super) async fn into_stream(
         mut self,
-        operations: hyper::Body,
+        operations: RouterBody,
     ) -> impl Stream<Item = UploadResult<Bytes>> {
         let map_bytes =
             serde_json::to_string(&self.map).expect("map should be serializable to JSON");
@@ -58,7 +59,7 @@ impl MultipartFormData {
         };
 
         let static_part = tokio_stream::once(Ok(Bytes::from(field_prefix("operations"))))
-            .chain(operations.map_err(Into::into))
+            .chain(operations.into_inner().map_err(Into::into))
             .chain(tokio_stream::once(Ok(Bytes::from(format!(
                 "\r\n{}{}\r\n",
                 field_prefix("map"),

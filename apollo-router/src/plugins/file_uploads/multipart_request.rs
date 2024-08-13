@@ -21,6 +21,7 @@ use super::error::FileUploadError;
 use super::map_field::MapField;
 use super::map_field::MapFieldRaw;
 use super::Result as UploadResult;
+use crate::services::router::body::RouterBody;
 
 // The limit to set for the map field in the multipart request.
 // We don't expect this to ever be reached, but we can always add a config option if needed later.
@@ -68,7 +69,7 @@ impl Drop for MultipartRequestState {
 
 impl MultipartRequest {
     pub(super) fn new(
-        request_body: hyper::Body,
+        request_body: RouterBody,
         boundary: String,
         limits: MultipartRequestLimits,
     ) -> Self {

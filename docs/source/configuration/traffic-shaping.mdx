@@ -1,11 +1,10 @@
 ---
-title: Traffic Shaping in the Apollo Router
+title: Traffic Shaping
 subtitle: Tune the performance and reliability of traffic to and from the router
-description: Fine-tune traffic performance and reliability in Apollo Router with YAML configuration for client and subgraph traffic shaping. 
+description: Fine-tune traffic performance and reliability in GraphOS Router and Apollo Router Core with YAML configuration for client and subgraph traffic shaping. 
 ---
 
-The Apollo Router provides various features to improve the performance and reliability of
-the traffic between the client and router and between the router and subgraphs.
+The GraphOS Router and Apollo Router Core provide various features to improve the performance and reliability of the traffic between the client and router and between the router and subgraphs.
 
 ## Configuration
 
@@ -48,7 +47,7 @@ The preset values of `traffic_shaping` that's enabled by default:
 
 ### Rate limiting
 
-The Apollo Router can apply rate limiting on client requests, as follows:
+The router can apply rate limiting on client requests, as follows:
 
 ```yaml title="router.yaml"
 traffic_shaping:
@@ -62,7 +61,7 @@ This rate limiting applies to all requests, there is no filtering per IP or othe
 
 ### Timeouts
 
-The Apollo Router applies a default timeout of 30 seconds for all requests, including the following:
+The router applies a default timeout of 30 seconds for all requests, including the following:
 
 - Requests the client makes to the router
 - Requests the router makes to subgraphs
@@ -97,7 +96,7 @@ Compression is automatically supported on the client side, depending on the `Acc
 
 ### Query batching
 
-The Apollo Router has _experimental_ support for receiving client query batches:
+The router has support for receiving client query batches:
 
 ```yaml title="router.yaml"
 batching:
@@ -109,7 +108,7 @@ For details, see [query batching for the router](../executing-operations/query-b
 
 ## Subgraph traffic shaping
 
-The Apollo Router supports various options affecting traffic destined for subgraphs, that can either be defined for all subgraphs, or overriden per subgraph:
+The router supports various options affecting traffic destined for subgraphs, that can either be defined for all subgraphs, or overriden per subgraph:
 
 ```yaml title="router.yaml"
 traffic_shaping:
@@ -122,7 +121,7 @@ traffic_shaping:
 
 ### Compression
 
-The Apollo Router can compress request bodies to subgraphs (along with response bodies to clients).
+The router can compress request bodies to subgraphs (along with response bodies to clients).
 It currently supports these algorithms: `gzip`, `br`, and `deflate`.
 
 ```yaml title="router.yaml"
@@ -169,13 +168,13 @@ traffic_shaping:
 
 ### Variable deduplication
 
-When subgraphs are sent entity requests by the Router using the `_entities` field, it is often the case that the same entity (identified by a unique `@key` constraint) is requested multiple times within the execution of a single federated query.  For example, an author's name might need to be fetched multiple times when accessing a list of a reviews for a product for which the author has written multiple reviews.
+When subgraphs are sent entity requests by the router using the `_entities` field, it is often the case that the same entity (identified by a unique `@key` constraint) is requested multiple times within the execution of a single federated query.  For example, an author's name might need to be fetched multiple times when accessing a list of a reviews for a product for which the author has written multiple reviews.
 
 To reduce the size of subgraph requests and the amount of work they might perform, the list of entities sent can be deduplicated. This is always active.
 
 ### Query deduplication
 
-If the Router is simultaneously processing similar queries, it may result in producing multiple identical requests to a subgraph.  With the `deduplicate_query` functionality enabled (by default, it is disabled), the Router can avoid sending the same query multiple times and instead buffer one or more of the dependent queries pending the result of the first, and reuse that result to fulfill all of the initial queries.  This will reduce the overall traffic to the subgraph and the overall client request latency.  To meet the criteria for deduplication, the feature must be enabled and the subgraph queries must have have the same HTTP path, headers and body:
+If the router is simultaneously processing similar queries, it may result in producing multiple identical requests to a subgraph.  With the `deduplicate_query` functionality enabled (by default, it is disabled), the router can avoid sending the same query multiple times and instead buffer one or more of the dependent queries pending the result of the first, and reuse that result to fulfill all of the initial queries.  This will reduce the overall traffic to the subgraph and the overall client request latency.  To meet the criteria for deduplication, the feature must be enabled and the subgraph queries must have have the same HTTP path, headers and body:
 
 ```yaml title="router.yaml"
 traffic_shaping:
@@ -185,26 +184,7 @@ traffic_shaping:
 
 ### HTTP/2
 
-The router supports subgraph connections over:
-- HTTP/1.1
-- HTTP/1.1 with TLS
-- HTTP/2 with TLS
-- HTTP/2 Cleartext protocol (h2c). This uses HTTP/2 over plaintext connections.
-
-Use the table below to look up the resulting protocol of a subgraph connection, based on the subgraph URL and the `experimental_http2` option:
-
-|                           | URL with `http://` | URL with `https://`         |
-| ------------------------- | ------------------- | --------------------------- |
-| `experimental_http2: disable` | HTTP/1.1           | HTTP/1.1 with TLS           |
-| `experimental_http2: enable`  | HTTP/1.1           | Either HTTP/1.1 or HTTP/2 with TLS, as determined by the TLS handshake with a subgraph |
-| `experimental_http2: http2only` | h2c              | HTTP/2 with TLS              |
-| `experimental_http2` not set | HTTP/1.1 | Either HTTP/1.1 or HTTP/2 with TLS, as determined by the TLS handshake with a subgraph |
-
-<Note>
-
-Configuring `experimental_http2: http2only` for a subgraph that doesn't support HTTP/2 results in a failed subgraph connection.
-
-</Note>
+<HttpConnection type="subgraph" />
 
 ### Ordering
 
@@ -212,9 +192,9 @@ Traffic shaping always executes these steps in the same order, to ensure a consi
 
 - preparing the subgraph request
 - variable deduplication
-- rate limiting
-- request retry
-- timeout
 - query deduplication
+- timeout
+- request retry
+- rate limiting
 - compression
 - sending the request to the subgraph

@@ -18,6 +18,7 @@ use serde::Deserializer;
 
 use crate::configuration::ConfigurationError;
 use crate::plugins::telemetry::config::AttributeValue;
+use crate::plugins::telemetry::config::TraceIdFormat;
 use crate::plugins::telemetry::config_new::experimental_when_header::HeaderLoggingCondition;
 use crate::plugins::telemetry::resource::ConfigResource;
 use crate::services::SupergraphRequest;
@@ -335,9 +336,42 @@ pub(crate) struct JsonFormat {
     /// Include the resource with the log event. (default: true)
     pub(crate) display_resource: bool,
     /// Include the trace id (if any) with the log event. (default: true)
-    pub(crate) display_trace_id: bool,
+    pub(crate) display_trace_id: DisplayTraceIdFormat,
     /// Include the span id (if any) with the log event. (default: true)
     pub(crate) display_span_id: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
+pub(crate) enum DisplayTraceIdFormat {
+    // /// Format the Trace ID as a hexadecimal number
+    // ///
+    // /// (e.g. Trace ID 16 -> 00000000000000000000000000000010)
+    // #[default]
+    // Hexadecimal,
+    // /// Format the Trace ID as a hexadecimal number
+    // ///
+    // /// (e.g. Trace ID 16 -> 00000000000000000000000000000010)
+    // OpenTelemetry,
+    // /// Format the Trace ID as a decimal number
+    // ///
+    // /// (e.g. Trace ID 16 -> 16)
+    // Decimal,
+
+    // /// Datadog
+    // Datadog,
+
+    // /// UUID format with dashes
+    // /// (eg. 67e55044-10b1-426f-9247-bb680e5fe0c8)
+    // Uuid,
+    TraceIdFormat(TraceIdFormat),
+    Bool(bool),
+}
+
+impl Default for DisplayTraceIdFormat {
+    fn default() -> Self {
+        Self::TraceIdFormat(TraceIdFormat::default())
+    }
 }
 
 impl Default for JsonFormat {
@@ -353,7 +387,7 @@ impl Default for JsonFormat {
             display_current_span: false,
             display_span_list: true,
             display_resource: true,
-            display_trace_id: true,
+            display_trace_id: DisplayTraceIdFormat::Bool(true),
             display_span_id: true,
         }
     }
@@ -389,7 +423,7 @@ pub(crate) struct TextFormat {
     /// Include all of the containing span information with the log event. (default: true)
     pub(crate) display_span_list: bool,
     /// Include the trace id (if any) with the log event. (default: false)
-    pub(crate) display_trace_id: bool,
+    pub(crate) display_trace_id: DisplayTraceIdFormat,
     /// Include the span id (if any) with the log event. (default: false)
     pub(crate) display_span_id: bool,
 }
@@ -410,7 +444,7 @@ impl Default for TextFormat {
             display_resource: false,
             display_current_span: true,
             display_span_list: true,
-            display_trace_id: false,
+            display_trace_id: DisplayTraceIdFormat::Bool(false),
             display_span_id: false,
         }
     }
