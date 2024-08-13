@@ -1,6 +1,8 @@
 ### Add `format` for trace ID propagation. ([PR #5803](https://github.com/apollographql/router/pull/5803))
 
-When propagating trace ID to subgraph via header is is now possible to specify the format.
+The router now supports specifying the format of trace IDs that are propagated to subgraphs via headers.
+
+You can configure the format with the `format` option:
 
 ```yaml
 telemetry:
