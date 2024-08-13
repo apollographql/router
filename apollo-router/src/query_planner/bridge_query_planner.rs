@@ -10,6 +10,7 @@ use apollo_compiler::ast;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_federation::error::FederationError;
+use apollo_federation::error::SingleFederationError;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use futures::future::BoxFuture;
 use opentelemetry_api::metrics::MeterProvider as _;
@@ -189,10 +190,26 @@ impl PlannerMode {
                 },
             debug: Default::default(),
         };
-        Ok(Arc::new(QueryPlanner::new(
-            schema.federation_supergraph(),
-            config,
-        )?))
+        let result = QueryPlanner::new(schema.federation_supergraph(), config);
+        if let Err(FederationError::SingleFederationError {
+            inner: error,
+            trace: _,
+        }) = &result
+        {
+            match error {
+                SingleFederationError::UnsupportedFederationVersion { .. } => {
+                    // Fed 1
+                }
+                SingleFederationError::UnsupportedFeature { .. } => {
+                    // progressive override or setContext
+                }
+                _ => {
+                    // Other
+                }
+            }
+        }
+        // TODO: add counter metric here with some details about the outcome
+        Ok(Arc::new(result?))
     }
 
     async fn js(
