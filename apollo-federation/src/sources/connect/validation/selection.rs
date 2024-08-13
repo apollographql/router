@@ -67,7 +67,7 @@ pub(super) fn validate_body_selection(
     let coordinate =
         connect_directive_http_body_coordinate(&connect_directive.name, parent_type, &field.name);
 
-    let selection_str = require_value_is_str(&selection_node, &coordinate, &schema.sources)?;
+    let selection_str = require_value_is_str(selection_node, &coordinate, &schema.sources)?;
 
     let (_rest, selection) = JSONSelection::parse(selection_str).map_err(|err| Message {
         code: Code::InvalidJsonSelection,
