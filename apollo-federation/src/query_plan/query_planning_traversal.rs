@@ -4,6 +4,10 @@ use apollo_compiler::collections::IndexSet;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 use serde::Serialize;
+use tracing::debug;
+use tracing::debug_span;
+use tracing::error;
+use tracing::error_span;
 use tracing::trace;
 
 use crate::error::FederationError;
@@ -264,6 +268,8 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         )
     )]
     pub fn find_best_plan(mut self) -> Result<Option<BestQueryPlanInfo>, FederationError> {
+        let span = error_span!("| ");
+        let _gaurd = span.enter();
         self.find_best_plan_inner()?;
         Ok(self.best_plan)
     }
@@ -277,6 +283,8 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         )
     )]
     fn find_best_plan_inner(&mut self) -> Result<Option<&BestQueryPlanInfo>, FederationError> {
+        let span = tracing::error_span!("| ");
+        let guard = span.enter();
         while let Some(mut current_branch) = self.open_branches.pop() {
             let Some(current_selection) = current_branch.selections.pop() else {
                 return Err(FederationError::internal(
@@ -300,6 +308,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 self.open_branches.push(new_branch);
             }
         }
+        drop(guard);
         self.compute_best_plan_from_closed_branches()?;
         return Ok(self.best_plan.as_ref());
     }
@@ -319,6 +328,8 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         selection: &Selection,
         options: &mut Vec<SimultaneousPathsWithLazyIndirectPaths>,
     ) -> Result<(bool, Option<OpenBranchAndSelections>), FederationError> {
+        let span = tracing::error_span!("| ");
+        let _guard = span.enter();
         let operation_element = selection.element()?;
         let mut new_options = vec![];
         let mut no_followups: bool = false;
@@ -330,7 +341,6 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             operation_element.to_string(),
             "operation_element"
         );
-
         for option in options.iter_mut() {
             let followups_for_option = option.advance_with_operation_element(
                 self.parameters.supergraph_schema.clone(),
@@ -500,7 +510,9 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
     }
 
     fn record_closed_branch(&mut self, closed_branch: ClosedBranch) -> Result<(), FederationError> {
+        let len = closed_branch.len();
         let maybe_trimmed = closed_branch.maybe_eliminate_strictly_more_costly_paths()?;
+        let new_len = maybe_trimmed.len();
         self.closed_branches.push(maybe_trimmed);
         Ok(())
     }
@@ -599,6 +611,8 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         )
     )]
     fn compute_best_plan_from_closed_branches(&mut self) -> Result<(), FederationError> {
+        let span = tracing::error_span!("| ");
+        let _guard = span.enter();
         snapshot!(
             name = "ClosedBranches",
             self.closed_branches,
@@ -1015,6 +1029,8 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         excluded_destinations: &ExcludedDestinations,
         excluded_conditions: &ExcludedConditions,
     ) -> Result<ConditionResolution, FederationError> {
+        let span = error_span!("| ");
+        let _guard = span.enter();
         let graph = &self.parameters.federated_query_graph;
         let head = graph.edge_endpoints(edge)?.0;
         // Note: `QueryPlanningTraversal::resolve` method asserts that the edge has conditions before
@@ -1052,13 +1068,14 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             excluded_conditions.add_item(edge_conditions),
         )?
         .find_best_plan()?;
-        match best_plan_opt {
+        let digest = match best_plan_opt {
             Some(best_plan) => Ok(ConditionResolution::Satisfied {
                 cost: best_plan.cost,
                 path_tree: Some(best_plan.path_tree),
             }),
             None => Ok(ConditionResolution::unsatisfied_conditions()),
-        }
+        };
+        digest
     }
 }
 
