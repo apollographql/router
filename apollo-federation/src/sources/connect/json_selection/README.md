@@ -55,21 +55,14 @@ improvements, we should adhere to the following principles:
    avoided because it limits the developer's ability to subselect fields of the
    opaque `JSON` value in GraphQL operations.
 
-3. `JSONSelection` syntax may be subsetted arbitrarily, either by generating a
+3. `JSONSelection` syntax may be _subsetted_ arbitrarily, either by generating a
    reduced `JSONSelection` that serves the needs of a particular GraphQL
    operation, or by skipping unneeded selections during `ApplyTo` execution.
    When this subsetting happens, it would be highly undesirable for the behavior
-   of the remaining selections to change unexpectedly.
-
-   For example, it is simpler to insist that `{...}` selections are always
-   mapped over input arrays, rather than sometimes mapping (when named fields
-   are present, say) and sometimes applying directly to the array itself (when
-   only array-safe `$->method` selections are present, hypothetically). Even if
-   array safety was easy to decide, it would be a mistake to base the mapping
-   decision on the presence or absence of certain kinds of selections, because
-   then the mapping behavior could change unexpectedly whenever certain kinds of
-   selections happen to be omitted, which is an ever-present possibility thanks
-   to subsetting.
+   of the remaining selections to change unexpectedly. Equivalently, but in the
+   other direction, `JSONSelection` syntax should always be _composable_, in the
+   sense that two `NamedSelection` items should continue to work as before when
+   used together in the same `SubSelection`.
 
 4. Backwards compatibility should be maintained as we release new versions of
    the `JSONSelection` syntax along with new versions of the (forthcoming)
