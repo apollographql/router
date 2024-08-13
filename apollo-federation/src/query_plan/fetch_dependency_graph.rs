@@ -2270,6 +2270,46 @@ impl std::fmt::Display for FetchDependencyGraph {
     }
 }
 
+// Necessary for `petgraph::dot::Dot` to compile, but executed.
+impl std::fmt::Display for FetchDependencyGraphNode {
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        unimplemented!()
+    }
+}
+
+// Necessary for `petgraph::dot::Dot` to compile, but executed.
+impl std::fmt::Display for FetchDependencyGraphEdge {
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        unimplemented!()
+    }
+}
+
+// GraphViz output for QueryGraph
+impl FetchDependencyGraph {
+    pub fn to_dot(&self) -> String {
+        fn label_node(node_id: NodeIndex, node: &FetchDependencyGraphNode) -> String {
+            let label_str = node.multiline_display(node_id).to_string();
+            format!("label=\"{}\"", label_str.replace('"', "\\\""))
+        }
+
+        fn label_edge(edge_id: EdgeIndex) -> String {
+            format!("label=\"{}\"", edge_id.index())
+        }
+
+        let config = [
+            petgraph::dot::Config::NodeNoLabel,
+            petgraph::dot::Config::EdgeNoLabel,
+        ];
+        petgraph::dot::Dot::with_attr_getters(
+            &self.graph,
+            &config,
+            &(|_, er| label_edge(er.id())),
+            &(|_, (node_id, node)| label_node(node_id, node)),
+        )
+        .to_string()
+    }
+}
+
 impl FetchDependencyGraphNode {
     pub(crate) fn selection_set_mut(&mut self) -> &mut FetchSelectionSet {
         self.cached_cost = None;
@@ -2545,6 +2585,81 @@ impl FetchDependencyGraphNode {
                     (None, _) => {
                         // [{ id }]
                         write!(f, "[{}]", self.node.selection_set.selection_set)?;
+                    }
+                }
+
+                Ok(())
+            }
+        }
+
+        FetchDependencyNodeDisplay { node: self, index }
+    }
+
+    // A variation of `fn display` with multiline output, which is more suitable for
+    // GraphViz output.
+    pub fn multiline_display(&self, index: NodeIndex) -> impl std::fmt::Display + '_ {
+        use std::fmt;
+        use std::fmt::Display;
+        use std::fmt::Formatter;
+
+        struct DisplayList<'a, T: Display>(&'a [T]);
+        impl<T: Display> Display for DisplayList<'_, T> {
+            fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+                let mut iter = self.0.iter();
+                if let Some(x) = iter.next() {
+                    write!(f, "{x}")?;
+                }
+                for x in iter {
+                    write!(f, "::{x}")?;
+                }
+                Ok(())
+            }
+        }
+
+        struct FetchDependencyNodeDisplay<'a> {
+            node: &'a FetchDependencyGraphNode,
+            index: NodeIndex,
+        }
+
+        impl Display for FetchDependencyNodeDisplay<'_> {
+            fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+                write!(f, "[{}]", self.index.index())?;
+                if self.node.defer_ref.is_some() {
+                    write!(f, "(deferred)")?;
+                }
+                if let Some(&id) = self.node.id.get() {
+                    write!(f, "{{id: {id}}}")?;
+                }
+
+                write!(f, " {}", self.node.subgraph_name)?;
+
+                match (self.node.merge_at.as_deref(), self.node.inputs.as_deref()) {
+                    (Some(merge_at), Some(inputs)) => {
+                        write!(
+                            f,
+                            // @(path::to::*::field)[{input1,input2} => { id }]
+                            "\n@({})\n{}\n=>\n{}\n",
+                            DisplayList(merge_at),
+                            inputs,
+                            self.node.selection_set.selection_set
+                        )?;
+                    }
+                    (Some(merge_at), None) => {
+                        write!(
+                            f,
+                            // @(path::to::*::field)[{} => { id }]
+                            "\n@({})\n{{}}\n=>\n{}\n",
+                            DisplayList(merge_at),
+                            self.node.selection_set.selection_set
+                        )?;
+                    }
+                    (None, _) => {
+                        // [(type){ id }]
+                        write!(
+                            f,
+                            "\n({})\n{}",
+                            self.node.parent_type, self.node.selection_set.selection_set
+                        )?;
                     }
                 }
 
