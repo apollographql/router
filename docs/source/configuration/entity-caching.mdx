@@ -105,7 +105,9 @@ preview_entity_cache:
 
 ### Configure time to live (TTL)
 
-To decide whether to cache an entity, the router honors the [`Cache-Control` header](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control) returned with the subgraph response. Because `Cache-Control` might not contain a `max-age` or `s-max-age` option, a default TTL must be configured, either defined per subgraph configuration or inherited from the global configuration. The router also generates a `Cache-Control` header for the client response by aggregating the TTL information from all response parts. If a subgraph doesn't return the header, its response is assumed to be `no-store`.
+To decide whether to cache an entity, the router honors the [`Cache-Control` header](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control) returned with the subgraph response. Because `Cache-Control` might not contain a `max-age` or `s-max-age` option, a default TTL must be configured, either defined per subgraph configuration or inherited from the global configuration.
+
+The router also generates a `Cache-Control` header for the client response by aggregating the TTL information from all response parts. If a subgraph doesn't return the header, its response is assumed to be `no-store`.
 
 ### Customize Redis cache key
 
