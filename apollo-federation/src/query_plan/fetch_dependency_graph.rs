@@ -2270,14 +2270,14 @@ impl std::fmt::Display for FetchDependencyGraph {
     }
 }
 
-// Necessary for `petgraph::dot::Dot` to compile, but executed.
+// Necessary for `petgraph::dot::Dot::with_attr_getters` calls to compile, but not executed.
 impl std::fmt::Display for FetchDependencyGraphNode {
     fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         unimplemented!()
     }
 }
 
-// Necessary for `petgraph::dot::Dot` to compile, but executed.
+// Necessary for `petgraph::dot::Dot::with_attr_getters` calls to compile, but not executed.
 impl std::fmt::Display for FetchDependencyGraphEdge {
     fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         unimplemented!()
