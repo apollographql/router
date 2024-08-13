@@ -1,4 +1,5 @@
 /docs/ @apollographql/docs
+/.changesets/ @apollographql/docs
 /apollo-federation/ @dariuszkuc @sachindshinde @goto-bus-stop @SimonSapin @lrlna @TylerBloom @duckki
 /apollo-federation/src/sources/connect/json_selection @benjamn
 /apollo-router/ @apollographql/polaris @apollographql/atlas
