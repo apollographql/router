@@ -4491,10 +4491,7 @@ mod tests {
         let path = path.add(Arc::new(frag2)).unwrap();
         let path = path.add(Arc::new(baz)).unwrap();
 
-        assert_eq!(
-            ".foo.bar.baz",
-            &to_string(&path.response_path)
-        );
+        assert_eq!(".foo.bar.baz", &to_string(&path.response_path));
     }
 
     #[test]
@@ -4556,10 +4553,7 @@ mod tests {
         let path = path.add(Arc::new(frag2)).unwrap();
         let path = path.add(Arc::new(baz)).unwrap();
 
-        assert_eq!(
-            ".|[Foo_1]foo.bar.baz",
-            &to_string(&path.response_path)
-        );
+        assert_eq!(".|[Foo_1]foo.bar.baz", &to_string(&path.response_path));
     }
 
     fn object_field_element(
