@@ -9,6 +9,7 @@ telemetry:
       propagation: 
         request: 
           header_name: "my_header"
+          # Must be in UUID form, with or without dashes
           format: uuid
 ```
 
