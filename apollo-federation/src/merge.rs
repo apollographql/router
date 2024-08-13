@@ -137,8 +137,6 @@ impl Merger {
         subgraphs.sort_by(|s1, s2| s1.name.cmp(&s2.name));
         let mut subgraphs_and_enum_values = Vec::new();
         for subgraph in &subgraphs {
-            // TODO: Implement JS codebase's name transform (which always generates a valid GraphQL
-            // name and avoids collisions).
             match EnumValue::new(&subgraph.name) {
                 Ok(enum_value) => subgraphs_and_enum_values.push((subgraph, enum_value)),
                 Err(err) => self.errors.push(err),
