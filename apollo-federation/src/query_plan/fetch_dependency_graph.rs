@@ -4472,8 +4472,10 @@ mod tests {
         let valid_schema = ValidFederationSchema::new(schema.clone()).unwrap();
 
         let foo = object_field_element(&valid_schema, name!("Query"), name!("foo"));
-        let bar = interface_field_element(&valid_schema, name!("Foo"), name!("bar"));
-        let baz = interface_field_element(&valid_schema, name!("Bar"), name!("baz"));
+        let frag = inline_fragment_element(&valid_schema, name!("Foo"), Some(name!("Foo_1")));
+        let bar = object_field_element(&valid_schema, name!("Foo_1"), name!("bar"));
+        let frag2 = inline_fragment_element(&valid_schema, name!("Bar"), Some(name!("Bar_1")));
+        let baz = object_field_element(&valid_schema, name!("Bar_1"), name!("baz"));
 
         let query_root = valid_schema
             .get_type(name!("Query"))
@@ -4484,10 +4486,15 @@ mod tests {
         let path = FetchDependencyGraphNodePath::new(valid_schema, false, query_root);
 
         let path = path.add(Arc::new(foo)).unwrap();
-        let path: FetchDependencyGraphNodePath = path.add(Arc::new(bar)).unwrap();
+        let path = path.add(Arc::new(frag)).unwrap();
+        let path = path.add(Arc::new(bar)).unwrap();
+        let path = path.add(Arc::new(frag2)).unwrap();
         let path = path.add(Arc::new(baz)).unwrap();
 
-        assert_eq!("foo.bar.baz", &to_string(&path.response_path));
+        assert_eq!(
+            ".foo.bar.baz",
+            &to_string(&path.response_path)
+        );
     }
 
     #[test]
@@ -4530,8 +4537,10 @@ mod tests {
         let valid_schema = ValidFederationSchema::new(schema.clone()).unwrap();
 
         let foo = object_field_element(&valid_schema, name!("Query"), name!("foo"));
-        let bar = interface_field_element(&valid_schema, name!("Foo"), name!("bar"));
-        let baz = interface_field_element(&valid_schema, name!("Bar"), name!("baz"));
+        let frag = inline_fragment_element(&valid_schema, name!("Foo"), Some(name!("Foo_1")));
+        let bar = object_field_element(&valid_schema, name!("Foo_1"), name!("bar"));
+        let frag2 = inline_fragment_element(&valid_schema, name!("Bar"), Some(name!("Bar_1")));
+        let baz = object_field_element(&valid_schema, name!("Bar_1"), name!("baz"));
 
         let query_root = valid_schema
             .get_type(name!("Query"))
@@ -4542,11 +4551,13 @@ mod tests {
         let path = FetchDependencyGraphNodePath::new(valid_schema, true, query_root);
 
         let path = path.add(Arc::new(foo)).unwrap();
+        let path = path.add(Arc::new(frag)).unwrap();
         let path = path.add(Arc::new(bar)).unwrap();
+        let path = path.add(Arc::new(frag2)).unwrap();
         let path = path.add(Arc::new(baz)).unwrap();
 
         assert_eq!(
-            "foo|[Foo_1,Foo_2].bar|[Bar_1,Bar_2].baz",
+            ".|[Foo_1]foo.bar.baz",
             &to_string(&path.response_path)
         );
     }

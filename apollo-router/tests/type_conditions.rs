@@ -511,10 +511,7 @@ fn normalize_response_extensions(mut response: Response) -> Response {
 
     for (key, value) in extensions.iter_mut() {
         visit_object(key, value, &mut |key, value| {
-            // println!("{}", key.as_str());
-            if key.as_str() == "operation"
-            /*|| key.as_str() == "text" */
-            {
+            if key.as_str() == "operation" {
                 if let Value::String(s) = value {
                     let new_value = Document::parse(s.as_str(), key.as_str())
                         .unwrap()
