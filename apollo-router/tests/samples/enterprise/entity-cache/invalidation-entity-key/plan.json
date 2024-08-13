@@ -7,11 +7,14 @@
             "schema_path": "./supergraph.graphql",
             "configuration_path": "./configuration.yaml",
             "subgraphs": {
-                "products": {
+                "invalidation-entity-key-products": {
                     "requests": [
                         {
                             "request": {
-                                "body": {"query":"{topProducts{__typename upc}}"}
+                                "body": {
+                                    "query":"query InvalidationEntityKey__invalidation_entity_key_products__0{topProducts{__typename upc}}",
+                                    "operationName": "InvalidationEntityKey__invalidation_entity_key_products__0"
+                                }
                             },
                             "response": {
                                 "headers": {
@@ -23,12 +26,13 @@
                         }
                     ]
                 },
-                "reviews": {
+                "invalidation-entity-key-reviews": {
                     "requests": [
                         {
                             "request": {
                                 "body": {
-                                    "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{body}}}}",
+                                    "query":"query InvalidationEntityKey__invalidation_entity_key_reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{body}}}}",
+                                    "operationName": "InvalidationEntityKey__invalidation_entity_key_reviews__1",
                                     "variables":{"representations":[{"upc":"0","__typename":"Product"},{"upc":"1","__typename":"Product"}]}
                                 }
                             },
@@ -59,7 +63,7 @@
         {
             "type": "Request",
             "request": {
-                "query": "{ topProducts { reviews { body } } }"
+                "query": "query InvalidationEntityKey { topProducts { reviews { body } } }"
             },
             "expected_response": {
                 "data":{
@@ -81,11 +85,13 @@
         {
             "type": "ReloadSubgraphs",
             "subgraphs": {
-                "reviews": {
+                "invalidation-entity-key-reviews": {
                     "requests": [
                         {
                             "request": {
-                                "body": {"query":"mutation{invalidateProductReview}"}
+                                "body": {
+                                    "query":"mutation InvalidationEntityKey__invalidation_entity_key_reviews__0{invalidateProductReview}"
+                                }
                             },
                             "response": {
                                 "headers": {
@@ -96,7 +102,7 @@
                                     "extensions": {
                                         "invalidation": [{
                                             "kind": "entity",
-                                            "subgraph": "reviews",
+                                            "subgraph": "invalidation-entity-key-reviews",
                                             "type": "Product",
                                             "key": {
                                                 "upc": "1"
@@ -109,7 +115,7 @@
                         {
                             "request": {
                                 "body": {
-                                    "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{body}}}}",
+                                    "query":"query InvalidationEntityKey__invalidation_entity_key_reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{body}}}}",
                                     "variables":{"representations":[{"upc":"1","__typename":"Product"}]}
                                 }
                             },
@@ -129,7 +135,7 @@
         {
             "type": "Request",
             "request": {
-                "query": "{ topProducts { reviews { body } } }"
+                "query": "query InvalidationEntityKey { topProducts { reviews { body } } }"
             },
             "expected_response": {
                 "data":{
@@ -151,7 +157,7 @@
         {
             "type": "Request",
             "request": {
-                "query": "mutation { invalidateProductReview }"
+                "query": "mutation InvalidationEntityKey { invalidateProductReview }"
             },
             "expected_response": {
                 "data":{
@@ -162,7 +168,7 @@
         {
             "type": "Request",
             "request": {
-                "query": "{ topProducts { reviews { body } } }"
+                "query": "query InvalidationEntityKey { topProducts { reviews { body } } }"
             },
             "expected_response":{
                 "data":{
@@ -170,12 +176,12 @@
                 },
                 "errors":[
                     {
-                        "message":"HTTP fetch failed from 'reviews': 500: Internal Server Error",
-                        "extensions":{"code":"SUBREQUEST_HTTP_ERROR","service":"reviews","reason":"500: Internal Server Error","http":{"status":500}}
+                        "message":"HTTP fetch failed from 'invalidation-entity-key-reviews': 500: Internal Server Error",
+                        "extensions":{"code":"SUBREQUEST_HTTP_ERROR","service":"invalidation-entity-key-reviews","reason":"500: Internal Server Error","http":{"status":500}}
                     },
                     {
-                        "message":"service 'reviews' response was malformed: {}",
-                        "extensions":{"service":"reviews","reason":"{}","code":"SUBREQUEST_MALFORMED_RESPONSE"}
+                        "message":"service 'invalidation-entity-key-reviews' response was malformed: {}",
+                        "extensions":{"service":"invalidation-entity-key-reviews","reason":"{}","code":"SUBREQUEST_MALFORMED_RESPONSE"}
                     }
                 ]
             }
@@ -183,12 +189,12 @@
         {
             "type": "ReloadSubgraphs",
             "subgraphs": {
-                "reviews": {
+                "invalidation-entity-key-reviews": {
                     "requests": [
                         {
                             "request": {
                                 "body": {
-                                    "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{body}}}}",
+                                    "query":"query InvalidationEntityKey__invalidation_entity_key_reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{body}}}}",
                                     "variables":{"representations":[{"upc":"1","__typename":"Product"}]}
                                 }
                             },
@@ -213,7 +219,7 @@
         {
             "type": "Request",
             "request": {
-                "query": "{ topProducts { reviews { body } } }"
+                "query": "query InvalidationEntityKey { topProducts { reviews { body } } }"
             },
             "expected_response": {
                 "data":{
