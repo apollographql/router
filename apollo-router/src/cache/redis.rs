@@ -593,11 +593,18 @@ mod test {
 
     use url::Url;
 
+    use crate::cache::storage::ValueType;
+
     #[test]
     fn ensure_invalid_payload_serialization_doesnt_fail() {
         #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
         struct Stuff {
             time: SystemTime,
+        }
+        impl ValueType for Stuff {
+            fn estimated_size(&self) -> Option<usize> {
+                None
+            }
         }
 
         let invalid_json_payload = super::RedisValue(Stuff {

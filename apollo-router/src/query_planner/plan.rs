@@ -1,3 +1,5 @@
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use apollo_compiler::validation::Valid;
@@ -9,6 +11,7 @@ use serde::Serialize;
 pub(crate) use self::fetch::OperationKind;
 use super::fetch;
 use super::subscription::SubscriptionNode;
+use crate::cache::estimate_size;
 use crate::configuration::Batching;
 use crate::error::CacheResolverError;
 use crate::error::ValidationErrors;
@@ -42,6 +45,10 @@ pub struct QueryPlan {
     pub(crate) formatted_query_plan: Option<Arc<String>>,
     pub(crate) query: Arc<Query>,
     pub(crate) query_metrics: OperationLimits<u32>,
+
+    /// The estimated size in bytes of the query plan
+    #[serde(default)]
+    pub(crate) estimated_size: Arc<AtomicUsize>,
 }
 
 /// This default impl is useful for test users
@@ -64,6 +71,7 @@ impl QueryPlan {
             formatted_query_plan: Default::default(),
             query: Arc::new(Query::empty()),
             query_metrics: Default::default(),
+            estimated_size: Default::default(),
         }
     }
 }
@@ -88,6 +96,14 @@ impl QueryPlan {
     ) -> Result<Vec<Arc<QueryHash>>, CacheResolverError> {
         self.root
             .query_hashes(batching_config, operation, variables, &self.query)
+    }
+
+    pub(crate) fn estimated_size(&self) -> usize {
+        if self.estimated_size.load(Ordering::SeqCst) == 0 {
+            self.estimated_size
+                .store(estimate_size(self), Ordering::SeqCst);
+        }
+        self.estimated_size.load(Ordering::SeqCst)
     }
 }
 
@@ -606,4 +622,18 @@ pub(crate) struct DeferredNode {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Depends {
     pub(crate) id: String,
+}
+
+#[cfg(test)]
+mod test {
+    use crate::query_planner::QueryPlan;
+
+    #[test]
+    fn test_estimated_size() {
+        let query_plan = QueryPlan::fake_builder().build();
+        let size1 = query_plan.estimated_size();
+        let size2 = query_plan.estimated_size();
+        assert!(size1 > 0);
+        assert_eq!(size1, size2);
+    }
 }

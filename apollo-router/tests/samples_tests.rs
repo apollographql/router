@@ -165,11 +165,13 @@ impl TestExecution {
             Action::Request {
                 request,
                 query_path,
+                headers,
                 expected_response,
             } => {
                 self.request(
                     request.clone(),
                     query_path.as_deref(),
+                    headers,
                     expected_response,
                     path,
                     out,
@@ -410,6 +412,7 @@ impl TestExecution {
         &mut self,
         mut request: Value,
         query_path: Option<&str>,
+        headers: &HashMap<String, String>,
         expected_response: &Value,
         path: &Path,
         out: &mut String,
@@ -434,7 +437,9 @@ impl TestExecution {
         }
 
         writeln!(out, "query: {}\n", serde_json::to_string(&request).unwrap()).unwrap();
-        let (_, response) = router.execute_query(&request).await;
+        let (_, response) = router
+            .execute_query_with_headers(&request, headers.clone())
+            .await;
         let body = response.bytes().await.map_err(|e| {
             writeln!(out, "could not get graphql response data: {e}").unwrap();
             let f: Failed = out.clone().into();
@@ -467,13 +472,13 @@ impl TestExecution {
             writeln!(out, "assertion `left == right` failed").unwrap();
             writeln!(
                 out,
-                " left: {}",
+                " expected: {}",
                 serde_json::to_string(&expected_response).unwrap()
             )
             .unwrap();
             writeln!(
                 out,
-                "right: {}",
+                "received: {}",
                 serde_json::to_string(&graphql_response).unwrap()
             )
             .unwrap();
@@ -575,6 +580,8 @@ enum Action {
     Request {
         request: Value,
         query_path: Option<String>,
+        #[serde(default)]
+        headers: HashMap<String, String>,
         expected_response: Value,
     },
     EndpointRequest {

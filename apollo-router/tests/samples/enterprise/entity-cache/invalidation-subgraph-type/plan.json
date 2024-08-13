@@ -7,11 +7,11 @@
             "schema_path": "./supergraph.graphql",
             "configuration_path": "./configuration.yaml",
             "subgraphs": {
-                "accounts": {
+                "invalidation-subgraph-type-accounts": {
                     "requests": [
                         {
                             "request": {
-                                "body": {"query":"query InvalidationSubgraphType__accounts__0{me{name id}}","operationName":"InvalidationSubgraphType__accounts__0"}
+                                "body": {"query":"query InvalidationSubgraphType__invalidation_subgraph_type_accounts__0{me{name id}}","operationName":"InvalidationSubgraphType__invalidation_subgraph_type_accounts__0"}
                             },
                             "response": {
                                 "headers": {
@@ -42,7 +42,7 @@
         {
             "type": "ReloadSubgraphs",
             "subgraphs": {
-                "accounts": {
+                "invalidation-subgraph-type-accounts": {
                     "requests": []
                 }
             }
@@ -66,21 +66,24 @@
             "url": "http://127.0.0.1:12345/invalidation-sample-subgraph-type",
             "request": {
                 "method": "POST",
-                "body": {
+                "headers": {
+                    "Authorization": "1234"
+                },
+                "body": [{
                     "kind": "type",
-                    "subgraph": "accounts",
+                    "subgraph": "invalidation-subgraph-type-accounts",
                     "type": "Query"
-                }
+                }]
             }
         },
         {
             "type": "ReloadSubgraphs",
             "subgraphs": {
-                "accounts": {
+                "invalidation-subgraph-type-accounts": {
                     "requests": [
                         {
                             "request": {
-                                "body": {"query":"query InvalidationSubgraphType__accounts__0{me{name id}}", "operationName":"InvalidationSubgraphType__accounts__0"}
+                                "body": {"query":"query InvalidationSubgraphType__invalidation_subgraph_type_accounts__0{me{name id}}", "operationName":"InvalidationSubgraphType__invalidation_subgraph_type_accounts__0"}
                             },
                             "response": {
                                 "headers": {
@@ -106,6 +109,21 @@
                         "id":"1"
                     }
                 }
+            }
+        },
+        {
+            "type": "EndpointRequest",
+            "url": "http://127.0.0.1:12345/invalidation-sample-subgraph-type",
+            "request": {
+                "method": "POST",
+                "headers": {
+                    "Authorization": "1234"
+                },
+                "body": [{
+                    "kind": "type",
+                    "subgraph": "invalidation-subgraph-type-accounts",
+                    "type": "Query"
+                }]
             }
         },
         {
