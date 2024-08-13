@@ -78,11 +78,9 @@ macro_rules! propagate_demand_control_directives_to_position {
             original_directive_names: &HashMap<Name, Name>,
         ) -> Result<(), FederationError> {
             let cost_directive_name = original_directive_names.get(&COST_DIRECTIVE_NAME_IN_SPEC);
-            if let Some(cost_directive) = source.directives.get(
-                cost_directive_name
-                    .unwrap_or(&COST_DIRECTIVE_NAME_IN_SPEC)
-                    .as_str(),
-            ) {
+            let cost_directive =
+                cost_directive_name.and_then(|name| source.directives.get(name.as_str()));
+            if let Some(cost_directive) = cost_directive {
                 dest.insert_directive(
                     subgraph_schema,
                     Component::from(
