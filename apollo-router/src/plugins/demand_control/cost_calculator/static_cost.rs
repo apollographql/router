@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
+use ahash::HashMap;
 use apollo_compiler::ast;
 use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::ast::NamedType;
@@ -12,23 +12,18 @@ use apollo_compiler::executable::Operation;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::validation::Valid;
-use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::Schema;
 use serde_json_bytes::Value;
 
-use super::directives::get_apollo_directive_names;
 use super::directives::IncludeDirective;
-use super::directives::RequiresDirective;
 use super::directives::SkipDirective;
+use super::schema::DemandControlledSchema;
 use super::DemandControlError;
 use crate::graphql::Response;
 use crate::graphql::ResponseVisitor;
 use crate::plugins::demand_control::cost_calculator::directives::CostDirective;
 use crate::plugins::demand_control::cost_calculator::directives::ListSizeDirective;
 use crate::query_planner::fetch::SubgraphOperation;
-use crate::query_planner::fetch::SubgraphSchemas;
 use crate::query_planner::DeferredNode;
 use crate::query_planner::PlanNode;
 use crate::query_planner::Primary;
@@ -36,21 +31,20 @@ use crate::query_planner::QueryPlan;
 
 pub(crate) struct StaticCostCalculator {
     list_size: u32,
-    supergraph_schema: Arc<Valid<Schema>>,
-    subgraph_schemas: Arc<SubgraphSchemas>,
-    directive_name_map: HashMap<Name, Name>,
+    supergraph_schema: Arc<DemandControlledSchema>,
+    subgraph_schemas: Arc<HashMap<String, DemandControlledSchema>>,
 }
 
 fn score_argument(
     argument: &apollo_compiler::ast::Value,
     argument_definition: &Node<InputValueDefinition>,
-    schema: &Valid<Schema>,
-    directive_name_map: &HashMap<Name, Name>,
+    schema: &DemandControlledSchema,
 ) -> Result<f64, DemandControlError> {
-    let cost_directive = CostDirective::from_argument(directive_name_map, argument_definition);
+    let cost_directive =
+        CostDirective::from_argument(schema.directive_name_map(), argument_definition);
     let ty = schema
         .types
-        .get(argument_definition.ty.inner_named_type().as_str())
+        .get(argument_definition.ty.inner_named_type())
         .ok_or_else(|| {
             DemandControlError::QueryParseFailure(format!(
                 "Argument {} was found in query, but its type ({}) was not found in the schema",
@@ -63,7 +57,11 @@ fn score_argument(
         (_, ExtendedType::Interface(_))
         | (_, ExtendedType::Object(_))
         | (_, ExtendedType::Union(_)) => Err(DemandControlError::QueryParseFailure(
-            format!("Argument {} has type {}, but objects, interfaces, and unions are disallowed in this position", argument_definition.name, argument_definition.ty.inner_named_type())
+            format!(
+                "Argument {} has type {}, but objects, interfaces, and unions are disallowed in this position",
+                argument_definition.name,
+                argument_definition.ty.inner_named_type()
+            )
         )),
 
         (ast::Value::Object(inner_args), ExtendedType::InputObject(inner_arg_defs)) => {
@@ -76,14 +74,14 @@ fn score_argument(
                         argument_definition.ty.inner_named_type()
                     ))
                 })?;
-                cost += score_argument(arg_val, arg_def, schema, directive_name_map)?;
+                cost += score_argument(arg_val, arg_def, schema)?;
             }
             Ok(cost)
         }
         (ast::Value::List(inner_args), _) => {
             let mut cost = cost_directive.map_or(0.0, |cost| cost.weight());
             for arg_val in inner_args {
-                cost += score_argument(arg_val, argument_definition, schema, directive_name_map)?;
+                cost += score_argument(arg_val, argument_definition, schema)?;
             }
             Ok(cost)
         }
@@ -94,18 +92,15 @@ fn score_argument(
 
 impl StaticCostCalculator {
     pub(crate) fn new(
-        supergraph_schema: Arc<Valid<Schema>>,
-        subgraph_schemas: Arc<SubgraphSchemas>,
+        supergraph_schema: Arc<DemandControlledSchema>,
+        subgraph_schemas: Arc<HashMap<String, DemandControlledSchema>>,
         list_size: u32,
-    ) -> Self {
-        let directive_name_map = get_apollo_directive_names(&supergraph_schema);
-
-        Self {
+    ) -> Result<Self, DemandControlError> {
+        Ok(Self {
             list_size,
             supergraph_schema,
             subgraph_schemas,
-            directive_name_map,
-        }
+        })
     }
 
     /// Scores a field within a GraphQL operation, handling some expected cases where
@@ -130,7 +125,7 @@ impl StaticCostCalculator {
         &self,
         field: &Field,
         parent_type: &NamedType,
-        schema: &Valid<Schema>,
+        schema: &DemandControlledSchema,
         executable: &ExecutableDocument,
         should_estimate_requires: bool,
         list_size_from_upstream: Option<i32>,
@@ -150,7 +145,10 @@ impl StaticCostCalculator {
         })?;
 
         let list_size_directive =
-            ListSizeDirective::from_field(&self.directive_name_map, field, definition)?;
+            match schema.type_field_list_size_directive(parent_type, &field.name) {
+                Some(dir) => dir.with_field(field).map(Some),
+                None => Ok(None),
+            }?;
         let instance_count = if !field.ty().is_list() {
             1
         } else if let Some(value) = list_size_from_upstream {
@@ -158,7 +156,7 @@ impl StaticCostCalculator {
             value
         } else if let Some(expected_size) = list_size_directive
             .as_ref()
-            .and_then(|list_size| list_size.expected_size)
+            .and_then(|dir| dir.expected_size)
         {
             expected_size
         } else {
@@ -168,8 +166,7 @@ impl StaticCostCalculator {
         // Determine the cost for this particular field. Scalars are free, non-scalars are not.
         // For fields with selections, add in the cost of the selections as well.
         let mut type_cost = if let Some(cost_directive) =
-            CostDirective::from_field(&self.directive_name_map, definition)
-                .or(CostDirective::from_type(&self.directive_name_map, ty))
+            schema.type_field_cost_directive(parent_type, &field.name)
         {
             cost_directive.weight()
         } else if ty.is_interface() || ty.is_object() || ty.is_union() {
@@ -195,12 +192,7 @@ impl StaticCostCalculator {
                         argument.name, field.name
                     ))
                 })?;
-            arguments_cost += score_argument(
-                &argument.value,
-                argument_definition,
-                schema,
-                &self.directive_name_map,
-            )?;
+            arguments_cost += score_argument(&argument.value, argument_definition, schema)?;
         }
 
         let mut requirements_cost = 0.0;
@@ -208,11 +200,12 @@ impl StaticCostCalculator {
             // If the field is marked with `@requires`, the required selection may not be included
             // in the query's selection. Adding that requirement's cost to the field ensures it's
             // accounted for.
-            let requirements =
-                RequiresDirective::from_field(field, parent_type, schema)?.map(|d| d.fields);
+            let requirements = schema
+                .type_field_requires_directive(parent_type, &field.name)
+                .map(|d| &d.fields);
             if let Some(selection_set) = requirements {
                 requirements_cost = self.score_selection_set(
-                    &selection_set,
+                    selection_set,
                     parent_type,
                     schema,
                     executable,
@@ -240,7 +233,7 @@ impl StaticCostCalculator {
         &self,
         fragment_spread: &FragmentSpread,
         parent_type: &NamedType,
-        schema: &Valid<Schema>,
+        schema: &DemandControlledSchema,
         executable: &ExecutableDocument,
         should_estimate_requires: bool,
         list_size_directive: Option<&ListSizeDirective>,
@@ -265,7 +258,7 @@ impl StaticCostCalculator {
         &self,
         inline_fragment: &InlineFragment,
         parent_type: &NamedType,
-        schema: &Valid<Schema>,
+        schema: &DemandControlledSchema,
         executable: &ExecutableDocument,
         should_estimate_requires: bool,
         list_size_directive: Option<&ListSizeDirective>,
@@ -283,7 +276,7 @@ impl StaticCostCalculator {
     fn score_operation(
         &self,
         operation: &Operation,
-        schema: &Valid<Schema>,
+        schema: &DemandControlledSchema,
         executable: &ExecutableDocument,
         should_estimate_requires: bool,
     ) -> Result<f64, DemandControlError> {
@@ -312,7 +305,7 @@ impl StaticCostCalculator {
         &self,
         selection: &Selection,
         parent_type: &NamedType,
-        schema: &Valid<Schema>,
+        schema: &DemandControlledSchema,
         executable: &ExecutableDocument,
         should_estimate_requires: bool,
         list_size_directive: Option<&ListSizeDirective>,
@@ -349,7 +342,7 @@ impl StaticCostCalculator {
         &self,
         selection_set: &SelectionSet,
         parent_type_name: &NamedType,
-        schema: &Valid<Schema>,
+        schema: &DemandControlledSchema,
         executable: &ExecutableDocument,
         should_estimate_requires: bool,
         list_size_directive: Option<&ListSizeDirective>,
@@ -469,7 +462,7 @@ impl StaticCostCalculator {
     pub(crate) fn estimated(
         &self,
         query: &ExecutableDocument,
-        schema: &Valid<Schema>,
+        schema: &DemandControlledSchema,
         should_estimate_requires: bool,
     ) -> Result<f64, DemandControlError> {
         let mut cost = 0.0;
@@ -499,19 +492,12 @@ impl StaticCostCalculator {
 
 pub(crate) struct ResponseCostCalculator<'a> {
     pub(crate) cost: f64,
-    schema: &'a Valid<Schema>,
-    directive_name_map: HashMap<Name, Name>,
+    schema: &'a DemandControlledSchema,
 }
 
 impl<'schema> ResponseCostCalculator<'schema> {
-    pub(crate) fn new(schema: &'schema Valid<Schema>) -> Self {
-        let directive_name_map = get_apollo_directive_names(schema);
-
-        Self {
-            cost: 0.0,
-            schema,
-            directive_name_map,
-        }
+    pub(crate) fn new(schema: &'schema DemandControlledSchema) -> Self {
+        Self { cost: 0.0, schema }
     }
 }
 
@@ -531,16 +517,16 @@ impl<'schema> ResponseVisitor for ResponseCostCalculator<'schema> {
                 .as_ref()
                 .map(|def| def.argument_by_name(&argument.name))
             {
-                if let Ok(score) = score_argument(
-                    &argument.value,
-                    argument_definition,
-                    self.schema,
-                    &self.directive_name_map,
-                ) {
+                if let Ok(score) = score_argument(&argument.value, argument_definition, self.schema)
+                {
                     self.cost += score;
                 }
             } else {
-                tracing::warn!("Failed to get schema definition for argument {} of field {}. The resulting actual cost will be a partial result.", argument.name, field.name)
+                tracing::warn!(
+                    "Failed to get schema definition for argument {} of field {}. The resulting actual cost will be a partial result.",
+                    argument.name,
+                    field.name
+                )
             }
         }
     }
@@ -552,13 +538,9 @@ impl<'schema> ResponseVisitor for ResponseCostCalculator<'schema> {
         field: &apollo_compiler::executable::Field,
         value: &Value,
     ) {
-        let ty = field.inner_type_def(self.schema);
-        let definition = self.schema.type_field(parent_ty, &field.name);
-        let cost_directive = definition
-            .as_ref()
-            .ok()
-            .and_then(|def| CostDirective::from_field(&self.directive_name_map, def))
-            .or(ty.and_then(|t| CostDirective::from_type(&self.directive_name_map, t)));
+        let cost_directive = self
+            .schema
+            .type_field_cost_directive(parent_ty, &field.name);
 
         match value {
             Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
@@ -581,6 +563,7 @@ impl<'schema> ResponseVisitor for ResponseCostCalculator<'schema> {
 mod tests {
     use std::sync::Arc;
 
+    use ahash::HashMapExt;
     use apollo_federation::query_plan::query_planner::QueryPlanner;
     use bytes::Bytes;
     use test_log::test;
@@ -615,13 +598,14 @@ mod tests {
     fn estimated_cost(schema_str: &str, query_str: &str) -> f64 {
         let (schema, query) =
             parse_schema_and_operation(schema_str, query_str, &Default::default());
-        StaticCostCalculator::new(
-            Arc::new(schema.supergraph_schema().clone()),
-            Default::default(),
-            100,
-        )
-        .estimated(&query.executable, schema.supergraph_schema(), true)
-        .unwrap()
+        let schema =
+            DemandControlledSchema::new(Arc::new(schema.supergraph_schema().clone())).unwrap();
+        let calculator =
+            StaticCostCalculator::new(Arc::new(schema), Default::default(), 100).unwrap();
+
+        calculator
+            .estimated(&query.executable, &calculator.supergraph_schema, true)
+            .unwrap()
     }
 
     /// Estimate cost of an operation on a plain, non-federated schema.
@@ -634,8 +618,12 @@ mod tests {
             "query.graphql",
         )
         .unwrap();
-        StaticCostCalculator::new(Arc::new(schema.clone()), Default::default(), 100)
-            .estimated(&query, &schema, true)
+        let schema = DemandControlledSchema::new(Arc::new(schema)).unwrap();
+        let calculator =
+            StaticCostCalculator::new(Arc::new(schema), Default::default(), 100).unwrap();
+
+        calculator
+            .estimated(&query, &calculator.supergraph_schema, true)
             .unwrap()
     }
 
@@ -648,17 +636,22 @@ mod tests {
 
         let query_plan = planner.build_query_plan(&query.executable, None).unwrap();
 
+        let schema =
+            DemandControlledSchema::new(Arc::new(schema.supergraph_schema().clone())).unwrap();
+        let mut demand_controlled_subgraph_schemas = HashMap::new();
+        for (subgraph_name, subgraph_schema) in planner.subgraph_schemas().iter() {
+            let demand_controlled_subgraph_schema =
+                DemandControlledSchema::new(Arc::new(subgraph_schema.schema().clone())).unwrap();
+            demand_controlled_subgraph_schemas
+                .insert(subgraph_name.to_string(), demand_controlled_subgraph_schema);
+        }
+
         let calculator = StaticCostCalculator::new(
-            Arc::new(schema.supergraph_schema().clone()),
-            Arc::new(
-                planner
-                    .subgraph_schemas()
-                    .iter()
-                    .map(|(k, v)| (k.to_string(), Arc::new(v.schema().clone())))
-                    .collect(),
-            ),
+            Arc::new(schema),
+            Arc::new(demand_controlled_subgraph_schemas),
             100,
-        );
+        )
+        .unwrap();
 
         calculator.rust_planned(&query_plan).unwrap()
     }
@@ -667,13 +660,12 @@ mod tests {
         let (schema, query) =
             parse_schema_and_operation(schema_str, query_str, &Default::default());
         let response = Response::from_bytes("test", Bytes::from(response_bytes)).unwrap();
-        StaticCostCalculator::new(
-            Arc::new(schema.supergraph_schema().clone()),
-            Default::default(),
-            100,
-        )
-        .actual(&query.executable, &response)
-        .unwrap()
+        let schema =
+            DemandControlledSchema::new(Arc::new(schema.supergraph_schema().clone())).unwrap();
+        StaticCostCalculator::new(Arc::new(schema), Default::default(), 100)
+            .unwrap()
+            .actual(&query.executable, &response)
+            .unwrap()
     }
 
     /// Actual cost of an operation on a plain, non-federated schema.
@@ -688,7 +680,9 @@ mod tests {
         .unwrap();
         let response = Response::from_bytes("test", Bytes::from(response_bytes)).unwrap();
 
-        StaticCostCalculator::new(Arc::new(schema.clone()), Default::default(), 100)
+        let schema = DemandControlledSchema::new(Arc::new(schema)).unwrap();
+        StaticCostCalculator::new(Arc::new(schema), Default::default(), 100)
+            .unwrap()
             .actual(&query, &response)
             .unwrap()
     }
@@ -851,14 +845,19 @@ mod tests {
         let schema = include_str!("./fixtures/federated_ships_schema.graphql");
         let query = include_str!("./fixtures/federated_ships_deferred_query.graphql");
         let (schema, query) = parse_schema_and_operation(schema, query, &Default::default());
-        let schema = Arc::new(schema.supergraph_schema().clone());
+        let schema = Arc::new(
+            DemandControlledSchema::new(Arc::new(schema.supergraph_schema().clone())).unwrap(),
+        );
 
-        let conservative_estimate =
-            StaticCostCalculator::new(schema.clone(), Default::default(), 100)
-                .estimated(&query.executable, &schema, true)
-                .unwrap();
-        let narrow_estimate = StaticCostCalculator::new(schema.clone(), Default::default(), 5)
-            .estimated(&query.executable, &schema, true)
+        let calculator =
+            StaticCostCalculator::new(schema.clone(), Default::default(), 100).unwrap();
+        let conservative_estimate = calculator
+            .estimated(&query.executable, &calculator.supergraph_schema, true)
+            .unwrap();
+
+        let calculator = StaticCostCalculator::new(schema.clone(), Default::default(), 5).unwrap();
+        let narrow_estimate = calculator
+            .estimated(&query.executable, &calculator.supergraph_schema, true)
             .unwrap();
 
         assert_eq!(conservative_estimate, 10200.0);

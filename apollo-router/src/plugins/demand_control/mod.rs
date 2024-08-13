@@ -5,6 +5,8 @@ use std::future;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
+use ahash::HashMap;
+use ahash::HashMapExt;
 use apollo_compiler::schema::FieldLookupError;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
@@ -28,6 +30,7 @@ use crate::json_ext::Object;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugins::demand_control::cost_calculator::schema::DemandControlledSchema;
 use crate::plugins::demand_control::strategy::Strategy;
 use crate::plugins::demand_control::strategy::StrategyFactory;
 use crate::register_plugin;
@@ -240,11 +243,21 @@ impl Plugin for DemandControl {
     type Config = DemandControlConfig;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        let demand_controlled_supergraph_schema =
+            DemandControlledSchema::new(init.supergraph_schema.clone())?;
+        let mut demand_controlled_subgraph_schemas = HashMap::new();
+        for (subgraph_name, subgraph_schema) in init.subgraph_schemas.iter() {
+            let demand_controlled_subgraph_schema =
+                DemandControlledSchema::new(subgraph_schema.clone())?;
+            demand_controlled_subgraph_schemas
+                .insert(subgraph_name.clone(), demand_controlled_subgraph_schema);
+        }
+
         Ok(DemandControl {
             strategy_factory: StrategyFactory::new(
                 init.config.clone(),
-                init.supergraph_schema.clone(),
-                init.subgraph_schemas.clone(),
+                Arc::new(demand_controlled_supergraph_schema),
+                Arc::new(demand_controlled_subgraph_schemas),
             ),
             config: init.config,
         })
