@@ -1072,6 +1072,9 @@ impl FetchDependencyGraph {
         if to_remove.is_empty() {
             return; // unchanged
         }
+        // Note: We remove empty nodes without relocating their children. The invariant is that
+        // the children of empty nodes (if any) must be accessible from the root via another path.
+        // Otherwise, they would've become inaccessible orphan nodes.
         self.retain_nodes(|node_index| !to_remove.contains(node_index));
     }
 
@@ -1450,6 +1453,13 @@ impl FetchDependencyGraph {
         // generate a simple string key from each node subgraph name and mergeAt. We do "sanitize"
         // subgraph name, but have no worries for `mergeAt` since it contains either number of
         // field names, and the later is restricted by graphQL so as to not be an issue.
+        // PORT_NOTE: The JS version iterates over the nodes in their index order, which is also
+        // the insertion order. The Rust version uses a topological sort to ensure that we never
+        // merge an ancestor node into a descendant node. JS version's insertion order is almost
+        // topologically sorted, thanks to the way the graph is constructed from the root. However,
+        // it's not exactly topologically sorted. So, it's unclear whether that is 100% safe.
+        // Note: MultiMap preserves insertion order for values of the same key. Thus, the values
+        // of the same key in `by_subgraphs` will be topologically sorted as well.
         let mut by_subgraphs = MultiMap::new();
         let sorted_nodes = petgraph::algo::toposort(&self.graph, None)
             .map_err(|_| FederationError::internal("Failed to sort nodes due to cycle(s)"))?;
@@ -1470,7 +1480,7 @@ impl FetchDependencyGraph {
             }
 
             // Create disjoint sets of the nodes.
-            // buckets: an array where each entry is a "bucket" of groups that can all be merge together.
+            // buckets: an array where each entry is a "bucket" of nodes that can all be merge together.
             let mut buckets: Vec<(NodeIndex, Vec<NodeIndex>)> = Vec::new();
             let has_equal_inputs = |a: NodeIndex, b: NodeIndex| {
                 let a_node = self.node_weight(a)?;
@@ -1503,9 +1513,12 @@ impl FetchDependencyGraph {
                     continue;
                 };
 
-                // We pick the head for the group and merge all others into it. Note that which
-                // group we choose shouldn't matter since the merging preserves all the
+                // We pick the head for the nodes and merge all others into it. Note that which
+                // node we choose shouldn't matter since the merging preserves all the
                 // dependencies of each group (both parents and children).
+                // However, we must not merge an ancestor node into a descendant node. Thus,
+                // we choose the head as the first node in the bucket that is also the earliest
+                // in the topo-sorted order.
                 for node in rest {
                     self.merge_in_with_all_dependencies(*head, *node)?;
                 }
@@ -2017,6 +2030,7 @@ impl FetchDependencyGraph {
         Ok(())
     }
 
+    /// Assumption: merged_id is not an ancestor of node_id in the graph.
     fn merge_in_internal(
         &mut self,
         node_id: NodeIndex,
@@ -2071,6 +2085,7 @@ impl FetchDependencyGraph {
     // - node_id's defer_ref == merged_id's defer_ref
     // - node_id's subgraph_name == merged_id's subgraph_name
     // - node_id's merge_at == merged_id's merge_at
+    // - merged_id is not an ancestor of node_id in the graph.
     fn merge_in_with_all_dependencies(
         &mut self,
         node_id: NodeIndex,
