@@ -4,19 +4,20 @@ use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
 use apollo_federation::sources::connect::ApplyTo;
 use apollo_federation::sources::connect::Connector;
+use http_body::Body as HttpBody;
 use parking_lot::Mutex;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 
 use crate::graphql;
 use crate::graphql::ErrorExtension;
-use crate::plugins::connectors::error::Error as ConnectorError;
+use crate::plugins::connectors::http::Response as ConnectorResponse;
+use crate::plugins::connectors::http::Result as ConnectorResult;
 use crate::plugins::connectors::make_requests::ResponseKey;
 use crate::plugins::connectors::make_requests::ResponseTypeName;
 use crate::plugins::connectors::plugin::ConnectorContext;
 use crate::plugins::connectors::plugin::SelectionData;
 use crate::services::connect::Response;
-use crate::services::router::body::RouterBody;
 
 const ENTITIES: &str = "_entities";
 const TYPENAME: &str = "__typename";
@@ -34,11 +35,8 @@ pub(crate) enum HandleResponseError {
 
 // --- RESPONSES ---------------------------------------------------------------
 
-pub(crate) async fn handle_responses(
-    responses: Vec<(
-        Result<http::Response<RouterBody>, ConnectorError>,
-        ResponseKey,
-    )>,
+pub(crate) async fn handle_responses<T: HttpBody>(
+    responses: Vec<ConnectorResponse<T>>,
     connector: &Connector,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
     _schema: &Valid<Schema>, // TODO for future apply_with_selection
@@ -53,16 +51,17 @@ pub(crate) async fn handle_responses(
         code: String,
     }
 
-    for (fetch_result, response_key) in responses {
+    for response in responses {
         let mut error = None;
-        match fetch_result {
-            Err(e) => {
+        let response_key = response.key;
+        match response.result {
+            ConnectorResult::Err(e) => {
                 error = Some(ErrorInput {
                     message: e.to_string(),
                     code: e.extension_code(),
                 })
             }
-            Ok(response) => {
+            ConnectorResult::HttpResponse(response) => {
                 let (parts, body) = response.into_parts();
                 let body = &hyper::body::to_bytes(body).await.map_err(|_| {
                     InvalidResponseBody("couldn't retrieve http response body".into())
@@ -267,8 +266,10 @@ mod tests {
     use insta::assert_debug_snapshot;
     use url::Url;
 
+    use crate::plugins::connectors::http::Response as ConnectorResponse;
     use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::plugins::connectors::make_requests::ResponseTypeName;
+    use crate::services::router::body::RouterBody;
 
     #[tokio::test]
     async fn test_handle_responses_root_fields() {
@@ -294,7 +295,7 @@ mod tests {
             max_requests: None,
         };
 
-        let response1 = http::Response::builder()
+        let response1: http::Response<RouterBody> = http::Response::builder()
             .body(hyper::Body::from(r#"{"data":"world"}"#).into())
             .expect("response builder");
         let response_key1 = ResponseKey::RootField {
@@ -324,8 +325,14 @@ mod tests {
 
         let res = super::handle_responses(
             vec![
-                (Ok(response1), response_key1),
-                (Ok(response2), response_key2),
+                ConnectorResponse {
+                    result: response1.into(),
+                    key: response_key1,
+                },
+                ConnectorResponse {
+                    result: response2.into(),
+                    key: response_key2,
+                },
             ],
             &connector,
             &None,
@@ -397,7 +404,7 @@ mod tests {
             directives: Default::default(),
         };
         let id_field = Field::new(Name::new("id").unwrap(), Node::from(id_field_definition));
-        let response1 = http::Response::builder()
+        let response1: http::Response<RouterBody> = http::Response::builder()
             .body(hyper::Body::from(r#"{"data":{"id": "1"}}"#).into())
             .expect("response builder");
         let response_key1 = ResponseKey::Entity {
@@ -432,8 +439,14 @@ mod tests {
 
         let res = super::handle_responses(
             vec![
-                (Ok(response1), response_key1),
-                (Ok(response2), response_key2),
+                ConnectorResponse {
+                    result: response1.into(),
+                    key: response_key1,
+                },
+                ConnectorResponse {
+                    result: response2.into(),
+                    key: response_key2,
+                },
             ],
             &connector,
             &None,
@@ -509,10 +522,10 @@ mod tests {
             max_requests: None,
         };
 
-        let response1 = http::Response::builder()
+        let response1: http::Response<RouterBody> = http::Response::builder()
             .body(hyper::Body::from(r#"{"data":"value1"}"#).into())
             .expect("response builder");
-        let reponse_key1 = ResponseKey::EntityField {
+        let response_key1 = ResponseKey::EntityField {
             index: 0,
             inputs: Default::default(),
             field_name: "field".to_string(),
@@ -546,8 +559,14 @@ mod tests {
 
         let res = super::handle_responses(
             vec![
-                (Ok(response1), reponse_key1),
-                (Ok(response2), response_key2),
+                ConnectorResponse {
+                    result: response1.into(),
+                    key: response_key1,
+                },
+                ConnectorResponse {
+                    result: response2.into(),
+                    key: response_key2,
+                },
             ],
             &connector,
             &None,
@@ -623,7 +642,7 @@ mod tests {
             max_requests: None,
         };
 
-        let response1 = http::Response::builder()
+        let response1: http::Response<RouterBody> = http::Response::builder()
             .status(404)
             .body(hyper::Body::from(r#"{"error":"not found"}"#).into())
             .expect("response builder");
@@ -673,9 +692,18 @@ mod tests {
 
         let res = super::handle_responses(
             vec![
-                (Ok(response1), response_key1),
-                (Ok(response2), response_key2),
-                (Ok(response3), response_key3),
+                ConnectorResponse {
+                    result: response1.into(),
+                    key: response_key1,
+                },
+                ConnectorResponse {
+                    result: response2.into(),
+                    key: response_key2,
+                },
+                ConnectorResponse {
+                    result: response3.into(),
+                    key: response_key3,
+                },
             ],
             &connector,
             &None,

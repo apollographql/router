@@ -20,6 +20,8 @@ use super::http::HttpRequest;
 use super::new_service::ServiceFactory;
 use crate::plugins::connectors::error::Error as ConnectorError;
 use crate::plugins::connectors::handle_responses::handle_responses;
+use crate::plugins::connectors::http::Response as ConnectorResponse;
+use crate::plugins::connectors::http::Result as ConnectorResult;
 use crate::plugins::connectors::make_requests::make_requests;
 use crate::plugins::connectors::plugin::ConnectorContext;
 use crate::plugins::connectors::request_limit::RequestLimits;
@@ -153,7 +155,10 @@ async fn execute(
         async move {
             if let Some(request_limit) = request_limit {
                 if !request_limit.allow() {
-                    return Ok((Err(ConnectorError::RequestLimitExceeded), key));
+                    return Ok(ConnectorResponse {
+                        result: ConnectorResult::Err(ConnectorError::RequestLimitExceeded),
+                        key,
+                    });
                 }
             }
             let client = http_client_factory.create(&original_subgraph_name);
@@ -163,7 +168,10 @@ async fn execute(
             };
             let res = client.oneshot(req).await?;
 
-            Ok::<_, BoxError>((Ok(res.http_response), key))
+            Ok::<_, BoxError>(ConnectorResponse {
+                result: ConnectorResult::HttpResponse(res.http_response),
+                key,
+            })
         }
     });
 
