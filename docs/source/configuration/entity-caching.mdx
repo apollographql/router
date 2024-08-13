@@ -105,7 +105,7 @@ preview_entity_cache:
 
 ### Configure time to live (TTL)
 
-To decide whether to cache an entity, the router honors the [`Cache-Control` header](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control) returned with the subgraph response. Because `Cache-Control` might not contain a `max-age` or `s-max-age` option, a default TTL must be configured, either defined per subgraph configuration or inherited from the global configuration.
+To decide whether to cache an entity, the router honors the [`Cache-Control` header](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control) returned with the subgraph response. Because `Cache-Control` might not contain a `max-age` or `s-max-age` option, a default TTL must either be defined per subgraph configuration or inherited from the global configuration.
 
 The router also generates a `Cache-Control` header for the client response by aggregating the TTL information from all response parts. If a subgraph doesn't return the header, its response is assumed to be `no-store`.
 
@@ -128,11 +128,11 @@ This entry contains an object with the `all` field to affect all subgraph reques
 
 ### Private information caching
 
-A subgraph might return a response with the header `Cache-Control: private`, indicating that it contains user personalized data. Although this usually forbids intermediate servers from storing data, the router may actually be able to recognize different users and store their data in different parts of the cache.
+A subgraph can return a response with the header `Cache-Control: private`, indicating that it contains user-personalized data. Although this usually forbids intermediate servers from storing data, the router may be able to recognize different users and store their data in different parts of the cache.
 
-To set up private information caching, you can configure the `private_id` option. `private_id` is a string pointing at a field in the request context, which contains data used to recognize users (for example, user id, or `sub` claim in JWT).
+To set up private information caching, you can configure the `private_id` option. `private_id` is a string pointing at a field in the request context that contains data used to recognize users (for example, user id, or `sub` claim in JWT).
 
-As an example, if you are using the router's JWT authentication plugin, you can configure the `private_id` option in the `accounts` subgraph to point to the `user_id` key in context, and use a rhai script to set that key from the JWT's `sub` claim:
+As an example, if you are using the router's JWT authentication plugin, you can first configure the `private_id` option in the `accounts` subgraph to point to the `user_id` key in context, then use a Rhai script to set that key from the JWT's `sub` claim:
 
 ```yaml title="router.yaml"
 preview_entity_cache:
@@ -167,12 +167,12 @@ fn supergraph_service(service) {
 }
 ```
 
-Because the router doesn't know in advance if a particular query will return private data, it implements the following sequence:
+The router implements the following sequence to determine whether a particular query returns private data:
 
 - Upon seeing a query for the first time, the router requests the cache as if it were a public-only query.
 - When the subgraph returns the response with private data, the router recognizes it and stores the data in a user-specific part of the cache.
-- The router stores the query in a list of known queries with private data
-- When the router sees the query a subsequent time:
+- The router stores the query in a list of known queries with private data.
+- When the router subsequently sees a known query:
   - If the private id isn't provided, the router doesn't interrogate the cache, but it instead transmits the subgraph response directly.
   - If the private id is provided, the router queries the part of the cache for the current user and checks the subgraph if nothing is available.
 
