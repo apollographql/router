@@ -357,12 +357,12 @@ impl fmt::Display for FetchDataPathElement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Key(conditions, name) => {
-                write_conditions(conditions, f)?;
-                f.write_str(name)
+                f.write_str(name)?;
+                write_conditions(conditions, f)
             }
             Self::AnyIndex(conditions) => {
-                write_conditions(conditions, f)?;
-                f.write_str("@")
+                f.write_str("@")?;
+                write_conditions(conditions, f)
             }
             Self::TypenameEquals(name) => write!(f, "... on {name}"),
         }
@@ -371,7 +371,7 @@ impl fmt::Display for FetchDataPathElement {
 
 fn write_conditions(conditions: &[Name], f: &mut fmt::Formatter<'_>) -> fmt::Result {
     if !conditions.is_empty() {
-        write!(f, "|[on {}]", conditions.join(","))
+        write!(f, "|[{}]", conditions.join(","))
     } else {
         Ok(())
     }
