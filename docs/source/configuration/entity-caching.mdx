@@ -130,7 +130,42 @@ This entry contains an object with the `all` field to affect all subgraph reques
 
 A subgraph might return a response with the header `Cache-Control: private`, indicating that it contains user personalized data. Although this usually forbids intermediate servers from storing data, the router may actually be able to recognize different users and store their data in different parts of the cache.
 
-To set up private information caching, you can configure the `private_id` option. `private_id` is a string pointing at a field in the request context, which contains data used to recognize users (for example, user id, or `sub` claim in JWT). 
+To set up private information caching, you can configure the `private_id` option. `private_id` is a string pointing at a field in the request context, which contains data used to recognize users (for example, user id, or `sub` claim in JWT).
+
+As an example, if you are using the router's JWT authentication plugin, you can configure the `private_id` option in the `accounts` subgraph to point to the `user_id` key in context, and use a rhai script to set that key from the JWT's `sub` claim:
+
+```yaml title="router.yaml"
+preview_entity_cache:
+  enabled: true
+  subgraph:
+    all:
+      enabled: true
+      redis:
+        urls: ["redis://..."]
+    subgraphs:
+      accounts:
+        private_id: "user_id"
+ authentication:
+     router:
+       jwt:
+         jwks:
+           - url: https://auth-server/jwks.json
+```
+
+```rhai title="main.rhai"
+fn supergraph_service(service) {
+  let request_callback = |request| {
+    let claims = request.context[Router.APOLLO_AUTHENTICATION_JWT_CLAIMS];
+
+    if claims != () {
+      let private_id = claims["sub"];
+      request.context["user_id"] = private_id;
+    }
+  };
+
+  service.map_request(request_callback);
+}
+```
 
 Because the router doesn't know in advance if a particular query will return private data, it implements the following sequence:
 
@@ -149,7 +184,7 @@ The router supports a [`cache` selector](./telemetry/instrumentation/selectors#s
 
 You can add a new attribute on the subgraph span for the number of cache hits. For example:
 
-```yaml title="todo_router.yaml"
+```yaml title="router.yaml"
 telemetry:
   instrumentation:
     spans:
@@ -163,7 +198,7 @@ telemetry:
 
 The router provides the `telemetry.instrumentation.instruments.cache` instrument to enable cache metrics:
 
-```yaml title="todo_router.yaml"
+```yaml title="router.yaml"
 telemetry:
   instrumentation:
     instruments:
@@ -180,7 +215,7 @@ telemetry:
 
 You can use custom instruments to create metrics for the subgraph service. The following example creates a custom instrument to generate a histogram that measures the subgraph request duration when there's at least one cache hit for the "inventory" subgraph:
 
-```yaml title="todo_router.yaml"
+```yaml title="router.yaml"
 telemetry:
   instrumentation:
     instruments:
