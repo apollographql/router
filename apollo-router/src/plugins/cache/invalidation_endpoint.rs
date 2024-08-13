@@ -95,7 +95,7 @@ impl Service<router::Request> for InvalidationService {
                             .map_err(BoxError::from)?,
                         context: req.context,
                     });
-                }*/
+                }
                 match parts.method {
                     Method::POST => {
                         let body = Into::<RouterBody>::into(body)
