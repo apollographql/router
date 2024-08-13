@@ -10,12 +10,23 @@ use super::SubSelection;
 /// Each parameter can include path components for drilling down into specific
 /// members of a parameter.
 ///
+/// Note: This is somewhat related to [apollo_federation::sources::connect::url_template::Parameter]
+/// but is less restrictive as it does not do any formal validation of parameters.
+///
 /// e.g. A parameter like below
 /// ```json_selection
 /// $this.a.b.c
 /// ```
 ///
-/// would have a name of "this" and a path of ["a", "b", "c"].
+/// would have the following representation:
+/// ```rust
+/// # use apollo_federation::sources::connect::StaticParameter;
+/// StaticParameter {
+///   name: "this",
+///   paths: vec!["a", "b", "c"],
+/// }
+/// # ;
+/// ```
 #[derive(Debug, Hash, PartialEq, Eq)]
 pub struct StaticParameter<'a> {
     /// The name of the parameter, after the $
@@ -55,7 +66,7 @@ impl ExtractParameters for PathSelection {
                     // a '.' to the path components
                     .map(|k| match k {
                         super::Key::Field(val) | super::Key::Quoted(val) => val.as_str(),
-                        super::Key::Index(_) => todo!(),
+                        super::Key::Index(_) => "[]", // TODO: Remove when JSONSelection removes it
                     })
                     .collect(),
             }),
