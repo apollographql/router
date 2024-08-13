@@ -87,18 +87,12 @@ pub(crate) trait FieldVisitor<Field>: Sized {
 /// Visitor for arbitrary tree-like structures where nodes can also have children
 ///
 /// This trait treats all nodes in the graph as Fields, checking if a Field is also
-/// a group for handling children.
+/// a group for handling children. Visiting order is depth-first.
 pub(crate) trait GroupVisitor<Group, Field>
 where
     Self: FieldVisitor<Field>,
     Field: Clone,
 {
-    /// Get all of the fields for a specified group
-    fn get_group_fields(
-        &self,
-        group: Group,
-    ) -> Result<Vec<Field>, <Self as FieldVisitor<Field>>::Error>;
-
     /// Try to get a group from a field, returning None if the field is not a group
     fn try_get_group_for_field(
         &self,
@@ -106,11 +100,11 @@ where
     ) -> Result<Option<Group>, <Self as FieldVisitor<Field>>::Error>;
 
     /// Enter a subselection group
-    /// Note: You can assume that the named selection corresponding to this
+    /// Note: You can assume that the field corresponding to this
     /// group will be visited first.
     fn enter_group(
         &mut self,
-        group: Group,
+        group: &Group,
     ) -> Result<Vec<Field>, <Self as FieldVisitor<Field>>::Error>;
 
     /// Exit a subselection group
@@ -118,13 +112,13 @@ where
     /// group will be visited and entered first.
     fn exit_group(&mut self) -> Result<(), <Self as FieldVisitor<Field>>::Error>;
 
-    /// Walk through a [`JSONSelection`], visiting each output key. If at any point, one of the
+    /// Walk through the `Group`, visiting each output key. If at any point, one of the
     /// visitor methods returns an error, then the walk will be stopped and the error will be
     /// returned.
     fn walk(mut self, entry: Group) -> Result<(), <Self as FieldVisitor<Field>>::Error> {
         // Start visiting each of the fields
         let mut to_visit =
-            VecDeque::from_iter(self.enter_group(entry)?.into_iter().map(|n| (0i32, n)));
+            VecDeque::from_iter(self.enter_group(&entry)?.into_iter().map(|n| (0i32, n)));
         let mut current_depth = 0;
         while let Some((depth, next)) = to_visit.pop_front() {
             for _ in depth..current_depth {
@@ -141,7 +135,7 @@ where
             if let Some(group) = self.try_get_group_for_field(&next)? {
                 current_depth += 1;
 
-                let fields = self.enter_group(group)?;
+                let fields = self.enter_group(&group)?;
                 fields
                     .into_iter()
                     .rev()
@@ -258,24 +252,17 @@ mod tests {
             Ok(field.next_subselection().cloned())
         }
 
-        fn get_group_fields(
-            &self,
-            group: SubSelection,
+        fn enter_group(
+            &mut self,
+            group: &SubSelection,
         ) -> Result<Vec<NamedSelection>, FederationError> {
+            let next_depth = self.last_depth().map(|d| d + 1).unwrap_or(0);
+            self.depth_stack.push(next_depth);
             Ok(group
                 .selections_iter()
                 .sorted_by_key(|s| s.name())
                 .cloned()
                 .collect())
-        }
-
-        fn enter_group(
-            &mut self,
-            group: SubSelection,
-        ) -> Result<Vec<NamedSelection>, FederationError> {
-            let next_depth = self.last_depth().map(|d| d + 1).unwrap_or(0);
-            self.depth_stack.push(next_depth);
-            self.get_group_fields(group)
         }
 
         fn exit_group(&mut self) -> Result<(), FederationError> {

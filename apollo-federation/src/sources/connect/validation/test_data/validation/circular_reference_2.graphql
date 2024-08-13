@@ -5,7 +5,7 @@ type Query {
   track(id: ID!): Track
     @connect(
       http: { GET: "http://track/{$args.id}" }
-      selection: "id title"
+      selection: "id"
       entity: true
     )
 }
