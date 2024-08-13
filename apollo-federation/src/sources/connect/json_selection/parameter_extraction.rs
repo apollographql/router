@@ -10,7 +10,7 @@ use super::SubSelection;
 /// Each parameter can include path components for drilling down into specific
 /// members of a parameter.
 ///
-/// Note: This is somewhat related to [apollo_federation::sources::connect::url_template::Parameter]
+/// Note: This is somewhat related to [crate::sources::connect::Parameter]
 /// but is less restrictive as it does not do any formal validation of parameters.
 ///
 /// e.g. A parameter like below

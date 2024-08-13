@@ -21,6 +21,7 @@ pub use json_selection::StaticParameter;
 pub use json_selection::SubSelection;
 pub use models::CustomConfiguration;
 pub(crate) use spec::ConnectSpecDefinition;
+pub use url_template::Parameter;
 pub use url_template::URLTemplate;
 
 pub use self::models::Connector;
