@@ -1118,6 +1118,33 @@ mod tests {
             check("nested.value->echo({ wrapped: @},)");
             check("nested.value->echo({ wrapped: @ , } , )");
         }
+
+        // Turn a list of { name, hobby } objects into a single { names: [...],
+        // hobbies: [...] } object.
+        assert_eq!(
+            selection!(
+                r#"
+                people->echo({
+                    names: @.name,
+                    hobbies: @.hobby,
+                })
+                "#
+            )
+            .apply_to(&json!({
+                "people": [
+                    { "name": "Alice", "hobby": "reading" },
+                    { "name": "Bob", "hobby": "fishing" },
+                    { "hobby": "painting", "name": "Charlie" },
+                ],
+            })),
+            (
+                Some(json!({
+                    "names": ["Alice", "Bob", "Charlie"],
+                    "hobbies": ["reading", "fishing", "painting"],
+                })),
+                vec![],
+            ),
+        );
     }
 
     #[test]

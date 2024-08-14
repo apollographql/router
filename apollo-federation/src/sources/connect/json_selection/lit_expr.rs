@@ -122,7 +122,7 @@ impl LitExpr {
     // LitProperty ::= Key ":" LitExpr
     fn parse_property(input: &str) -> IResult<&str, (String, Self)> {
         tuple((Key::parse, char(':'), Self::parse))(input)
-            .map(|(input, (key, _, value))| (input, (key.to_string(), value)))
+            .map(|(input, (key, _, value))| (input, (key.as_string(), value)))
     }
 
     // LitArray ::= "[" (LitExpr ("," LitExpr)* ","?)? "]"
