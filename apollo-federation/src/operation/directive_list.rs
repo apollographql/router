@@ -14,13 +14,13 @@ use apollo_compiler::Node;
 use super::sort_arguments;
 
 /// Compare sorted input values, which means specifically establishing an order between the variants
-/// of input values, and comparing values for the same variants accordingly. This is used for
-/// hashing directives in a way consistent with [same_directives()].
+/// of input values, and comparing values for the same variants accordingly.
 ///
 /// Note that Floats and Ints are compared textually and not parsed numerically. This is fine for
-/// the purposes of hashing. For object comparison semantics, see [compare_sorted_object_pairs()].
+/// the purposes of hashing.
 fn compare_sorted_value(left: &executable::Value, right: &executable::Value) -> std::cmp::Ordering {
     use apollo_compiler::executable::Value;
+    /// Returns an arbitrary index for each value type so values of different types are sorted consistently.
     fn discriminant(value: &Value) -> u8 {
         match value {
             Value::Null => 0,
