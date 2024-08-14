@@ -1,0 +1,27 @@
+---
+source: apollo-federation/src/sources/connect/expand/tests/mod.rs
+expression: api_schema
+---
+directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+type Activity {
+  id: ID!
+  name: String
+  distance: Float
+  sport_type: String
+}
+
+type Athlete {
+  id: ID!
+  username: String
+  firstname: String
+  lastname: String
+  city: String
+  state: String
+  country: String
+  activities(page: Int!, per_page: Int!): [Activity]
+}
+
+type Query {
+  me: Athlete
+}
