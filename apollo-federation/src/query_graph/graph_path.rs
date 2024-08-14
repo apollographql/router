@@ -1642,7 +1642,7 @@ where
                                     .get(root_kind)
                                     .copied()
                             } else {
-                                Some(last_subgraph_entering_edge_tail)
+                                Some(last_subgraph_entering_edge_head)
                             };
 
                             // If the previous subgraph is a federated root, as noted above we take
