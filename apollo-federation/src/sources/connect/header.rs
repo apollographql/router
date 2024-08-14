@@ -1,4 +1,4 @@
-//! Headers defined in connectors `@source` directives.
+//! Headers defined in connectors `@source` and `@connect` directives.
 use std::str::FromStr;
 
 use nom::branch::alt;
@@ -48,11 +48,12 @@ impl HeaderValue {
                     let value = vars
                         .get(&var_path_bytes)
                         .ok_or_else(|| format!("Missing variable: {}", var.path))?;
-                    result.push_str(
-                        value
-                            .as_str()
-                            .ok_or_else(|| format!("Variable {} is not a string", var.path))?,
-                    );
+                    let value = if let JSON::String(string) = value {
+                        string.as_str().to_string()
+                    } else {
+                        value.to_string()
+                    };
+                    result.push_str(value.as_str());
                 }
             }
         }
@@ -126,6 +127,8 @@ fn variable_reference(input: &str) -> IResult<&str, &str> {
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
 
     #[test]
@@ -275,5 +278,40 @@ mod tests {
                 }
             ))
         );
+    }
+
+    #[test]
+    fn test_interpolate() {
+        let value = HeaderValue::from_str("before {$config.one} after").unwrap();
+        let mut vars = Map::new();
+        vars.insert("$config.one", JSON::String("foo".into()));
+        assert_eq!(value.interpolate(&vars), Ok("before foo after".into()));
+    }
+
+    #[test]
+    fn test_interpolate_missing_value() {
+        let value = HeaderValue::from_str("{$config.one}").unwrap();
+        let vars = Map::new();
+        assert_eq!(
+            value.interpolate(&vars),
+            Err("Missing variable: $config.one".to_string())
+        );
+    }
+
+    #[rstest]
+    #[case(JSON::Array(vec!["one".into(), "two".into()]), Ok("[\"one\",\"two\"]".into()))]
+    #[case(JSON::Bool(true), Ok("true".into()))]
+    #[case(JSON::Null, Ok("null".into()))]
+    #[case(JSON::Number(1.into()), Ok("1".into()))]
+    #[case(JSON::Object(Map::new()), Ok("{}".into()))]
+    #[case(JSON::String("string".into()), Ok("string".into()))]
+    fn test_interpolate_value_not_a_string(
+        #[case] value: JSON,
+        #[case] expected: Result<String, String>,
+    ) {
+        let header_value = HeaderValue::from_str("{$config.one}").unwrap();
+        let mut vars = Map::new();
+        vars.insert("$config.one", value);
+        assert_eq!(expected, header_value.interpolate(&vars));
     }
 }
