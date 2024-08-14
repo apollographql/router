@@ -833,7 +833,11 @@ impl Selector for SupergraphSelector {
                 .flatten()
                 .map(opentelemetry::Value::from),
 
-            SupergraphSelector::Query { default, .. } => request
+            SupergraphSelector::Query {
+                default,
+                query: Query::String,
+                ..
+            } => request
                 .supergraph_request
                 .body()
                 .query
@@ -990,6 +994,25 @@ impl Selector for SupergraphSelector {
         ctx: &Context,
     ) -> Option<opentelemetry::Value> {
         match self {
+            SupergraphSelector::Query { query, .. } => {
+                let limits_opt = ctx
+                    .extensions()
+                    .with_lock(|lock| lock.get::<OperationLimits<u32>>().cloned());
+                match query {
+                    Query::Aliases => {
+                        limits_opt.map(|limits| opentelemetry::Value::I64(limits.aliases as i64))
+                    }
+                    Query::Depth => {
+                        limits_opt.map(|limits| opentelemetry::Value::I64(limits.depth as i64))
+                    }
+                    Query::Height => {
+                        limits_opt.map(|limits| opentelemetry::Value::I64(limits.height as i64))
+                    }
+                    Query::RootFields => limits_opt
+                        .map(|limits| opentelemetry::Value::I64(limits.root_fields as i64)),
+                    Query::String => None,
+                }
+            }
             SupergraphSelector::ResponseData {
                 response_data,
                 default,
@@ -3010,10 +3033,16 @@ mod test {
             selector
                 .on_response(
                     &crate::services::SupergraphResponse::fake_builder()
-                        .context(context)
+                        .context(context.clone())
                         .build()
                         .unwrap()
                 )
+                .unwrap(),
+            4.into()
+        );
+        assert_eq!(
+            selector
+                .on_response_event(&crate::graphql::Response::builder().build(), &context)
                 .unwrap(),
             4.into()
         );
