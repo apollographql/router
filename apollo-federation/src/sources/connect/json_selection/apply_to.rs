@@ -304,7 +304,7 @@ impl ApplyTo for PathList {
                 } else {
                     errors.insert(ApplyToError::new(
                         format!("Variable {} not found", var_name),
-                        vec![json!(var_name)],
+                        input_path.to_vec(),
                     ));
                     None
                 }
@@ -1289,14 +1289,18 @@ mod tests {
             ),
         );
         assert_eq!(
-            selection!("id: $args.id name").apply_to(&data),
+            selection!("nested.path { id: $args.id name }").apply_to(&json!({
+                "nested": {
+                    "path": data.clone(),
+                },
+            })),
             (
                 Some(json!({
                     "name": "Ben"
                 })),
                 vec![ApplyToError::from_json(&json!({
                     "message": "Variable $args not found",
-                    "path": ["$args"],
+                    "path": ["nested", "path"],
                 }))],
             ),
         );
