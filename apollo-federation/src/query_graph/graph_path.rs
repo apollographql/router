@@ -12,7 +12,6 @@ use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::DirectiveList;
-use itertools::Itertools;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
@@ -20,8 +19,6 @@ use tracing::debug;
 use tracing::debug_span;
 
 use crate::display_helpers::write_indented_lines;
-use crate::display_helpers::DisplayOption;
-use crate::display_helpers::DisplaySlice;
 use crate::display_helpers::State as IndentedFormatter;
 use crate::error::FederationError;
 use crate::is_leaf_type;
@@ -1663,8 +1660,6 @@ where
                             } else {
                                 Some(last_subgraph_entering_edge_tail)
                             };
-                            let direct_path_start =
-                                self.graph.node_weight(direct_path_start_node.unwrap())?;
 
                             // If the previous subgraph is a federated root, as noted above we take
                             // the previous subgraph to instead be the destination subgraph of this
@@ -1678,7 +1673,7 @@ where
                                 let last_subgraph_entering_edge_head_weight =
                                     self.graph.node_weight(last_subgraph_entering_edge_head)?;
                                 last_subgraph_entering_edge_head_weight.source
-                                    == last_subgraph_entering_edge_tail_weight.source
+                                    == edge_tail_weight.source
                             };
 
                             let direct_path_end_node = if let Some(direct_path_start_node) =
@@ -1691,13 +1686,12 @@ where
                                         "Edge tail is unexpectedly a federated root",
                                     ));
                                 };
-                                let direct_path = to_advance.check_direct_path_from_node(
+                                to_advance.check_direct_path_from_node(
                                     last_subgraph_entering_edge_info.index + 2,
                                     direct_path_start_node,
                                     edge_tail_type_pos,
                                     &node_and_trigger_to_edge,
-                                )?;
-                                direct_path
+                                )?
                             } else {
                                 None
                             };
@@ -1774,7 +1768,6 @@ where
                             heap.push(HeapElement(updated_path));
                         }
                     }
-                } else {
                 }
             }
         }
@@ -3478,7 +3471,6 @@ impl SimultaneousPathsWithLazyIndirectPaths {
                         }
                         options.extend(advance_options);
                     }
-                } else {
                 }
             }
 
@@ -3576,7 +3568,6 @@ impl ClosedBranch {
             panic!("Too many options: {:#?}", self.0);
         }
 
-        let len = self.0.len();
         // Keep track of which options should be kept.
         let mut keep_options = vec![true; self.0.len()];
         for option_index in 0..(self.0.len()) {
