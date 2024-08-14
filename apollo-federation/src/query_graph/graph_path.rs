@@ -1078,7 +1078,7 @@ where
                 edges.push(edge);
                 edge_triggers.push(Arc::new(trigger));
                 edge_conditions.push(condition_path_tree);
-                if self.graph.is_cross_subgraph_edge(new_edge)? {
+                if defer.is_none() && self.graph.is_cross_subgraph_edge(new_edge)? {
                     last_subgraph_entering_edge_info = Some(SubgraphEnteringEdgeInfo {
                         index: self.edges.len() - 1,
                         conditions_cost: condition_cost,
@@ -1113,7 +1113,7 @@ where
         edges.push(edge);
         edge_triggers.push(Arc::new(trigger));
         edge_conditions.push(condition_path_tree);
-        if self.graph.is_cross_subgraph_edge(new_edge)? {
+        if defer.is_none() && self.graph.is_cross_subgraph_edge(new_edge)? {
             last_subgraph_entering_edge_info = Some(SubgraphEnteringEdgeInfo {
                 index: self.edges.len(),
                 conditions_cost: condition_cost,
