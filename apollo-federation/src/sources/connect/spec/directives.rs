@@ -27,6 +27,7 @@ use crate::error::FederationError;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
 use crate::schema::FederationSchema;
+use crate::sources::connect::header::HeaderValue;
 use crate::sources::connect::json_selection::JSONSelection;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::sources::connect::HeaderSource;
@@ -240,7 +241,14 @@ fn node_to_header(value: &Node<Value>) -> Result<(HeaderName, HeaderSource), Fed
         ))?;
 
     if let Some(value) = value.as_str() {
-        Ok((name, HeaderSource::Value(value.to_string())))
+        Ok((
+            name,
+            HeaderSource::Value(
+                value.parse::<HeaderValue>().map_err(|err| {
+                    internal!(format!("Invalid header value: {}", err.to_string()))
+                })?,
+            ),
+        ))
     } else {
         Err(internal!(
             "`value` field in HTTP header mapping is not a string"
@@ -524,7 +532,13 @@ mod tests {
                             "X-Auth-Token",
                         ),
                         "user-agent": Value(
-                            "Firefox",
+                            HeaderValue {
+                                parts: [
+                                    Text(
+                                        "Firefox",
+                                    ),
+                                ],
+                            },
                         ),
                     },
                 },
