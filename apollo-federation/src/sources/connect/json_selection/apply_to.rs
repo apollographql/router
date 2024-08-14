@@ -290,14 +290,17 @@ impl ApplyTo for PathList {
     ) -> Option<JSON> {
         match self {
             Self::Var(var_name, tail) => {
-                if let Some((var_data, var_path)) = vars.get(var_name) {
+                if var_name == "@" {
+                    // We represent @ as a variable name in PathList::Var, but
+                    // it is never stored in the vars map, because it is always
+                    // shorthand for the current data value.
+                    tail.apply_to_path(data, vars, input_path, errors)
+                } else if let Some((var_data, var_path)) = vars.get(var_name) {
                     // Variables are associated with a path, which is always
                     // just the variable name for named $variables other than $.
                     // For the special variable $, the path represents the
                     // sequence of keys from the root input data to the $ data.
                     tail.apply_to_path(var_data, vars, var_path, errors)
-                } else if var_name == "@" {
-                    tail.apply_to_path(data, vars, input_path, errors)
                 } else {
                     errors.insert(ApplyToError::new(
                         format!("Variable {} not found", var_name),
