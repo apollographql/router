@@ -1051,13 +1051,6 @@ where
                 }
             }
         }
-        let cross = self.graph.is_cross_subgraph_edge(new_edge)?;
-        if cross {
-            last_subgraph_entering_edge_info = Some(SubgraphEnteringEdgeInfo {
-                index: self.edges.len().saturating_sub(1),
-                conditions_cost: condition_cost,
-            });
-        }
 
         if matches!(
             edge_weight.transition,
@@ -1082,6 +1075,12 @@ where
                 edges.push(edge);
                 edge_triggers.push(Arc::new(trigger));
                 edge_conditions.push(condition_path_tree);
+                if self.graph.is_cross_subgraph_edge(new_edge)? {
+                    last_subgraph_entering_edge_info = Some(SubgraphEnteringEdgeInfo {
+                        index: self.edges.len() - 1,
+                        conditions_cost: condition_cost,
+                    });
+                }
                 return Ok(GraphPath {
                     graph: self.graph.clone(),
                     head: self.head,
@@ -1111,12 +1110,12 @@ where
         edges.push(edge);
         edge_triggers.push(Arc::new(trigger));
         edge_conditions.push(condition_path_tree);
-        /*
-        last_subgraph_entering_edge_info = Some(SubgraphEnteringEdgeInfo {
-            index: self.edges.len(),
-            conditions_cost: condition_cost,
-        });
-        */
+        if self.graph.is_cross_subgraph_edge(new_edge)? {
+            last_subgraph_entering_edge_info = Some(SubgraphEnteringEdgeInfo {
+                index: self.edges.len(),
+                conditions_cost: condition_cost,
+            });
+        }
         Ok(GraphPath {
             graph: self.graph.clone(),
             head: self.head,
@@ -1653,7 +1652,7 @@ where
                                         ));
                                     };
                                     to_advance.check_direct_path_from_node(
-                                        last_subgraph_entering_edge_info.index + 2,
+                                        last_subgraph_entering_edge_info.index + 1,
                                         direct_path_start_node,
                                         edge_tail_type_pos,
                                         &node_and_trigger_to_edge,
