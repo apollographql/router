@@ -1,0 +1,66 @@
+# rover supergraph compose --config apollo-federation/src/sources/connect/expand/tests/schemas/singleton.yaml > apollo-federation/src/sources/connect/expand/tests/schemas/singleton.graphql
+# NOTE: this has a hack and tests expect a manual edit to the supergraph to remove `&id={$this.id}`
+federation_version: =2.9.0-connectors.12
+subgraphs:
+  singleton:
+    routing_url: none
+    schema:
+      sdl: |
+        extend schema
+          @link(
+            url: "https://specs.apollo.dev/federation/v2.8"
+          )
+          @link(
+            url: "https://specs.apollo.dev/connect/v0.1"
+            import: ["@connect", "@source"]
+          )
+          @source(
+            name: "singleton"
+            http: {
+              baseURL: "https://www.singleton.com/api/v3/"
+            }
+          )
+
+        type Athlete {
+          id: ID!
+          username: String
+          firstname: String
+          lastname: String
+          city: String
+          state: String
+          country: String
+          activities(page: Int!, per_page: Int!): [Activity]
+            @connect(
+              source: "singleton"
+              http: { GET: "/activities?page={$$args.page}&per_page={$$args.per_page}&id={$$this.id}" }
+              selection: """
+              id
+              name
+              distance
+              sport_type
+              """
+            )
+        }
+
+        type Activity {
+          id: ID!
+          name: String
+          distance: Float
+          sport_type: String
+        }
+
+        type Query {
+          me: Athlete
+            @connect(
+              source: "singleton"
+              http: { GET: "/athlete" }
+              selection: """
+              id
+              firstname
+              lastname
+              city
+              state
+              country
+              """
+            )
+        }

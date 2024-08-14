@@ -1,0 +1,197 @@
+---
+source: apollo-federation/src/sources/connect/expand/tests/mod.rs
+expression: connectors.by_service_name
+---
+{
+    "singleton_Athlete_activities_0": Connector {
+        id: ConnectId {
+            label: "singleton.singleton http: GET /activities?page={$args.page}&per_page={$args.per_page}",
+            subgraph_name: "singleton",
+            source_name: Some(
+                "singleton",
+            ),
+            directive: ObjectOrInterfaceFieldDirectivePosition {
+                field: Object(Athlete.activities),
+                directive_name: "connect",
+                directive_index: 0,
+            },
+        },
+        transport: HttpJsonTransport {
+            source_url: Some(
+                Url {
+                    scheme: "https",
+                    cannot_be_a_base: false,
+                    username: "",
+                    password: None,
+                    host: Some(
+                        Domain(
+                            "www.singleton.com",
+                        ),
+                    ),
+                    port: None,
+                    path: "/api/v3/",
+                    query: None,
+                    fragment: None,
+                },
+            ),
+            connect_template: URLTemplate {
+                base: None,
+                path: [
+                    ParameterValue {
+                        parts: [
+                            Text(
+                                "activities",
+                            ),
+                        ],
+                    },
+                ],
+                query: {
+                    "page": ParameterValue {
+                        parts: [
+                            Var(
+                                VariableExpression {
+                                    var_path: "$args.page",
+                                    batch_separator: None,
+                                    required: false,
+                                },
+                            ),
+                        ],
+                    },
+                    "per_page": ParameterValue {
+                        parts: [
+                            Var(
+                                VariableExpression {
+                                    var_path: "$args.per_page",
+                                    batch_separator: None,
+                                    required: false,
+                                },
+                            ),
+                        ],
+                    },
+                },
+            },
+            method: Get,
+            headers: {},
+            body: None,
+        },
+        selection: Named(
+            SubSelection {
+                selections: [
+                    Field(
+                        None,
+                        "id",
+                        None,
+                    ),
+                    Field(
+                        None,
+                        "name",
+                        None,
+                    ),
+                    Field(
+                        None,
+                        "distance",
+                        None,
+                    ),
+                    Field(
+                        None,
+                        "sport_type",
+                        None,
+                    ),
+                ],
+                star: None,
+            },
+        ),
+        config: None,
+        entity_resolver: Some(
+            Implicit,
+        ),
+    },
+    "singleton_Query_me_0": Connector {
+        id: ConnectId {
+            label: "singleton.singleton http: GET /athlete",
+            subgraph_name: "singleton",
+            source_name: Some(
+                "singleton",
+            ),
+            directive: ObjectOrInterfaceFieldDirectivePosition {
+                field: Object(Query.me),
+                directive_name: "connect",
+                directive_index: 0,
+            },
+        },
+        transport: HttpJsonTransport {
+            source_url: Some(
+                Url {
+                    scheme: "https",
+                    cannot_be_a_base: false,
+                    username: "",
+                    password: None,
+                    host: Some(
+                        Domain(
+                            "www.singleton.com",
+                        ),
+                    ),
+                    port: None,
+                    path: "/api/v3/",
+                    query: None,
+                    fragment: None,
+                },
+            ),
+            connect_template: URLTemplate {
+                base: None,
+                path: [
+                    ParameterValue {
+                        parts: [
+                            Text(
+                                "athlete",
+                            ),
+                        ],
+                    },
+                ],
+                query: {},
+            },
+            method: Get,
+            headers: {},
+            body: None,
+        },
+        selection: Named(
+            SubSelection {
+                selections: [
+                    Field(
+                        None,
+                        "id",
+                        None,
+                    ),
+                    Field(
+                        None,
+                        "firstname",
+                        None,
+                    ),
+                    Field(
+                        None,
+                        "lastname",
+                        None,
+                    ),
+                    Field(
+                        None,
+                        "city",
+                        None,
+                    ),
+                    Field(
+                        None,
+                        "state",
+                        None,
+                    ),
+                    Field(
+                        None,
+                        "country",
+                        None,
+                    ),
+                ],
+                star: None,
+            },
+        ),
+        config: None,
+        entity_resolver: None,
+    },
+}

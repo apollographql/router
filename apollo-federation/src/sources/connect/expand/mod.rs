@@ -645,6 +645,28 @@ mod helpers {
                         ))
                     }
                 }?;
+            } else if matches!(connector.entity_resolver, Some(EntityResolver::Implicit)) {
+                let key_directive = Directive {
+                    name: self.key_name.clone(),
+                    arguments: vec![Node::new(Argument {
+                        name: name!("fields"),
+                        value: Node::new(Value::String("__typename".to_string())),
+                    })],
+                };
+
+                match parent_type {
+                    TypeDefinitionPosition::Object(o) => {
+                        o.insert_directive(to_schema, Component::new(key_directive))
+                    }
+                    TypeDefinitionPosition::Interface(i) => {
+                        i.insert_directive(to_schema, Component::new(key_directive))
+                    }
+                    _ => {
+                        return Err(FederationError::internal(
+                            "keys cannot be added to scalars, unions, enums, or input objects",
+                        ))
+                    }
+                }?;
             }
 
             Ok(())
