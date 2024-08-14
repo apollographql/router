@@ -344,9 +344,12 @@ fn coerce_operation_values(schema: &Valid<Schema>, operation: &mut Node<executab
             continue;
         };
 
-        if coerce_value(&schema.types, default_value, &variable.ty).is_err() {
-            variable.default_value = None;
-        }
+        // On error, the default value is invalid. This would have been caught by validation.
+        // In schemas, we explicitly remove the default value if it's invalid, to match the JS
+        // query planner behaviour.
+        // In queries, I hope we can just reject queries with invalid default values instead of
+        // silently doing the wrong thing :)
+        _ = coerce_value(&schema.types, default_value, &variable.ty);
     }
 
     coerce_selection_set_values(schema, &mut operation.selection_set);
