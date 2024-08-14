@@ -1,0 +1,47 @@
+# Demand control enabled in measure mode.
+preview_demand_control:
+  enabled: true
+  # Use measure mode to monitor the costs of your operations without rejecting any.
+  mode: measure
+
+  strategy:
+    # Static estimated strategy has a fixed cost for elements.
+    static_estimated:
+      # The assumed returned list size for operations. Set this to the maximum number of items in a GraphQL list
+      list_size: 10
+      # The maximum cost of a single operation, above which the operation is rejected.
+      max: 1000
+
+# Basic telemetry configuration for cost.
+telemetry:
+  exporters:
+    metrics:
+      common:
+        service_name: apollo-router
+        views:
+          # Define a custom view because cost is different than the default latency-oriented view of OpenTelemetry
+          - name: cost.*
+            aggregation:
+              histogram:
+                buckets:
+                  - 0
+                  - 10
+                  - 100
+                  - 1000
+                  - 10000
+                  - 100000
+                  - 1000000
+
+  instrumentation:
+    instruments:
+      supergraph:
+        cost.rejected.operations:
+          type: histogram
+          value:
+            cost: actual
+          description: "Estimated cost per rejected operation."
+          unit: delta
+          condition:
+            gt:
+              - cost: delta
+              - 3

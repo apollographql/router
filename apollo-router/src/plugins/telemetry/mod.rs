@@ -3244,35 +3244,39 @@ mod tests {
         );
     }
 
-    async fn make_failed_demand_control_request(plugin: &dyn DynPlugin) {
+    async fn make_failed_demand_control_request(plugin: &dyn DynPlugin, cost_details: CostContext) {
         let mut mock_service = MockSupergraphService::new();
         mock_service
             .expect_call()
             .times(1)
             .returning(move |req: SupergraphRequest| {
                 req.context.extensions().with_lock(|mut lock| {
-                    let cost_result = lock.get_or_default_mut::<CostContext>();
-                    cost_result.strategy = "static_estimated";
-                    cost_result.estimated = 10.0;
-                    cost_result.result = "COST_ESTIMATED_TOO_EXPENSIVE";
+                    lock.insert(cost_details.clone());
                 });
+
+                let errors = if cost_details.result == "COST_ESTIMATED_TOO_EXPENSIVE" {
+                    DemandControlError::EstimatedCostTooExpensive {
+                        estimated_cost: cost_details.estimated,
+                        max_cost: (cost_details.estimated - 5.0).max(0.0),
+                    }
+                    .into_graphql_errors()
+                    .unwrap()
+                } else if cost_details.result == "COST_ACTUAL_TOO_EXPENSIVE" {
+                    DemandControlError::ActualCostTooExpensive {
+                        actual_cost: cost_details.actual,
+                        max_cost: (cost_details.actual - 5.0).max(0.0),
+                    }
+                    .into_graphql_errors()
+                    .unwrap()
+                } else {
+                    Vec::new()
+                };
 
                 SupergraphResponse::fake_builder()
                     .context(req.context)
                     .data(
-                        serde_json::to_value(
-                            graphql::Response::builder()
-                                .errors(
-                                    DemandControlError::EstimatedCostTooExpensive {
-                                        estimated_cost: 10.0,
-                                        max_cost: 5.0,
-                                    }
-                                    .into_graphql_errors()
-                                    .unwrap(),
-                                )
-                                .build(),
-                        )
-                        .unwrap(),
+                        serde_json::to_value(graphql::Response::builder().errors(errors).build())
+                            .unwrap(),
                     )
                     .build()
             });
@@ -3292,15 +3296,76 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_custom_metrics_for_demand_control_failures() {
+    async fn test_demand_control_delta_filter() {
         async {
             let plugin = create_plugin_with_config(include_str!(
-                "testdata/demand_control_rejection_metric.router.yaml"
+                "testdata/demand_control_delta_filter.router.yaml"
             ))
             .await;
-            make_failed_demand_control_request(plugin.as_ref()).await;
+            make_failed_demand_control_request(
+                plugin.as_ref(),
+                CostContext {
+                    estimated: 10.0,
+                    actual: 8.0,
+                    result: "COST_ACTUAL_TOO_EXPENSIVE",
+                    strategy: "static_estimated",
+                },
+            )
+            .await;
+
+            assert_histogram_sum!("cost.rejected.operations", 8.0);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_demand_control_result_filter() {
+        async {
+            let plugin = create_plugin_with_config(include_str!(
+                "testdata/demand_control_result_filter.router.yaml"
+            ))
+            .await;
+            make_failed_demand_control_request(
+                plugin.as_ref(),
+                CostContext {
+                    estimated: 10.0,
+                    actual: 0.0,
+                    result: "COST_ESTIMATED_TOO_EXPENSIVE",
+                    strategy: "static_estimated",
+                },
+            )
+            .await;
 
             assert_histogram_sum!("cost.rejected.operations", 10.0);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_demand_control_result_attributes() {
+        async {
+            let plugin = create_plugin_with_config(include_str!(
+                "testdata/demand_control_result_attribute.router.yaml"
+            ))
+            .await;
+            make_failed_demand_control_request(
+                plugin.as_ref(),
+                CostContext {
+                    estimated: 10.0,
+                    actual: 0.0,
+                    result: "COST_ESTIMATED_TOO_EXPENSIVE",
+                    strategy: "static_estimated",
+                },
+            )
+            .await;
+
+            assert_histogram_sum!(
+                "cost.estimated",
+                10.0,
+                "cost.result" = "COST_ESTIMATED_TOO_EXPENSIVE"
+            );
         }
         .with_metrics()
         .await;
