@@ -87,7 +87,7 @@ SubSelection         ::= "{" NakedSubSelection "}"
 NamedSelection       ::= NamedPathSelection | NamedFieldSelection | NamedQuotedSelection | NamedGroupSelection
 NamedPathSelection   ::= Alias PathSelection
 NamedFieldSelection  ::= Alias? Identifier SubSelection?
-NamedQuotedSelection ::= Alias StringLiteral SubSelection?
+NamedQuotedSelection ::= Alias LitString SubSelection?
 NamedGroupSelection  ::= Alias SubSelection
 Alias                ::= Identifier ":"
 PathSelection        ::= (VarPath | KeyPath | AtPath) SubSelection?
@@ -95,17 +95,16 @@ VarPath              ::= "$" (NO_SPACE Identifier)? PathStep*
 KeyPath              ::= Key PathStep+
 AtPath               ::= "@" PathStep*
 PathStep             ::= "." Key | "->" Identifier MethodArgs?
-Key                  ::= Identifier | StringLiteral
+Key                  ::= Identifier | LitString
 Identifier           ::= [a-zA-Z_] NO_SPACE [0-9a-zA-Z_]*
-StringLiteral        ::= "'" ("\\'" | [^'])* "'" | '"' ('\\"' | [^"])* '"'
-MethodArgs           ::= "(" (JSLiteral ("," JSLiteral)*)? ")"
-JSLiteral            ::= JSPrimitive | JSObject | JSArray | PathSelection
-JSPrimitive          ::= StringLiteral | JSNumber | "true" | "false" | "null"
-JSNumber             ::= "-"? (UnsignedInt ("." [0-9]*)? | "." [0-9]+)
-UnsignedInt          ::= "0" | [1-9] NO_SPACE [0-9]*
-JSObject             ::= "{" (JSProperty ("," JSProperty)*)? "}"
-JSProperty           ::= Key ":" JSLiteral
-JSArray              ::= "[" (JSLiteral ("," JSLiteral)*)? "]"
+MethodArgs           ::= "(" (LitExpr ("," LitExpr)*)? ")"
+LitExpr              ::= LitPrimitive | LitObject | LitArray | PathSelection
+LitPrimitive         ::= LitString | LitNumber | "true" | "false" | "null"
+LitString            ::= "'" ("\\'" | [^'])* "'" | '"' ('\\"' | [^"])* '"'
+LitNumber            ::= "-"? ([0-9]+ ("." [0-9]*)? | "." [0-9]+)
+LitObject            ::= "{" (LitProperty ("," LitProperty)*)? "}"
+LitProperty          ::= Key ":" LitExpr
+LitArray             ::= "[" (LitExpr ("," LitExpr)*)? "]"
 StarSelection        ::= Alias? "*" SubSelection?
 NO_SPACE             ::= !SpacesOrComments
 SpacesOrComments     ::= (Spaces | Comment)+
@@ -163,13 +162,12 @@ in a few key places:
 ```ebnf
 VarPath     ::= "$" (NO_SPACE Identifier)? PathStep*
 Identifier  ::= [a-zA-Z_] NO_SPACE [0-9a-zA-Z_]*
-UnsignedInt ::= "0" | [1-9] NO_SPACE [0-9]*
 ```
 
 These rules mean the `$` of a `$variable` cannot be separated from the
 identifier part (so `$ var` is invalid), and the first character of a
-multi-character `Identifier` or `UnsignedInt` must not be separated from the
-remaining characters.
+multi-character `Identifier` must not be separated from the remaining
+characters.
 
 Make sure you use `spaces_or_comments` generously when modifying or adding to
 the grammar implementation, or parsing may fail in cryptic ways when the input
@@ -180,7 +178,7 @@ contains seemingly harmless whitespace or comment characters.
 Since the `JSONSelection` syntax is meant to be embedded within GraphQL string
 literals, and GraphQL shares the same `'...'` and `"..."` string literal syntax
 as `JSONSelection`, it can be visually confusing to embed a `JSONSelection`
-string literal (denoted by the `StringLiteral` non-terminal) within a GraphQL
+string literal (denoted by the `LitString` non-terminal) within a GraphQL
 string.
 
 Fortunately, GraphQL also supports multi-line string literals, delimited by
@@ -395,7 +393,7 @@ A `PathSelection` is a `VarPath` or `KeyPath` followed by an optional
 anonymous value from the input JSON, without preserving the nested structure of
 the keys along the path.
 
-Since properties along the path may be either `Identifier` or `StringLiteral`
+Since properties along the path may be either `Identifier` or `LitString`
 values, you are not limited to selecting only properties that are valid GraphQL
 field names, e.g. `myID: people."Ben Newman".id`. This is a slight departure
 from JavaScript syntax, which would use `people["Ben Newman"].id` to achieve the
@@ -622,7 +620,7 @@ method, but are passed in as expressions that the method may choose to evaluate
 A `PathStep` is a single step along a `VarPath` or `KeyPath`, which can either
 select a nested key using `.` or invoke a method using `->`.
 
-Keys selected using `.` can be either `Identifier` or `StringLiteral` names, but
+Keys selected using `.` can be either `Identifier` or `LitString` names, but
 method names invoked using `->` must be `Identifier` names, and must be
 registered in the `JSONSelection` parser in order to be recognized.
 
@@ -716,7 +714,7 @@ excludedMiddle: $.toBe->or($.toBe->not)->eq(true)
 ![MethodArgs](./grammar/MethodArgs.svg)
 
 When a `PathStep` invokes an `->operator` method, the method invocation may
-optionally take a sequence of comma-separated `JSLiteral` arguments in
+optionally take a sequence of comma-separated `LitExpr` arguments in
 parentheses, as in `list->slice(0, 5)` or `kilometers: miles->mul(1.60934)`.
 
 Methods do not have to take arguments, as in `list->first` or `list->last`,
@@ -727,7 +725,7 @@ which is why `MethodArgs` is optional in `PathStep`.
 ![Key](./grammar/Key.svg)
 
 A property name occurring along a dotted `PathSelection`, either an `Identifier`
-or a `StringLiteral`.
+or a `LitString`.
 
 ### `Identifier ::=`
 
@@ -740,9 +738,33 @@ In some languages, identifiers can include `$` characters, but `JSONSelection`
 syntax aims to match GraphQL grammar, which does not allow `$` in field names.
 Instead, the `$` is reserved for denoting variables in `VarPath` selections.
 
-### `StringLiteral ::=`
+### `LitExpr ::=`
 
-![StringLiteral](./grammar/StringLiteral.svg)
+![LitExpr](./grammar/LitExpr.svg)
+
+A `LitExpr` (short for _literal expression_) represents a JSON-like value that
+can be passed inline as part of `MethodArgs`.
+
+The `LitExpr` mini-language diverges from JSON by allowing symbolic
+`PathSelection` values (which may refer to variables or fields) in addition to
+the usual JSON primitives. This allows `->` methods to be parameterized in
+powerful ways, e.g. `page: list->slice(0, $limit)`.
+
+Also, as a minor syntactic convenience, `LitObject` literals can have
+`Identifier` or `LitString` keys, whereas JSON objects can have only
+double-quoted string literal keys.
+
+### `LitPrimitive ::=`
+
+![LitPrimitive](./grammar/LitPrimitive.svg)
+
+Analogous to a JSON primitive value, with the only differences being that
+`LitNumber` does not currently support the exponential syntax, and `LitString`
+values can be single-quoted as well as double-quoted.
+
+### `LitString ::=`
+
+![LitString](./grammar/LitString.svg)
 
 A string literal that can be single-quoted or double-quoted, and may contain any
 characters except the quote character that delimits the string. The backslash
@@ -758,71 +780,38 @@ You can avoid most of the headaches of escaping by choosing your outer quote
 characters wisely. If your string contains many double quotes, use single quotes
 to delimit the string, and vice versa, as in JavaScript.
 
-### `JSLiteral ::=`
+### `LitNumber ::=`
 
-![JSLiteral](./grammar/JSLiteral.svg)
-
-A `JSLiteral` represents a JSON-like value that can be passed inline as part of
-`MethodArgs`.
-
-The `JSLiteral` mini-language diverges from JSON by allowing symbolic
-`PathSelection` values (which may refer to variables or fields) in addition to
-the usual JSON primitives. This allows `->` methods to be parameterized in
-powerful ways, e.g. `page: list->slice(0, $limit)`.
-
-Also, as a minor syntactic convenience, `JSObject` literals can have
-`Identifier` or `StringLiteral` keys, whereas JSON objects can have only
-double-quoted string literal keys.
-
-### `JSPrimitive ::=`
-
-![JSPrimitive](./grammar/JSPrimitive.svg)
-
-Analogous to a JSON primitive value, with the only differences being that
-`JSNumber` does not currently support the exponential syntax, and
-`StringLiteral` values can be single-quoted as well as double-quoted.
-
-### `JSNumber ::=`
-
-![JSNumber](./grammar/JSNumber.svg)
+![LitNumber](./grammar/LitNumber.svg)
 
 A numeric literal that is possibly negative and may contain a fractional
 component. The integer component is required unless a fractional component is
 present, and the fractional component can have zero digits when the integer
 component is present (as in `-123.`), but the fractional component must have at
 least one digit when there is no integer component, since `.` is not a valid
-numeric literal by itself. Leading and trailing zeroes are essential for the
-fractional component, but leading zeroes are disallowed for the integer
-component, except when the integer component is exactly zero.
+numeric literal by itself.
 
-### `UnsignedInt ::=`
+### `LitObject ::=`
 
-![UnsignedInt](./grammar/UnsignedInt.svg)
+![LitObject](./grammar/LitObject.svg)
 
-The integer component of a `JSNumber`, which must be either `0` or an integer
-without any leading zeroes.
-
-### `JSObject ::=`
-
-![JSObject](./grammar/JSObject.svg)
-
-A sequence of `JSProperty` items within curly braces, as in JavaScript.
+A sequence of `LitProperty` items within curly braces, as in JavaScript.
 
 Trailing commas are not currently allowed, but could be supported in the future.
 
-### `JSProperty ::=`
+### `LitProperty ::=`
 
-![JSProperty](./grammar/JSProperty.svg)
+![LitProperty](./grammar/LitProperty.svg)
 
-A key-value pair within a `JSObject`. Note that the `Key` may be either an
-`Identifier` or a `StringLiteral`, as in JavaScript. This is a little different
+A key-value pair within a `LitObject`. Note that the `Key` may be either an
+`Identifier` or a `LitString`, as in JavaScript. This is a little different
 from JSON, which allows double-quoted strings only.
 
-### `JSArray ::=`
+### `LitArray ::=`
 
-![JSArray](./grammar/JSArray.svg)
+![LitArray](./grammar/LitArray.svg)
 
-A list of `JSLiteral` items within square brackets, as in JavaScript.
+A list of `LitExpr` items within square brackets, as in JavaScript.
 
 Trailing commas are not currently allowed, but could be supported in the future.
 

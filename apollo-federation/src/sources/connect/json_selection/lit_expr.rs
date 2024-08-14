@@ -1,7 +1,8 @@
-// A JSLiteral is similar to a JSON value (or serde_json::Value), with the
-// addition of PathSelection as a possible leaf value, so literal expressions
-// passed to -> methods (via MethodArgs) can capture both field and argument
-// values and sub-paths, in addition to constant JSON structures and values.
+// A LitExpr (short for LiteralExpression) is similar to a JSON value (or
+// serde_json::Value), with the addition of PathSelection as a possible leaf
+// value, so literal expressions passed to -> methods (via MethodArgs) can
+// capture both field and argument values and sub-paths, in addition to constant
+// JSON structures and values.
 
 use apollo_compiler::collections::IndexMap;
 use nom::branch::alt;
@@ -12,6 +13,7 @@ use nom::combinator::map;
 use nom::combinator::opt;
 use nom::combinator::recognize;
 use nom::multi::many0;
+use nom::multi::many1;
 use nom::sequence::delimited;
 use nom::sequence::pair;
 use nom::sequence::preceded;
@@ -28,19 +30,19 @@ use super::parser::Key;
 use super::parser::PathSelection;
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum JSLiteral {
+pub enum LitExpr {
     String(String),
     Number(String),
     Bool(bool),
     Null,
-    Object(IndexMap<String, JSLiteral>),
-    Array(Vec<JSLiteral>),
+    Object(IndexMap<String, LitExpr>),
+    Array(Vec<LitExpr>),
     Path(PathSelection),
 }
 
-impl JSLiteral {
-    // JSLiteral   ::= JSPrimitive | JSObject | JSArray | PathSelection
-    // JSPrimitive ::= StringLiteral | JSNumber | "true" | "false" | "null"
+impl LitExpr {
+    // LitExpr      ::= LitPrimitive | LitObject | LitArray | PathSelection
+    // LitPrimitive ::= LitString | LitNumber | "true" | "false" | "null"
     pub fn parse(input: &str) -> IResult<&str, Self> {
         tuple((
             spaces_or_comments,
@@ -52,7 +54,6 @@ impl JSLiteral {
                 map(tag("null"), |_| Self::Null),
                 Self::parse_object,
                 Self::parse_array,
-                // TODO Disallow KeyPath PathSelection in JSLiteral?
                 map(PathSelection::parse, Self::Path),
             )),
             spaces_or_comments,
@@ -60,39 +61,34 @@ impl JSLiteral {
         .map(|(input, (_, value, _))| (input, value))
     }
 
-    // JSNumber    ::= "-"? (UnsignedInt ("." [0-9]*)? | "." [0-9]+)
-    // UnsignedInt ::= "0" | [1-9] NO_SPACE [0-9]*
+    // LitNumber ::= "-"? ([0-9]+ ("." [0-9]*)? | "." [0-9]+)
     fn parse_number(input: &str) -> IResult<&str, Self> {
         delimited(
             spaces_or_comments,
             tuple((
                 opt(char('-')),
                 spaces_or_comments,
-                tuple((
-                    recognize(alt((
-                        recognize(char('0')),
-                        recognize(pair(one_of("123456789"), many0(one_of("0123456789")))),
-                    ))),
-                    opt(preceded(char('.'), recognize(many0(one_of("0123456789"))))),
+                alt((
+                    recognize(pair(
+                        many1(one_of("0123456789")),
+                        opt(preceded(char('.'), many0(one_of("0123456789")))),
+                    )),
+                    recognize(pair(tag("."), many1(one_of("0123456789")))),
                 )),
             )),
             spaces_or_comments,
         )(input)
-        .map(|(input, (neg, _, (integer, decimal)))| {
+        .map(|(input, (neg, _, num))| {
             let mut number = String::new();
-            if let Some(neg) = neg {
-                number.push(neg);
+            if let Some('-') = neg {
+                number.push('-');
             }
-            number.push_str(integer);
-            if let Some(decimal) = decimal {
-                number.push('.');
-                number.push_str(decimal);
-            }
+            number.push_str(num);
             (input, Self::Number(number))
         })
     }
 
-    // JSObject ::= "{" (JSProperty ("," JSProperty)*)? "}"
+    // LitObject ::= "{" (LitProperty ("," LitProperty)*)? "}"
     fn parse_object(input: &str) -> IResult<&str, Self> {
         delimited(
             tuple((spaces_or_comments, char('{'), spaces_or_comments)),
@@ -116,13 +112,13 @@ impl JSLiteral {
         )(input)
     }
 
-    // JSProperty ::= Key ":" JSONLiteral
+    // LitProperty ::= Key ":" LitExpr
     fn parse_property(input: &str) -> IResult<&str, (String, Self)> {
         tuple((Key::parse, char(':'), Self::parse))(input)
             .map(|(input, (key, _, value))| (input, (key.to_string(), value)))
     }
 
-    // JSArray ::= "[" (JSONLiteral ("," JSONLiteral)*)? "]"
+    // LitArray ::= "[" (LitExpr ("," LitExpr)*)? "]"
     fn parse_array(input: &str) -> IResult<&str, Self> {
         delimited(
             tuple((spaces_or_comments, char('['), spaces_or_comments)),
@@ -155,7 +151,7 @@ impl JSLiteral {
     }
 }
 
-impl Serialize for JSLiteral {
+impl Serialize for LitExpr {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::ser::Serializer,

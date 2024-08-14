@@ -8,7 +8,7 @@ use serde_json_bytes::Map as JSONMap;
 
 use super::helpers::json_type_name;
 use super::immutable::InputPath;
-use super::js_literal::JSLiteral;
+use super::lit_expr::LitExpr;
 use super::ApplyTo;
 use super::ApplyToError;
 use super::MethodArgs;
@@ -232,7 +232,7 @@ fn match_method(
     // single-element unconditional [value] may appear at the end.
     if let Some(MethodArgs(args)) = method_args {
         for pair in args {
-            if let JSLiteral::Array(pair) = pair {
+            if let LitExpr::Array(pair) = pair {
                 if pair.len() == 1 {
                     return pair[0]
                         .apply_to_path(data, vars, input_path, errors)
@@ -279,7 +279,7 @@ fn match_if_method(
 ) -> Option<JSON> {
     if let Some(MethodArgs(args)) = method_args {
         for pair in args {
-            if let JSLiteral::Array(pair) = pair {
+            if let LitExpr::Array(pair) = pair {
                 if pair.len() == 2 {
                     if let Some(JSON::Bool(true)) =
                         pair[0].apply_to_path(data, vars, input_path, errors)

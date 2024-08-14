@@ -12,7 +12,7 @@ use serde_json_bytes::Value as JSON;
 
 use super::helpers::json_type_name;
 use super::immutable::InputPath;
-use super::js_literal::JSLiteral;
+use super::lit_expr::LitExpr;
 use super::methods::ARROW_METHODS;
 use super::parser::*;
 
@@ -374,7 +374,7 @@ impl ApplyTo for PathList {
     }
 }
 
-impl ApplyTo for JSLiteral {
+impl ApplyTo for LitExpr {
     fn apply_to_path(
         &self,
         data: &JSON,

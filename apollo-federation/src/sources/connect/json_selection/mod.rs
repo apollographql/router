@@ -2,7 +2,7 @@ mod apply_to;
 mod graphql;
 mod helpers;
 mod immutable;
-mod js_literal;
+mod lit_expr;
 mod methods;
 mod parser;
 mod pretty;

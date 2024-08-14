@@ -5,7 +5,7 @@
 //! pretty printing trait which is then implemented on the various sub types
 //! of the JSONSelection tree.
 
-use super::js_literal::JSLiteral;
+use super::lit_expr::LitExpr;
 use crate::sources::connect::json_selection::JSONSelection;
 use crate::sources::connect::json_selection::MethodArgs;
 use crate::sources::connect::json_selection::NamedSelection;
@@ -184,7 +184,7 @@ impl PrettyPrintable for MethodArgs {
     }
 }
 
-impl PrettyPrintable for JSLiteral {
+impl PrettyPrintable for LitExpr {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
         let mut result = String::new();
         if !inline {
@@ -192,14 +192,14 @@ impl PrettyPrintable for JSLiteral {
         }
 
         match self {
-            JSLiteral::String(s) => {
+            LitExpr::String(s) => {
                 let safely_quoted = serde_json_bytes::Value::String(s.clone().into()).to_string();
                 result.push_str(safely_quoted.as_str());
             }
-            JSLiteral::Number(n) => result.push_str(n.as_str()),
-            JSLiteral::Bool(b) => result.push_str(b.to_string().as_str()),
-            JSLiteral::Null => result.push_str("null"),
-            JSLiteral::Object(map) => {
+            LitExpr::Number(n) => result.push_str(n.as_str()),
+            LitExpr::Bool(b) => result.push_str(b.to_string().as_str()),
+            LitExpr::Null => result.push_str("null"),
+            LitExpr::Object(map) => {
                 result.push('{');
                 let mut is_first = true;
                 for (key, value) in map {
@@ -219,7 +219,7 @@ impl PrettyPrintable for JSLiteral {
                 }
                 result.push('}');
             }
-            JSLiteral::Array(vec) => {
+            LitExpr::Array(vec) => {
                 result.push('[');
                 let mut is_first = true;
                 for value in vec {
@@ -236,7 +236,7 @@ impl PrettyPrintable for JSLiteral {
                 }
                 result.push(']');
             }
-            JSLiteral::Path(path) => {
+            LitExpr::Path(path) => {
                 let path = path.pretty_print_with_indentation(inline, indentation);
                 result.push_str(path.as_str());
             }

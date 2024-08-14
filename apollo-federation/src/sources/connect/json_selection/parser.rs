@@ -18,7 +18,7 @@ use serde::Serialize;
 use serde_json_bytes::Value as JSON;
 
 use super::helpers::spaces_or_comments;
-use super::js_literal::JSLiteral;
+use super::lit_expr::LitExpr;
 
 // JSONSelection     ::= NakedSubSelection | PathSelection
 // NakedSubSelection ::= NamedSelection* StarSelection?
@@ -65,7 +65,7 @@ impl JSONSelection {
 // NamedSelection       ::= NamedPathSelection | NamedFieldSelection | NamedQuotedSelection | NamedGroupSelection
 // NamedPathSelection   ::= Alias PathSelection
 // NamedFieldSelection  ::= Alias? Identifier SubSelection?
-// NamedQuotedSelection ::= Alias StringLiteral SubSelection?
+// NamedQuotedSelection ::= Alias LitString SubSelection?
 // NamedGroupSelection  ::= Alias SubSelection
 
 #[derive(Debug, PartialEq, Clone, Serialize)]
@@ -555,7 +555,7 @@ impl Alias {
     }
 }
 
-// Key ::= Identifier | StringLiteral
+// Key ::= Identifier | LitString
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize)]
 pub enum Key {
@@ -634,7 +634,7 @@ fn parse_identifier_no_space(input: &str) -> IResult<&str, String> {
     .map(|(input, name)| (input, name.to_string()))
 }
 
-// StringLiteral ::=
+// LitString ::=
 //   | "'" ("\\'" | [^'])* "'"
 //   | '"' ('\\"' | [^"])* '"'
 
@@ -686,21 +686,18 @@ pub fn parse_string_literal(input: &str) -> IResult<&str, String> {
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize)]
-pub struct MethodArgs(pub(super) Vec<JSLiteral>);
+pub struct MethodArgs(pub(super) Vec<LitExpr>);
 
 // Comma-separated positional arguments for a method, surrounded by parentheses.
 // When an arrow method is used without arguments, the Option<MethodArgs> for
 // the PathSelection::Method will be None, so we can safely define MethodArgs
-// using a Vec<JSLiteral> in all cases (possibly empty but never missing).
+// using a Vec<LitExpr> in all cases (possibly empty but never missing).
 impl MethodArgs {
     fn parse(input: &str) -> IResult<&str, Self> {
         delimited(
             tuple((spaces_or_comments, char('('), spaces_or_comments)),
             opt(map(
-                tuple((
-                    JSLiteral::parse,
-                    many0(preceded(char(','), JSLiteral::parse)),
-                )),
+                tuple((LitExpr::parse, many0(preceded(char(','), LitExpr::parse)))),
                 |(first, rest)| {
                     let mut output = vec![first];
                     output.extend(rest);
@@ -1625,12 +1622,10 @@ mod tests {
                         Key::Field("x".to_string()),
                         Box::new(PathList::Method(
                             "or".to_string(),
-                            Some(MethodArgs(vec![JSLiteral::Path(
-                                PathSelection::from_slice(
-                                    &[Key::Field("data".to_string()), Key::Field("y".to_string())],
-                                    None,
-                                ),
-                            )])),
+                            Some(MethodArgs(vec![LitExpr::Path(PathSelection::from_slice(
+                                &[Key::Field("data".to_string()), Key::Field("y".to_string())],
+                                None,
+                            ))])),
                             Box::new(PathList::Empty),
                         )),
                     )),
@@ -1646,15 +1641,15 @@ mod tests {
                     Box::new(PathList::Method(
                         "query".to_string(),
                         Some(MethodArgs(vec![
-                            JSLiteral::Path(PathSelection::from_slice(
+                            LitExpr::Path(PathSelection::from_slice(
                                 &[Key::Field("a".to_string())],
                                 None,
                             )),
-                            JSLiteral::Path(PathSelection::from_slice(
+                            LitExpr::Path(PathSelection::from_slice(
                                 &[Key::Field("b".to_string())],
                                 None,
                             )),
-                            JSLiteral::Path(PathSelection::from_slice(
+                            LitExpr::Path(PathSelection::from_slice(
                                 &[Key::Field("c".to_string())],
                                 None,
                             )),
@@ -1674,12 +1669,12 @@ mod tests {
                         Key::Field("x".to_string()),
                         Box::new(PathList::Method(
                             "concat".to_string(),
-                            Some(MethodArgs(vec![JSLiteral::Array(vec![
-                                JSLiteral::Path(PathSelection::from_slice(
+                            Some(MethodArgs(vec![LitExpr::Array(vec![
+                                LitExpr::Path(PathSelection::from_slice(
                                     &[Key::Field("data".to_string()), Key::Field("y".to_string())],
                                     None,
                                 )),
-                                JSLiteral::Path(PathSelection::from_slice(
+                                LitExpr::Path(PathSelection::from_slice(
                                     &[Key::Field("data".to_string()), Key::Field("z".to_string())],
                                     None,
                                 )),
@@ -1698,8 +1693,8 @@ mod tests {
                     Key::Field("data".to_string()),
                     Box::new(PathList::Method(
                         "method".to_string(),
-                        Some(MethodArgs(vec![JSLiteral::Array(vec![
-                            JSLiteral::Path(PathSelection {
+                        Some(MethodArgs(vec![LitExpr::Array(vec![
+                            LitExpr::Path(PathSelection {
                                 path: PathList::Var(
                                     "$".to_string(),
                                     Box::new(PathList::Selection(SubSelection {
@@ -1710,7 +1705,7 @@ mod tests {
                                                     Key::Field("x".to_string()),
                                                     Box::new(PathList::Method(
                                                         "times".to_string(),
-                                                        Some(MethodArgs(vec![JSLiteral::Number(
+                                                        Some(MethodArgs(vec![LitExpr::Number(
                                                             "2".to_string(),
                                                         )])),
                                                         Box::new(PathList::Empty),
@@ -1722,7 +1717,7 @@ mod tests {
                                     })),
                                 ),
                             }),
-                            JSLiteral::Path(PathSelection {
+                            LitExpr::Path(PathSelection {
                                 path: PathList::Var(
                                     "$".to_string(),
                                     Box::new(PathList::Selection(SubSelection {
@@ -1733,7 +1728,7 @@ mod tests {
                                                     Key::Field("y".to_string()),
                                                     Box::new(PathList::Method(
                                                         "times".to_string(),
-                                                        Some(MethodArgs(vec![JSLiteral::Number(
+                                                        Some(MethodArgs(vec![LitExpr::Number(
                                                             "2".to_string(),
                                                         )])),
                                                         Box::new(PathList::Empty),

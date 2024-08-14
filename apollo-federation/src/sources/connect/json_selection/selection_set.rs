@@ -25,7 +25,7 @@ use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::Node;
 use multimap::MultiMap;
 
-use super::js_literal::JSLiteral;
+use super::lit_expr::LitExpr;
 use super::parser::MethodArgs;
 use super::parser::PathList;
 use crate::sources::connect::json_selection::Alias;
@@ -71,7 +71,7 @@ impl SubSelection {
                         "$".to_string(),
                         Box::new(PathList::Method(
                             "echo".to_string(),
-                            Some(MethodArgs(vec![JSLiteral::String(
+                            Some(MethodArgs(vec![LitExpr::String(
                                 selection_set.ty.to_string(),
                             )])),
                             Box::new(PathList::Empty),
