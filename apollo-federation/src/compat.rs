@@ -7,18 +7,18 @@
 //! This module contains functions that modify an apollo-rs schema to produce the same output as a
 //! graphql-js schema would.
 
-use apollo_compiler::ExecutableDocument;
 use apollo_compiler::ast::Value;
-use apollo_compiler::executable;
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::executable;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::InputValueDefinition;
 use apollo_compiler::schema::Type;
+use apollo_compiler::validation::Valid;
+use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
-use apollo_compiler::validation::Valid;
 
 /// Return true if a directive application is "semantic", meaning it's observable in introspection.
 fn is_semantic_directive_application(directive: &Directive) -> bool {
@@ -284,7 +284,10 @@ pub fn coerce_schema_default_values(schema: &mut Schema) {
     }
 }
 
-fn coerce_directive_application_values(schema: &Valid<Schema>, directives: &mut executable::DirectiveList) {
+fn coerce_directive_application_values(
+    schema: &Valid<Schema>,
+    directives: &mut executable::DirectiveList,
+) {
     for directive in directives {
         let Some(definition) = schema.directive_definitions.get(&directive.name) else {
             continue;
@@ -300,7 +303,10 @@ fn coerce_directive_application_values(schema: &Valid<Schema>, directives: &mut 
     }
 }
 
-fn coerce_selection_set_values(schema: &Valid<Schema>, selection_set: &mut executable::SelectionSet) {
+fn coerce_selection_set_values(
+    schema: &Valid<Schema>,
+    selection_set: &mut executable::SelectionSet,
+) {
     for selection in &mut selection_set.selections {
         match selection {
             executable::Selection::Field(field) => {
@@ -346,7 +352,7 @@ fn coerce_operation_values(schema: &Valid<Schema>, operation: &mut Node<executab
     coerce_selection_set_values(schema, &mut operation.selection_set);
 }
 
-pub fn coerce_executable_default_values(schema: &Valid<Schema>, document: &mut ExecutableDocument) {
+pub fn coerce_executable_values(schema: &Valid<Schema>, document: &mut ExecutableDocument) {
     if let Some(operation) = &mut document.operations.anonymous {
         coerce_operation_values(schema, operation);
     }
@@ -365,21 +371,22 @@ pub fn make_print_schema_compatible(schema: &mut Schema) {
 
 #[cfg(test)]
 mod tests {
+    use apollo_compiler::validation::Valid;
     use apollo_compiler::ExecutableDocument;
     use apollo_compiler::Schema;
-    use apollo_compiler::validation::Valid;
 
-    use super::coerce_executable_default_values;
+    use super::coerce_executable_values;
 
     fn parse_and_coerce(schema: &Valid<Schema>, input: &str) -> String {
         let mut document = ExecutableDocument::parse(schema, input, "test.graphql").unwrap();
-        coerce_executable_default_values(schema, &mut document);
+        coerce_executable_values(schema, &mut document);
         document.to_string()
     }
 
     #[test]
     fn coerces_list_values() {
-        let schema = Schema::parse_and_validate(r#"
+        let schema = Schema::parse_and_validate(
+            r#"
         type Query {
           test(
             bools: [Boolean],
@@ -388,7 +395,10 @@ mod tests {
             floats: [Float],
           ): Int
         }
-        "#, "schema.graphql").unwrap();
+        "#,
+            "schema.graphql",
+        )
+        .unwrap();
 
         insta::assert_snapshot!(parse_and_coerce(&schema, r#"
         {

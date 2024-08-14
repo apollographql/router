@@ -32,7 +32,7 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use serde::Serialize;
 
-use crate::compat::coerce_executable_default_values;
+use crate::compat::coerce_executable_values;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::error::SingleFederationError::Internal;
@@ -3858,7 +3858,7 @@ impl TryFrom<Operation> for Valid<executable::ExecutableDocument> {
         let mut document = executable::ExecutableDocument::new();
         document.fragments = fragments;
         document.operations.insert(operation);
-        coerce_executable_default_values(value.schema.schema(), &mut document);
+        coerce_executable_values(value.schema.schema(), &mut document);
         Ok(document.validate(value.schema.schema())?)
     }
 }
