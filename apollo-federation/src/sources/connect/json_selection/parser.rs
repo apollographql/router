@@ -231,12 +231,31 @@ impl From<PathList> for PathSelection {
 
 #[derive(Debug, PartialEq, Clone, Serialize)]
 pub(super) enum PathList {
-    // We use a recursive structure here instead of a Vec<Key> to make applying
-    // the selection to a JSON value easier.
+    // A VarPath must start with a variable (either $identifier, $, or @),
+    // followed by any number of PathStep items (the Box<PathList>). Because we
+    // represent the @ quasi-variable using PathList::Var, this variant handles
+    // both VarPath and AtPath from the grammar. The String variable name must
+    // always contain the $ character. The PathList::Var variant may only appear
+    // at the beginning of a PathSelection's PathList, not in the middle.
     Var(String, Box<PathList>),
+
+    // A PathSelection that starts with a PathList::Key is a KeyPath, but a
+    // PathList::Key also counts as PathStep item, so it may also appear in the
+    // middle/tail of a PathList.
     Key(Key, Box<PathList>),
+
+    // A PathList::Method is a PathStep item that may appear only in the
+    // middle/tail (not the beginning) of a PathSelection. Methods are
+    // distinguished from .keys by their ->method invocation syntax.
     Method(String, Option<MethodArgs>, Box<PathList>),
+
+    // Optionally, a PathList may end with a SubSelection, which applies a set
+    // of named selections to the final value of the path. PathList::Selection
+    // by itself is not a valid PathList.
     Selection(SubSelection),
+
+    // Every PathList must be terminated by either PathList::Selection or
+    // PathList::Empty. PathList::Empty by itself is not a valid PathList.
     Empty,
 }
 
