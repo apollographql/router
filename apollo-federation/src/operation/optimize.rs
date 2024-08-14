@@ -1624,6 +1624,7 @@ fn fragment_name(mut index: usize) -> Name {
 #[derive(Debug, Default)]
 struct FragmentGenerator {
     fragments: NamedFragments,
+    // XXX(@goto-bus-stop): This is temporary to support mismatch testing with JS!
     names: HashMap<(String, usize), usize>,
 }
 
@@ -1632,16 +1633,28 @@ impl FragmentGenerator {
         fragment_name(self.fragments.len())
     }
 
+    // XXX(@goto-bus-stop): This is temporary to support mismatch testing with JS!
+    // In the future, we will just use `.next_name()`.
     fn generate_name(&mut self, frag: &InlineFragmentSelection) -> Name {
         use std::fmt::Write as _;
 
-        let type_condition = frag.inline_fragment.type_condition_position.as_ref()
-            .map_or_else(|| "undefined".to_string(), |condition| condition.to_string());
+        let type_condition = frag
+            .inline_fragment
+            .type_condition_position
+            .as_ref()
+            .map_or_else(
+                || "undefined".to_string(),
+                |condition| condition.to_string(),
+            );
         let selections = frag.selection_set.selections.len();
         let mut name = format!("_generated_on{type_condition}_{selections}");
 
         let key = (type_condition, selections);
-        let index = self.names.entry(key).and_modify(|index| *index += 1).or_default();
+        let index = self
+            .names
+            .entry(key)
+            .and_modify(|index| *index += 1)
+            .or_default();
         _ = write!(&mut name, "_{index}");
 
         Name::new_unchecked(&name)
@@ -1733,6 +1746,8 @@ impl FragmentGenerator {
                     let existing = if let Some(existing) = existing {
                         existing
                     } else {
+                        // XXX(@goto-bus-stop): This is temporary to support mismatch testing with JS!
+                        // This should be reverted to `self.next_name();` when we're ready.
                         let name = self.generate_name(candidate.get());
                         self.fragments.insert(Fragment {
                             schema: selection_set.schema.clone(),
