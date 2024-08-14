@@ -718,10 +718,7 @@ impl QueryGraph {
             return None;
         };
         match op_path_element {
-            OpPathElement::Field(field) => {
-                let digest = self.edge_for_field(node, field).map(Some);
-                digest
-            },
+            OpPathElement::Field(field) => self.edge_for_field(node, field).map(Some),
             OpPathElement::InlineFragment(inline_fragment) => {
                 if inline_fragment.type_condition_position.is_some() {
                     self.edge_for_inline_fragment(node, inline_fragment)

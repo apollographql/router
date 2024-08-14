@@ -4,10 +4,7 @@ use apollo_compiler::collections::IndexSet;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 use serde::Serialize;
-use tracing::debug;
 use tracing::debug_span;
-use tracing::error;
-use tracing::error_span;
 use tracing::trace;
 
 use crate::error::FederationError;
@@ -268,7 +265,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         )
     )]
     pub fn find_best_plan(mut self) -> Result<Option<BestQueryPlanInfo>, FederationError> {
-        let span = error_span!("| ");
+        let span = debug_span!("| ");
         let _gaurd = span.enter();
         self.find_best_plan_inner()?;
         Ok(self.best_plan)
@@ -510,9 +507,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
     }
 
     fn record_closed_branch(&mut self, closed_branch: ClosedBranch) -> Result<(), FederationError> {
-        let len = closed_branch.len();
         let maybe_trimmed = closed_branch.maybe_eliminate_strictly_more_costly_paths()?;
-        let new_len = maybe_trimmed.len();
         self.closed_branches.push(maybe_trimmed);
         Ok(())
     }
@@ -1029,7 +1024,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         excluded_destinations: &ExcludedDestinations,
         excluded_conditions: &ExcludedConditions,
     ) -> Result<ConditionResolution, FederationError> {
-        let span = error_span!("| ");
+        let span = debug_span!("| ");
         let _guard = span.enter();
         let graph = &self.parameters.federated_query_graph;
         let head = graph.edge_endpoints(edge)?.0;
@@ -1068,14 +1063,13 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             excluded_conditions.add_item(edge_conditions),
         )?
         .find_best_plan()?;
-        let digest = match best_plan_opt {
+        match best_plan_opt {
             Some(best_plan) => Ok(ConditionResolution::Satisfied {
                 cost: best_plan.cost,
                 path_tree: Some(best_plan.path_tree),
             }),
             None => Ok(ConditionResolution::unsatisfied_conditions()),
-        };
-        digest
+        }
     }
 }
 

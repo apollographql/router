@@ -1676,25 +1676,24 @@ where
                                     == edge_tail_weight.source
                             };
 
-                            let direct_path_end_node = if let Some(direct_path_start_node) =
-                                direct_path_start_node
-                            {
-                                let QueryGraphNodeType::SchemaType(edge_tail_type_pos) =
-                                    &edge_tail_weight.type_
-                                else {
-                                    return Err(FederationError::internal(
-                                        "Edge tail is unexpectedly a federated root",
-                                    ));
+                            let direct_path_end_node =
+                                if let Some(direct_path_start_node) = direct_path_start_node {
+                                    let QueryGraphNodeType::SchemaType(edge_tail_type_pos) =
+                                        &edge_tail_weight.type_
+                                    else {
+                                        return Err(FederationError::internal(
+                                            "Edge tail is unexpectedly a federated root",
+                                        ));
+                                    };
+                                    to_advance.check_direct_path_from_node(
+                                        last_subgraph_entering_edge_info.index + 2,
+                                        direct_path_start_node,
+                                        edge_tail_type_pos,
+                                        &node_and_trigger_to_edge,
+                                    )?
+                                } else {
+                                    None
                                 };
-                                to_advance.check_direct_path_from_node(
-                                    last_subgraph_entering_edge_info.index + 2,
-                                    direct_path_start_node,
-                                    edge_tail_type_pos,
-                                    &node_and_trigger_to_edge,
-                                )?
-                            } else {
-                                None
-                            };
 
                             if let Some(direct_path_end_node) = direct_path_end_node {
                                 let direct_key_edge_max_cost = last_subgraph_entering_edge_info
@@ -3196,19 +3195,12 @@ impl SimultaneousPaths {
         other: &SimultaneousPaths,
     ) -> Result<Ordering, FederationError> {
         match (self.0.as_slice(), other.0.as_slice()) {
-            ([a], [b]) => {
-                a.compare_single_path_options_complexity_out_of_context(b)
-            }
-            ([a], _) => {
-                a.compare_single_vs_multi_path_options_complexity_out_of_context(other)
-            }
-            (_, [b]) => {
-                b.compare_single_vs_multi_path_options_complexity_out_of_context(self)
-                    .map(Ordering::reverse)
-            }
-            _ => {
-                Ok(Ordering::Equal)
-            }
+            ([a], [b]) => a.compare_single_path_options_complexity_out_of_context(b),
+            ([a], _) => a.compare_single_vs_multi_path_options_complexity_out_of_context(other),
+            (_, [b]) => b
+                .compare_single_vs_multi_path_options_complexity_out_of_context(self)
+                .map(Ordering::reverse),
+            _ => Ok(Ordering::Equal),
         }
     }
 }
