@@ -1072,6 +1072,9 @@ impl FetchDependencyGraph {
         if to_remove.is_empty() {
             return; // unchanged
         }
+        // Note: We remove empty nodes without relocating their children. The invariant is that
+        // the children of empty nodes (if any) must be accessible from the root via another path.
+        // Otherwise, they would've become inaccessible orphan nodes.
         self.retain_nodes(|node_index| !to_remove.contains(node_index));
     }
 
@@ -1450,6 +1453,13 @@ impl FetchDependencyGraph {
         // generate a simple string key from each node subgraph name and mergeAt. We do "sanitize"
         // subgraph name, but have no worries for `mergeAt` since it contains either number of
         // field names, and the later is restricted by graphQL so as to not be an issue.
+        // PORT_NOTE: The JS version iterates over the nodes in their index order, which is also
+        // the insertion order. The Rust version uses a topological sort to ensure that we never
+        // merge an ancestor node into a descendant node. JS version's insertion order is almost
+        // topologically sorted, thanks to the way the graph is constructed from the root. However,
+        // it's not exactly topologically sorted. So, it's unclear whether that is 100% safe.
+        // Note: MultiMap preserves insertion order for values of the same key. Thus, the values
+        // of the same key in `by_subgraphs` will be topologically sorted as well.
         let mut by_subgraphs = MultiMap::new();
         let sorted_nodes = petgraph::algo::toposort(&self.graph, None)
             .map_err(|_| FederationError::internal("Failed to sort nodes due to cycle(s)"))?;
@@ -1470,7 +1480,7 @@ impl FetchDependencyGraph {
             }
 
             // Create disjoint sets of the nodes.
-            // buckets: an array where each entry is a "bucket" of groups that can all be merge together.
+            // buckets: an array where each entry is a "bucket" of nodes that can all be merge together.
             let mut buckets: Vec<(NodeIndex, Vec<NodeIndex>)> = Vec::new();
             let has_equal_inputs = |a: NodeIndex, b: NodeIndex| {
                 let a_node = self.node_weight(a)?;
@@ -1503,9 +1513,12 @@ impl FetchDependencyGraph {
                     continue;
                 };
 
-                // We pick the head for the group and merge all others into it. Note that which
-                // group we choose shouldn't matter since the merging preserves all the
+                // We pick the head for the nodes and merge all others into it. Note that which
+                // node we choose shouldn't matter since the merging preserves all the
                 // dependencies of each group (both parents and children).
+                // However, we must not merge an ancestor node into a descendant node. Thus,
+                // we choose the head as the first node in the bucket that is also the earliest
+                // in the topo-sorted order.
                 for node in rest {
                     self.merge_in_with_all_dependencies(*head, *node)?;
                 }
@@ -2017,6 +2030,7 @@ impl FetchDependencyGraph {
         Ok(())
     }
 
+    /// Assumption: merged_id is not an ancestor of node_id in the graph.
     fn merge_in_internal(
         &mut self,
         node_id: NodeIndex,
@@ -2071,6 +2085,7 @@ impl FetchDependencyGraph {
     // - node_id's defer_ref == merged_id's defer_ref
     // - node_id's subgraph_name == merged_id's subgraph_name
     // - node_id's merge_at == merged_id's merge_at
+    // - merged_id is not an ancestor of node_id in the graph.
     fn merge_in_with_all_dependencies(
         &mut self,
         node_id: NodeIndex,
@@ -2267,6 +2282,46 @@ impl std::fmt::Display for FetchDependencyGraph {
             fmt_node(self, node_id, f, 0)?;
         }
         Ok(())
+    }
+}
+
+// Necessary for `petgraph::dot::Dot::with_attr_getters` calls to compile, but not executed.
+impl std::fmt::Display for FetchDependencyGraphNode {
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Err(std::fmt::Error)
+    }
+}
+
+// Necessary for `petgraph::dot::Dot::with_attr_getters` calls to compile, but not executed.
+impl std::fmt::Display for FetchDependencyGraphEdge {
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Err(std::fmt::Error)
+    }
+}
+
+impl FetchDependencyGraph {
+    // GraphViz output for FetchDependencyGraph
+    pub fn to_dot(&self) -> String {
+        fn label_node(node_id: NodeIndex, node: &FetchDependencyGraphNode) -> String {
+            let label_str = node.multiline_display(node_id).to_string();
+            format!("label=\"{}\"", label_str.replace('"', "\\\""))
+        }
+
+        fn label_edge(edge_id: EdgeIndex) -> String {
+            format!("label=\"{}\"", edge_id.index())
+        }
+
+        let config = [
+            petgraph::dot::Config::NodeNoLabel,
+            petgraph::dot::Config::EdgeNoLabel,
+        ];
+        petgraph::dot::Dot::with_attr_getters(
+            &self.graph,
+            &config,
+            &(|_, er| label_edge(er.id())),
+            &(|_, (node_id, node)| label_node(node_id, node)),
+        )
+        .to_string()
     }
 }
 
@@ -2545,6 +2600,81 @@ impl FetchDependencyGraphNode {
                     (None, _) => {
                         // [{ id }]
                         write!(f, "[{}]", self.node.selection_set.selection_set)?;
+                    }
+                }
+
+                Ok(())
+            }
+        }
+
+        FetchDependencyNodeDisplay { node: self, index }
+    }
+
+    // A variation of `fn display` with multiline output, which is more suitable for
+    // GraphViz output.
+    pub fn multiline_display(&self, index: NodeIndex) -> impl std::fmt::Display + '_ {
+        use std::fmt;
+        use std::fmt::Display;
+        use std::fmt::Formatter;
+
+        struct DisplayList<'a, T: Display>(&'a [T]);
+        impl<T: Display> Display for DisplayList<'_, T> {
+            fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+                let mut iter = self.0.iter();
+                if let Some(x) = iter.next() {
+                    write!(f, "{x}")?;
+                }
+                for x in iter {
+                    write!(f, "::{x}")?;
+                }
+                Ok(())
+            }
+        }
+
+        struct FetchDependencyNodeDisplay<'a> {
+            node: &'a FetchDependencyGraphNode,
+            index: NodeIndex,
+        }
+
+        impl Display for FetchDependencyNodeDisplay<'_> {
+            fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+                write!(f, "[{}]", self.index.index())?;
+                if self.node.defer_ref.is_some() {
+                    write!(f, "(deferred)")?;
+                }
+                if let Some(&id) = self.node.id.get() {
+                    write!(f, "{{id: {id}}}")?;
+                }
+
+                write!(f, " {}", self.node.subgraph_name)?;
+
+                match (self.node.merge_at.as_deref(), self.node.inputs.as_deref()) {
+                    (Some(merge_at), Some(inputs)) => {
+                        write!(
+                            f,
+                            // @(path::to::*::field)[{input1,input2} => { id }]
+                            "\n@({})\n{}\n=>\n{}\n",
+                            DisplayList(merge_at),
+                            inputs,
+                            self.node.selection_set.selection_set
+                        )?;
+                    }
+                    (Some(merge_at), None) => {
+                        write!(
+                            f,
+                            // @(path::to::*::field)[{} => { id }]
+                            "\n@({})\n{{}}\n=>\n{}\n",
+                            DisplayList(merge_at),
+                            self.node.selection_set.selection_set
+                        )?;
+                    }
+                    (None, _) => {
+                        // [(type){ id }]
+                        write!(
+                            f,
+                            "\n({})\n{}",
+                            self.node.parent_type, self.node.selection_set.selection_set
+                        )?;
                     }
                 }
 
