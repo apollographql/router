@@ -223,6 +223,20 @@ pub(crate) mod tests {
         assert!(futures::poll!(watch.next()).is_ready())
     }
 
+    #[test(tokio::test)]
+    async fn clog_watch() {
+        let (path, mut file) = create_temp_file();
+        let mut watch = watch_with_duration(&path, Duration::from_millis(100));
+        assert!(futures::poll!(watch.next()).is_ready());
+        write_and_flush(&mut file, "Some data 1").await;
+        write_and_flush(&mut file, "Some data 2").await;
+        write_and_flush(&mut file, "Some data 3").await;
+        write_and_flush(&mut file, "Some data 4").await;
+        assert!(futures::poll!(watch.next()).is_ready(), "polling the future should notice the event");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(!futures::poll!(watch.next()).is_ready(), "should only have one event for multiple updates");
+    }
+
     pub(crate) fn create_temp_file() -> (PathBuf, File) {
         let path = temp_dir().join(format!("{}", uuid::Uuid::new_v4()));
         let file = std::fs::File::create(&path).unwrap();
