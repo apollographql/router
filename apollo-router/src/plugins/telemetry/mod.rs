@@ -2162,6 +2162,7 @@ mod tests {
     use crate::error::FetchError;
     use crate::graphql;
     use crate::graphql::Error;
+    use crate::graphql::IntoGraphQLErrors;
     use crate::graphql::Request;
     use crate::http_ext;
     use crate::json_ext::Object;
@@ -2170,6 +2171,8 @@ mod tests {
     use crate::plugin::test::MockSubgraphService;
     use crate::plugin::test::MockSupergraphService;
     use crate::plugin::DynPlugin;
+    use crate::plugins::demand_control::CostContext;
+    use crate::plugins::demand_control::DemandControlError;
     use crate::plugins::telemetry::config::TraceIdFormat;
     use crate::plugins::telemetry::handle_error_internal;
     use crate::services::router::body::get_body_bytes;
@@ -3239,5 +3242,67 @@ mod tests {
             injected.0.get("my_header").unwrap(),
             "04f9e396-465c-4840-bc2b-f493b8b1a7fc"
         );
+    }
+
+    async fn make_failed_demand_control_request(plugin: &dyn DynPlugin) {
+        let mut mock_service = MockSupergraphService::new();
+        mock_service
+            .expect_call()
+            .times(1)
+            .returning(move |req: SupergraphRequest| {
+                req.context.extensions().with_lock(|mut lock| {
+                    let cost_result = lock.get_or_default_mut::<CostContext>();
+                    cost_result.strategy = "static_estimated";
+                    cost_result.estimated = 10.0;
+                    cost_result.result = "COST_ESTIMATED_TOO_EXPENSIVE";
+                });
+
+                SupergraphResponse::fake_builder()
+                    .context(req.context)
+                    .data(
+                        serde_json::to_value(
+                            graphql::Response::builder()
+                                .errors(
+                                    DemandControlError::EstimatedCostTooExpensive {
+                                        estimated_cost: 10.0,
+                                        max_cost: 5.0,
+                                    }
+                                    .into_graphql_errors()
+                                    .unwrap(),
+                                )
+                                .build(),
+                        )
+                        .unwrap(),
+                    )
+                    .build()
+            });
+
+        let mut service = plugin.supergraph_service(BoxService::new(mock_service));
+        let router_req = SupergraphRequest::fake_builder().build().unwrap();
+        let _router_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(router_req)
+            .await
+            .unwrap()
+            .next_response()
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_custom_metrics_for_demand_control_failures() {
+        async {
+            let plugin = create_plugin_with_config(include_str!(
+                "testdata/demand_control_rejection_metric.router.yaml"
+            ))
+            .await;
+            make_failed_demand_control_request(plugin.as_ref()).await;
+
+            assert_histogram_sum!("cost.rejected.operations", 10.0);
+        }
+        .with_metrics()
+        .await;
     }
 }
