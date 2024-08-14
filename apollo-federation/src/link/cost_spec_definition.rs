@@ -91,11 +91,9 @@ macro_rules! propagate_demand_control_directives_to_position {
 
             let list_size_directive_name =
                 original_directive_names.get(&LIST_SIZE_DIRECTIVE_NAME_IN_SPEC);
-            if let Some(list_size_directive) = source.directives.get(
-                list_size_directive_name
-                    .unwrap_or(&LIST_SIZE_DIRECTIVE_NAME_IN_SPEC)
-                    .as_str(),
-            ) {
+            let list_size_directive =
+                list_size_directive_name.and_then(|name| source.directives.get(name.as_str()));
+            if let Some(list_size_directive) = list_size_directive {
                 dest.insert_directive(
                     subgraph_schema,
                     Component::from(self.list_size_directive(
