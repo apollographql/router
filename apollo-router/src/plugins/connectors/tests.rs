@@ -559,7 +559,22 @@ async fn test_headers() {
         &mock_server.uri(),
         "query { users { id } }",
         Default::default(),
-        None,
+        Some(json!({
+            "preview_connectors": {
+                "subgraphs": {
+                    "connectors": {
+                        "$config": {
+                          "source": {
+                            "val": "val-from-config-source"
+                          },
+                          "connect": {
+                            "val": "val-from-config-connect"
+                          },
+                        }
+                    }
+                }
+            }
+        })),
         |request| {
             let headers = request.router_request.headers_mut();
             headers.insert("x-rename-source", "renamed-by-source".parse().unwrap());
@@ -597,6 +612,14 @@ async fn test_headers() {
             .header(
                 HeaderName::from_str("x-insert-multi-value").unwrap(),
                 HeaderValue::from_str("second").unwrap(),
+            )
+            .header(
+                HeaderName::from_str("x-config-variable-source").unwrap(),
+                HeaderValue::from_str("before val-from-config-source after").unwrap(),
+            )
+            .header(
+                HeaderName::from_str("x-config-variable-connect").unwrap(),
+                HeaderValue::from_str("before val-from-config-connect after").unwrap(),
             )
             .path("/users")
             .build()],

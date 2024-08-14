@@ -14,6 +14,7 @@ use super::JSONSelection;
 use super::URLTemplate;
 use crate::error::FederationError;
 use crate::schema::ValidFederationSchema;
+use crate::sources::connect::header::HeaderValue;
 use crate::sources::connect::spec::extract_connect_directive_arguments;
 use crate::sources::connect::spec::extract_source_directive_arguments;
 use crate::sources::connect::ConnectSpecDefinition;
@@ -221,7 +222,7 @@ impl HTTPMethod {
 #[derive(Clone, Debug)]
 pub enum HeaderSource {
     From(String),
-    Value(String),
+    Value(HeaderValue),
 }
 
 #[cfg(test)]
@@ -310,7 +311,13 @@ mod tests {
                             "X-Auth-Token",
                         ),
                         "user-agent": Value(
-                            "Firefox",
+                            HeaderValue {
+                                parts: [
+                                    Text(
+                                        "Firefox",
+                                    ),
+                                ],
+                            },
                         ),
                     },
                     body: None,
@@ -397,7 +404,13 @@ mod tests {
                             "X-Auth-Token",
                         ),
                         "user-agent": Value(
-                            "Firefox",
+                            HeaderValue {
+                                parts: [
+                                    Text(
+                                        "Firefox",
+                                    ),
+                                ],
+                            },
                         ),
                     },
                     body: None,

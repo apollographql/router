@@ -70,10 +70,11 @@ pub(crate) fn make_request(
     original_request: &connect::Request,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
 ) -> Result<http::Request<RouterBody>, HttpJsonTransportError> {
+    let flat_inputs = flatten_keys(&inputs);
     let uri = make_uri(
         transport.source_url.as_ref(),
         &transport.connect_template,
-        &inputs,
+        &flat_inputs,
     )?;
 
     let (json_body, body, apply_to_errors) = if let Some(ref selection) = transport.body {
@@ -99,6 +100,7 @@ pub(crate) fn make_request(
         &mut request,
         original_request.supergraph_request.headers(),
         &transport.headers,
+        &flat_inputs,
     );
 
     if let Some(debug) = debug {
@@ -120,9 +122,8 @@ pub(crate) fn make_request(
 fn make_uri(
     source_url: Option<&Url>,
     template: &URLTemplate,
-    inputs: &IndexMap<String, Value>,
+    inputs: &Map<ByteString, Value>,
 ) -> Result<Url, HttpJsonTransportError> {
-    let flat_inputs = flatten_keys(inputs);
     let mut url = source_url
         .or(template.base.as_ref())
         .ok_or(HttpJsonTransportError::NoBaseUrl)?
@@ -135,12 +136,12 @@ fn make_uri(
         .pop_if_empty()
         .extend(
             template
-                .interpolate_path(&flat_inputs)
+                .interpolate_path(inputs)
                 .map_err(HttpJsonTransportError::TemplateGenerationError)?,
         );
 
     let query_params = template
-        .interpolate_query(&flat_inputs)
+        .interpolate_query(inputs)
         .map_err(HttpJsonTransportError::TemplateGenerationError)?;
     if !query_params.is_empty() {
         url.query_pairs_mut().extend_pairs(query_params);
@@ -180,6 +181,7 @@ fn add_headers<T>(
     request: &mut http::Request<T>,
     incoming_supergraph_headers: &HeaderMap<HeaderValue>,
     config: &IndexMap<HeaderName, HeaderSource>,
+    inputs: &Map<ByteString, Value>,
 ) {
     let headers = request.headers_mut();
     for (header_name, header_source) in config {
@@ -202,12 +204,17 @@ fn add_headers<T>(
                     }
                 }
             }
-            HeaderSource::Value(value) => match HeaderValue::from_str(value) {
-                Ok(value) => {
-                    headers.append(header_name, value);
-                }
+            HeaderSource::Value(value) => match value.interpolate(inputs) {
+                Ok(value) => match HeaderValue::from_str(value.as_str()) {
+                    Ok(value) => {
+                        headers.append(header_name, value);
+                    }
+                    Err(err) => {
+                        tracing::error!("Invalid header value '{:?}': {:?}", value, err);
+                    }
+                },
                 Err(err) => {
-                    tracing::error!("Invalid header value '{}': {:?}", value, err);
+                    tracing::error!("Unable to interpolate header value: {:?}", err);
                 }
             },
         }
@@ -244,7 +251,7 @@ mod test_make_uri {
                 $(
                     map.insert($key.to_string(), json!($value));
                 )*
-                map
+                flatten_keys(&map)
             }
         };
     }
@@ -731,6 +738,7 @@ mod tests {
             &mut request,
             &incoming_supergraph_headers,
             &IndexMap::with_hasher(Default::default()),
+            &Map::default(),
         );
         assert!(request.headers().is_empty());
     }
@@ -754,11 +762,16 @@ mod tests {
         );
         config.insert(
             "x-insert".parse().unwrap(),
-            HeaderSource::Value("inserted".to_string()),
+            HeaderSource::Value("inserted".parse().unwrap()),
         );
 
         let mut request = http::Request::builder().body(hyper::Body::empty()).unwrap();
-        add_headers(&mut request, &incoming_supergraph_headers, &config);
+        add_headers(
+            &mut request,
+            &incoming_supergraph_headers,
+            &config,
+            &Map::default(),
+        );
         let result = request.headers();
         assert_eq!(result.len(), 3);
         assert_eq!(result.get("x-new-name"), Some(&"renamed".parse().unwrap()));

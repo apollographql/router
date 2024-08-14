@@ -1,5 +1,5 @@
 # rover supergraph compose --config apollo-router/src/plugins/connectors/testdata/steelthread.yaml > apollo-router/src/plugins/connectors/testdata/steelthread.graphql
-federation_version: =2.9.0-connectors.9
+federation_version: =2.9.0-connectors.12
 subgraphs:
   connectors:
     routing_url: none
@@ -22,6 +22,7 @@ subgraphs:
                 { name: "x-new-name" from: "x-rename-source" }
                 { name: "x-forward" from: "x-forward" }
                 { name: "x-insert" value: "inserted" }
+                { name: "x-config-variable-source" value: "before {$$config.source.val} after" }
               ]
             }
           )
@@ -35,6 +36,7 @@ subgraphs:
                 headers: [
                  {name: "x-new-name", from: "x-rename-connect"}
                  {name: "x-insert-multi-value", value: "first,second"}
+                 {name: "x-config-variable-connect" value: "before {$$config.connect.val} after"}
                 ]
               }
               selection: "id name"
