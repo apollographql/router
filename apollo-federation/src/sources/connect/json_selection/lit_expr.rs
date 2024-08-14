@@ -22,7 +22,6 @@ use nom::IResult;
 use serde::ser::SerializeMap;
 use serde::ser::SerializeSeq;
 use serde::Serialize;
-use serde_json_bytes::Value as JSON;
 
 use super::helpers::spaces_or_comments;
 use super::parser::parse_string_literal;
@@ -32,7 +31,7 @@ use super::parser::PathSelection;
 #[derive(Debug, PartialEq, Clone)]
 pub enum LitExpr {
     String(String),
-    Number(String),
+    Number(serde_json::Number),
     Bool(bool),
     Null,
     Object(IndexMap<String, LitExpr>),
@@ -63,7 +62,7 @@ impl LitExpr {
 
     // LitNumber ::= "-"? ([0-9]+ ("." [0-9]*)? | "." [0-9]+)
     fn parse_number(input: &str) -> IResult<&str, Self> {
-        delimited(
+        let (suffix, (neg, _, num)) = delimited(
             spaces_or_comments,
             tuple((
                 opt(char('-')),
@@ -77,15 +76,22 @@ impl LitExpr {
                 )),
             )),
             spaces_or_comments,
-        )(input)
-        .map(|(input, (neg, _, num))| {
-            let mut number = String::new();
-            if let Some('-') = neg {
-                number.push('-');
-            }
-            number.push_str(num);
-            (input, Self::Number(number))
-        })
+        )(input)?;
+
+        let mut number = String::new();
+        if let Some('-') = neg {
+            number.push('-');
+        }
+        number.push_str(num);
+
+        if let Ok(lit_number) = number.parse().map(Self::Number) {
+            Ok((suffix, lit_number))
+        } else {
+            Err(nom::Err::Failure(nom::error::Error::new(
+                input,
+                nom::error::ErrorKind::IsNot,
+            )))
+        }
     }
 
     // LitObject ::= "{" (LitProperty ("," LitProperty)*)? "}"
@@ -142,10 +148,7 @@ impl LitExpr {
 
     pub(super) fn as_i64(&self) -> Option<i64> {
         match self {
-            Self::Number(n) => match serde_json_bytes::serde_json::from_str(n.as_str()) {
-                Ok(JSON::Number(n)) => n.as_i64(),
-                _ => None,
-            },
+            Self::Number(n) => n.as_i64(),
             _ => None,
         }
     }
@@ -158,7 +161,7 @@ impl Serialize for LitExpr {
     {
         match self {
             Self::String(s) => serializer.serialize_str(s),
-            Self::Number(n) => serializer.serialize_str(n),
+            Self::Number(n) => n.serialize(serializer),
             Self::Bool(b) => serializer.serialize_bool(*b),
             Self::Null => serializer.serialize_none(),
             Self::Object(map) => {

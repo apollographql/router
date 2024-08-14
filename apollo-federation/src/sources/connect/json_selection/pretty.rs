@@ -196,7 +196,7 @@ impl PrettyPrintable for LitExpr {
                 let safely_quoted = serde_json_bytes::Value::String(s.clone().into()).to_string();
                 result.push_str(safely_quoted.as_str());
             }
-            LitExpr::Number(n) => result.push_str(n.as_str()),
+            LitExpr::Number(n) => result.push_str(n.to_string().as_str()),
             LitExpr::Bool(b) => result.push_str(b.to_string().as_str()),
             LitExpr::Null => result.push_str("null"),
             LitExpr::Object(map) => {

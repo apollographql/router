@@ -384,17 +384,7 @@ impl ApplyTo for LitExpr {
     ) -> Option<JSON> {
         match self {
             Self::String(s) => Some(JSON::String(s.clone().into())),
-            Self::Number(n) => {
-                if let Ok(JSON::Number(n)) = serde_json_bytes::serde_json::from_str(n) {
-                    Some(JSON::Number(n))
-                } else {
-                    errors.insert(ApplyToError::new(
-                        format!("Invalid number {}", n),
-                        input_path.to_vec(),
-                    ));
-                    None
-                }
-            }
+            Self::Number(n) => Some(JSON::Number(n.clone())),
             Self::Bool(b) => Some(JSON::Bool(*b)),
             Self::Null => Some(JSON::Null),
             Self::Object(map) => {

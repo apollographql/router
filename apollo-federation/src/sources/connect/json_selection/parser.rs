@@ -1706,7 +1706,9 @@ mod tests {
                                                     Box::new(PathList::Method(
                                                         "times".to_string(),
                                                         Some(MethodArgs(vec![LitExpr::Number(
-                                                            "2".to_string(),
+                                                            "2".parse().expect(
+                                                                "serde_json::Number parse error",
+                                                            ),
                                                         )])),
                                                         Box::new(PathList::Empty),
                                                     )),
@@ -1729,7 +1731,9 @@ mod tests {
                                                     Box::new(PathList::Method(
                                                         "times".to_string(),
                                                         Some(MethodArgs(vec![LitExpr::Number(
-                                                            "2".to_string(),
+                                                            "2".parse().expect(
+                                                                "serde_json::Number parse error",
+                                                            ),
                                                         )])),
                                                         Box::new(PathList::Empty),
                                                     )),
