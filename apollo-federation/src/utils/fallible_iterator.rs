@@ -2,20 +2,6 @@
 
 use itertools::Itertools;
 
-#[allow(dead_code, unused)]
-fn sandbox() {
-    fn is_prime(i: usize) -> Result<bool, ()> {
-        match i {
-            0 | 1 => Err(()), // 0 and 1 are neither prime or composite
-            2 | 3 => Ok(true),
-            _ => Ok(false), // Every other number is composite, I guess
-        }
-    }
-
-    let vals = (1..6).fallible_filter(|i| is_prime(*i));
-    itertools::assert_equal(vals, vec![Err(()), Ok(2), Ok(3)]);
-}
-
 /// An extension trait for `Iterator`, similar to `Itertools`, that seeks to improve the ergonomics
 /// around fallible operations.
 ///
@@ -66,13 +52,11 @@ fn sandbox() {
 // write equalivalent folding methods. Should they be implemented in the future, we should rework
 // existing methods to use them.
 pub trait FallibleIterator: Sized + Itertools {
-    /// The method transforms the current iterator, which yields `T`s, into an iterator that yields
-    /// `Result<T, E>`. The predicate that is provided is fallible. If the predicate yields
-    /// `Ok(false)`, the item is skipped. If the predicate yields `Err(e)`, that `T` is discard and
-    /// iterator will yield `Err(e)` in its place. Lastly, if the predicate yields `Ok(true)`, the
-    /// iterator will yield `Ok(val)`
-    ///
-    /// DOCS
+    /// The method transforms the existing iterator, which yields `T`s, into an iterator that
+    /// yields `Result<T, E>`. The predicate that is provided is fallible. If the predicate yields
+    /// `Ok(false)`, the item is skipped. If the predicate yields `Err`, that `T` is discard and
+    /// the iterator will yield the `Err` in its place. Lastly, if the predicate yields `Ok(true)`,
+    /// the iterator will yield `Ok(val)`.
     ///
     /// ```rust
     /// use apollo_federation::utils::FallibleIterator;
@@ -99,9 +83,17 @@ pub trait FallibleIterator: Sized + Itertools {
         }
     }
 
-    // NOTE: There is a `filter_ok` method on `Itertools`, but there is not a `filter_err`. That
+    // NOTE: There is a `filter_ok` method in `Itertools`, but there is not a `filter_err`. That
     // might be useful at some point.
 
+    /// This method functions similarly to `Iterator::filter` but where the existing iterator
+    /// yeilds `Result`s and the given predicate also returns `Result`s.
+    ///
+    /// The predicate is only called if the existing iterator yields `Ok`. `Err`s are ignored.
+    /// Should the predicate return an `Err`, the `Ok` value was replaced with the `Err`. This
+    /// method is very similar to `Itertools::filter_ok` except the predicate for this method is
+    /// fallible.
+    ///
     /// ```rust
     /// use apollo_federation::utils::FallibleIterator;
     ///
@@ -114,10 +106,9 @@ pub trait FallibleIterator: Sized + Itertools {
     ///   }
     /// }
     ///
-    /// let vals = vec![Ok(0), Err(()), Err(()), Ok(3), Ok(4)].and_then_filter(|i| is_prime(*i));
+    /// let vals = vec![Ok(0), Err(()), Err(()), Ok(3), Ok(4)].into_iter().and_then_filter(|i| is_prime(*i));
     /// itertools::assert_equal(vals, vec![Err(()), Err(()), Err(()), Ok(3)]);
     /// ```
-    // TODO(@TylerBloom): Write an example (or two) and rewrite the docs.
     fn and_then_filter<T, E, F>(self, predicate: F) -> AndThenFilter<Self, F>
     where
         Self: Iterator<Item = Result<T, E>>,
@@ -129,6 +120,14 @@ pub trait FallibleIterator: Sized + Itertools {
         }
     }
 
+    /// This method functions similarly to `Iterator::all` but where the given predicate returns
+    /// `Result`s.
+    ///
+    /// Like `Iterator::all`, this function short-curcuits but will short-curcuit if the predicate
+    /// returns anything other than `Ok(true)`. If the first item that is not `Ok(true)` is
+    /// `Ok(false)`, the returned value will be `Ok(false)`. If that item is `Err`, than that `Err`
+    /// is returned.
+    ///
     /// ```rust
     /// use apollo_federation::utils::FallibleIterator;
     ///
@@ -147,7 +146,6 @@ pub trait FallibleIterator: Sized + Itertools {
     /// assert_eq!(Ok(false), (2..5).fallible_all(is_prime));
     /// assert_eq!(Err(()), (1..5).fallible_all(is_prime));
     /// ```
-    // TODO(@TylerBloom): Write an example (or two) and write the docs.
     fn fallible_all<E, F>(&mut self, mut predicate: F) -> Result<bool, E>
     where
         F: FnMut(Self::Item) -> Result<bool, E>,
@@ -162,8 +160,35 @@ pub trait FallibleIterator: Sized + Itertools {
         Ok(digest)
     }
 
-    // Hmm... I don't like this name...
-    fn all_ok<T, E, F>(&mut self, predicate: F) -> Result<bool, E>
+    /// This method functions similarly to `FallibleIterator::fallible_all` but inverted. The
+    /// existing iterator yields `Result`s but the predicate is not fallible.
+    ///
+    /// Like `FallibleIterator::fallible_all`, this function short-curcuits but will short-curcuit
+    /// if it encounters an `Err` or `false`. If the existing iterator yields an `Err`, this
+    /// function short-curcuits, does not call the predicate, and returns that `Err`. If the value
+    /// is `Ok`, it is given to the predicate. If the predicate returns `false`, this method
+    /// returns `Ok(false)`.
+    ///
+    /// ```rust
+    /// use apollo_federation::utils::FallibleIterator;
+    ///
+    /// type Item = Result<usize, ()>;
+    ///
+    /// fn is_even(i: usize) -> bool {
+    ///     i % 2 == 0
+    /// }
+    ///
+    /// let first_values: Vec<Item>  = vec![];
+    /// let second_values: Vec<Item> = vec![Ok(1), Err(())];
+    /// let third_values: Vec<Item>  = vec![Ok(0), Ok(1), Ok(2)];
+    /// let fourth_values: Vec<Item> = vec![Err(()), Ok(0)];
+    ///
+    /// assert_eq!(Ok(true), first_values.into_iter().ok_and_all(is_even));
+    /// assert_eq!(Ok(false), second_values.into_iter().ok_and_all(is_even));
+    /// assert_eq!(Ok(false), third_values.into_iter().ok_and_all(is_even));
+    /// assert_eq!(Err(()), fourth_values.into_iter().ok_and_all(is_even));
+    /// ```
+    fn ok_and_all<T, E, F>(&mut self, predicate: F) -> Result<bool, E>
     where
         Self: Iterator<Item = Result<T, E>>,
         F: FnMut(T) -> bool,
@@ -171,7 +196,43 @@ pub trait FallibleIterator: Sized + Itertools {
         self.process_results(|mut results| results.all(predicate))
     }
 
-    // TODO(@TylerBloom): Write an example (or two) and write the docs.
+    /// This method functions similarly to `FallibleIterator::fallible_all` but both the
+    /// existing iterator and predicate yield `Result`s.
+    ///
+    /// Like `FallibleIterator::fallible_all`, this function short-curcuits but will short-curcuit
+    /// if it encounters an `Err` or `Ok(false)`. If the existing iterator yields an `Err`, this
+    /// function returns that `Err`. If the value is `Ok`, it is given to the predicate. If the
+    /// predicate returns `Err`, that `Err` is returned. If the predicate returns `Ok(false)`,
+    /// `Ok(false)` is returned. By default, this function returned `Ok(true)`.
+    ///
+    /// ```rust
+    /// use apollo_federation::utils::FallibleIterator;
+    ///
+    /// type Item = Result<usize, ()>;
+    ///
+    /// // A totally accurate prime checker
+    /// fn is_prime(i: usize) -> Result<bool, ()> {
+    ///   match i {
+    ///     0 | 1 => Err(()), // 0 and 1 are neither prime or composite
+    ///     2 | 3 => Ok(true),
+    ///     _ => Ok(false), // Every other number is composite, I guess
+    ///   }
+    /// }
+    ///
+    /// let first_values: Vec<Item>  = vec![];
+    /// let second_values: Vec<Item> = vec![Ok(0), Err(())];
+    /// let third_values: Vec<Item>  = vec![Ok(2), Ok(3)];
+    /// let fourth_values: Vec<Item> = vec![Err(()), Ok(2)];
+    /// let fifth_values: Vec<Item>  = vec![Ok(2), Err(())];
+    /// let sixth_values: Vec<Item>  = vec![Ok(4), Ok(3)];
+    ///
+    /// assert_eq!(Ok(true), first_values.into_iter().and_then_all(is_prime));
+    /// assert_eq!(Err(()), second_values.into_iter().and_then_all(is_prime));
+    /// assert_eq!(Ok(true), third_values.into_iter().and_then_all(is_prime));
+    /// assert_eq!(Err(()), fourth_values.into_iter().and_then_all(is_prime));
+    /// assert_eq!(Err(()), fifth_values.into_iter().and_then_all(is_prime));
+    /// assert_eq!(Ok(false), sixth_values.into_iter().and_then_all(is_prime));
+    /// ```
     fn and_then_all<T, E, F>(&mut self, mut predicate: F) -> Result<bool, E>
     where
         Self: Iterator<Item = Result<T, E>>,
@@ -187,6 +248,14 @@ pub trait FallibleIterator: Sized + Itertools {
         Ok(digest)
     }
 
+    /// This method functions similarly to `Iterator::any` but where the given predicate returns
+    /// `Result`s.
+    ///
+    /// Like `Iterator::any`, this function short-curcuits but will short-curcuit if the predicate
+    /// returns anything other than `Ok(false)`. If the first item that is not `Ok(false)` is
+    /// `Ok(true)`, the returned value will be `Ok(true)`. If that item is `Err`, than that `Err`
+    /// is returned.
+    ///
     /// ```rust
     /// use apollo_federation::utils::FallibleIterator;
     ///
@@ -205,7 +274,6 @@ pub trait FallibleIterator: Sized + Itertools {
     /// assert_eq!(Err(()), (1..4).fallible_any(is_prime));
     /// assert_eq!(Err(()), (1..5).fallible_any(is_prime));
     /// ```
-    // TODO(@TylerBloom): Write an example (or two) and rewrite the docs.
     fn fallible_any<E, F>(&mut self, mut predicate: F) -> Result<bool, E>
     where
         F: FnMut(Self::Item) -> Result<bool, E>,
@@ -220,8 +288,35 @@ pub trait FallibleIterator: Sized + Itertools {
         Ok(digest)
     }
 
-    // Hmm... I don't like this name...
-    fn any_ok<T, E, F>(&mut self, predicate: F) -> Result<bool, E>
+    /// This method functions similarly to `FallibleIterator::fallible_any` but inverted. The
+    /// existing iterator yields `Result`s but the predicate is not fallible.
+    ///
+    /// Like `FallibleIterator::fallible_any`, this function short-curcuits but will short-curcuit
+    /// if it encounters an `Err` or `true`. If the existing iterator yields an `Err`, this
+    /// function short-curcuits, does not call the predicate, and returns that `Err`. If the value
+    /// is `Ok`, it is given to the predicate. If the predicate returns `true`, this method returns
+    /// `Ok(true)`.
+    ///
+    /// ```rust
+    /// use apollo_federation::utils::FallibleIterator;
+    ///
+    /// type Item = Result<usize, ()>;
+    ///
+    /// fn is_even(i: usize) -> bool {
+    ///     i % 2 == 0
+    /// }
+    ///
+    /// let first_values: Vec<Item>  = vec![];
+    /// let second_values: Vec<Item> = vec![Ok(0), Err(())];
+    /// let third_values: Vec<Item>  = vec![Ok(1), Ok(3)];
+    /// let fourth_values: Vec<Item> = vec![Err(()), Ok(0)];
+    ///
+    /// assert_eq!(Ok(false), first_values.into_iter().ok_and_any(is_even));
+    /// assert_eq!(Ok(true), second_values.into_iter().ok_and_any(is_even));
+    /// assert_eq!(Ok(false), third_values.into_iter().ok_and_any(is_even));
+    /// assert_eq!(Err(()), fourth_values.into_iter().ok_and_any(is_even));
+    /// ```
+    fn ok_and_any<T, E, F>(&mut self, predicate: F) -> Result<bool, E>
     where
         Self: Iterator<Item = Result<T, E>>,
         F: FnMut(T) -> bool,
@@ -229,7 +324,43 @@ pub trait FallibleIterator: Sized + Itertools {
         self.process_results(|mut results| results.any(predicate))
     }
 
-    // TODO(@TylerBloom): Write an example (or two) and write the docs.
+    /// This method functions similarly to `FallibleIterator::fallible_any` but both the
+    /// existing iterator and predicate yield `Result`s.
+    ///
+    /// Like `FallibleIterator::fallible_any`, this function short-curcuits but will short-curcuit
+    /// if it encounters an `Err` or `Ok(true)`. If the existing iterator yields an `Err`, this
+    /// function returns that `Err`. If the value is `Ok`, it is given to the predicate. If the
+    /// predicate returns `Err`, that `Err` is returned. If the predicate returns `Ok(true)`,
+    /// `Ok(true)` is returned. By default, this function returned `Ok(false)`.
+    ///
+    /// ```rust
+    /// use apollo_federation::utils::FallibleIterator;
+    ///
+    /// type Item = Result<usize, ()>;
+    ///
+    /// // A totally accurate prime checker
+    /// fn is_prime(i: usize) -> Result<bool, ()> {
+    ///   match i {
+    ///     0 | 1 => Err(()), // 0 and 1 are neither prime or composite
+    ///     2 | 3 => Ok(true),
+    ///     _ => Ok(false), // Every other number is composite, I guess
+    ///   }
+    /// }
+    ///
+    /// let first_values: Vec<Item>  = vec![];
+    /// let second_values: Vec<Item> = vec![Ok(0), Err(())];
+    /// let third_values: Vec<Item>  = vec![Ok(3), Ok(4)];
+    /// let fourth_values: Vec<Item> = vec![Err(()), Ok(2)];
+    /// let fifth_values: Vec<Item> = vec![Ok(2), Err(())];
+    /// let sixth_values: Vec<Item> = vec![Ok(4), Ok(5)];
+    ///
+    /// assert_eq!(Ok(false), first_values.into_iter().and_then_any(is_prime));
+    /// assert_eq!(Err(()), second_values.into_iter().and_then_any(is_prime));
+    /// assert_eq!(Ok(true), third_values.into_iter().and_then_any(is_prime));
+    /// assert_eq!(Err(()), fourth_values.into_iter().and_then_any(is_prime));
+    /// assert_eq!(Ok(true), fifth_values.into_iter().and_then_any(is_prime));
+    /// assert_eq!(Ok(false), sixth_values.into_iter().and_then_any(is_prime));
+    /// ```
     fn and_then_any<T, E, F>(&mut self, mut predicate: F) -> Result<bool, E>
     where
         Self: Iterator<Item = Result<T, E>>,
@@ -245,7 +376,8 @@ pub trait FallibleIterator: Sized + Itertools {
         Ok(digest)
     }
 
-    /// A convenience method that is equivalent to calling `.map(|result| result.and_then(fallible_fn))`.
+    /// A convenience method that is equivalent to calling `.map(|result|
+    /// result.and_then(fallible_fn))`.
     fn and_then<T, E, U, F>(self, map: F) -> AndThen<Self, F>
     where
         Self: Iterator<Item = Result<T, E>>,
@@ -254,7 +386,8 @@ pub trait FallibleIterator: Sized + Itertools {
         AndThen { iter: self, map }
     }
 
-    /// A convenience method that is equivalent to calling `.map(|result| result.or_else(fallible_fn))`.
+    /// A convenience method that is equivalent to calling `.map(|result|
+    /// result.or_else(fallible_fn))`.
     fn or_else<T, E, EE, F>(self, map: F) -> OrElse<Self, F>
     where
         Self: Iterator<Item = Result<T, E>>,
@@ -264,7 +397,7 @@ pub trait FallibleIterator: Sized + Itertools {
     }
 }
 
-impl<I: Iterator> FallibleIterator for I {}
+impl<I: Itertools> FallibleIterator for I {}
 
 /// The struct returned by [fallible_filter](FallibleIterator::fallible_filter).
 pub struct FallibleFilter<I, F> {
