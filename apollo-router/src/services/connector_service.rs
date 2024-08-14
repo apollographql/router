@@ -1,4 +1,5 @@
 //! Tower fetcher for fetch node execution.
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::task::Poll;
@@ -17,9 +18,13 @@ use super::connect::BoxService;
 use super::http::HttpClientServiceFactory;
 use super::http::HttpRequest;
 use super::new_service::ServiceFactory;
+use crate::plugins::connectors::error::Error as ConnectorError;
 use crate::plugins::connectors::handle_responses::handle_responses;
+use crate::plugins::connectors::http::Response as ConnectorResponse;
+use crate::plugins::connectors::http::Result as ConnectorResult;
 use crate::plugins::connectors::make_requests::make_requests;
 use crate::plugins::connectors::plugin::ConnectorContext;
+use crate::plugins::connectors::request_limit::RequestLimits;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
 use crate::plugins::connectors::tracing::CONNECT_SPAN_NAME;
 use crate::plugins::subscription::SubscriptionConfig;
@@ -128,27 +133,45 @@ async fn execute(
     let context = request.context.clone();
     let original_subgraph_name = connector.id.subgraph_name.to_string();
 
-    let debug = context
-        .extensions()
-        .with_lock(|lock| lock.get::<Arc<Mutex<ConnectorContext>>>().cloned());
+    let (debug, request_limit) = context.extensions().with_lock(|lock| {
+        let debug = lock.get::<Arc<Mutex<ConnectorContext>>>().cloned();
+        let request_limit = lock
+            .get::<Arc<RequestLimits>>()
+            .map(|limits| limits.get((&connector.id).into(), connector.max_requests))
+            .expect("missing request limit");
+        (debug, request_limit)
+    });
 
     let requests = make_requests(request, connector, &debug).map_err(BoxError::from)?;
 
     let tasks = requests.into_iter().map(move |(req, key)| {
+        // Returning an error from this closure causes all tasks to be cancelled and the operation
+        // to fail. This is the reason for the Result-wrapped-in-a-Result here. An `Err` on the
+        // inner result fails just that one task, but an `Err` on the outer result cancels all the
+        // tasks and fails the whole operation.
         let context = context.clone();
         let original_subgraph_name = original_subgraph_name.clone();
+        let request_limit = request_limit.clone();
         async move {
+            if let Some(request_limit) = request_limit {
+                if !request_limit.allow() {
+                    return Ok(ConnectorResponse {
+                        result: ConnectorResult::Err(ConnectorError::RequestLimitExceeded),
+                        key,
+                    });
+                }
+            }
             let client = http_client_factory.create(&original_subgraph_name);
             let req = HttpRequest {
                 http_request: req,
                 context,
             };
             let res = client.oneshot(req).await?;
-            let mut res = res.http_response;
-            let extensions = res.extensions_mut();
-            extensions.insert(key);
 
-            Ok::<_, BoxError>(res)
+            Ok::<_, BoxError>(ConnectorResponse {
+                result: ConnectorResult::HttpResponse(res.http_response),
+                key,
+            })
         }
     });
 

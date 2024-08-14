@@ -1281,6 +1281,7 @@ mod tests {
             selection: JSONSelection::parse(".data").unwrap().1,
             entity_resolver: None,
             config: Default::default(),
+            max_requests: None,
         };
 
         let requests = super::make_requests(req, &connector, &None).unwrap();

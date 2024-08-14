@@ -237,6 +237,130 @@ async fn value_from_config() {
 }
 
 #[tokio::test]
+async fn max_requests() {
+    let mock_server = MockServer::start().await;
+    mock_api::users().mount(&mock_server).await;
+    mock_api::user_1().mount(&mock_server).await;
+    mock_api::user_2().mount(&mock_server).await;
+
+    let response = execute(
+        STEEL_THREAD_SCHEMA,
+        &mock_server.uri(),
+        "query { users { id name username } }",
+        Default::default(),
+        Some(json!({
+          "preview_connectors": {
+            "max_requests_per_operation_per_source": 2
+          }
+        })),
+        |_| {},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "users": [
+          {
+            "id": 1,
+            "name": "Leanne Graham",
+            "username": "Bret"
+          },
+          {
+            "id": 2,
+            "name": "Ervin Howell",
+            "username": null
+          }
+        ]
+      },
+      "errors": [
+        {
+          "message": "Request limit exceeded",
+          "extensions": {
+            "connector": "connectors.json http: GET /users/{$args.id!}",
+            "code": "REQUEST_LIMIT_EXCEEDED"
+          }
+        }
+      ]
+    }
+    "###);
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+            Matcher::new().method("GET").path("/users").build(),
+            Matcher::new().method("GET").path("/users/1").build(),
+        ],
+    );
+}
+
+#[tokio::test]
+async fn source_max_requests() {
+    let mock_server = MockServer::start().await;
+    mock_api::users().mount(&mock_server).await;
+    mock_api::user_1().mount(&mock_server).await;
+    mock_api::user_2().mount(&mock_server).await;
+
+    let response = execute(
+        STEEL_THREAD_SCHEMA,
+        &mock_server.uri(),
+        "query { users { id name username } }",
+        Default::default(),
+        Some(json!({
+          "preview_connectors": {
+            "subgraphs": {
+              "connectors": {
+                "sources": {
+                  "json": {
+                    "max_requests_per_operation": 2,
+                  }
+                }
+              }
+            }
+          }
+        })),
+        |_| {},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "users": [
+          {
+            "id": 1,
+            "name": "Leanne Graham",
+            "username": "Bret"
+          },
+          {
+            "id": 2,
+            "name": "Ervin Howell",
+            "username": null
+          }
+        ]
+      },
+      "errors": [
+        {
+          "message": "Request limit exceeded",
+          "extensions": {
+            "connector": "connectors.json http: GET /users/{$args.id!}",
+            "code": "REQUEST_LIMIT_EXCEEDED"
+          }
+        }
+      ]
+    }
+    "###);
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+            Matcher::new().method("GET").path("/users").build(),
+            Matcher::new().method("GET").path("/users/1").build(),
+        ],
+    );
+}
+
+#[tokio::test]
 async fn test_root_field_plus_entity() {
     let mock_server = MockServer::start().await;
     mock_api::users().mount(&mock_server).await;

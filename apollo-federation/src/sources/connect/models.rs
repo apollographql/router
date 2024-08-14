@@ -25,6 +25,7 @@ pub struct Connector {
     pub transport: HttpJsonTransport,
     pub selection: JSONSelection,
     pub config: Option<CustomConfiguration>,
+    pub max_requests: Option<usize>,
 
     /// The type of entity resolver to use for this connector
     pub entity_resolver: Option<EntityResolver>,
@@ -116,6 +117,7 @@ impl Connector {
                     selection: args.selection,
                     entity_resolver,
                     config: None,
+                    max_requests: None,
                 };
 
                 Ok((id, connector))
@@ -331,6 +333,7 @@ mod tests {
                     },
                 ),
                 config: None,
+                max_requests: None,
                 entity_resolver: None,
             },
             ConnectId {
@@ -422,6 +425,7 @@ mod tests {
                     },
                 ),
                 config: None,
+                max_requests: None,
                 entity_resolver: None,
             },
         }

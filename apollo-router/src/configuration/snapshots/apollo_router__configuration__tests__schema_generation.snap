@@ -1750,6 +1750,14 @@ expression: "&schema"
           "description": "Enables connector debugging information on response extensions if the feature is enabled",
           "type": "boolean"
         },
+        "max_requests_per_operation_per_source": {
+          "default": null,
+          "description": "The maximum number of requests for a connector source",
+          "format": "uint",
+          "minimum": 0.0,
+          "nullable": true,
+          "type": "integer"
+        },
         "subgraphs": {
           "additionalProperties": {
             "$ref": "#/definitions/SubgraphConnectorConfiguration",
@@ -5406,6 +5414,14 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Configuration for a `@source` directive",
       "properties": {
+        "max_requests_per_operation": {
+          "default": null,
+          "description": "The maximum number of requests for this source",
+          "format": "uint",
+          "minimum": 0.0,
+          "nullable": true,
+          "type": "integer"
+        },
         "override_url": {
           "default": null,
           "description": "Override the `@source(http: {baseURL:})`",
