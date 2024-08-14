@@ -741,7 +741,6 @@ fn compute_plan_internal(
         (main, deferred, primary_selection)
     } else {
         let mut dependency_graph = compute_root_parallel_dependency_graph(parameters, has_defers)?;
-        // panic!("`compute_plan_internal` check point");
 
         let (main, deferred) = dependency_graph.process(&mut *processor, root_kind)?;
         snapshot!(
