@@ -116,7 +116,7 @@ fn echo_method(
         }
     }
     errors.insert(ApplyToError::new(
-        format!("Method ->{} requires one argument", method_name).as_str(),
+        format!("Method ->{} requires one argument", method_name),
         input_path.to_vec(),
     ));
     None
@@ -133,7 +133,7 @@ fn typeof_method(
 ) -> Option<JSON> {
     if let Some(MethodArgs(_)) = method_args {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} does not take any arguments", method_name).as_str(),
+            format!("Method ->{} does not take any arguments", method_name),
             input_path.to_vec(),
         ));
         None
@@ -177,14 +177,14 @@ fn map_method(
             }
         } else {
             errors.insert(ApplyToError::new(
-                format!("Method ->{} requires one argument", method_name).as_str(),
+                format!("Method ->{} requires one argument", method_name),
                 input_path.to_vec(),
             ));
             None
         }
     } else {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} requires one argument", method_name).as_str(),
+            format!("Method ->{} requires one argument", method_name),
             input_path.to_vec(),
         ));
         None
@@ -212,7 +212,7 @@ fn eq_method(
         }
     }
     errors.insert(ApplyToError::new(
-        format!("Method ->{} requires exactly one argument", method_name).as_str(),
+        format!("Method ->{} requires exactly one argument", method_name),
         input_path.to_vec(),
     ));
     None
@@ -257,8 +257,7 @@ fn match_method(
         format!(
             "Method ->{} did not match any [candidate, value] pair",
             method_name
-        )
-        .as_str(),
+        ),
         input_path.to_vec(),
     ));
     None
@@ -299,8 +298,7 @@ fn match_if_method(
         format!(
             "Method ->{} did not match any [condition, value] pair",
             method_name
-        )
-        .as_str(),
+        ),
         input_path.to_vec(),
     ));
     None
@@ -325,14 +323,14 @@ fn arithmetic_method(
                         result = new_result;
                     } else {
                         errors.insert(ApplyToError::new(
-                            format!("Method ->{} failed on argument {}", method_name, n).as_str(),
+                            format!("Method ->{} failed on argument {}", method_name, n),
                             input_path.to_vec(),
                         ));
                         return None;
                     }
                 } else {
                     errors.insert(ApplyToError::new(
-                        format!("Method ->{} requires numeric arguments", method_name).as_str(),
+                        format!("Method ->{} requires numeric arguments", method_name),
                         input_path.to_vec(),
                     ));
                     return None;
@@ -341,14 +339,14 @@ fn arithmetic_method(
             Some(JSON::Number(result))
         } else {
             errors.insert(ApplyToError::new(
-                format!("Method ->{} requires numeric arguments", method_name).as_str(),
+                format!("Method ->{} requires numeric arguments", method_name),
                 input_path.to_vec(),
             ));
             None
         }
     } else {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} requires at least one argument", method_name).as_str(),
+            format!("Method ->{} requires at least one argument", method_name),
             input_path.to_vec(),
         ));
         None
@@ -418,7 +416,7 @@ fn first_method(
 ) -> Option<JSON> {
     if let Some(MethodArgs(_)) = method_args {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} does not take any arguments", method_name).as_str(),
+            format!("Method ->{} does not take any arguments", method_name),
             input_path.to_vec(),
         ));
         return None;
@@ -451,7 +449,7 @@ fn last_method(
 ) -> Option<JSON> {
     if let Some(MethodArgs(_)) = method_args {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} does not take any arguments", method_name).as_str(),
+            format!("Method ->{} does not take any arguments", method_name),
             input_path.to_vec(),
         ));
         return None;
@@ -539,7 +537,7 @@ fn has_method(
             },
             None => {
                 errors.insert(ApplyToError::new(
-                    format!("Method ->{} requires an argument", method_name).as_str(),
+                    format!("Method ->{} requires an argument", method_name),
                     input_path.to_vec(),
                 ));
                 None
@@ -547,7 +545,7 @@ fn has_method(
         }
     } else {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} requires an argument", method_name).as_str(),
+            format!("Method ->{} requires an argument", method_name),
             input_path.to_vec(),
         ));
         None
@@ -582,8 +580,7 @@ fn get_method(
                                 format!(
                                     "Method ->{}({}) array index out of bounds",
                                     method_name, i,
-                                )
-                                .as_str(),
+                                ),
                                 input_path.to_vec(),
                             ));
                             None
@@ -608,8 +605,7 @@ fn get_method(
                                 format!(
                                     "Method ->{}({}) string index out of bounds",
                                     method_name, i,
-                                )
-                                .as_str(),
+                                ),
                                 input_path.to_vec(),
                             ));
                             None
@@ -617,7 +613,7 @@ fn get_method(
                     }
                     (_, None) => {
                         errors.insert(ApplyToError::new(
-                            format!("Method ->{} requires an integer index", method_name).as_str(),
+                            format!("Method ->{} requires an integer index", method_name),
                             input_path.to_vec(),
                         ));
                         None
@@ -628,8 +624,7 @@ fn get_method(
                                 "Method ->{} requires an array or string input, not {}",
                                 method_name,
                                 json_type_name(data),
-                            )
-                            .as_str(),
+                            ),
                             input_path.to_vec(),
                         ));
                         None
@@ -641,8 +636,7 @@ fn get_method(
                             tail.apply_to_path(value, vars, input_path, errors)
                         } else {
                             errors.insert(ApplyToError::new(
-                                format!("Method ->{}({}) object key not found", method_name, key,)
-                                    .as_str(),
+                                format!("Method ->{}({}) object key not found", method_name, key),
                                 input_path.to_vec(),
                             ));
                             None
@@ -650,8 +644,7 @@ fn get_method(
                     }
                     _ => {
                         errors.insert(ApplyToError::new(
-                            format!("Method ->{}({}) requires an object input", method_name, key,)
-                                .as_str(),
+                            format!("Method ->{}({}) requires an object input", method_name, key),
                             input_path.to_vec(),
                         ));
                         None
@@ -662,15 +655,14 @@ fn get_method(
                         format!(
                             "Method ->{}({}) requires an integer or string argument",
                             method_name, value,
-                        )
-                        .as_str(),
+                        ),
                         input_path.to_vec(),
                     ));
                     None
                 }
                 None => {
                     errors.insert(ApplyToError::new(
-                        format!("Method ->{} received undefined argument", method_name).as_str(),
+                        format!("Method ->{} received undefined argument", method_name),
                         input_path.to_vec(),
                     ));
                     None
@@ -678,14 +670,14 @@ fn get_method(
             }
         } else {
             errors.insert(ApplyToError::new(
-                format!("Method ->{} requires an argument", method_name).as_str(),
+                format!("Method ->{} requires an argument", method_name),
                 input_path.to_vec(),
             ));
             None
         }
     } else {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} requires an argument", method_name).as_str(),
+            format!("Method ->{} requires an argument", method_name),
             input_path.to_vec(),
         ));
         None
@@ -707,7 +699,7 @@ fn slice_method(
         s.as_str().len() as i64
     } else {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} requires an array or string input", method_name).as_str(),
+            format!("Method ->{} requires an array or string input", method_name),
             input_path.to_vec(),
         ));
         return None;
@@ -771,7 +763,7 @@ fn size_method(
 ) -> Option<JSON> {
     if let Some(MethodArgs(_)) = method_args {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} does not take any arguments", method_name).as_str(),
+            format!("Method ->{} does not take any arguments", method_name),
             input_path.to_vec(),
         ));
         return None;
@@ -798,8 +790,7 @@ fn size_method(
                     "Method ->{} requires an array, string, or object input, not {}",
                     method_name,
                     json_type_name(data),
-                )
-                .as_str(),
+                ),
                 input_path.to_vec(),
             ));
             None
@@ -818,7 +809,7 @@ fn keys_method(
 ) -> Option<JSON> {
     if let Some(MethodArgs(_)) = method_args {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} does not take any arguments", method_name).as_str(),
+            format!("Method ->{} does not take any arguments", method_name),
             input_path.to_vec(),
         ));
         return None;
@@ -835,8 +826,7 @@ fn keys_method(
                     "Method ->{} requires an object input, not {}",
                     method_name,
                     json_type_name(data),
-                )
-                .as_str(),
+                ),
                 input_path.to_vec(),
             ));
             None
@@ -855,7 +845,7 @@ fn values_method(
 ) -> Option<JSON> {
     if let Some(MethodArgs(_)) = method_args {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} does not take any arguments", method_name).as_str(),
+            format!("Method ->{} does not take any arguments", method_name),
             input_path.to_vec(),
         ));
         return None;
@@ -872,8 +862,7 @@ fn values_method(
                     "Method ->{} requires an object input, not {}",
                     method_name,
                     json_type_name(data),
-                )
-                .as_str(),
+                ),
                 input_path.to_vec(),
             ));
             None
@@ -896,7 +885,7 @@ fn entries_method(
 ) -> Option<JSON> {
     if let Some(MethodArgs(_)) = method_args {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} does not take any arguments", method_name).as_str(),
+            format!("Method ->{} does not take any arguments", method_name),
             input_path.to_vec(),
         ));
         return None;
@@ -921,8 +910,7 @@ fn entries_method(
                     "Method ->{} requires an object input, not {}",
                     method_name,
                     json_type_name(data),
-                )
-                .as_str(),
+                ),
                 input_path.to_vec(),
             ));
             None
@@ -941,7 +929,7 @@ fn not_method(
 ) -> Option<JSON> {
     if method_args.is_some() {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} does not take any arguments", method_name).as_str(),
+            format!("Method ->{} does not take any arguments", method_name),
             input_path.to_vec(),
         ));
         None
@@ -983,7 +971,7 @@ fn or_method(
         tail.apply_to_path(&JSON::Bool(result), vars, input_path, errors)
     } else {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} requires arguments", method_name).as_str(),
+            format!("Method ->{} requires arguments", method_name),
             input_path.to_vec(),
         ));
         None
@@ -1013,7 +1001,7 @@ fn and_method(
         tail.apply_to_path(&JSON::Bool(result), vars, input_path, errors)
     } else {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} requires arguments", method_name).as_str(),
+            format!("Method ->{} requires arguments", method_name),
             input_path.to_vec(),
         ));
         None

@@ -99,9 +99,9 @@ impl Hash for ApplyToError {
 }
 
 impl ApplyToError {
-    pub(crate) fn new(message: &str, path: Vec<JSON>) -> Self {
+    pub(crate) fn new(message: String, path: Vec<JSON>) -> Self {
         Self(json!({
-            "message": message.to_string(),
+            "message": message,
             "path": JSON::Array(path),
         }))
     }
@@ -209,7 +209,7 @@ impl ApplyTo for NamedSelection {
                         "Property {} not found in {}",
                         key.dotted(),
                         json_type_name(data),
-                    ).as_str(),
+                    ),
                     input_path_with_key.to_vec(),
                 ));
             }
@@ -265,8 +265,7 @@ impl ApplyTo for PathSelection {
                                 "Property {} not found in {}",
                                 key.dotted(),
                                 json_type_name(dollar_data),
-                            )
-                            .as_str(),
+                            ),
                             input_path_with_key.to_vec(),
                         ));
                         None
@@ -301,7 +300,7 @@ impl ApplyTo for PathList {
                     tail.apply_to_path(data, vars, input_path, errors)
                 } else {
                     errors.insert(ApplyToError::new(
-                        format!("Variable {} not found", var_name).as_str(),
+                        format!("Variable {} not found", var_name),
                         vec![json!(var_name)],
                     ));
                     None
@@ -320,8 +319,7 @@ impl ApplyTo for PathList {
                             "Property {} not found in {}",
                             key.dotted(),
                             json_type_name(data),
-                        )
-                        .as_str(),
+                        ),
                         input_path_with_key.to_vec(),
                     ));
                     return None;
@@ -338,8 +336,7 @@ impl ApplyTo for PathList {
                             "Property {} not found in {}",
                             key.dotted(),
                             json_type_name(data),
-                        )
-                        .as_str(),
+                        ),
                         input_path_with_key.to_vec(),
                     ));
                     None
@@ -358,7 +355,7 @@ impl ApplyTo for PathList {
                     )
                 } else {
                     errors.insert(ApplyToError::new(
-                        format!("Method ->{} not found", method_name).as_str(),
+                        format!("Method ->{} not found", method_name),
                         input_path.to_vec(),
                     ));
                     None
@@ -389,7 +386,7 @@ impl ApplyTo for JSLiteral {
                     Some(JSON::Number(n))
                 } else {
                     errors.insert(ApplyToError::new(
-                        format!("Invalid number {}", n).as_str(),
+                        format!("Invalid number {}", n),
                         input_path.to_vec(),
                     ));
                     None
