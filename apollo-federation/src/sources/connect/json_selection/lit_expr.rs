@@ -94,7 +94,7 @@ impl LitExpr {
         }
     }
 
-    // LitObject ::= "{" (LitProperty ("," LitProperty)*)? "}"
+    // LitObject ::= "{" (LitProperty ("," LitProperty)* ","?)? "}"
     fn parse_object(input: &str) -> IResult<&str, Self> {
         delimited(
             tuple((spaces_or_comments, char('{'), spaces_or_comments)),
@@ -102,10 +102,11 @@ impl LitExpr {
                 opt(tuple((
                     Self::parse_property,
                     many0(preceded(char(','), Self::parse_property)),
+                    opt(char(',')),
                 ))),
                 |properties| {
                     let mut output = IndexMap::default();
-                    if let Some(((first_key, first_value), rest)) = properties {
+                    if let Some(((first_key, first_value), rest, _trailing_comma)) = properties {
                         output.insert(first_key, first_value);
                         for (key, value) in rest {
                             output.insert(key, value);
@@ -124,7 +125,7 @@ impl LitExpr {
             .map(|(input, (key, _, value))| (input, (key.to_string(), value)))
     }
 
-    // LitArray ::= "[" (LitExpr ("," LitExpr)*)? "]"
+    // LitArray ::= "[" (LitExpr ("," LitExpr)* ","?)? "]"
     fn parse_array(input: &str) -> IResult<&str, Self> {
         delimited(
             tuple((spaces_or_comments, char('['), spaces_or_comments)),
@@ -132,10 +133,11 @@ impl LitExpr {
                 opt(tuple((
                     Self::parse,
                     many0(preceded(char(','), Self::parse)),
+                    opt(char(',')),
                 ))),
                 |elements| {
                     let mut output = vec![];
-                    if let Some((first, rest)) = elements {
+                    if let Some((first, rest, _trailing_comma)) = elements {
                         output.push(first);
                         output.extend(rest);
                     }

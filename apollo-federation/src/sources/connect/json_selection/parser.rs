@@ -697,8 +697,12 @@ impl MethodArgs {
         delimited(
             tuple((spaces_or_comments, char('('), spaces_or_comments)),
             opt(map(
-                tuple((LitExpr::parse, many0(preceded(char(','), LitExpr::parse)))),
-                |(first, rest)| {
+                tuple((
+                    LitExpr::parse,
+                    many0(preceded(char(','), LitExpr::parse)),
+                    opt(char(',')),
+                )),
+                |(first, rest, _trailing_comma)| {
                     let mut output = vec![first];
                     output.extend(rest);
                     output
@@ -1633,9 +1637,8 @@ mod tests {
             },
         );
 
-        check_path_selection(
-            "data->query(.a, .b, .c)",
-            PathSelection {
+        {
+            let expected = PathSelection {
                 path: PathList::Key(
                     Key::Field("data".to_string()),
                     Box::new(PathList::Method(
@@ -1657,12 +1660,16 @@ mod tests {
                         Box::new(PathList::Empty),
                     )),
                 ),
-            },
-        );
+            };
+            check_path_selection("data->query(.a, .b, .c)", expected.clone());
+            check_path_selection("data->query(.a, .b, .c )", expected.clone());
+            check_path_selection("data->query(.a, .b, .c,)", expected.clone());
+            check_path_selection("data->query(.a, .b, .c ,)", expected.clone());
+            check_path_selection("data->query(.a, .b, .c , )", expected.clone());
+        }
 
-        check_path_selection(
-            "data.x->concat([data.y, data.z])",
-            PathSelection {
+        {
+            let expected = PathSelection {
                 path: PathList::Key(
                     Key::Field("data".to_string()),
                     Box::new(PathList::Key(
@@ -1683,8 +1690,14 @@ mod tests {
                         )),
                     )),
                 ),
-            },
-        );
+            };
+            check_path_selection("data.x->concat([data.y, data.z])", expected.clone());
+            check_path_selection("data.x->concat([ data.y, data.z ])", expected.clone());
+            check_path_selection("data.x->concat([data.y, data.z,])", expected.clone());
+            check_path_selection("data.x->concat([data.y, data.z , ])", expected.clone());
+            check_path_selection("data.x->concat([data.y, data.z,],)", expected.clone());
+            check_path_selection("data.x->concat([data.y, data.z , ] , )", expected.clone());
+        }
 
         check_path_selection(
             "data->method([$ { x2: x->times(2) }, $ { y2: y->times(2) }])",

@@ -3,8 +3,8 @@ use apollo_compiler::collections::IndexSet;
 use lazy_static::lazy_static;
 use serde_json_bytes::serde_json::Number;
 use serde_json_bytes::ByteString;
-use serde_json_bytes::Value as JSON;
 use serde_json_bytes::Map as JSONMap;
+use serde_json_bytes::Value as JSON;
 
 use super::helpers::json_type_name;
 use super::immutable::InputPath;
@@ -1098,6 +1098,26 @@ mod tests {
             })),
             (Some(json!(3)), vec![]),
         );
+
+        {
+            let nested_value_data = json!({
+                "nested": {
+                    "value": 123,
+                },
+            });
+
+            let expected = (Some(json!({ "wrapped": 123 })), vec![]);
+
+            let check = |selection: &str| {
+                assert_eq!(selection!(selection).apply_to(&nested_value_data), expected,);
+            };
+
+            check("nested.value->echo({ wrapped: @ })");
+            check("nested.value->echo({ wrapped: @,})");
+            check("nested.value->echo({ wrapped: @,},)");
+            check("nested.value->echo({ wrapped: @},)");
+            check("nested.value->echo({ wrapped: @ , } , )");
+        }
     }
 
     #[test]
