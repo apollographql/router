@@ -1,7 +1,6 @@
-use std::collections::HashMap;
-
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::EnumType;
@@ -41,7 +40,7 @@ macro_rules! propagate_demand_control_directives {
             subgraph_schema: &FederationSchema,
             source: &$directives_ty,
             dest: &mut $directives_ty,
-            original_directive_names: &HashMap<Name, Name>,
+            original_directive_names: &IndexMap<Name, Name>,
         ) -> Result<(), FederationError> {
             let cost_directive_name = original_directive_names.get(&COST_DIRECTIVE_NAME_IN_SPEC);
             let cost_directive = cost_directive_name.and_then(|name| source.get(name.as_str()));
@@ -75,7 +74,7 @@ macro_rules! propagate_demand_control_directives_to_position {
             subgraph_schema: &mut FederationSchema,
             source: &Node<$source_ty>,
             dest: &$dest_ty,
-            original_directive_names: &HashMap<Name, Name>,
+            original_directive_names: &IndexMap<Name, Name>,
         ) -> Result<(), FederationError> {
             let cost_directive_name = original_directive_names.get(&COST_DIRECTIVE_NAME_IN_SPEC);
             let cost_directive =

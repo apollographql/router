@@ -13,8 +13,6 @@
 //! [`Field`], and the selection type is [`FieldSelection`].
 
 use std::borrow::Cow;
-use std::collections::HashMap;
-use std::collections::HashSet;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::hash::Hash;
@@ -103,7 +101,7 @@ pub struct Operation {
 pub(crate) struct NormalizedDefer {
     pub operation: Operation,
     pub has_defers: bool,
-    pub assigned_defer_labels: HashSet<String>,
+    pub assigned_defer_labels: IndexSet<String>,
     pub defer_conditions: IndexMap<String, IndexSet<String>>,
 }
 
@@ -152,7 +150,7 @@ impl Operation {
         NormalizedDefer {
             operation: self,
             has_defers: false,
-            assigned_defer_labels: HashSet::new(),
+            assigned_defer_labels: IndexSet::default(),
             defer_conditions: IndexMap::default(),
         }
         // TODO(@TylerBloom): Once defer is implement, the above statement needs to be replaced
@@ -164,7 +162,7 @@ impl Operation {
             NormalizedDefer {
                 operation: self,
                 has_defers: false,
-                assigned_defer_labels: HashSet::new(),
+                assigned_defer_labels: IndexSet::default(),
                 defer_conditions: IndexMap::default(),
             }
         }
@@ -2652,7 +2650,8 @@ impl SelectionSet {
             return Ok(self.clone());
         }
 
-        let mut at_current_level: HashMap<FetchDataPathElement, &FieldToAlias> = HashMap::new();
+        let mut at_current_level: IndexMap<FetchDataPathElement, &FieldToAlias> =
+            IndexMap::default();
         let mut remaining: Vec<&FieldToAlias> = Vec::new();
 
         for alias in aliases {
@@ -2929,7 +2928,7 @@ fn compute_aliases_for_non_merging_fields(
     alias_collector: &mut Vec<FieldToAlias>,
     schema: &ValidFederationSchema,
 ) -> Result<(), FederationError> {
-    let mut seen_response_names: HashMap<Name, SeenResponseName> = HashMap::new();
+    let mut seen_response_names: IndexMap<Name, SeenResponseName> = IndexMap::default();
 
     // - `s.selections` must be fragment-spread-free.
     fn rebased_fields_in_set(s: &SelectionSetAtPath) -> impl Iterator<Item = FieldInPath> + '_ {
@@ -3061,7 +3060,7 @@ fn compute_aliases_for_non_merging_fields(
     Ok(())
 }
 
-fn gen_alias_name(base_name: &Name, unavailable_names: &HashMap<Name, SeenResponseName>) -> Name {
+fn gen_alias_name(base_name: &Name, unavailable_names: &IndexMap<Name, SeenResponseName>) -> Name {
     let mut counter = 0usize;
     loop {
         if let Ok(name) = Name::try_from(format!("{base_name}__alias_{counter}")) {
@@ -3419,7 +3418,7 @@ impl NamedFragments {
         //       the outcome of `map_to_expanded_selection_sets`.
         let mut fragments_map: IndexMap<Name, FragmentDependencies> = IndexMap::default();
         for fragment in fragments.values() {
-            let mut fragment_usages = HashMap::new();
+            let mut fragment_usages = IndexMap::default();
             NamedFragments::collect_fragment_usages(&fragment.selection_set, &mut fragment_usages);
             let usages: Vec<Name> = fragment_usages.keys().cloned().collect::<Vec<Name>>();
             fragments_map.insert(
@@ -3431,7 +3430,7 @@ impl NamedFragments {
             );
         }
 
-        let mut removed_fragments: HashSet<Name> = HashSet::new();
+        let mut removed_fragments: IndexSet<Name> = IndexSet::default();
         let mut mapped_fragments = NamedFragments::default();
         while !fragments_map.is_empty() {
             // Note that graphQL specifies that named fragments cannot have cycles (https://spec.graphql.org/draft/#sec-Fragment-spreads-must-not-form-cycles)
@@ -3449,7 +3448,7 @@ impl NamedFragments {
                         // JS code has methods for
                         // * add and throw exception if entry already there
                         // * add_if_not_exists
-                        // Rust HashMap exposes insert (that overwrites) and try_insert (that throws)
+                        // Rust IndexMap exposes insert (that overwrites) and try_insert (that throws)
                         mapped_fragments.insert(normalized);
                     } else {
                         removed_fragments.insert(name.clone());
@@ -3465,7 +3464,7 @@ impl NamedFragments {
     /// Just like our `SelectionSet::used_fragments`, but with apollo-compiler types
     fn collect_fragment_usages(
         selection_set: &executable::SelectionSet,
-        aggregator: &mut HashMap<Name, u32>,
+        aggregator: &mut IndexMap<Name, u32>,
     ) {
         selection_set.selections.iter().for_each(|s| match s {
             executable::Selection::Field(f) => {
@@ -3512,7 +3511,7 @@ impl NamedFragments {
 // Collect fragment usages from operation types.
 
 impl Selection {
-    fn collect_used_fragment_names(&self, aggregator: &mut HashMap<Name, u32>) {
+    fn collect_used_fragment_names(&self, aggregator: &mut IndexMap<Name, u32>) {
         match self {
             Selection::Field(field_selection) => {
                 if let Some(s) = &field_selection.selection_set {
@@ -3533,28 +3532,28 @@ impl Selection {
 }
 
 impl SelectionSet {
-    pub(crate) fn collect_used_fragment_names(&self, aggregator: &mut HashMap<Name, u32>) {
+    pub(crate) fn collect_used_fragment_names(&self, aggregator: &mut IndexMap<Name, u32>) {
         for s in self.selections.values() {
             s.collect_used_fragment_names(aggregator);
         }
     }
 
-    pub(crate) fn used_fragments(&self) -> HashMap<Name, u32> {
-        let mut usages = HashMap::new();
+    pub(crate) fn used_fragments(&self) -> IndexMap<Name, u32> {
+        let mut usages = IndexMap::default();
         self.collect_used_fragment_names(&mut usages);
         usages
     }
 }
 
 impl Fragment {
-    pub(crate) fn collect_used_fragment_names(&self, aggregator: &mut HashMap<Name, u32>) {
+    pub(crate) fn collect_used_fragment_names(&self, aggregator: &mut IndexMap<Name, u32>) {
         self.selection_set.collect_used_fragment_names(aggregator)
     }
 }
 
 impl NamedFragments {
     /// Collect the usages of fragments that are used within the selection of other fragments.
-    pub(crate) fn collect_used_fragment_names(&self, aggregator: &mut HashMap<Name, u32>) {
+    pub(crate) fn collect_used_fragment_names(&self, aggregator: &mut IndexMap<Name, u32>) {
         for fragment in self.fragments.values() {
             fragment
                 .selection_set
@@ -3566,7 +3565,7 @@ impl NamedFragments {
 // Collect used variables from operation types.
 
 pub(crate) struct VariableCollector<'s> {
-    variables: HashSet<&'s Name>,
+    variables: IndexSet<&'s Name>,
 }
 
 impl<'s> VariableCollector<'s> {
@@ -3655,14 +3654,14 @@ impl<'s> VariableCollector<'s> {
     }
 
     /// Consume the collector and return the collected names.
-    pub(crate) fn into_inner(self) -> HashSet<&'s Name> {
+    pub(crate) fn into_inner(self) -> IndexSet<&'s Name> {
         self.variables
     }
 }
 
 impl Fragment {
     /// Returns the variable names that are used by this fragment.
-    pub(crate) fn used_variables(&self) -> HashSet<&'_ Name> {
+    pub(crate) fn used_variables(&self) -> IndexSet<&'_ Name> {
         let mut collector = VariableCollector::new();
         collector.visit_directive_list(&self.directives);
         collector.visit_selection_set(&self.selection_set);
@@ -3673,7 +3672,7 @@ impl Fragment {
 impl SelectionSet {
     /// Returns the variable names that are used by this selection set, including through fragment
     /// spreads.
-    pub(crate) fn used_variables(&self) -> HashSet<&'_ Name> {
+    pub(crate) fn used_variables(&self) -> IndexSet<&'_ Name> {
         let mut collector = VariableCollector::new();
         collector.visit_selection_set(self);
         collector.into_inner()
