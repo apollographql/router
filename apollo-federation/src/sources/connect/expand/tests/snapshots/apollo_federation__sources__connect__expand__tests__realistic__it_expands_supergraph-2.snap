@@ -98,6 +98,7 @@ expression: connectors.by_service_name
             },
         ),
         config: None,
+        max_requests: None,
         entity_resolver: None,
     },
     "connectors_Query_usersByCompany_0": Connector {

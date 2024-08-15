@@ -17,6 +17,7 @@ use super::PlanNode;
 use super::QueryPlan;
 use crate::axum_factory::CanceledRequest;
 use crate::error::Error;
+use crate::error::FetchError;
 use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::json_ext::Object;
@@ -254,16 +255,20 @@ impl PlanNode {
                                     .variables(variables)
                                     .current_dir(current_dir.clone())
                                     .build();
-                                (value, errors) = match service.oneshot(request).await {
-                                    Ok(r) => r,
-                                    Err(e) => (
-                                        Value::Null,
-                                        vec![Error::builder()
-                                            .message(format!("{:?}", e))
-                                            .extension_code("FETCH_SERVICE")
-                                            .build()],
-                                    ),
-                                };
+                                (value, errors) =
+                                    match service.oneshot(request).await.map_err(|e| {
+                                        FetchError::SubrequestHttpError {
+                                            status_code: None,
+                                            service: fetch_node.service_name.to_string(),
+                                            reason: e.to_string(),
+                                        }
+                                    }) {
+                                        Ok(r) => r,
+                                        Err(e) => (
+                                            Value::default(),
+                                            vec![e.to_graphql_error(Some(current_dir.to_owned()))],
+                                        ),
+                                    };
                                 FetchNode::deferred_fetches(
                                     current_dir,
                                     &fetch_node.id,

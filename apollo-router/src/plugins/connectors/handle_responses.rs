@@ -9,8 +9,8 @@ use parking_lot::Mutex;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 
+use crate::error::FetchError;
 use crate::graphql;
-use crate::graphql::ErrorExtension;
 use crate::plugins::connectors::http::Response as ConnectorResponse;
 use crate::plugins::connectors::http::Result as ConnectorResult;
 use crate::plugins::connectors::make_requests::ResponseKey;
@@ -46,20 +46,12 @@ pub(crate) async fn handle_responses<T: HttpBody>(
     let mut data = serde_json_bytes::Map::new();
     let mut errors = Vec::new();
     let count = responses.len();
-    struct ErrorInput {
-        message: String,
-        code: String,
-    }
-
     for response in responses {
         let mut error = None;
         let response_key = response.key;
         match response.result {
             ConnectorResult::Err(e) => {
-                error = Some(ErrorInput {
-                    message: e.to_string(),
-                    code: e.extension_code(),
-                })
+                error = Some(e.to_graphql_error(connector, None));
             }
             ConnectorResult::HttpResponse(response) => {
                 let (parts, body) = response.into_parts();
@@ -167,10 +159,18 @@ pub(crate) async fn handle_responses<T: HttpBody>(
                         }
                     }
                 } else {
-                    error = Some(ErrorInput {
-                        message: format!("http error: {}", parts.status),
-                        code: format!("{}", parts.status.as_u16()),
-                    });
+                    error = Some(
+                        FetchError::SubrequestHttpError {
+                            status_code: Some(parts.status.as_u16()),
+                            service: connector.id.label.clone(),
+                            reason: format!(
+                                "{}: {}",
+                                parts.status.as_str(),
+                                parts.status.canonical_reason().unwrap_or("Unknown")
+                            ),
+                        }
+                        .to_graphql_error(None),
+                    );
                     if let Some(ref debug) = debug {
                         match serde_json::from_slice(body) {
                             Ok(json_data) => {
@@ -199,15 +199,7 @@ pub(crate) async fn handle_responses<T: HttpBody>(
                 }
                 _ => {}
             };
-
-            errors.push(
-                graphql::Error::builder()
-                    .message(error.message)
-                    // todo path: ["_entities", i, "???"]
-                    .extension_code(error.code)
-                    .extension("connector", connector.id.label.clone())
-                    .build(),
-            );
+            errors.push(error);
         }
     }
 
@@ -739,29 +731,41 @@ mod tests {
                     path: None,
                     errors: [
                         Error {
-                            message: "http error: 404 Not Found",
+                            message: "HTTP fetch failed from 'test label': 404: Not Found",
                             locations: [],
                             path: None,
                             extensions: {
-                                "connector": String(
+                                "code": String(
+                                    "SUBREQUEST_HTTP_ERROR",
+                                ),
+                                "service": String(
                                     "test label",
                                 ),
-                                "code": String(
-                                    "404",
+                                "reason": String(
+                                    "404: Not Found",
                                 ),
+                                "http": Object({
+                                    "status": Number(404),
+                                }),
                             },
                         },
                         Error {
-                            message: "http error: 500 Internal Server Error",
+                            message: "HTTP fetch failed from 'test label': 500: Internal Server Error",
                             locations: [],
                             path: None,
                             extensions: {
-                                "connector": String(
+                                "code": String(
+                                    "SUBREQUEST_HTTP_ERROR",
+                                ),
+                                "service": String(
                                     "test label",
                                 ),
-                                "code": String(
-                                    "500",
+                                "reason": String(
+                                    "500: Internal Server Error",
                                 ),
+                                "http": Object({
+                                    "status": Number(500),
+                                }),
                             },
                         },
                     ],

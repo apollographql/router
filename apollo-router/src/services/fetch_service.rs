@@ -6,6 +6,7 @@ use std::task::Poll;
 
 use apollo_compiler::validation::Valid;
 use futures::future::BoxFuture;
+use serde_json_bytes::Value;
 use tower::BoxError;
 use tower::ServiceExt;
 use tracing::instrument::Instrumented;
@@ -16,6 +17,7 @@ use super::fetch::BoxService;
 use super::new_service::ServiceFactory;
 use super::ConnectRequest;
 use super::SubgraphRequest;
+use crate::error::FetchError;
 use crate::graphql::Request as GraphQLRequest;
 use crate::http_ext;
 use crate::plugins::subscription::SubscriptionConfig;
@@ -64,6 +66,7 @@ impl tower::Service<FetchRequest> for FetchService {
             Self::fetch_with_connector_service(
                 self.schema.clone(),
                 self.connector_service_factory.clone(),
+                connector.id.subgraph_name.clone(),
                 request,
             )
             .instrument(tracing::info_span!(
@@ -93,6 +96,7 @@ impl FetchService {
     fn fetch_with_connector_service(
         schema: Arc<Schema>,
         connector_service_factory: Arc<ConnectorServiceFactory>,
+        subgraph_name: String,
         request: FetchRequest,
     ) -> BoxFuture<'static, Result<FetchResponse, BoxError>> {
         let FetchRequest {
@@ -108,7 +112,7 @@ impl FetchService {
         let operation = fetch_node.operation.as_parsed().cloned();
 
         Box::pin(async move {
-            let (_parts, response) = connector_service_factory
+            let (_parts, response) = match connector_service_factory
                 .create()
                 .oneshot(
                     ConnectRequest::builder()
@@ -119,9 +123,30 @@ impl FetchService {
                         .variables(variables)
                         .build(),
                 )
-                .await?
-                .response
-                .into_parts();
+                .await
+                .map_err(|e| match e.downcast::<FetchError>() {
+                    Ok(inner) => match *inner {
+                        FetchError::SubrequestHttpError { .. } => *inner,
+                        _ => FetchError::SubrequestHttpError {
+                            status_code: None,
+                            service: subgraph_name,
+                            reason: inner.to_string(),
+                        },
+                    },
+                    Err(e) => FetchError::SubrequestHttpError {
+                        status_code: None,
+                        service: subgraph_name,
+                        reason: e.to_string(),
+                    },
+                }) {
+                Err(e) => {
+                    return Ok((
+                        Value::default(),
+                        vec![e.to_graphql_error(Some(current_dir.to_owned()))],
+                    ));
+                }
+                Ok(res) => res.response.into_parts(),
+            };
 
             let (value, errors) =
                 fetch_node.response_at_path(&schema, &current_dir, paths, response);
