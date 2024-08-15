@@ -1624,11 +1624,40 @@ fn fragment_name(mut index: usize) -> Name {
 #[derive(Debug, Default)]
 struct FragmentGenerator {
     fragments: NamedFragments,
+    // XXX(@goto-bus-stop): This is temporary to support mismatch testing with JS!
+    names: HashMap<(String, usize), usize>,
 }
 
 impl FragmentGenerator {
     fn next_name(&self) -> Name {
         fragment_name(self.fragments.len())
+    }
+
+    // XXX(@goto-bus-stop): This is temporary to support mismatch testing with JS!
+    // In the future, we will just use `.next_name()`.
+    fn generate_name(&mut self, frag: &InlineFragmentSelection) -> Name {
+        use std::fmt::Write as _;
+
+        let type_condition = frag
+            .inline_fragment
+            .type_condition_position
+            .as_ref()
+            .map_or_else(
+                || "undefined".to_string(),
+                |condition| condition.to_string(),
+            );
+        let selections = frag.selection_set.selections.len();
+        let mut name = format!("_generated_on{type_condition}_{selections}");
+
+        let key = (type_condition, selections);
+        let index = self
+            .names
+            .entry(key)
+            .and_modify(|index| *index += 1)
+            .or_default();
+        _ = write!(&mut name, "_{index}");
+
+        Name::new_unchecked(&name)
     }
 
     /// Is a selection set worth using for a newly generated named fragment?
@@ -1697,6 +1726,17 @@ impl FragmentGenerator {
                         continue;
                     };
 
+                    // XXX(@goto-bus-stop): This is temporary to support mismatch testing with JS!
+                    // JS does not special-case @skip and @include. It never extracts a fragment if
+                    // there's any directives on it. This code duplicates the body from the
+                    // previous condition so it's very easy to remove when we're ready :)
+                    if !skip_include.is_empty() {
+                        new_selection_set.add_local_selection(&Selection::InlineFragment(
+                            Arc::clone(candidate.get()),
+                        ))?;
+                        continue;
+                    }
+
                     let existing = self.fragments.iter().find(|existing| {
                         existing.type_condition_position
                             == candidate.get().inline_fragment.casted_type()
@@ -1706,7 +1746,9 @@ impl FragmentGenerator {
                     let existing = if let Some(existing) = existing {
                         existing
                     } else {
-                        let name = self.next_name();
+                        // XXX(@goto-bus-stop): This is temporary to support mismatch testing with JS!
+                        // This should be reverted to `self.next_name();` when we're ready.
+                        let name = self.generate_name(candidate.get());
                         self.fragments.insert(Fragment {
                             schema: selection_set.schema.clone(),
                             name: name.clone(),

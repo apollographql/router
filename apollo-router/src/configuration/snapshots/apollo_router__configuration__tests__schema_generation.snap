@@ -4635,7 +4635,6 @@ expression: "&schema"
         }
       },
       "required": [
-        "format",
         "header_name"
       ],
       "type": "object"
