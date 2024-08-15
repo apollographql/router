@@ -590,6 +590,7 @@ impl QueryPlanner {
             ";
             return Err(SingleFederationError::UnsupportedFeature {
                 message: message.to_owned(),
+                kind: crate::error::UnsupportedFeatureKind::ProgressiveOverrides,
             }
             .into());
         }
@@ -616,6 +617,7 @@ impl QueryPlanner {
             ";
             return Err(SingleFederationError::UnsupportedFeature {
                 message: message.to_owned(),
+                kind: crate::error::UnsupportedFeatureKind::Context,
             }
             .into());
         }
@@ -855,8 +857,9 @@ fn compute_plan_for_defer_conditionals(
     _parameters: &mut QueryPlanningParameters,
     _defer_conditions: IndexMap<String, IndexSet<String>>,
 ) -> Result<Option<PlanNode>, FederationError> {
-    Err(SingleFederationError::Internal {
+    Err(SingleFederationError::UnsupportedFeature {
         message: String::from("@defer is currently not supported"),
+        kind: crate::error::UnsupportedFeatureKind::Defer,
     }
     .into())
 }

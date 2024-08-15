@@ -65,6 +65,10 @@ use crate::Configuration;
 
 pub(crate) const RUST_QP_MODE: &str = "rust";
 const JS_QP_MODE: &str = "js";
+const UNSUPPORTED_CONTEXT: &str = "context";
+const UNSUPPORTED_OVERRIDES: &str = "progressive overrides";
+const UNSUPPORTED_FED1: &str = "fed1";
+const INTERNAL_INIT_ERROR: &str = "internal";
 
 #[derive(Clone)]
 /// A query planner that calls out to the nodejs router-bridge query planner.
@@ -191,6 +195,7 @@ impl PlannerMode {
             debug: Default::default(),
         };
         let result = QueryPlanner::new(schema.federation_supergraph(), config);
+
         if let Err(FederationError::SingleFederationError {
             inner: error,
             trace: _,
@@ -198,17 +203,24 @@ impl PlannerMode {
         {
             match error {
                 SingleFederationError::UnsupportedFederationVersion { .. } => {
-                    // Fed 1
+                    metric_rust_qp_init(Some(UNSUPPORTED_FED1));
                 }
-                SingleFederationError::UnsupportedFeature { .. } => {
-                    // progressive override or setContext
-                }
+                SingleFederationError::UnsupportedFeature { message: _, kind } => match kind {
+                    apollo_federation::error::UnsupportedFeatureKind::ProgressiveOverrides => {
+                        metric_rust_qp_init(Some(UNSUPPORTED_OVERRIDES))
+                    }
+                    apollo_federation::error::UnsupportedFeatureKind::Context => {
+                        metric_rust_qp_init(Some(UNSUPPORTED_CONTEXT))
+                    }
+                    _ => metric_rust_qp_init(Some(INTERNAL_INIT_ERROR)),
+                },
                 _ => {
-                    // Other
+                    metric_rust_qp_init(Some(INTERNAL_INIT_ERROR));
                 }
             }
         }
-        // TODO: add counter metric here with some details about the outcome
+
+        metric_rust_qp_init(None);
         Ok(Arc::new(result?))
     }
 
@@ -992,6 +1004,25 @@ pub(crate) fn metric_query_planning_plan_duration(planner: &'static str, start: 
     );
 }
 
+pub(crate) fn metric_rust_qp_init(init_error_kind: Option<&'static str>) {
+    if let Some(init_error_kind) = init_error_kind {
+        u64_counter!(
+            "apollo.router.lifecycle.query_planner.init",
+            "Rust query planner initialisation failure",
+            1,
+            "init.error_kind" = init_error_kind,
+            "init.is_success" = false
+        );
+    } else {
+        u64_counter!(
+            "apollo.router.lifecycle.query_planner.init",
+            "Rust query planner initialisation failure",
+            1,
+            "init.is_success" = true
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -1632,6 +1663,44 @@ mod tests {
             "apollo.router.query_planning.plan.duration",
             f64,
             "planner" = "js"
+        );
+    }
+
+    #[test]
+    fn test_metric_rust_qp_initialisation() {
+        metric_rust_qp_init(None);
+        assert_counter!(
+            "apollo.router.lifecycle.query_planner.init",
+            1,
+            "init.is_success" = "true"
+        );
+        metric_rust_qp_init(Some(UNSUPPORTED_CONTEXT));
+        assert_counter!(
+            "apollo.router.lifecycle.query_planner.init",
+            1,
+            "init.error_kind" = "context",
+            "init.is_success" = "false"
+        );
+        metric_rust_qp_init(Some(UNSUPPORTED_OVERRIDES));
+        assert_counter!(
+            "apollo.router.lifecycle.query_planner.init",
+            1,
+            "init.error_kind" = "overrides",
+            "init.is_success" = "false"
+        );
+        metric_rust_qp_init(Some(UNSUPPORTED_FED1));
+        assert_counter!(
+            "apollo.router.lifecycle.query_planner.init",
+            1,
+            "init.error_kind" = "fed1",
+            "init.is_success" = "false"
+        );
+        metric_rust_qp_init(Some(INTERNAL_INIT_ERROR));
+        assert_counter!(
+            "apollo.router.lifecycle.query_planner.init",
+            1,
+            "init.error_kind" = "internal",
+            "init.is_success" = "false"
         );
     }
 }
