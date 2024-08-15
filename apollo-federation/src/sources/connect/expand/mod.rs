@@ -25,6 +25,7 @@ use visitors::filter_directives;
 pub struct Connectors {
     pub by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
     pub labels_by_service_name: Arc<IndexMap<Arc<str>, String>>,
+    pub spec_versions: IndexMap<ConnectSpecDefinition, u64>,
 }
 
 /// The result of a supergraph expansion of connect-aware subgraphs
@@ -67,37 +68,42 @@ pub fn expand_connectors(supergraph_str: &str) -> Result<ExpansionResult, Federa
         .into_iter()
         .partition_map(|(_, sub)| {
             match ConnectSpecDefinition::get_from_schema(sub.schema.schema()) {
-                Some((_, link)) if contains_connectors(&link, &sub) => {
-                    either::Either::Left((link, sub))
+                Some((spec, link)) if contains_connectors(&link, &sub) => {
+                    either::Either::Left((spec, link, sub))
                 }
                 _ => either::Either::Right(ValidSubgraph::from(sub)),
             }
         });
 
-    // Expand just the connector subgraphs
-    let connect_subgraphs = connect_subgraphs
-        .into_iter()
-        .map(|(link, sub)| split_subgraph(&link, sub))
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .flatten()
-        .collect_vec();
+    let mut expanded_subgraphs = Vec::new();
+    let mut spec_versions = IndexMap::new();
+
+    for (spec, link, sub) in connect_subgraphs {
+        expanded_subgraphs.extend(split_subgraph(&link, sub)?);
+        spec_versions
+            .entry(spec)
+            .and_modify(|v| *v += 1)
+            .or_insert(1);
+    }
 
     // Merge the subgraphs into one supergraph
     let all_subgraphs = graphql_subgraphs
         .iter()
-        .chain(connect_subgraphs.iter().map(|(_, sub)| sub))
+        .chain(expanded_subgraphs.iter().map(|(_, sub)| sub))
         .collect();
     let new_supergraph = merge_subgraphs(all_subgraphs).map_err(|e| {
         FederationError::internal(format!("could not merge expanded subgraphs: {e:?}"))
     })?;
 
     let mut new_supergraph = FederationSchema::new(new_supergraph.schema.into_inner())?;
-    carryover_directives(&supergraph.schema, &mut new_supergraph).map_err(|e| {
-        FederationError::internal(format!("could not carry over directives: {e:?}"))
-    })?;
+    carryover_directives(
+        &supergraph.schema,
+        &mut new_supergraph,
+        spec_versions.keys().copied(),
+    )
+    .map_err(|e| FederationError::internal(format!("could not carry over directives: {e:?}")))?;
 
-    let connectors_by_service_name: IndexMap<Arc<str>, Connector> = connect_subgraphs
+    let connectors_by_service_name: IndexMap<Arc<str>, Connector> = expanded_subgraphs
         .into_iter()
         .map(|(connector, sub)| (sub.name.into(), connector))
         .collect();
@@ -113,6 +119,7 @@ pub fn expand_connectors(supergraph_str: &str) -> Result<ExpansionResult, Federa
         connectors: Connectors {
             by_service_name: Arc::new(connectors_by_service_name),
             labels_by_service_name: Arc::new(labels_by_service_name),
+            spec_versions,
         },
     })
 }
