@@ -37,16 +37,16 @@ pub trait ApplyTo {
         for (var_name, var_data) in vars {
             vars_with_paths.insert(
                 var_name.to_string(),
-                (var_data, InputPath::Empty.append(json!(var_name))),
+                (var_data, InputPath::empty().append(json!(var_name))),
             );
         }
         // The $ variable initially refers to the root data value, but is
         // rebound by nested selection sets to refer to the root value the
         // selection set was applied to.
-        vars_with_paths.insert("$".to_string(), (data, InputPath::Empty));
+        vars_with_paths.insert("$".to_string(), (data, InputPath::empty()));
         // Using IndexSet over HashSet to preserve the order of the errors.
         let mut errors = IndexSet::default();
-        let value = self.apply_to_path(data, &vars_with_paths, &InputPath::Empty, &mut errors);
+        let value = self.apply_to_path(data, &vars_with_paths, &InputPath::empty(), &mut errors);
         (value, errors.into_iter().collect())
     }
 

@@ -1,24 +1,55 @@
 use std::clone::Clone;
 use std::rc::Rc;
 
-#[derive(Clone)]
-pub enum InputPath<T: Clone> {
-    Empty,
-    Tail(Rc<InputPath<T>>, T),
+#[derive(Debug, Clone)]
+pub struct InputPath<T: Clone> {
+    path: Path<T>,
+}
+
+type Path<T> = Option<Rc<AppendPath<T>>>;
+
+#[derive(Debug, Clone)]
+struct AppendPath<T: Clone> {
+    prefix: Path<T>,
+    last: T,
 }
 
 impl<T: Clone> InputPath<T> {
-    pub fn append(&self, last: T) -> InputPath<T> {
-        InputPath::Tail(Rc::new(self.clone()), last)
+    pub fn empty() -> InputPath<T> {
+        InputPath { path: None }
+    }
+
+    pub fn append(&self, last: T) -> Self {
+        Self {
+            path: Some(Rc::new(AppendPath {
+                prefix: self.path.clone(),
+                last,
+            })),
+        }
     }
 
     pub fn to_vec(&self) -> Vec<T> {
-        match self {
-            InputPath::Empty => vec![],
-            InputPath::Tail(prefix, last) => {
-                let mut prefix = prefix.to_vec();
-                prefix.push(last.clone());
-                prefix
+        // This method needs to be iterative rather than recursive, to be
+        // consistent with the paranoia of the drop method.
+        let mut vec = Vec::new();
+        let mut path = self.path.as_deref();
+        while let Some(p) = path {
+            vec.push(p.last.clone());
+            path = p.prefix.as_deref();
+        }
+        vec.reverse();
+        vec
+    }
+}
+
+impl<T: Clone> Drop for InputPath<T> {
+    fn drop(&mut self) {
+        let mut path = self.path.take();
+        while let Some(rc) = path {
+            if let Ok(mut p) = Rc::try_unwrap(rc) {
+                path = p.prefix.take();
+            } else {
+                break;
             }
         }
     }
