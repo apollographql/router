@@ -6,6 +6,12 @@ description: Distributed caching for GraphOS Router with GraphOS Enterprise. Con
 
 import RedisTLS from '../../shared/redis-tls.mdx'
 
+<SummitCallout
+  topic="graph performance"
+  workshopName="Better, faster, stronger: Advanced configurations to boost your router performance"
+  URL="https://reg.summit.graphql.com/flow/apollo/summit24/AttendeePortal/page/catalog/session/1712947098784001VPCx"
+/>
+
 <EnterpriseFeature linkWithAnchor="https://www.apollographql.com/pricing#graphos-router" />
 
 If you have multiple GraphOS Router instances, those instances can share a Redis-backed cache for their query plans and automatic persisted queries (APQ). This means that if _any_ of your router instances caches a particular value, _all_ of your instances can look up that value to significantly improve responsiveness. For more details on query plans and APQ, see the article on [in-memory caching](./in-memory-caching).
@@ -150,7 +156,7 @@ The `ttl` option defines the default global expiration for Redis entries. For AP
 
 ### Namespace
 
-When using the same Redis instance for multiple purposes, the `namespace` option defines a prefix for all the keys defined by the router.
+When using the same Redis instance for multiple puposes, the `namespace` option defines a prefix for all the keys defined by the router.
 
 ### TLS
 
