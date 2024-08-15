@@ -6,6 +6,7 @@ use apollo_compiler::parser::LineColumn;
 use apollo_compiler::parser::SourceMap;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
+use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
@@ -17,10 +18,13 @@ use super::Code;
 use super::Message;
 use super::Name;
 use super::Value;
-use crate::sources::connect::json_selection::JSONSelectionVisitor;
+use crate::sources::connect::expand::visitors::FieldVisitor;
+use crate::sources::connect::expand::visitors::GroupVisitor;
+use crate::sources::connect::json_selection::NamedSelection;
 use crate::sources::connect::spec::schema::CONNECT_SELECTION_ARGUMENT_NAME;
 use crate::sources::connect::validation::coordinates::connect_directive_http_body_coordinate;
 use crate::sources::connect::JSONSelection;
+use crate::sources::connect::SubSelection;
 
 pub(super) fn validate_selection(
     field: &Component<FieldDefinition>,
@@ -35,17 +39,24 @@ pub(super) fn validate_selection(
         };
 
     let Some(return_type) = schema.get_object(field.ty.inner_named_type()) else {
-        // TODO: Validate scalars
+        // TODO: Validate scalar return types
         return None;
+    };
+    let Some(selection) = json_selection.next_subselection() else {
+        // TODO: Validate scalar selections
+        return None;
+    };
+
+    let group = Group {
+        selection,
+        ty: return_type,
+        definition: field,
     };
 
     SelectionValidator {
         root: PathPart::Root(parent_type),
         schema,
-        path: vec![PathPart::Field {
-            definition: field,
-            ty: return_type,
-        }],
+        path: Vec::new(),
         selection_coordinate: connect_directive_selection_coordinate(
             &connect_directive.name,
             parent_type,
@@ -53,7 +64,7 @@ pub(super) fn validate_selection(
         ),
         selection_location: selection_value.line_column_range(&schema.sources),
     }
-    .walk(&json_selection)
+    .walk(group)
     .err()
 }
 
@@ -168,6 +179,46 @@ struct SelectionValidator<'schema> {
     selection_coordinate: String,
 }
 
+impl SelectionValidator<'_> {
+    fn check_for_circular_reference(
+        &self,
+        field: Field,
+        object: &Node<ObjectType>,
+    ) -> Result<(), Message> {
+        for seen_part in self.path_with_root() {
+            let (seen_type, ancestor_field) = match seen_part {
+                PathPart::Root(root) => (root, None),
+                PathPart::Field { ty, definition } => (ty, Some(definition)),
+            };
+
+            if seen_type == object {
+                return Err(Message {
+                    code: Code::CircularReference,
+                    message: format!(
+                        "Circular reference detected in {coordinate}: type `{new_object_name}` appears more than once in `{selection_path}`. For more information, see https://go.apollo.dev/connectors/limitations#circular-references",
+                        coordinate = &self.selection_coordinate,
+                        selection_path = self.path_string(field.definition),
+                        new_object_name = object.name,
+                    ),
+                    locations:
+                    self.selection_location.iter().cloned()
+                        // Root field includes the selection location, which duplicates the diagnostic
+                        .chain(ancestor_field.and_then(|def| def.line_column_range(&self.schema.sources)))
+                        .chain(field.definition.line_column_range(&self.schema.sources))
+                        .collect(),
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Field<'schema> {
+    selection: &'schema NamedSelection,
+    definition: &'schema Node<FieldDefinition>,
+}
+
 #[derive(Clone, Copy, Debug)]
 enum PathPart<'a> {
     // Query, Mutation, Subscription OR an Entity type
@@ -177,80 +228,126 @@ enum PathPart<'a> {
         ty: &'a Node<ObjectType>,
     },
 }
+
+impl<'a> PathPart<'a> {
+    fn ty(&self) -> &Node<ObjectType> {
+        match self {
+            PathPart::Root(ty) => ty,
+            PathPart::Field { ty, .. } => ty,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct Group<'schema> {
+    selection: &'schema SubSelection,
+    ty: &'schema Node<ObjectType>,
+    definition: &'schema Node<FieldDefinition>,
+}
+
 // TODO: Once there is location data for JSONSelection, return multiple errors instead of stopping
 //  at the first
-impl<'schema> JSONSelectionVisitor for SelectionValidator<'schema> {
-    type Error = Message;
-
-    fn visit(&mut self, _name: &str) -> Result<(), Self::Error> {
-        // TODO: Validate that the field exists
-        Ok(())
+impl<'schema> GroupVisitor<Group<'schema>, Field<'schema>> for SelectionValidator<'schema> {
+    /// If the both the selection and the schema agree that this field is an object, then we
+    /// provide it back to the visitor to be walked.
+    ///
+    /// This does no validation, as we have to do that on the field level anyway.
+    fn try_get_group_for_field(
+        &self,
+        field: &Field<'schema>,
+    ) -> Result<Option<Group<'schema>>, Self::Error> {
+        let Some(selection) = field.selection.next_subselection() else {
+            return Ok(None);
+        };
+        let Some(ty) = self
+            .schema
+            .get_object(field.definition.ty.inner_named_type())
+        else {
+            return Ok(None);
+        };
+        Ok(Some(Group {
+            selection,
+            ty,
+            definition: field.definition,
+        }))
     }
 
-    fn enter_group(&mut self, field_name: &str) -> Result<(), Self::Error> {
-        let parent = self.path.last().copied().unwrap_or(self.root);
-        let parent_type = match parent {
-            PathPart::Root(root) => root,
-            PathPart::Field { ty, .. } => ty,
-        };
-
-        let definition = parent_type.fields.get(field_name).ok_or_else(||  {
-            Message {
-                code: Code::SelectedFieldNotFound,
-                message: format!(
-                    "{coordinate} contains field `{field_name}`, which does not exist on `{parent_type}`.",
-                    coordinate = &self.selection_coordinate,
-                    parent_type = parent_type.name
-                ),
-                locations: self.selection_location.iter().cloned().collect(),
-            }})?;
-
-        let ty = self.schema.get_object(definition.ty.inner_named_type()).ok_or_else(|| {
-            Message {
-                code: Code::GroupSelectionIsNotObject,
-                message: format!(
-                    "{coordinate} selects a group `{field_name}`, but `{parent_type}.{field_name}` is not an object.",
-                    coordinate = &self.selection_coordinate,
-                    parent_type = parent_type.name,
-                ),
-                locations: self.selection_location.iter().cloned().chain(definition.line_column_range(&self.schema.sources)).collect(),
-            }})?;
-
-        for seen_part in self.path_with_root() {
-            let (seen_type, field_def) = match seen_part {
-                PathPart::Root(root) => (root, None),
-                PathPart::Field { ty, definition } => (ty, Some(definition)),
-            };
-
-            if seen_type == ty {
-                return Err(Message {
-                    code: Code::CircularReference,
+    /// Get all the fields for an object type / selection.
+    /// Returns an error if a selection points at a field which does not exist on the schema.
+    fn enter_group(&mut self, group: &Group<'schema>) -> Result<Vec<Field<'schema>>, Self::Error> {
+        self.path.push(PathPart::Field {
+            definition: group.definition,
+            ty: group.ty,
+        });
+        group.selection.selections_iter().map(|selection| {
+            let field_name = selection.name();
+            let definition = group.ty.fields.get(field_name).ok_or_else(|| {
+                Message {
+                    code: Code::SelectedFieldNotFound,
                     message: format!(
-                        "Circular reference detected in {coordinate}: type `{new_object_name}` appears more than once in `{selection_path}`. For more information, see https://go.apollo.dev/connectors/limitations#circular-references",
+                        "{coordinate} contains field `{field_name}`, which does not exist on `{parent_type}`.",
                         coordinate = &self.selection_coordinate,
-                        selection_path = self.path_string(&definition.name),
-                        new_object_name = ty.name,
+                        parent_type = group.ty.name,
                     ),
-                    locations:
-                        self.selection_location.iter().cloned()
-                        // Root field includes the selection location, which duplicates the diagnostic
-                            .chain(field_def.and_then(|def| def.line_column_range(&self.schema.sources)))
-                            .chain(definition.line_column_range(&self.schema.sources))
-                            .collect(),
-                });
-            }
-        }
-        self.path.push(PathPart::Field { definition, ty });
-        Ok(())
+                    locations: self.selection_location.iter().cloned().collect(),
+                }
+            })?;
+            Ok(Field {
+                selection,
+                definition,
+            })
+        }).collect()
     }
 
     fn exit_group(&mut self) -> Result<(), Self::Error> {
         self.path.pop();
         Ok(())
     }
+}
 
-    fn finish(self) -> Result<(), Self::Error> {
-        Ok(())
+impl<'schema> FieldVisitor<Field<'schema>> for SelectionValidator<'schema> {
+    type Error = Message;
+
+    fn visit(&mut self, field: Field<'schema>) -> Result<(), Self::Error> {
+        let field_name = field.definition.name.as_str();
+        let type_name = field.definition.ty.inner_named_type();
+        let field_type = self.schema.types.get(type_name).ok_or_else(|| Message {
+            code: Code::GraphQLError,
+            message: format!(
+                "{coordinate} contains field `{field_name}`, which has undefined type `{type_name}.",
+                coordinate = &self.selection_coordinate,
+            ),
+            locations: self.selection_location.iter().cloned().collect(),
+        })?;
+        let is_group = field.selection.next_subselection().is_some();
+
+        match (field_type, is_group) {
+            (ExtendedType::Object(object), true) => {
+                self.check_for_circular_reference(field, object)
+            },
+            (_, true) => {
+                Err(Message {
+                    code: Code::GroupSelectionIsNotObject,
+                    message: format!(
+                        "{coordinate} selects a group `{field_name}{{}}`, but `{parent_type}.{field_name}` is of type `{type_name}` which is not an object.",
+                        coordinate = &self.selection_coordinate,
+                        parent_type = self.last_field().ty().name,
+                    ),
+                    locations: self.selection_location.iter().cloned().chain(field.definition.line_column_range(&self.schema.sources)).collect(),
+                })
+            },
+            (ExtendedType::Object(_), false) => {
+                Err(Message {
+                    code: Code::GroupSelectionRequiredForObject,
+                    message: format!(
+                        "`{type_name}.{field_name}` is an object, so `{coordinate}` must select a group `{field_name}{{}}`.",
+                        coordinate = &self.selection_coordinate,
+                    ),
+                    locations: self.selection_location.iter().cloned().chain(field.definition.line_column_range(&self.schema.sources)).collect(),
+                })
+            },
+            (_, false) => Ok(()),
+        }
     }
 }
 
@@ -259,13 +356,17 @@ impl SelectionValidator<'_> {
         once(self.root).chain(self.path.iter().copied())
     }
 
-    fn path_string(&self, tail: &str) -> String {
+    fn path_string(&self, tail: &FieldDefinition) -> String {
         self.path_with_root()
             .map(|part| match part {
                 PathPart::Root(ty) => ty.name.as_str(),
                 PathPart::Field { definition, .. } => definition.name.as_str(),
             })
-            .chain(once(tail))
+            .chain(once(tail.name.as_str()))
             .join(".")
+    }
+
+    fn last_field(&self) -> &PathPart {
+        self.path.last().unwrap_or(&self.root)
     }
 }

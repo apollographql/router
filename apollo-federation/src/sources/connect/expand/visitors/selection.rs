@@ -126,17 +126,6 @@ impl FieldVisitor<NamedSelection> for SchemaVisitor<'_, ObjectTypeDefinitionPosi
 impl GroupVisitor<JSONSelectionGroup, NamedSelection>
     for SchemaVisitor<'_, ObjectTypeDefinitionPosition, ObjectType>
 {
-    fn get_group_fields(
-        &self,
-        (_, group): JSONSelectionGroup,
-    ) -> Result<Vec<NamedSelection>, <Self as FieldVisitor<NamedSelection>>::Error> {
-        Ok(group
-            .selections_iter()
-            .sorted_by_key(|s| s.name())
-            .cloned()
-            .collect())
-    }
-
     fn try_get_group_for_field(
         &self,
         field: &NamedSelection,
@@ -163,7 +152,7 @@ impl GroupVisitor<JSONSelectionGroup, NamedSelection>
 
     fn enter_group(
         &mut self,
-        (group_type, group): JSONSelectionGroup,
+        (group_type, group): &JSONSelectionGroup,
     ) -> Result<Vec<NamedSelection>, FederationError> {
         try_pre_insert!(self.to_schema, group_type)?;
         let def = group_type.get(self.original_schema.schema())?;
@@ -177,7 +166,11 @@ impl GroupVisitor<JSONSelectionGroup, NamedSelection>
         };
 
         self.type_stack.push((group_type.clone(), sub_type));
-        self.get_group_fields((group_type, group))
+        Ok(group
+            .selections_iter()
+            .sorted_by_key(|s| s.name())
+            .cloned()
+            .collect())
     }
 
     fn exit_group(&mut self) -> Result<(), FederationError> {

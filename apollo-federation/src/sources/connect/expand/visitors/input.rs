@@ -58,17 +58,6 @@ impl FieldVisitor<InputObjectFieldDefinitionPosition>
 impl GroupVisitor<InputObjectTypeDefinitionPosition, InputObjectFieldDefinitionPosition>
     for SchemaVisitor<'_, InputObjectTypeDefinitionPosition, InputObjectType>
 {
-    fn get_group_fields(
-        &self,
-        group: InputObjectTypeDefinitionPosition,
-    ) -> Result<
-        Vec<InputObjectFieldDefinitionPosition>,
-        <Self as FieldVisitor<InputObjectFieldDefinitionPosition>>::Error,
-    > {
-        let def = group.get(self.original_schema.schema())?;
-        Ok(def.fields.keys().cloned().map(|f| group.field(f)).collect())
-    }
-
     fn try_get_group_for_field(
         &self,
         field: &InputObjectFieldDefinitionPosition,
@@ -91,7 +80,7 @@ impl GroupVisitor<InputObjectTypeDefinitionPosition, InputObjectFieldDefinitionP
 
     fn enter_group<'a>(
         &mut self,
-        group: InputObjectTypeDefinitionPosition,
+        group: &InputObjectTypeDefinitionPosition,
     ) -> Result<Vec<InputObjectFieldDefinitionPosition>, FederationError> {
         try_pre_insert!(self.to_schema, group)?;
 
@@ -104,7 +93,8 @@ impl GroupVisitor<InputObjectTypeDefinitionPosition, InputObjectFieldDefinitionP
         };
 
         self.type_stack.push((group.clone(), output_type));
-        self.get_group_fields(group)
+        let def = group.get(self.original_schema.schema())?;
+        Ok(def.fields.keys().cloned().map(|f| group.field(f)).collect())
     }
 
     fn exit_group(&mut self) -> Result<(), FederationError> {

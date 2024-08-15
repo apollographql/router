@@ -5,7 +5,6 @@ mod parameter_extraction;
 mod parser;
 mod pretty;
 mod selection_set;
-mod visitor;
 
 pub use apply_to::*;
 pub use parameter_extraction::*;
@@ -15,4 +14,3 @@ pub use parser::*;
 // remove the `#[cfg(test)]`.
 #[cfg(test)]
 pub use pretty::*;
-pub use visitor::*;

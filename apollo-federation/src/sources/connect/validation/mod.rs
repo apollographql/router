@@ -348,6 +348,8 @@ pub enum Code {
     UnsupportedAbstractType,
     /// Header does not define `from` or `value`
     MissingHeaderSource,
+    /// Fields that return an object type must use a group JSONSelection `{}`
+    GroupSelectionRequiredForObject,
 }
 
 impl Code {
