@@ -36,8 +36,7 @@ impl HeaderValue {
     /// Replace variable references in the header value with the given variable definitions.
     ///
     /// # Errors
-    /// Returns an error if a variable used in the header value is not defined or if a variable
-    /// value is not a string.
+    /// Returns an error if a variable used in the header value is not defined.
     pub fn interpolate(&self, vars: &Map<ByteString, JSON>) -> Result<String, String> {
         let mut result = String::new();
         for part in &self.parts {

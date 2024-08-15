@@ -277,7 +277,7 @@ async fn max_requests() {
         {
           "message": "Request limit exceeded",
           "extensions": {
-            "connector": "connectors.json http: GET /users/{$args.id!}",
+            "service": "connectors.json http: GET /users/{$args.id!}",
             "code": "REQUEST_LIMIT_EXCEEDED"
           }
         }
@@ -343,7 +343,7 @@ async fn source_max_requests() {
         {
           "message": "Request limit exceeded",
           "extensions": {
-            "connector": "connectors.json http: GET /users/{$args.id!}",
+            "service": "connectors.json http: GET /users/{$args.id!}",
             "code": "REQUEST_LIMIT_EXCEEDED"
           }
         }
@@ -538,10 +538,14 @@ async fn basic_errors() {
       "data": null,
       "errors": [
         {
-          "message": "http error: 404 Not Found",
+          "message": "HTTP fetch failed from 'connectors.json http: GET /users': 404: Not Found",
           "extensions": {
-            "connector": "connectors.json http: GET /users",
-            "code": "404"
+            "code": "SUBREQUEST_HTTP_ERROR",
+            "service": "connectors.json http: GET /users",
+            "reason": "404: Not Found",
+            "http": {
+              "status": 404
+            }
           }
         }
       ]
