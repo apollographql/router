@@ -66,7 +66,7 @@ use crate::Configuration;
 pub(crate) const RUST_QP_MODE: &str = "rust";
 const JS_QP_MODE: &str = "js";
 const UNSUPPORTED_CONTEXT: &str = "context";
-const UNSUPPORTED_OVERRIDES: &str = "progressive overrides";
+const UNSUPPORTED_OVERRIDES: &str = "overrides";
 const UNSUPPORTED_FED1: &str = "fed1";
 const INTERNAL_INIT_ERROR: &str = "internal";
 
