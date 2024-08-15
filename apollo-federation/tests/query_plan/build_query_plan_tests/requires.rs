@@ -1737,7 +1737,6 @@ fn it_handles_multiple_requires_with_multiple_fetches() {
     );
 }
 
-
 #[test]
 fn handles_requires_from_supergraph() {
     // This test verifies that @requires field selection set does not have to be locally satisfiable
