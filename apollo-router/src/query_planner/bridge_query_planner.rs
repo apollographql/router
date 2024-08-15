@@ -1008,7 +1008,7 @@ pub(crate) fn metric_rust_qp_init(init_error_kind: Option<&'static str>) {
     if let Some(init_error_kind) = init_error_kind {
         u64_counter!(
             "apollo.router.lifecycle.query_planner.init",
-            "Rust query planner initialisation",
+            "Rust query planner initialization",
             1,
             "init.error_kind" = init_error_kind,
             "init.is_success" = false
@@ -1016,7 +1016,7 @@ pub(crate) fn metric_rust_qp_init(init_error_kind: Option<&'static str>) {
     } else {
         u64_counter!(
             "apollo.router.lifecycle.query_planner.init",
-            "Rust query planner initialisation",
+            "Rust query planner initialization",
             1,
             "init.is_success" = true
         );
