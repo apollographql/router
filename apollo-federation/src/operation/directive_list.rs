@@ -256,6 +256,30 @@ impl DirectiveList {
         std::iter::once(directive.into()).collect()
     }
 
+    #[cfg(test)]
+    pub(crate) fn parse(input: &str) -> Self {
+        use apollo_compiler::ast;
+        let input = format!(
+            r#"query {{ field
+# Directive input:
+{input}
+#
+}}"#
+        );
+        let mut parser = apollo_compiler::parser::Parser::new();
+        let document = parser
+            .parse_ast(&input, "DirectiveList::parse.graphql")
+            .unwrap();
+        let Some(ast::Definition::OperationDefinition(operation)) = document.definitions.first()
+        else {
+            unreachable!();
+        };
+        let Some(ast::Selection::Field(field)) = operation.selection_set.first() else {
+            unreachable!();
+        };
+        field.directives.clone().into()
+    }
+
     /// Iterate the directives in their original order.
     pub(crate) fn iter(&self) -> impl ExactSizeIterator<Item = &Node<executable::Directive>> {
         self.inner
@@ -343,22 +367,7 @@ impl DirectiveIterSorted<'_> {
 mod tests {
     use std::collections::HashSet;
 
-    use apollo_compiler::name;
-    use apollo_compiler::Name;
-    use apollo_compiler::Node;
-
     use super::*;
-
-    fn directive(
-        name: &str,
-        arguments: Vec<Node<executable::Argument>>,
-    ) -> Node<executable::Directive> {
-        executable::Directive {
-            name: Name::new_unchecked(name),
-            arguments,
-        }
-        .into()
-    }
 
     #[test]
     fn consistent_hash() {
@@ -367,53 +376,35 @@ mod tests {
         assert!(set.insert(DirectiveList::new()));
         assert!(!set.insert(DirectiveList::new()));
 
-        assert!(set.insert(DirectiveList::from_iter([
-            directive("a", Default::default()),
-            directive("b", Default::default()),
-        ])));
-        assert!(!set.insert(DirectiveList::from_iter([
-            directive("b", Default::default()),
-            directive("a", Default::default()),
-        ])));
+        assert!(set.insert(DirectiveList::parse("@a @b")));
+        assert!(!set.insert(DirectiveList::parse("@b @a")));
     }
 
     #[test]
     fn order_independent_equality() {
         assert_eq!(DirectiveList::new(), DirectiveList::new());
         assert_eq!(
-            DirectiveList::from_iter([
-                directive("a", Default::default()),
-                directive("b", Default::default()),
-            ]),
-            DirectiveList::from_iter([
-                directive("b", Default::default()),
-                directive("a", Default::default()),
-            ]),
+            DirectiveList::parse("@a @b"),
+            DirectiveList::parse("@b @a"),
             "equality should be order independent"
         );
 
         assert_eq!(
-            DirectiveList::from_iter([
-                directive(
-                    "a",
-                    vec![(name!("arg1"), true).into(), (name!("arg2"), false).into()]
-                ),
-                directive(
-                    "b",
-                    vec![(name!("arg2"), false).into(), (name!("arg1"), true).into()]
-                ),
-            ]),
-            DirectiveList::from_iter([
-                directive(
-                    "b",
-                    vec![(name!("arg1"), true).into(), (name!("arg2"), false).into()]
-                ),
-                directive(
-                    "a",
-                    vec![(name!("arg1"), true).into(), (name!("arg2"), false).into()]
-                ),
-            ]),
+            DirectiveList::parse("@a(arg1: true, arg2: false) @b(arg2: false, arg1: true)"),
+            DirectiveList::parse("@b(arg1: true, arg2: false) @a(arg1: true, arg2: false)"),
             "arguments should be order independent"
+        );
+
+        assert_eq!(
+            DirectiveList::parse("@nested(object: { a: 1, b: 2, c: 3 })"),
+            DirectiveList::parse("@nested(object: { b: 2, c: 3, a: 1 })"),
+            "input objects should be order independent"
+        );
+
+        assert_eq!(
+            DirectiveList::parse("@nested(object: [true, { a: 1, b: 2, c: { a: 3 } }])"),
+            DirectiveList::parse("@nested(object: [true, { b: 2, c: { a: 3 }, a: 1 }])"),
+            "input objects should be order independent"
         );
     }
 }
