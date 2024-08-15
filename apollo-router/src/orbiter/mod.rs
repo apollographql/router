@@ -126,7 +126,7 @@ impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
     }
 }
 
-fn create_report(configuration: Arc<Configuration>, _schema: Arc<Schema>) -> UsageReport {
+fn create_report(configuration: Arc<Configuration>, schema: Arc<Schema>) -> UsageReport {
     let mut configuration: Value = configuration
         .validated_yaml
         .clone()
@@ -143,6 +143,19 @@ fn create_report(configuration: Arc<Configuration>, _schema: Arc<Schema>) -> Usa
             .map(|plugins| plugins.len())
             .unwrap_or_default() as u64,
     );
+
+    if let Some(connectors) = schema.connectors.as_ref() {
+        usage.insert(
+            "connectors.len".to_string(),
+            connectors.by_service_name.len() as u64,
+        );
+        for (spec, subgraph_count) in &connectors.spec_versions {
+            usage.insert(
+                format!("connectors.subgraphs_with_spec.{}", spec.version_str()),
+                *subgraph_count,
+            );
+        }
+    }
 
     // Make sure the config is an object, but don't fail if it wasn't
     if !configuration.is_object() {
