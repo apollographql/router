@@ -35,7 +35,7 @@ telemetry:
 
 Spans may have attributes attached to them from the router pipeline. These attributes are used to filter and group spans in your APM.
 
-Attributes may be drawn from [standard attributes](./standard-attributes) or [selectors](./selectors). 
+Attributes may be drawn from [standard attributes](/router/configuration/telemetry/instrumentation/standard-attributes) or [selectors](/router/configuration/telemetry/instrumentation/selectors). 
 
 <PremiumFeature>
 
@@ -58,7 +58,7 @@ telemetry:
             response_header: "x-my-header"
 ```
 
-You can also have [conditions](./conditions) on custom attributes using [selectors](./selectors). You can only have conditions on a selector at the same execution level.
+You can also have [conditions](/router/configuration/telemetry/instrumentation/conditions) on custom attributes using [selectors](/router/configuration/telemetry/instrumentation/selectors). You can only have conditions on a selector at the same execution level.
 Example you can't have a condition on `response_header` if you want to set an attribute from `request_header`.
 
 ```yaml title="desc.router.yaml"
@@ -245,8 +245,8 @@ telemetry:
 | Option                                | Values                                                                    | Default                        | Description                              |
 |---------------------------------------|---------------------------------------------------------------------------|--------------------------------|------------------------------------------|
 | `<attribute-name>`                    |                                                                           |                                | The name of the custom attribute.        |
-| `attributes`                          | [standard attributes](./standard-attributes)\|[selectors](./selectors)    |                                | The attributes of the span.              |
-| `condition`                           | [conditions](./conditions)                                                |                                | The condition for adding a custom attribute. |
+| `attributes`                          | [standard attributes](/router/configuration/telemetry/instrumentation/standard-attributes)\|[selectors](/router/configuration/telemetry/instrumentation/selectors)    |                                | The attributes of the span.              |
+| `condition`                           | [conditions](/router/configuration/telemetry/instrumentation/conditions)                                                |                                | The condition for adding a custom attribute. |
 | `default_attribute_requirement_level` | `required`\|`recommended`                                                 | `required`                     | The default attribute requirement level. |
 | `mode`                                | `spec_compliant` \| `deprecated`                                          | `deprecated`                   | The attributes of the span.              |
 

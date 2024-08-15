@@ -6,7 +6,7 @@ description: Attach OpenTelemetry (OTel) standard attributes to Apollo GraphOS R
 
 import RouterServices from '../../../../shared/router-lifecycle-services.mdx';
 
-[OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/) define a set of **standard attributes** that can be attached to [spans](./spans), [instruments](./instruments) and [events](./events). These attributes are used to filter and group data in your application performance monitor (APM).
+[OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/) define a set of **standard attributes** that can be attached to [spans](/router/configuration/telemetry/instrumentation/spans), [instruments](/router/configuration/telemetry/instrumentation/instruments) and [events](/router/configuration/telemetry/instrumentation/events). These attributes are used to filter and group data in your application performance monitor (APM).
 
 The attributes available depend on the service of the router pipeline.
 
@@ -78,9 +78,9 @@ Standard attributes of the `supergraph` service:
 
 | Attribute                   | Values                              | Description                                 |
 |-----------------------------|-------------------------------------|---------------------------------------------|
-| `graphql.operation.name`    |                                     | The operation name from the graphql query (need `spec_compliant` [mode](./spans/#mode) to disable it)   |
+| `graphql.operation.name`    |                                     | The operation name from the graphql query (need `spec_compliant` [mode](/router/configuration/telemetry/instrumentation/spans/#mode) to disable it)   |
 | `graphql.operation.type`    | `query`\|`mutation`\|`subscription` | The operation kind from the subgraph query  |
-| `graphql.document`          |                                     | The GraphQL query to the subgraph (need `spec_compliant` [mode](./spans/#mode) to disable it)          |
+| `graphql.document`          |                                     | The GraphQL query to the subgraph (need `spec_compliant` [mode](/router/configuration/telemetry/instrumentation/spans/#mode) to disable it)          |
 
 
 #### Subgraph
@@ -89,7 +89,7 @@ Standard attributes of the `subgraph` service:
 
 | Attribute                          | Values                              | Description                                    |
 |------------------------------------|-------------------------------------|------------------------------------------------|
-| `subgraph.name`                    |                                     | The name of the subgraph (need `spec_compliant` [mode](./spans/#mode) to disable it)                       |
-| `subgraph.graphql.operation.name`  |                                     | The operation name from the subgraph query  (need `spec_compliant` [mode](./spans/#mode) to disable it)    |
+| `subgraph.name`                    |                                     | The name of the subgraph (need `spec_compliant` [mode](/router/configuration/telemetry/instrumentation/spans/#mode) to disable it)                       |
+| `subgraph.graphql.operation.name`  |                                     | The operation name from the subgraph query  (need `spec_compliant` [mode](/router/configuration/telemetry/instrumentation/spans/#mode) to disable it)    |
 | `subgraph.graphql.operation.type`  | `query`\|`mutation`\|`subscription` | The operation kind from the subgraph query     |
-| `subgraph.graphql.document`        |                                     | The GraphQL query to the subgraph  (need `spec_compliant` [mode](./spans/#mode) to disable it)             |
+| `subgraph.graphql.document`        |                                     | The GraphQL query to the subgraph  (need `spec_compliant` [mode](/router/configuration/telemetry/instrumentation/spans/#mode) to disable it)             |

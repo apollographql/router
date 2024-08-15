@@ -8,7 +8,7 @@ description:  Protect sensitive data by enabling JWT authentication in the Apoll
 
 Authentication is crucial to prevent illegitimate access and protect sensitive data in your graph. The GraphOS Router supports request authentication and key rotation via the [JSON Web Token](https://www.rfc-editor.org/rfc/rfc7519) (**JWT**) and [JSON Web Key](https://www.rfc-editor.org/rfc/rfc7517) (**JWK**) standards. This support is compatible with popular identity providers (**IdPs**) like Okta and Auth0.
 
-By enabling JWT authentication, you can block malicious traffic at the _edge_ of your graph instead of relying on [header forwarding](./header-propagation/) to propagate tokens to your subgraphs.
+By enabling JWT authentication, you can block malicious traffic at the _edge_ of your graph instead of relying on [header forwarding](/router/configuration/header-propagation/) to propagate tokens to your subgraphs.
 
 <Tip>
 
@@ -39,7 +39,7 @@ If you use your own custom IdP, [advanced configuration is required](#creating-y
 
 Otherwise, if you issue JWTs via a popular third-party IdP (Auth0, Okta, PingOne, etc.), enabling JWT authentication in your router is a two step process described below.
 
-1. Set configuration options for JWT authentication in your router's [YAML config file](./overview/#yaml-config-file), under the `authentication` key:
+1. Set configuration options for JWT authentication in your router's [YAML config file](/router/configuration/overview/#yaml-config-file), under the `authentication` key:
 
    ```yaml title="router.yaml"
    authentication:
@@ -254,7 +254,7 @@ fn process_request(request) {
 
 <Tip>
 
-Explicitly listing claims and _always_ setting headers for them is strongly recommended to avoid possible security issues when [forwarding headers](./header-propagation/) to subgraphs.
+Explicitly listing claims and _always_ setting headers for them is strongly recommended to avoid possible security issues when [forwarding headers](/router/configuration/header-propagation/) to subgraphs.
 
 </Tip>
 
@@ -355,7 +355,7 @@ A [`RouterService` coprocessor](../customizations/coprocessor#how-it-works) is a
 - insert additional data in the claims list
 - return the claims list to the router
 
-For example, if you use this [router configuration](./overview#yaml-config-file):
+For example, if you use this [router configuration](/router/configuration/overview#yaml-config-file):
 
 ```yaml title="router.yaml"
 authentication:
@@ -739,13 +739,13 @@ This matching strategy is necessary because some identity providers (IdPs) don't
 
 Because the GraphOS Router handles validating incoming JWTs, you rarely need to pass those JWTs to individual subgraphs in their entirety. Instead, you usually want to [pass JWT _claims_ to subgraphs](#example-forwarding-claims-to-subgraphs-as-headers) to enable fine-grained access control.
 
-If you _do_ need to pass entire JWTs to subgraphs, you can do so via the GraphOS Router's general-purpose [HTTP header propagation settings](./header-propagation).
+If you _do_ need to pass entire JWTs to subgraphs, you can do so via the GraphOS Router's general-purpose [HTTP header propagation settings](/router/configuration/header-propagation).
 
 ## Observability
 
-If your router enables [tracing](./telemetry/exporters/tracing/overview), the JWT authentication plugin has its own tracing span: `authentication_plugin`
+If your router enables [tracing](/router/configuration/telemetry/exporters/tracing/overview), the JWT authentication plugin has its own tracing span: `authentication_plugin`
 
-If your router enables [metrics collection via Prometheus](./telemetry/exporters/metrics/prometheus), the JWT authentication plugin provides and exports the following metrics:
+If your router enables [metrics collection via Prometheus](/router/configuration/telemetry/exporters/metrics/prometheus), the JWT authentication plugin provides and exports the following metrics:
 
 - `apollo_authentication_failure_count`
 - `apollo_authentication_success_count`

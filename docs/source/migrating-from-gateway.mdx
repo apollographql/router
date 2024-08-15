@@ -10,7 +10,7 @@ Learn how to migrate a federated supergraph using the `@apollo/gateway` library 
 
 Whereas `@apollo/gateway` is an npm package, the router is packaged as a _static, standalone binary_. 
 
-The router exposes the most common critical features via declarative configuration. You customize the router with a [YAML configuration file](./configuration/overview/#yaml-config-file) that takes effect at startup. Configurations can be modified and take effect without restart if you either start the router with the `--hot-reload` flag or set the `APOLLO_ROUTER_HOT_RELOAD` environment variable to `true`.
+The router exposes the most common critical features via declarative configuration. You customize the router with a [YAML configuration file](/router/configuration/overview/#yaml-config-file) that takes effect at startup. Configurations can be modified and take effect without restart if you either start the router with the `--hot-reload` flag or set the `APOLLO_ROUTER_HOT_RELOAD` environment variable to `true`.
 
 Although you _can_ download the Apollo Router Core source and use it as a library in a larger project and as the basis for a self-hosted GraphOS Router, you may not need to because the features that were implemented by custom code with `@apollo/gateway` may be standard, supported features of the router.
 
@@ -79,9 +79,9 @@ The [`buildService` function](/apollo-server/using-federation/api/apollo-gateway
 Common use cases include:
 
 * Overriding subgraph URLs at runtime
-    * In the router, you can use the [`override_subgraph_urls` option](./configuration/overview#subgraph-routing-urls).
+    * In the router, you can use the [`override_subgraph_urls` option](/router/configuration/overview#subgraph-routing-urls).
 * Propagating headers to subgraphs via `RemoteGraphQLDataSource`
-    * In the router, you can use the [`headers` option](./configuration/header-propagation).
+    * In the router, you can use the [`headers` option](/router/configuration/header-propagation).
 
 ### `logger`
 
@@ -89,7 +89,7 @@ The [`logger` constructor option](/apollo-server/using-federation/api/apollo-gat
 
 In the router, logging is JSON-structured in production environments by default, and you can adjust the verbosity. More advanced logging can be enabled through the use of [plugins](#plugins).
 
-For more information, see [Logging in the router](./configuration/logging/).
+For more information, see [Logging in the router](/router/configuration/logging/).
 
 ## `ApolloServer` constructor options
 
@@ -107,13 +107,13 @@ This constructor option is an object that enables you to propagate information a
 * Authentication information
 * Header propagation
 
-The router provides [similar functionality](./customizations/rhai-api#requestcontext).
+The router provides [similar functionality](/router/customizations/rhai-api#requestcontext).
 
 ### `plugins`
 
 This constructor option is an array of built-in or custom `plugins` that extend Apollo Server's functionality. If you provide `plugins` to your `ApolloServer` instance, take note of each plugin's functionality and add it to your migration checklist.
 
-Before you attempt to replicate a plugin's functionality via a router [customization](#supported-customizations), check whether any router [configuration options](./configuration/overview/) provide that same functionality. For example, the router supports options for propagating HTTP headers to subgraphs and enabling OpenTelemetry instrumentation.
+Before you attempt to replicate a plugin's functionality via a router [customization](#supported-customizations), check whether any router [configuration options](/router/configuration/overview/) provide that same functionality. For example, the router supports options for propagating HTTP headers to subgraphs and enabling OpenTelemetry instrumentation.
 
 If one of your `@apollo/gateway` plugins _does_ require a corresponding router customization, we encourage you to describe your use case in the router repo's [GitHub discussions](https://github.com/apollographql/router/discussions/). It might represent core functionality that the router _should_ provide out of the box, and we can help discuss the design.
 
@@ -123,15 +123,15 @@ For less common use cases, we also want to help build an ecosystem of shared cus
 
 The router supports two types of customizations that hook into the request-handling pipeline:
 
-* [Rhai scripts](./customizations/rhai/)
+* [Rhai scripts](/router/customizations/rhai/)
     * Rhai is a scripting language designed for use with Rust applications.
-* [External coprocessing](./customizations/coprocessor/)
+* [External coprocessing](/router/customizations/coprocessor/)
 
 Examples for each are provided in their respective documentation, and in the [Router repo](https://github.com/apollographql/router/tree/main/examples).
 
 ## Kubernetes deployment
 
-For migrating to the router deployed on Kubernetes, see some tips for [configuring your router deployment](./containerization/kubernetes/#configure-for-migration-from-gateway).
+For migrating to the router deployed on Kubernetes, see some tips for [configuring your router deployment](/router/containerization/kubernetes/#configure-for-migration-from-gateway).
 
 ## Reporting migration issues
 

@@ -6,11 +6,11 @@ description: Collect and export tracing information from the Apollo GraphOS Rout
 
 The GraphOS Router and Apollo Router Core support collection of traces with [OpenTelemetry](https://opentelemetry.io/), with exporters for:
 
-* [Jaeger](./jaeger)
-* [Zipkin](./zipkin)
-* [Datadog](./datadog)
-* [New Relic](./new-relic)
-* [OpenTelemetry Protocol (OTLP)](./otlp) over HTTP or gRPC
+* [Jaeger](/router/configuration/telemetry/exporters/tracing/jaeger)
+* [Zipkin](/router/configuration/telemetry/exporters/tracing/zipkin)
+* [Datadog](/router/configuration/telemetry/exporters/tracing/datadog)
+* [New Relic](/router/configuration/telemetry/exporters/tracing/new-relic)
+* [OpenTelemetry Protocol (OTLP)](/router/configuration/telemetry/exporters/tracing/otlp) over HTTP or gRPC
 
 The router generates [**spans**](../../instrumentation/spans) that include the various phases of serving a request and associated dependencies. This is useful for showing how response time is affected by:
 

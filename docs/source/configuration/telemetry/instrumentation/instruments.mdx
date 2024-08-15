@@ -63,7 +63,7 @@ telemetry:
 
 ### Apollo standard instruments
 
-To learn about Apollo-provided standard metric instruments for the router's request lifecycle, see [router instruments](./standard-instruments).
+To learn about Apollo-provided standard metric instruments for the router's request lifecycle, see [router instruments](/router/configuration/telemetry/instrumentation/standard-instruments).
 
 ### Custom instruments 
 
@@ -309,7 +309,7 @@ The [service](#router-request-lifecycle-services) you define an instrument on de
 
 <Note>
 
-`event_*` are mandantory when you want to use a [selector](./selectors) on the supergraph response body (`response_data` and `response_errors`).
+`event_*` are mandantory when you want to use a [selector](/router/configuration/telemetry/instrumentation/selectors) on the supergraph response body (`response_data` and `response_errors`).
 
 </Note>
 
@@ -403,7 +403,7 @@ telemetry:
 
 Instruments may have attributes attached to them from the router pipeline. These attributes are used to filter and group metrics in your APM. 
 
-Attributes may be drawn from [standard attributes](./standard-attributes) or [selectors](./selectors) except for the standard metric `http.server.active_requests`.
+Attributes may be drawn from [standard attributes](/router/configuration/telemetry/instrumentation/standard-attributes) or [selectors](/router/configuration/telemetry/instrumentation/selectors) except for the standard metric `http.server.active_requests`.
 
 The attributes available depend on the service of the pipeline.
 
@@ -469,8 +469,8 @@ telemetry:
 |-----------------------------|--------------------------------------------------------------------------------|------------|-----------------------------------------------|
 | `<attribute-name>`          |                                                                                |            | The name of the custom attribute.             |
 | `<instrument-name>`         |                                                                                |            | The name of the custom instrument.            |
-| `attributes`                | [standard attributes](./standard-attributes) or [selectors](./selectors)       |            | The attributes of the custom instrument.      |
-| `condition`                 | [conditions](./conditions)                                                     |            | The condition for mutating the instrument.    |
+| `attributes`                | [standard attributes](/router/configuration/telemetry/instrumentation/standard-attributes) or [selectors](/router/configuration/telemetry/instrumentation/selectors)       |            | The attributes of the custom instrument.      |
+| `condition`                 | [conditions](/router/configuration/telemetry/instrumentation/conditions)                                                     |            | The condition for mutating the instrument.    |
 | `default_requirement_level` | `required`\|`recommended`                                                      | `required` | The default attribute requirement level.      |
 | `type`                      | `counter`\|`histogram`                                                         |            | The name of the custom instrument.            |
 | `unit`                      |                                                                                |            | A unit name, for example `By` or `{request}`. |

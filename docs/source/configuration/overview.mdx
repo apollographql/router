@@ -469,9 +469,9 @@ supergraph:
 
 ### Debugging
 
-- To configure logging, see [Logging in the router](./telemetry/exporters/logging/overview).
+- To configure logging, see [Logging in the router](/router/configuration/telemetry/exporters/logging/overview).
 
-- To configure the inclusion of subgraph errors, see [Subgraph error inclusion](./subgraph-error-inclusion).
+- To configure the inclusion of subgraph errors, see [Subgraph error inclusion](/router/configuration/subgraph-error-inclusion).
 
 ### Landing pages
 
@@ -541,11 +541,11 @@ By default, the router stores the following data in its in-memory cache to impro
 - Automatic persisted queries (APQ)
 - Introspection responses
 
-You can configure certain caching behaviors for generated query plans and APQ (but not introspection responses). For details, see [In-Memory Caching in the router](./in-memory-caching/).
+You can configure certain caching behaviors for generated query plans and APQ (but not introspection responses). For details, see [In-Memory Caching in the router](/router/configuration/in-memory-caching/).
 
 **If you have a GraphOS Enterprise plan:** 
-- You can configure a Redis-backed _distributed_ cache that enables multiple router instances to share cached values. For details, see [Distributed caching in the GraphOS Router](./distributed-caching/).
-- You can configure a Redis-backed _entity_ cache that enables a client query to retrieve cached entity data split between subgraph reponses. For details, see [Subgraph entity caching in the GraphOS Router](./entity-caching/).
+- You can configure a Redis-backed _distributed_ cache that enables multiple router instances to share cached values. For details, see [Distributed caching in the GraphOS Router](/router/configuration/distributed-caching/).
+- You can configure a Redis-backed _entity_ cache that enables a client query to retrieve cached entity data split between subgraph reponses. For details, see [Subgraph entity caching in the GraphOS Router](/router/configuration/entity-caching/).
 
 <MinVersion version="1.44.0">
 
@@ -855,19 +855,19 @@ You won't see an immediate change in checks behavior when you first turn on exte
 
 You can enhance your graph's security with GraphOS Router by maintaining a persisted query list (PQL), an operation safelist made by your first-party apps. As opposed to automatic persisted queries (APQ) where operations are automatically cached, operations must be preregistered to the PQL. Once configured, the router checks incoming requests against the PQL.
 
-See [Safelisting with persisted queries](./persisted-queries) for more information.
+See [Safelisting with persisted queries](/router/configuration/persisted-queries) for more information.
 
 ### HTTP header rules
 
-See [Sending HTTP headers to subgraphs](./header-propagation/).
+See [Sending HTTP headers to subgraphs](/router/configuration/header-propagation/).
 
 ### Traffic shaping
 
-To configure the shape of traffic between clients, routers, and subgraphs, see [Traffic shaping in the router](./traffic-shaping).
+To configure the shape of traffic between clients, routers, and subgraphs, see [Traffic shaping in the router](/router/configuration/traffic-shaping).
 
 ### Cross-Origin Resource Sharing (CORS)
 
-See [Configuring CORS in the router](./cors).
+See [Configuring CORS in the router](/router/configuration/cors).
 
 ### Defer support
 
@@ -883,21 +883,21 @@ See [GraphQL subscriptions in the GraphOS Router](../executing-operations/subscr
 
 ### Authorization support
 
-- To configure authorization directives, see [Authorization directives](./authorization/#authorization-directives).
+- To configure authorization directives, see [Authorization directives](/router/configuration/authorization/#authorization-directives).
 
-- To configure the authorization plugin, see [Configuration options](./authorization/#configuration-options).
+- To configure the authorization plugin, see [Configuration options](/router/configuration/authorization/#configuration-options).
 
 ### JWT authentication
 
-To enable and configure JWT authentication, see [JWT authentication in the GraphOS Router](./authn-jwt).
+To enable and configure JWT authentication, see [JWT authentication in the GraphOS Router](/router/configuration/authn-jwt).
 
 ### Cross-site request forgery (CSRF) prevention
 
-To configure CSRF prevention, see [CSRF prevention in the router](./csrf).
+To configure CSRF prevention, see [CSRF prevention in the router](/router/configuration/csrf).
 
 ### Subgraph authentication
 
-To configure subgraph authentication with AWS SigV4, see a [configuration example](./authn-subgraph/#configuration-example).
+To configure subgraph authentication with AWS SigV4, see a [configuration example](/router/configuration/authn-subgraph/#configuration-example).
 
 ### External coprocessing
 
@@ -907,7 +907,7 @@ See [External coprocessing in the GraphOS Router](../customizations/coprocessor/
 
 The router supports standard and custom instrumentation to collect telemetry data from its request and response processing pipeline to produce logs, metrics and traces to export.
 
-See the [router telemetry overview](./telemetry/overview).
+See the [router telemetry overview](/router/configuration/telemetry/overview).
 
 ### TLS
 
@@ -1051,7 +1051,7 @@ limits:
 
 #### Operation-based limits (Enterprise only)
 
-See [this article](./operation-limits/).
+See [this article](/router/configuration/operation-limits/).
 
 #### Network-based limits
 

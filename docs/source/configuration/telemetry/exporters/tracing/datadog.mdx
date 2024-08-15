@@ -8,7 +8,7 @@ import BatchProcessorRef from '../../../../../shared/batch-processor-ref.mdx';
 
 Enable and configure the [Datadog](https://www.datadoghq.com/) exporter for tracing in the GraphOS Router or Apollo Router Core.
 
-For general tracing configuration, refer to [Router Tracing Configuration](./overview).
+For general tracing configuration, refer to [Router Tracing Configuration](/router/configuration/telemetry/exporters/tracing/overview).
 
 ## OTLP configuration
 
@@ -26,7 +26,7 @@ otlp_config:
         endpoint: <dd-agent-ip>:4317
 ```
 
-To configure the router, enable the [OTLP exporter](./otlp) and set `endpoint: <datadog-agent-endpoint>`. For example: 
+To configure the router, enable the [OTLP exporter](/router/configuration/telemetry/exporters/tracing/otlp) and set `endpoint: <datadog-agent-endpoint>`. For example: 
 
 ```yaml title="router.yaml"
 telemetry:

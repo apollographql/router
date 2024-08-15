@@ -4,11 +4,11 @@ subtitle: APIs for router customizations
 description: This reference documents the symbols and behaviors that are specific to Rhai customizations for the Apollo GraphOS Router and Apollo Router Core. Includes entry point hooks, logging, and more.
 ---
 
-This reference documents the symbols and behaviors that are specific to [Rhai customizations](./rhai/) for the GraphOS Router and Apollo Router Core.
+This reference documents the symbols and behaviors that are specific to [Rhai customizations](/router/customizations/rhai/) for the GraphOS Router and Apollo Router Core.
 
 ## Entry point hooks
 
-Your Rhai script's [main file](./rhai/#the-main-file) hooks into the individual services of the router's [request-handling lifecycle](./rhai/#router-request-lifecycle). To do so, it defines whichever combination of the following entry point hooks it requires:
+Your Rhai script's [main file](/router/customizations/rhai/#the-main-file) hooks into the individual services of the router's [request-handling lifecycle](/router/customizations/rhai/#router-request-lifecycle). To do so, it defines whichever combination of the following entry point hooks it requires:
 
 ```rhai
 fn router_service(service) {}
@@ -17,7 +17,7 @@ fn execution_service(service) {}
 fn subgraph_service(service, subgraph) {}
 ```
 
-Within each hook, you define custom logic to interact with the current active request and/or response as needed. This most commonly involves using methods of the provided `service` object to [register service callbacks](./rhai/#service-callbacks), like so:
+Within each hook, you define custom logic to interact with the current active request and/or response as needed. This most commonly involves using methods of the provided `service` object to [register service callbacks](/router/customizations/rhai/#service-callbacks), like so:
 
 ```rhai title="main.rhai"
 fn supergraph_service(service) {
@@ -114,7 +114,7 @@ fn supergraph_service(service) {
 }
 ```
 
-Rhai throws at the `map_request` layer behave the same as `ControlFlow::Break`, which is explained in the [external extensibility section](./coprocessor/#terminating-a-client-request).
+Rhai throws at the `map_request` layer behave the same as `ControlFlow::Break`, which is explained in the [external extensibility section](/router/customizations/coprocessor/#terminating-a-client-request).
 
 If the supplied status code is not a valid HTTP status code, then a `500` response code will result.
 

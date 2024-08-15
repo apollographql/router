@@ -70,13 +70,13 @@ Follow this guide to enable and configure entity caching in the GraphOS Router.
 To use entity caching in the GraphOS Router, you must set up:
 
 - A Redis instance or cluster that your router instances can communicate with
-- A [GraphOS Enterprise plan](https://www.apollographql.com/pricing/) that [connects your router to GraphOS](./overview/#environment-variables).
+- A [GraphOS Enterprise plan](https://www.apollographql.com/pricing/) that [connects your router to GraphOS](/router/configuration/overview/#environment-variables).
 
 ### Configure router for entity caching
 
 In `router.yaml`, configure `preview_entity_cache`:
 - Enable entity caching globally.
-- Configure Redis using the same conventions described in [distributed caching](./distributed-caching#redis-url-configuration).
+- Configure Redis using the same conventions described in [distributed caching](/router/configuration/distributed-caching#redis-url-configuration).
 - Configure entity caching per subgraph, with overrides per subgraph for disabling entity caching and TTL.
 
 For example:
@@ -137,7 +137,7 @@ To prevent transient errors from affecting the cache for a long duration, subgra
 
 ### Authorization and entity caching
 
-When used alongside the router's [authorization directives](./authorization), cache entries are separated by authorization context. If a query contains fields that need a specific scope, the requests providing that scope have different cache entries from those not providing the scope. This means that data requiring authorization can still be safely cached and even shared across users, without needing invalidation when a user's roles change because their requests are automatically directed to a different part of the cache.
+When used alongside the router's [authorization directives](/router/configuration/authorization), cache entries are separated by authorization context. If a query contains fields that need a specific scope, the requests providing that scope have different cache entries from those not providing the scope. This means that data requiring authorization can still be safely cached and even shared across users, without needing invalidation when a user's roles change because their requests are automatically directed to a different part of the cache.
 
 ### Schema updates and entity caching
 

@@ -92,13 +92,13 @@ Logs record **events** in the router. Examples of logged events include:
 * Warnings about misconfiguration
 * Errors that occurred during a request
 
-Logs can be consumed by [logging exporters](./exporters/logging/overview) and as part of [spans](#traces-and-spans) via [tracing exporters](./exporters/tracing/overview). 
+Logs can be consumed by [logging exporters](/router/configuration/telemetry/exporters/logging/overview) and as part of [spans](#traces-and-spans) via [tracing exporters](/router/configuration/telemetry/exporters/tracing/overview). 
 
 ### Metrics and instruments
 
 Metrics are measurements of the router's behavior that can be exported and monitored. Different kinds of metrics include histograms, gauges, and counts. 
 
-Metrics can be consumed by _exporters_. See [Metrics exporters](./exporters/metrics/overview) for an overview of supported exporters.
+Metrics can be consumed by _exporters_. See [Metrics exporters](/router/configuration/telemetry/exporters/metrics/overview) for an overview of supported exporters.
 
 An individual metric is called an _instrument_. Example instruments of the router include:
 
@@ -106,11 +106,11 @@ An individual metric is called an _instrument_. Example instruments of the route
 * Histogram of request durations
 * Number of in-flight requests
 
-See [Instruments](./instrumentation/instruments) for an overview of available instruments and a guide for configuring and customizing instruments.
+See [Instruments](/router/configuration/telemetry/instrumentation/instruments) for an overview of available instruments and a guide for configuring and customizing instruments.
 
 ### Traces and spans
 
-Traces monitor the flow of a request through the router. A trace is composed of [**spans**](./instrumentation/spans). A span captures a request's duration as it flows through the router request lifecycle. Spans may include contextual information about the request, such as the HTTP status code, or the name of the subgraph being queried.
+Traces monitor the flow of a request through the router. A trace is composed of [**spans**](/router/configuration/telemetry/instrumentation/spans). A span captures a request's duration as it flows through the router request lifecycle. Spans may include contextual information about the request, such as the HTTP status code, or the name of the subgraph being queried.
 
 Examples of spans include:
 
@@ -118,7 +118,7 @@ Examples of spans include:
 * `supergraph` - Wraps a request once GraphQL parsing has taken place
 * `subgraph` - Wraps a request to a subgraph.
 
-Traces are consumed via [tracing exporters](./exporters/tracing/overview).
+Traces are consumed via [tracing exporters](/router/configuration/telemetry/exporters/tracing/overview).
 
 ## Router telemetry exporters
 
@@ -131,7 +131,7 @@ The router exports its collected telemetry in formats compatible with industry-s
 * Jaeger
 * Zipkin
 
-For more information, see [logging exporters](./exporters/logging/overview), [metrics exporters](./exporters/metrics/overview), and [tracing exporters](./exporters/tracing/overview).
+For more information, see [logging exporters](/router/configuration/telemetry/exporters/logging/overview), [metrics exporters](/router/configuration/telemetry/exporters/metrics/overview), and [tracing exporters](/router/configuration/telemetry/exporters/tracing/overview).
 
 ## Router telemetry attributes
 
@@ -143,11 +143,11 @@ Example attributes include:
 * GraphQL operation name
 * Subgraph name
 
-You can use [standard attributes](./instrumentation/standard-attributes) or [selectors](./instrumentation/selectors) as span attributes.
+You can use [standard attributes](/router/configuration/telemetry/instrumentation/standard-attributes) or [selectors](/router/configuration/telemetry/instrumentation/selectors) as span attributes.
 
 <PremiumFeature>
 
-[Custom attributes for spans](./instrumentation/spans/#attributes) require a GraphOS [Dedicated or Enterprise plan](https://www.apollographql.com/pricing#observability).
+[Custom attributes for spans](/router/configuration/telemetry/instrumentation/spans/#attributes) require a GraphOS [Dedicated or Enterprise plan](https://www.apollographql.com/pricing#observability).
 
 </PremiumFeature>
 

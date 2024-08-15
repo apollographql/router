@@ -38,7 +38,7 @@ Your subgraph libraries must support federated tracing (also known as FTV1 traci
 
 By default, the router requests subgraph trace data from operations with a 1% sampling probability per operation. In most cases, this provides a sufficient sample size while minimizing latency for most operations (traces can affect latency because they increase the size of subgraph response payloads).
 
-You can customize your router's trace sampling probability by setting the following options in your [YAML config file](./overview/#yaml-config-file):
+You can customize your router's trace sampling probability by setting the following options in your [YAML config file](/router/configuration/telemetry/overview/#yaml-config-file):
 
 ```yaml title="router.yaml"
 telemetry:
@@ -58,7 +58,7 @@ telemetry:
 
 <Note>
 
-Because field-level instrumentation is dependent on general-purpose [OpenTelemetry tracing](./exporters/tracing/overview), the value of `telemetry.apollo.field_level_instrumentation_sampler` cannot exceed the value of `telemetry.exporters.tracing.common.sampler`.
+Because field-level instrumentation is dependent on general-purpose [OpenTelemetry tracing](/router/configuration/telemetry/exporters/tracing/overview), the value of `telemetry.apollo.field_level_instrumentation_sampler` cannot exceed the value of `telemetry.exporters.tracing.common.sampler`.
 
 </Note>
 

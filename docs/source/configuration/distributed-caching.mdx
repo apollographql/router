@@ -8,14 +8,14 @@ import RedisTLS from '../../shared/redis-tls.mdx'
 
 <EnterpriseFeature linkWithAnchor="https://www.apollographql.com/pricing#graphos-router" />
 
-If you have multiple GraphOS Router instances, those instances can share a Redis-backed cache for their query plans and automatic persisted queries (APQ). This means that if _any_ of your router instances caches a particular value, _all_ of your instances can look up that value to significantly improve responsiveness. For more details on query plans and APQ, see the article on [in-memory caching](./in-memory-caching).
+If you have multiple GraphOS Router instances, those instances can share a Redis-backed cache for their query plans and automatic persisted queries (APQ). This means that if _any_ of your router instances caches a particular value, _all_ of your instances can look up that value to significantly improve responsiveness. For more details on query plans and APQ, see the article on [in-memory caching](/router/configuration/in-memory-caching).
 
 ## Prerequisites
 
 To use this feature:
 
 - You must have a Redis cluster (or single instance) that your router instances can communicate with.
-- You must have a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/) and [connect your router to GraphOS](./overview/#environment-variables).
+- You must have a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/) and [connect your router to GraphOS](/router/configuration/overview/#environment-variables).
 
 ## How it works
 
@@ -83,13 +83,13 @@ or, if configured with multiple URLs:
 
 <Tip>
 
-In your router's YAML config file, **you should specify your Redis URLs via environment variables and [variable expansion](./overview#variable-expansion)**. This prevents your Redis URLs from being committed to version control, which is especially dangerous if they include authentication information like a username and/or password.
+In your router's YAML config file, **you should specify your Redis URLs via environment variables and [variable expansion](/router/configuration/overview#variable-expansion)**. This prevents your Redis URLs from being committed to version control, which is especially dangerous if they include authentication information like a username and/or password.
 
 </Tip>
 
 ### Distributed query plan caching
 
-To enable distributed caching of query plans, add the following to your router's [YAML config file](./overview/#yaml-config-file):
+To enable distributed caching of query plans, add the following to your router's [YAML config file](/router/configuration/overview/#yaml-config-file):
 
 ```yaml title="router.yaml"
 supergraph:
@@ -105,7 +105,7 @@ All query plan cache entries will be prefixed with `plan.` within the distribute
 
 ### Distributed APQ caching
 
-To enable distributed caching of automatic persisted queries (APQ), add the following to your router's [YAML config file](./overview/#yaml-config-file):
+To enable distributed caching of automatic persisted queries (APQ), add the following to your router's [YAML config file](/router/configuration/overview/#yaml-config-file):
 
 ```yaml title="router.yaml"
 apq:
@@ -121,7 +121,7 @@ All APQ cache entries will be prefixed with `apq` followed by a null byte charac
 
 ### Common Redis configuration
 
-Redis configuration is done in the same way for APQ caching, query plan caching and [entity caching](./entity-caching).
+Redis configuration is done in the same way for APQ caching, query plan caching and [entity caching](/router/configuration/entity-caching).
 
 ```yaml title="router.yaml"
 supergraph:

@@ -4,9 +4,9 @@ subtitle: Configure the Datadog exporter for metrics
 description: Configure the Datadog exporter for metrics via OpenTelemetry Protocol (OTLP) in the Apollo GraphOS Router or Apollo Router Core.
 ---
 
-Enable and configure the [OTLP exporter](./otlp) for metrics in the GraphOS Router or Apollo Router Core for use with [Datadog](https://www.datadoghq.com/).
+Enable and configure the [OTLP exporter](/router/configuration/telemetry/exporters/metrics/otlp) for metrics in the GraphOS Router or Apollo Router Core for use with [Datadog](https://www.datadoghq.com/).
 
-For general tracing configuration, refer to [Router Metrics Configuration](./overview).
+For general tracing configuration, refer to [Router Metrics Configuration](/router/configuration/telemetry/exporters/metrics/overview).
 
 ## Datadog configuration
 
@@ -28,7 +28,7 @@ otlp_config:
 ```
 
 ### Router configuration
-To configure the router, enable the [OTLP exporter](./otlp#configuration) and set both `temporality: delta` and `endpoint: <datadog-agent-endpoint>`. For example: 
+To configure the router, enable the [OTLP exporter](/router/configuration/telemetry/exporters/metrics/otlp#configuration) and set both `temporality: delta` and `endpoint: <datadog-agent-endpoint>`. For example: 
 
 ```yaml title="router.yaml"
 telemetry:

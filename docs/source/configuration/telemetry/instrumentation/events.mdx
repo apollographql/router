@@ -60,7 +60,7 @@ telemetry:
         # ...
 ```
 
-But you can also enable these standard events based on [conditions](./conditions) (not supported on batched requests).
+But you can also enable these standard events based on [conditions](/router/configuration/telemetry/instrumentation/conditions) (not supported on batched requests).
 
 For example:
 ```yaml title="router.yaml"
@@ -174,13 +174,13 @@ telemetry:
               - response_status: Code
 ```
 
-For more details, see [Conditions](./conditions).
+For more details, see [Conditions](/router/configuration/telemetry/instrumentation/conditions).
 
 ### `attributes`
 
 Custom events may have attributes attached to them from the router's request lifecycle. These attributes are used to filter and group spans in your APM.
 
-Attributes may be drawn from [standard attributes](./standard-attributes) or [selectors](./selectors).
+Attributes may be drawn from [standard attributes](/router/configuration/telemetry/instrumentation/standard-attributes) or [selectors](/router/configuration/telemetry/instrumentation/selectors).
 The attributes available depend on the service of the request lifecycle.
 
 ```yaml title="future.router.yaml"
@@ -236,8 +236,8 @@ telemetry:
 | Option             | Values                                                                       | Default | Description                                                 |
 |--------------------|------------------------------------------------------------------------------|---------|-------------------------------------------------------------|
 | `<attribute-name>` |                                                                              |         | The name of the custom attribute.                           |
-| `attributes`       | [standard attributes](./standard-attributes) or [selectors](./selectors)     |         | The attributes of the custom log event.                     |
-| `condition`        | [conditions](./conditions)                                                   |         | The condition that must be met for the event to be emitted. |
+| `attributes`       | [standard attributes](/router/configuration/telemetry/instrumentation/standard-attributes) or [selectors](/router/configuration/telemetry/instrumentation/selectors)     |         | The attributes of the custom log event.                     |
+| `condition`        | [conditions](/router/configuration/telemetry/instrumentation/conditions)                                                   |         | The condition that must be met for the event to be emitted. |
 | `error`            | `trace`\|`info`\|`warn`\|`error`\| `off`                                     | `off`   | The level of the error log event.                           |
 | `level`            | `trace`\|`info`\|`warn`\|`error`\| `off`                                     | `off`   | The level of the custom log event.                          |
 | `message`          |                                                                              |         | The message of the custom log event.                        |
