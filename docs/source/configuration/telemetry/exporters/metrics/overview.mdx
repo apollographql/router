@@ -11,7 +11,7 @@ The GraphOS Router and Apollo Router Core support collection of metrics with [Op
 * [Datadog via OTLP](/router/configuration/telemetry/exporters/metrics/datadog)
 * [New Relic via OTLP](/router/configuration/telemetry/exporters/metrics/new-relic)
 
-In [`router.yaml`](../../../overview/#yaml-config-file), you configure router metrics with the following settings:
+In [`router.yaml`](/router/configuration/overview/#yaml-config-file), you configure router metrics with the following settings:
 
 - `telemetry.exporters.metrics.common`. Configure values for the router which are common across metrics exporters.
 - `telemetry.exporters.metrics.prometheus`. Configure the Prometheus exporter.
@@ -31,7 +31,7 @@ Common metrics configuration contains global settings for all exporters:
 
 Set a service name for your router metrics so you can easily locate them in external metrics dashboards. 
 
-The service name can be set by an environment variable or in [`router.yaml`](../../../overview/#yaml-config-file), with the following order of precedence (first to last):
+The service name can be set by an environment variable or in [`router.yaml`](/router/configuration/overview/#yaml-config-file), with the following order of precedence (first to last):
 
 1. `OTEL_SERVICE_NAME` environment variable
 2. `OTEL_RESOURCE_ATTRIBUTES` environment variable
@@ -77,7 +77,7 @@ If the service name isn't explicitly set, it defaults to `unknown_service:router
 
 A resource attribute is a set of key-value pairs that provide additional information to an exporter. It's an attribute of an [OpenTelemetry resource](https://opentelemetry.io/docs/specs/otel/resource/sdk/). Application performance monitors (APM) can interpret and display resource information. 
 
-In [`router.yaml`](../../../overview/#yaml-config-file), resource attributes are set in `telemetry.metrics.common.resource`. For example:
+In [`router.yaml`](/router/configuration/overview/#yaml-config-file), resource attributes are set in `telemetry.metrics.common.resource`. For example:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -94,7 +94,7 @@ For OpenTelemetry conventions for resources, see [Resource Semantic Conventions]
 
 ### `buckets`
 
-You can customize bucket boundaries for all generated histograms by setting `telemetry.exporters.metrics.common.buckets` in [`router.yaml`](../../../overview/#yaml-config-file). For example:
+You can customize bucket boundaries for all generated histograms by setting `telemetry.exporters.metrics.common.buckets` in [`router.yaml`](/router/configuration/overview/#yaml-config-file). For example:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -186,7 +186,7 @@ telemetry:
 
 <Note>
 
-OpenTelemetry includes many [standard attributes](https://opentelemetry.io/docs/specs/semconv/attributes-registry/) that you can use via custom [instruments](../../instrumentation/instruments). 
+OpenTelemetry includes many [standard attributes](https://opentelemetry.io/docs/specs/semconv/attributes-registry/) that you can use via custom [instruments](/router/configuration/telemetry/instrumentation/instruments). 
 
 </Note>
 

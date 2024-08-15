@@ -214,7 +214,7 @@ headers:
 
 ## Response header propagation
 
-It is not currently possible to propagate response headers from subgraphs to clients using YAML configuration alone. However, you _can_ achieve this using [Rhai scripting](../customizations/rhai).
+It is not currently possible to propagate response headers from subgraphs to clients using YAML configuration alone. However, you _can_ achieve this using [Rhai scripting](/router/customizations/rhai).
 
 This approach relies on the fact that each request has a `context` object that can store data for the duration of that request:
 
@@ -264,7 +264,7 @@ If you require a configuration-based solution for response header propagation, [
 
 ## Propagation between subgraphs
 
-It is not currently possible to propagate headers between subgraphs using YAML config alone. However, you _can_ achieve this using [Rhai scripting](../customizations/rhai).
+It is not currently possible to propagate headers between subgraphs using YAML config alone. However, you _can_ achieve this using [Rhai scripting](/router/customizations/rhai).
 
 This approach relies on the fact that each request has a `context` object that can store data for the duration of that request:
 

@@ -61,7 +61,7 @@ The [graph API key](/graphos/api-keys/#graph-api-keys) that the router should us
 
 ## Command-line options
 
-After [installing the Apollo Router Core](../quickstart/) in your current working directory, you can run the router with the following example command:
+After [installing the Apollo Router Core](/router/quickstart/) in your current working directory, you can run the router with the following example command:
 
 ```bash
 ./router --config router.yaml --supergraph supergraph-schema.graphql
@@ -180,9 +180,9 @@ An offline GraphOS Enterprise license. Enables Enterprise router features when d
 
 An offline license is specified either as an absolute or relative path to a license file (`--license <license_path>` or `APOLLO_ROUTER_LICENSE_PATH`), or as the stringified contents of a license (`APOLLO_ROUTER_LICENSE`).
 
-When not set, the router retrieves an Enterprise license [from GraphOS via Apollo Uplink](../enterprise-features/#the-enterprise-license).
+When not set, the router retrieves an Enterprise license [from GraphOS via Apollo Uplink](/router/enterprise-features/#the-enterprise-license).
 
-For information about fetching an offline license and configuring the router, see [Offline Enterprise license](../enterprise-features/#offline-enterprise-license).
+For information about fetching an offline license and configuring the router, see [Offline Enterprise license](/router/enterprise-features/#offline-enterprise-license).
 
 </td>
 </tr>
@@ -531,7 +531,7 @@ In this example, the `organizations` subgraph URL is overridden to point to `htt
 
 Any subgraphs that are _omitted_ from `override_subgraph_url` continue to use the routing URL specified in the supergraph schema.
 
-If you need to override the subgraph URL at runtime on a per-request basis, you can use [request customizations](../customizations/overview/#request-path) in the `SubgraphService` layer.
+If you need to override the subgraph URL at runtime on a per-request basis, you can use [request customizations](/router/customizations/overview/#request-path) in the `SubgraphService` layer.
 
 ### Caching
 
@@ -871,15 +871,15 @@ See [Configuring CORS in the router](/router/configuration/cors).
 
 ### Defer support
 
-See [router support for `@defer`](../executing-operations/defer-support/#disabling-defer).
+See [router support for `@defer`](/router/executing-operations/defer-support/#disabling-defer).
 
 ### Query batching support
 
-See [GraphOS Router's support for query batching](../executing-operations/query-batching).
+See [GraphOS Router's support for query batching](/router/executing-operations/query-batching).
 
 ### Subscription support
 
-See [GraphQL subscriptions in the GraphOS Router](../executing-operations/subscription-support/#router-setup).
+See [GraphQL subscriptions in the GraphOS Router](/router/executing-operations/subscription-support/#router-setup).
 
 ### Authorization support
 
@@ -901,7 +901,7 @@ To configure subgraph authentication with AWS SigV4, see a [configuration exampl
 
 ### External coprocessing
 
-See [External coprocessing in the GraphOS Router](../customizations/coprocessor/).
+See [External coprocessing in the GraphOS Router](/router/customizations/coprocessor/).
 
 ### Telemetry and monitoring
 
@@ -1029,7 +1029,7 @@ The GraphOS Router supports enforcing three types of request limits for enhanced
 
 - Network-based limits
 - Lexical, parser-based limits
-- Semantic, operation-based limits (this is an [Enterprise feature](../enterprise-features/))
+- Semantic, operation-based limits (this is an [Enterprise feature](/router/enterprise-features/))
 
 The router rejects any request that violates at least one of these limits.
 
@@ -1105,7 +1105,7 @@ Note that the router calculates the recursion depth for each operation and fragm
 
 ### Demand control
 
-See [Demand Control](../executing-operations/demand-control) to learn how to analyze the cost of operations and to reject requests with operations that exceed customizable cost limits. 
+See [Demand Control](/router/executing-operations/demand-control) to learn how to analyze the cost of operations and to reject requests with operations that exceed customizable cost limits. 
 
 ### Early cancel
 
@@ -1127,7 +1127,7 @@ supergraph:
 
 ### Plugins
 
-You can customize the router's behavior with [plugins](../customizations/overview). Each plugin can have its own section in the configuration file with arbitrary values:
+You can customize the router's behavior with [plugins](/router/customizations/overview). Each plugin can have its own section in the configuration file with arbitrary values:
 
 ```yaml {4,8} title="example-plugin-router.yaml"
 plugins:

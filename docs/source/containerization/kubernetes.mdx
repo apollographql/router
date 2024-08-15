@@ -46,7 +46,7 @@ The path to the OCI router chart is `oci://ghcr.io/apollographql/helm-charts/rou
 
 </Note>
 
-You customize a deployed router with the same [command-line options and YAML configuration](../configuration/overview) but under different Helm CLI options and YAML keys.  
+You customize a deployed router with the same [command-line options and YAML configuration](/router/configuration/overview) but under different Helm CLI options and YAML keys.  
 
 ## Basic deployment
 
@@ -54,8 +54,8 @@ Follow this guide to deploy the  Router using Helm to install the basic chart pr
 
 Each router chart has a `values.yaml` file with router and deployment settings. The released, unedited file has a few explicit settings, including:
 
-* Default container ports for the router's [HTTP server](../configuration/overview/#listen-address), [health check endpoint](../configuration/health-checks), and [metrics endpoint](../configuration/telemetry/exporters/metrics/overview).
-* A command-line argument to enable [hot reloading of the router](../configuration/overview/#--hr----hot-reload).
+* Default container ports for the router's [HTTP server](/router/configuration/overview/#listen-address), [health check endpoint](/router/configuration/health-checks), and [metrics endpoint](/router/configuration/telemetry/exporters/metrics/overview).
+* A command-line argument to enable [hot reloading of the router](/router/configuration/overview/#--hr----hot-reload).
 * A single replica.
 
 <ExpansionPanel title="Click to expand values.yaml for router v1.31.0">
@@ -113,7 +113,7 @@ To manage the system resources you need to deploy the router on Kubernetes:
 
 ### Set up graph
 
-Set up your self-hosted graph and get its [graph ref](../configuration/overview/#apollo_graph_ref) and [API key](../configuration/overview/#apollo_graph_ref).
+Set up your self-hosted graph and get its [graph ref](/router/configuration/overview/#apollo_graph_ref) and [API key](/router/configuration/overview/#apollo_graph_ref).
 
 If you need a guide to set up your graph, you can follow [the self-hosted router quickstart](/graphos/quickstart/self-hosted) and complete [step 1 (Set up Apollo tools)](/graphos/quickstart/self-hosted/#1-set-up-apollo-tools), [step 4 (Obtain your subgraph schemas)](/graphos/quickstart/self-hosted/#4-obtain-your-subgraph-schemas), and [step 5 (Publish your subgraph schemas)](/graphos/quickstart/self-hosted/#5-publish-your-subgraph-schemas).
 
@@ -126,8 +126,8 @@ helm install --namespace <router-namespace> --set managedFederation.apiKey="<gra
 ```
 The necessary arguments for specific configuration values:
 
-* `--set managedFederation.graphRef="<graph-ref>"`. The reference to your managed graph (`id@variant`), the same value as the [`APOLLO_GRAPH_REF` environment variable](../configuration/overview/#apollo_graph_ref).
-* `--set managedFederation.apiKey="<graph-api-key>"`. The API key to your managed graph, the same value as the [`APOLLO_KEY` environment variable](../configuration/overview/#apollo_key).
+* `--set managedFederation.graphRef="<graph-ref>"`. The reference to your managed graph (`id@variant`), the same value as the [`APOLLO_GRAPH_REF` environment variable](/router/configuration/overview/#apollo_graph_ref).
+* `--set managedFederation.apiKey="<graph-api-key>"`. The API key to your managed graph, the same value as the [`APOLLO_KEY` environment variable](/router/configuration/overview/#apollo_key).
 
 Some optional but recommended arguments:
 
@@ -146,7 +146,7 @@ helm list --namespace <router-namespace>
 
 ## Deploy with metrics endpoints 
 
-The router supports [metrics endpoints for Prometheus and OpenTelemetry protocol (OTLP)](../configuration/telemetry/exporters/metrics/overview). A [basic deployment](#basic-deployment) doesn't enable metrics endpoints, because the router chart disables both Prometheus (explicitly) and OTLP (by omission).
+The router supports [metrics endpoints for Prometheus and OpenTelemetry protocol (OTLP)](/router/configuration/telemetry/exporters/metrics/overview). A [basic deployment](#basic-deployment) doesn't enable metrics endpoints, because the router chart disables both Prometheus (explicitly) and OTLP (by omission).
 
 To enable metrics endpoints in your deployed router through a YAML configuration file:
 
@@ -185,20 +185,20 @@ To enable metrics endpoints in your deployed router through a YAML configuration
 
 ## Deploy with Rhai scripts
 
-The router supports [Rhai scripting](../customizations/rhai) to add custom functionality.
+The router supports [Rhai scripting](/router/customizations/rhai) to add custom functionality.
 
 Enabling Rhai scripts in your deployed router requires mounting an extra volume for your Rhai scripts and getting your scripts onto the volume. That can be done by following steps in [a separate example for creating a custom in-house router chart](https://github.com/apollographql/in-house-router-example). The example creates a new (in-house) chart that wraps (and depends on) the released router chart, and the new chart has templates that add the necessary configuration to allow Rhai scripts for a deployed router.
 
 ## Deploy with a coprocessor
 
-The router supports [external coprocessing](../customizations/coprocessor) to run custom logic on requests throughout the [router's request-handling lifecycle](../customizations/rhai/#router-request-lifecycle).
+The router supports [external coprocessing](/router/customizations/coprocessor) to run custom logic on requests throughout the [router's request-handling lifecycle](/router/customizations/rhai/#router-request-lifecycle).
 
 A deployed coprocessor has its own application image and container in the router pod. 
 
 To configure a coprocessor and its container for your deployed router through a YAML configuration file:
 
 1. Create a YAML file, `my_values.yaml`, to contain additional values that override default values.
-1. Edit `my_values.yaml` to configure a coprocessor for the router. For reference, follow the [typical](../customizations/coprocessor#typical-configuration) and [minimal](../customizations/coprocessor#minimal-configuration)  configuration examples, and apply them to `router.configuration.coprocessor`. 
+1. Edit `my_values.yaml` to configure a coprocessor for the router. For reference, follow the [typical](/router/customizations/coprocessor#typical-configuration) and [minimal](/router/customizations/coprocessor#minimal-configuration)  configuration examples, and apply them to `router.configuration.coprocessor`. 
 
   <ExpansionPanel title="Example of typical configuration for a coprocessor">
 
@@ -248,7 +248,7 @@ This is not specifically a router issue and Istio has instructions on how to man
 
 ## Configure for migration from gateway
 
-When [migrating from `@apollo/gateway` to the router](../migrating-from-gateway), consider the following tips to maximize the compatibility of your router deployment.
+When [migrating from `@apollo/gateway` to the router](/router/migrating-from-gateway), consider the following tips to maximize the compatibility of your router deployment.
 
 ### Increase maximum request bytes
 

@@ -4,7 +4,7 @@ subtitle: Extend your router with custom functionality
 description: Extend the GraphOS Router or Apollo Router Core with custom functionality. Understand the request lifecycle and how customizations intervene at specific points.
 ---
 
-You can create **customizations** for the GraphOS Router or Apollo Router Core to add functionality that isn't available via built-in [configuration options](../configuration/overview/). For example, you can make an external call to fetch authentication data for each incoming request.
+You can create **customizations** for the GraphOS Router or Apollo Router Core to add functionality that isn't available via built-in [configuration options](/router/configuration/overview/). For example, you can make an external call to fetch authentication data for each incoming request.
 
 ## Customization types
 
@@ -12,7 +12,7 @@ The GraphOS Router supports the following customization types:
 
 - [**Rhai scripts**](/router/customizations/rhai/)
     - The [Rhai scripting language](https://rhai.rs/book/) lets you add functionality directly to your stock router binary by hooking into different phases of the router's request lifecycle.
-- [**External co-processing**](/router/customizations/coprocessor/) ([Enterprise feature](../enterprise-features/))
+- [**External co-processing**](/router/customizations/coprocessor/) ([Enterprise feature](/router/enterprise-features/))
     - If your organization has a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/), you can write custom request-handling code in any language. This code can run in the same container as your router or separately.
     - The router calls your custom code via HTTP, passing it the details of each incoming client request.
 

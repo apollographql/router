@@ -87,7 +87,7 @@ batching:
 
 - There are limitations on the ability of the router to preserve batches from the client request into the subgraph requests. In particular, certain forms of queries will require data to be present before they are processed. Consequently, the router will only be able to generate batches from queries which are processed which don't contain such constraints. This may result in the router issuing multiple batches or requests. 
 
-- If [query deduplication](../configuration/traffic-shaping/#query-deduplication) or [entity caching](../configuration/entity-caching) are enabled, they will not apply to batched queries. Batching will take precedence over query deduplication and entity caching. Query deduplication and Entity caching will still be performed for non-batched queries.
+- If [query deduplication](/router/configuration/traffic-shaping/#query-deduplication) or [entity caching](/router/configuration/entity-caching) are enabled, they will not apply to batched queries. Batching will take precedence over query deduplication and entity caching. Query deduplication and Entity caching will still be performed for non-batched queries.
 
 </Note>
 

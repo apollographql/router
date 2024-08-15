@@ -24,7 +24,7 @@ Common use cases for Rhai scripts in routers include:
 
 ## Setup
 
-To enable Rhai scripts in your router, you add the following keys to the router's [YAML config file](../configuration/overview/#yaml-config-file):
+To enable Rhai scripts in your router, you add the following keys to the router's [YAML config file](/router/configuration/overview/#yaml-config-file):
 
 ```yaml title="config.yaml"
 # This is a top-level key. It MUST define at least one of the two
@@ -39,7 +39,7 @@ rhai:
   main: "test.rhai"
 ```
 
-1. Add the `rhai` top-level key to your router's [YAML config file](../configuration/overview/#yaml-config-file).
+1. Add the `rhai` top-level key to your router's [YAML config file](/router/configuration/overview/#yaml-config-file).
     * This key **must** contain at least one of a `scripts` key or a `main` key (see the example above). 
 2. Place all of your Rhai script files in a specific directory.
     * By default, the router looks in the `./rhai` directory (relative to the directory the `router` command is executed from).
@@ -194,7 +194,7 @@ Each service of the router has a corresponding function that a Rhai script can d
 
 Runs at the very beginning and very end of the HTTP request lifecycle.
 
-For example, [JWT authentication](../configuration/authn-jwt) is performed within the `RouterService`.
+For example, [JWT authentication](/router/configuration/authn-jwt) is performed within the `RouterService`.
 
 Define `router_service` if your customization needs to interact with HTTP `context` and `headers`. It doesn't support access to the `body` property (see [this GitHub issue](https://github.com/apollographql/router/issues/3642) for details).
 
@@ -467,7 +467,7 @@ Currently, Rhai scripts _cannot_ do the following:
 * Execute network requests
 * Read or write to disk
 
-If your router customization needs to do any of these, you can instead use [external co-processing](/router/customizations/coprocessor/) (this is an [Enterprise feature](../enterprise-features)).
+If your router customization needs to do any of these, you can instead use [external co-processing](/router/customizations/coprocessor/) (this is an [Enterprise feature](/router/enterprise-features)).
 
 ### Global variables
 

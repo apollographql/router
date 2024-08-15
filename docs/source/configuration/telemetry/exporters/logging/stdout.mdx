@@ -31,7 +31,7 @@ You can configure the logging output format. The default format depends on how t
 * In an interactive shell, [`text`](#text) is the default.
 * In a non-interactive shell, [`json`](#json) is the default.
 
-You can explicitly set the format in [`router.yaml`](../../../overview#yaml-config-file) with `telemetry.exporters.logging.stdout.format`:
+You can explicitly set the format in [`router.yaml`](/router/configuration/overview#yaml-config-file) with `telemetry.exporters.logging.stdout.format`:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -51,7 +51,7 @@ If both `format` and `tty_format` are configured then the output depends on the 
 * In an interactive shell, `tty_format` will take precedence.
 * In a non-interactive shell, `format` will take precedence.
 
-You can explicitly set the format in [`router.yaml`](../../../overview#yaml-config-file) with `telemetry.exporters.logging.stdout.tty_format`:
+You can explicitly set the format in [`router.yaml`](/router/configuration/overview#yaml-config-file) with `telemetry.exporters.logging.stdout.tty_format`:
 
 ```yaml title="router.yaml"
 telemetry:

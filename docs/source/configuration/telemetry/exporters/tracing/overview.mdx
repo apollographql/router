@@ -12,7 +12,7 @@ The GraphOS Router and Apollo Router Core support collection of traces with [Ope
 * [New Relic](/router/configuration/telemetry/exporters/tracing/new-relic)
 * [OpenTelemetry Protocol (OTLP)](/router/configuration/telemetry/exporters/tracing/otlp) over HTTP or gRPC
 
-The router generates [**spans**](../../instrumentation/spans) that include the various phases of serving a request and associated dependencies. This is useful for showing how response time is affected by:
+The router generates [**spans**](/router/configuration/telemetry/instrumentation/spans) that include the various phases of serving a request and associated dependencies. This is useful for showing how response time is affected by:
 
 * Sub-request response times
 * Query shape (sub-request dependencies)
@@ -34,7 +34,7 @@ Common tracing configuration contains global settings for all exporters.
 
 Set a service name for your router traces so you can easily locate them in external metrics dashboards.
 
-The service name can be set by an environment variable or in [`router.yaml`](../../../overview#yaml-config-file), with the following order of precedence (first to last):
+The service name can be set by an environment variable or in [`router.yaml`](/router/configuration/overview#yaml-config-file), with the following order of precedence (first to last):
 
 1. `OTEL_SERVICE_NAME` environment variable
 2. `OTEL_RESOURCE_ATTRIBUTES` environment variable
@@ -80,7 +80,7 @@ If the service name isn't explicitly set, it defaults to `unknown_service:router
 
 A resource attribute is a set of key-value pairs that provide additional information to an exporter. Application performance monitors (APM) may interpret and display resource information. 
 
-In [`router.yaml`](../../../overview#yaml-config-file), resource attributes are set in `telemetry.exporters.tracing.common.resource`. For example:
+In [`router.yaml`](/router/configuration/overview#yaml-config-file), resource attributes are set in `telemetry.exporters.tracing.common.resource`. For example:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -96,7 +96,7 @@ For OpenTelemetry conventions for resources, see [Resource Semantic Conventions]
 
 ### `sampler`
 
-You can configure the sampling rate of traces to match the rate of your application performance monitors (APM). To enable sampling configuration, in [`router.yaml`](../../../overview#yaml-config-file) set `telemetry.exporters.tracing.common.sampler` and `telemetry.exporters.tracing.common.parent_based_sampler`:
+You can configure the sampling rate of traces to match the rate of your application performance monitors (APM). To enable sampling configuration, in [`router.yaml`](/router/configuration/overview#yaml-config-file) set `telemetry.exporters.tracing.common.sampler` and `telemetry.exporters.tracing.common.parent_based_sampler`:
 
 ```yaml title="router.yaml"
 telemetry:

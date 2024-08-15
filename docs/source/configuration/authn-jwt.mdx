@@ -29,7 +29,7 @@ These are the high-level steps of JWT-based authentication with the GraphOS Rout
    - Your router obtains all of its known JWKs from URLs that you specify in its configuration file. Each URL provides its keys within a single JSON object called a [JWK Set](https://www.rfc-editor.org/rfc/rfc7517#section-5) (or a **JWKS**).
    - **If validation fails, the router rejects the request.** This can occur if the JWT is malformed, or if it's been expired for more than 60 seconds (this window accounts for synchronization issues).
 
-5. The router extracts all **claims** from the validated JWT and includes them in the request's context, making them available to your [router customizations](../customizations/overview/), such as Rhai scripts.
+5. The router extracts all **claims** from the validated JWT and includes them in the request's context, making them available to your [router customizations](/router/customizations/overview/), such as Rhai scripts.
 6. Your customizations can handle the request differently depending on the details of the extracted claims, and/or you can propagate the claims to subgraphs to enable more granular access control.
    - For examples, [see below](#working-with-jwt-claims).
 
@@ -215,17 +215,17 @@ authorization:
 
 **Claims** are the individual details of a JWT's scope. They might include details like the ID of the associated user, any roles assigned to that user, and the JWT's expiration time. [See the spec.](https://www.rfc-editor.org/rfc/rfc7519#section-4)
 
-Because claims are added to the context, you can define custom logic for handling each request based on the details of its claims. You can define this logic within a Rhai script or external coprocessor at the supergraph service level (for more on these options, see [Router Customizations](../customizations/overview/)).
+Because claims are added to the context, you can define custom logic for handling each request based on the details of its claims. You can define this logic within a Rhai script or external coprocessor at the supergraph service level (for more on these options, see [Router Customizations](/router/customizations/overview/)).
 
-Below are 2 example [Rhai script](../customizations/rhai/) customizations that demonstrate actions the router can perform based on a request's claims.
+Below are 2 example [Rhai script](/router/customizations/rhai/) customizations that demonstrate actions the router can perform based on a request's claims.
 
 ### Example: Forwarding claims to subgraphs as headers
 
-Below is an example [Rhai script](../customizations/rhai/) that forwards a JWT's claims to individual subgraphs via HTTP headers (one header for each claim). This enables each subgraph to define logic to handle (or potentially reject) incoming requests based on claim details. This function should be imported and run in your [`main.rhai`](#example-mainrhai) file.
+Below is an example [Rhai script](/router/customizations/rhai/) that forwards a JWT's claims to individual subgraphs via HTTP headers (one header for each claim). This enables each subgraph to define logic to handle (or potentially reject) incoming requests based on claim details. This function should be imported and run in your [`main.rhai`](#example-mainrhai) file.
 
 <Note>
 
-This script should be run in the router's `SubgraphService`, which executes before the router sends a subquery to an individual subgraph. [Learn more about router services.](../customizations/rhai#router-request-lifecycle)
+This script should be run in the router's `SubgraphService`, which executes before the router sends a subquery to an individual subgraph. [Learn more about router services.](/router/customizations/rhai#router-request-lifecycle)
 
 </Note>
 
@@ -260,11 +260,11 @@ Explicitly listing claims and _always_ setting headers for them is strongly reco
 
 ### Example: Forwarding claims to subgraphs as GraphQL extensions
 
-Below is an example [Rhai script](../customizations/rhai/) that forwards a JWT's claims to individual subgraphs via GraphQL extension. This enables each subgraph to define logic to handle (or potentially reject) incoming requests based on claim details. This function should be imported and run in your [`main.rhai`](#example-mainrhai) file.
+Below is an example [Rhai script](/router/customizations/rhai/) that forwards a JWT's claims to individual subgraphs via GraphQL extension. This enables each subgraph to define logic to handle (or potentially reject) incoming requests based on claim details. This function should be imported and run in your [`main.rhai`](#example-mainrhai) file.
 
 <Note>
 
-This script should be run in the router's `SubgraphService`, which executes before the router sends a subquery to an individual subgraph. [Learn more about router services.](../customizations/rhai#router-request-lifecycle)
+This script should be run in the router's `SubgraphService`, which executes before the router sends a subquery to an individual subgraph. [Learn more about router services.](/router/customizations/rhai#router-request-lifecycle)
 
 </Note>
 
@@ -286,11 +286,11 @@ fn process_request(request) {
 
 ### Example: Throwing errors for invalid claims
 
-Below is an example [Rhai script](../customizations/rhai/) that throws distinct errors for different invalid JWT claim details. This function should be imported and run in your [`main.rhai`](#example-mainrhai) file.
+Below is an example [Rhai script](/router/customizations/rhai/) that throws distinct errors for different invalid JWT claim details. This function should be imported and run in your [`main.rhai`](#example-mainrhai) file.
 
 <Note>
 
-This script should be run in the router's `SupergraphService`, which executes before the router begins generating the query plan for an operation. [Learn more about router services.](../customizations/rhai#router-request-lifecycle)
+This script should be run in the router's `SupergraphService`, which executes before the router begins generating the query plan for an operation. [Learn more about router services.](/router/customizations/rhai#router-request-lifecycle)
 
 </Note>
 
@@ -315,7 +315,7 @@ fn process_request(request) {
 
 ### Example `main.rhai`
 
-In order to use the above Rhai examples, you must import them into your [`main.rhai`](../customizations/rhai#the-main-file) like this:
+In order to use the above Rhai examples, you must import them into your [`main.rhai`](/router/customizations/rhai#the-main-file) like this:
 
 <ExpansionPanel title="Click to expand">
 
@@ -344,11 +344,11 @@ fn subgraph_service(service, subgraph) {
 
 ### Claim augmentation via coprocessors
 
-You may require information beyond what your JSON web tokens provide. For example, a token's claims may include user IDs, which you then use to look up user roles. For situations like this, you can augment the claims from your JSON web tokens with [coprocessors](../customizations/coprocessor#how-it-works).
+You may require information beyond what your JSON web tokens provide. For example, a token's claims may include user IDs, which you then use to look up user roles. For situations like this, you can augment the claims from your JSON web tokens with [coprocessors](/router/customizations/coprocessor#how-it-works).
 
 <ExpansionPanel title="Click to expand">
 
-A [`RouterService` coprocessor](../customizations/coprocessor#how-it-works) is appropriate for augmenting claims since the router calls it directly after receiving a client request. The router calls it after the JWT authentication plugin, so you can use a `RouterService` coprocessor to:
+A [`RouterService` coprocessor](/router/customizations/coprocessor#how-it-works) is appropriate for augmenting claims since the router calls it directly after receiving a client request. The router calls it after the JWT authentication plugin, so you can use a `RouterService` coprocessor to:
 
 - receive the list of claims extracted from the JWT
 - use information like the `sub` (subject) claim to look up the user in an external database or service
@@ -411,7 +411,7 @@ The coprocessor can then look up the user with the identifier specified in the `
 }
 ```
 
-For more information, refer to [the coprocessor documentation](../customizations/coprocessor/).
+For more information, refer to [the coprocessor documentation](/router/customizations/coprocessor/).
 
 </ExpansionPanel>
 

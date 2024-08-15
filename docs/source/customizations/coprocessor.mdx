@@ -68,9 +68,9 @@ If your coprocessor hooks into your router's `SubgraphService`, the router sends
 
 ## Setup
 
-First, make sure your router is [connected to a GraphOS Enterprise organization](../enterprise-features/#enabling-enterprise-features).
+First, make sure your router is [connected to a GraphOS Enterprise organization](/router/enterprise-features/#enabling-enterprise-features).
 
-You configure external coprocessing in your router's [YAML config file](../configuration/overview/#yaml-config-file), under the `coprocessor` key.
+You configure external coprocessing in your router's [YAML config file](/router/configuration/overview/#yaml-config-file), under the `coprocessor` key.
 
 ### Typical configuration
 
@@ -94,7 +94,7 @@ In this case, the `RouterService` only sends a coprocessor request whenever it r
 
 ### Conditions
 
-You can define [conditions](../configuration/telemetry/instrumentation/conditions) for a stage of the request lifecycle that you want to run the coprocessor. You can set coprocessor conditions with [selectors](../configuration//telemetry//instrumentation/selectors) based on headers or context entries.
+You can define [conditions](/router/configuration/telemetry/instrumentation/conditions) for a stage of the request lifecycle that you want to run the coprocessor. You can set coprocessor conditions with [selectors](/router/configuration//telemetry//instrumentation/selectors) based on headers or context entries.
 
 <Note>
 
@@ -837,7 +837,7 @@ This field's structure depends on whether the coprocessor request corresponds to
 - **If a standard response,** `body` usually contains `data` and/or `errors` properties for the GraphQL operation result.
 - **If a response "chunk",** `body` contains `data` for _some_ of the operation fields.
 
-By default, the `RouterResponse` stage returns _redacted_ errors within the `errors` field. To process subgraph errors manually in your coprocessor, enable [subgraph error inclusion](../configuration/subgraph-error-inclusion).
+By default, the `RouterResponse` stage returns _redacted_ errors within the `errors` field. To process subgraph errors manually in your coprocessor, enable [subgraph error inclusion](/router/configuration/subgraph-error-inclusion).
 
 </td>
 </tr>
@@ -1129,7 +1129,7 @@ If a request to a coprocessor results in a **failed response**, which is seperat
 
 ## Handling deferred query responses
 
-GraphOS Router and Apollo Router Core support the incremental delivery of query response data via [the `@defer` directive](../executing-operations/defer-support/):
+GraphOS Router and Apollo Router Core support the incremental delivery of query response data via [the `@defer` directive](/router/executing-operations/defer-support/):
 
 ```mermaid
 sequenceDiagram
@@ -1210,7 +1210,7 @@ Subsequent response chunks omit the `headers` and `statusCode` fields:
 
 ## Adding authorization claims via coprocessor
 
-To use the [authorization directives](../configuration/authorization#authorization-directives), a request needs to include **claims**—the details of its authentication and scope. The most straightforward way to add claims is with [JWT authentication](../configuration/./authn-jwt). You can also add claims with a [`RouterService` or `SupergraphService` coprocessor](#how-it-works) since they hook into the request lifecycle before the router applies authorization logic.
+To use the [authorization directives](/router/configuration/authorization#authorization-directives), a request needs to include **claims**—the details of its authentication and scope. The most straightforward way to add claims is with [JWT authentication](/router/configuration/./authn-jwt). You can also add claims with a [`RouterService` or `SupergraphService` coprocessor](#how-it-works) since they hook into the request lifecycle before the router applies authorization logic.
 
 An example configuration of the router calling a coprocessor for authorization claims:
 
@@ -1239,7 +1239,7 @@ This configuration prompts the router to send an HTTP POST request to your copro
 }
 ```
 
-When your coprocessor receives this request from the router, it should add claims to the request's [`context`](#context) and return them in the response to the router. Specifically, the coprocessor should add an entry with a claims object. The key must be `apollo_authentication::JWT::claims`, and the value should be the claims required by the authorization directives you intend to use. For example, if you want to use [`@requireScopes`](../configuration/authorization#requiresscopes), the response may look something like this:
+When your coprocessor receives this request from the router, it should add claims to the request's [`context`](#context) and return them in the response to the router. Specifically, the coprocessor should add an entry with a claims object. The key must be `apollo_authentication::JWT::claims`, and the value should be the claims required by the authorization directives you intend to use. For example, if you want to use [`@requireScopes`](/router/configuration/authorization#requiresscopes), the response may look something like this:
 
 ```json
 {
