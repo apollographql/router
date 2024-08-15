@@ -1,4 +1,4 @@
-# Composed from subgraphs with hash: 36dd36e8bdeee340c1bc4be4e18f482b49713d3e
+# Composed from subgraphs with hash: 46a2d6c6cf9956c08daa5b3faa018245cb5f9cfe
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
@@ -60,7 +60,7 @@ type T
   @join__type(graph: SUBGRAPH2, key: "id")
 {
   id: ID!
-  i: I! @join__field(graph: SUBGRAPH1) @join__field(graph: SUBGRAPH2, external: true)
+  i: I @join__field(graph: SUBGRAPH1) @join__field(graph: SUBGRAPH2, external: true)
   r: Int @join__field(graph: SUBGRAPH2, requires: "i { name ... on U { value } }")
 }
 

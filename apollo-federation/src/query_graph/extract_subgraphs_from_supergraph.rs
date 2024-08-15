@@ -2107,7 +2107,6 @@ fn remove_inactive_applications(
                         .into();
                 // @requires needs to be validated against the supergraph schema
                 (fields, parent_type_pos, supergraph_schema.schema())
-                // (fields, parent_type_pos, schema.schema())
             }
         };
         // TODO: The assume_valid_ref() here is non-ideal, in the sense that the error messages we
