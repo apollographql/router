@@ -170,14 +170,3 @@ impl From<ConnectSpecDefinition> for Version {
         }
     }
 }
-
-//
-// impl SpecDefinition for ConnectSpec {
-//     fn url(&self) -> &Url {
-//         &self.url
-//     }
-//
-//     fn minimum_federation_version(&self) -> Option<&Version> {
-//         self.minimum_federation_version.as_ref()
-//     }
-// }
