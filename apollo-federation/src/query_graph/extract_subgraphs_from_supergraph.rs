@@ -2086,7 +2086,7 @@ fn remove_inactive_applications(
     let mut replacement_directives = Vec::new();
     let field = object_or_interface_field_definition_position.get(schema.schema())?;
     for directive in field.directives.get_all(name_in_schema) {
-        let (fields, parent_type_pos, is_requires_field_set) = match directive_kind {
+        let (fields, parent_type_pos, target_schema) = match directive_kind {
             FieldSetDirectiveKind::Provides => {
                 let fields = federation_spec_definition
                     .provides_directive_arguments(directive)?
@@ -2094,7 +2094,7 @@ fn remove_inactive_applications(
                 let parent_type_pos: CompositeTypeDefinitionPosition = schema
                     .get_type(field.ty.inner_named_type().clone())?
                     .try_into()?;
-                (fields, parent_type_pos, false)
+                (fields, parent_type_pos, schema.schema())
             }
             FieldSetDirectiveKind::Requires => {
                 let fields = federation_spec_definition
@@ -2105,7 +2105,9 @@ fn remove_inactive_applications(
                         .parent()
                         .clone()
                         .into();
-                (fields, parent_type_pos, true)
+                // @requires needs to be validated against the supergraph schema
+                (fields, parent_type_pos, supergraph_schema.schema())
+                // (fields, parent_type_pos, schema.schema())
             }
         };
         // TODO: The assume_valid_ref() here is non-ideal, in the sense that the error messages we
@@ -2115,27 +2117,17 @@ fn remove_inactive_applications(
         // At best, we could try to shift this computation to after the subgraph schema validation
         // step, but its unclear at this time whether performing this shift affects correctness (and
         // it takes time to determine that). So for now, we keep this here.
+        let valid_schema = Valid::assume_valid_ref(target_schema);
         // TODO: In the JS codebase, this function ends up getting additionally used in the schema
         // upgrader, where parsing the field set may error. In such cases, we end up skipping those
         // directives instead of returning error here, as it pollutes the list of error messages
         // during composition (another site in composition will properly check for field set
         // validity and give better error messaging).
-        let mut fields = if is_requires_field_set {
-            // @requires needs to be validated against the supergraph schema
-            let valid_supergraph_schema = Valid::assume_valid_ref(supergraph_schema.schema());
-            parse_field_set_without_normalization(
-                valid_supergraph_schema,
-                parent_type_pos.type_name().clone(),
-                fields,
-            )
-        } else {
-            let valid_schema = Valid::assume_valid_ref(schema.schema());
-            parse_field_set_without_normalization(
+        let mut fields = parse_field_set_without_normalization(
                 valid_schema,
                 parent_type_pos.type_name().clone(),
                 fields,
-            )
-        }?;
+            )?;
         let is_modified = remove_non_external_leaf_fields(schema, &mut fields)?;
         if is_modified {
             let replacement_directive = if fields.selections.is_empty() {
