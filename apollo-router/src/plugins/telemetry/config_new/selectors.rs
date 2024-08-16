@@ -224,7 +224,12 @@ impl From<&SupergraphValue> for InstrumentValue<SupergraphSelector> {
     fn from(value: &SupergraphValue) -> Self {
         match value {
             SupergraphValue::Standard(s) => InstrumentValue::Standard(s.clone()),
-            SupergraphValue::Custom(selector) => InstrumentValue::Custom(selector.clone()),
+            SupergraphValue::Custom(selector) => match selector {
+                SupergraphSelector::Cost { .. } => {
+                    InstrumentValue::Chunked(Event::Custom(selector.clone()))
+                }
+                _ => InstrumentValue::Custom(selector.clone()),
+            },
             SupergraphValue::Event(e) => InstrumentValue::Chunked(e.clone()),
         }
     }

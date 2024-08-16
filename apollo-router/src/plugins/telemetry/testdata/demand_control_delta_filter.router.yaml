@@ -44,4 +44,4 @@ telemetry:
           condition:
             gt:
               - cost: delta
-              - 3
+              - 1
