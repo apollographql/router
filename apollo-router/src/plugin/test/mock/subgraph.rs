@@ -135,15 +135,17 @@ impl MockSubgraphBuilder {
 // Normalize queries so that spaces and operation names
 // don't have an impact on the cache
 fn normalize(request: &mut Request) {
-    let mut doc = Document::parse(request.query.clone().unwrap(), "request").unwrap();
+    if let Some(q) = &request.query {
+        let mut doc = Document::parse(q.clone(), "request").unwrap();
 
-    if let Some(Definition::OperationDefinition(ref mut op)) = doc.definitions.first_mut() {
-        let o = op.make_mut();
-        o.name.take();
-    };
+        if let Some(Definition::OperationDefinition(ref mut op)) = doc.definitions.first_mut() {
+            let o = op.make_mut();
+            o.name.take();
+        };
 
-    request.query = Some(doc.serialize().no_indent().to_string());
-    request.operation_name = None;
+        request.query = Some(doc.serialize().no_indent().to_string());
+        request.operation_name = None;
+    }
 }
 
 impl Service<SubgraphRequest> for MockSubgraph {
