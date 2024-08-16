@@ -1,0 +1,33 @@
+telemetry:
+
+  instrumentation:
+
+    spans:
+
+      mode: spec_compliant
+      router:
+        attributes:
+          # This should match the trace ID in the request
+          id_from_header:
+            trace_id: open_telemetry
+    events:
+      router:
+        # Standard events
+        request: info
+
+  apollo:
+    field_level_instrumentation_sampler: always_off
+  exporters:
+    tracing:
+      propagation:
+        request:
+          header_name: "id_from_header"
+    logging:
+      stdout:
+        format:
+          text:
+            display_trace_id: true
+            display_span_id: true
+            ansi_escape_codes: false
+            display_current_span: true
+

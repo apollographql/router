@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Write;
 use std::ops::Deref;
@@ -50,6 +49,7 @@ use crate::link::join_spec_definition::JoinSpecDefinition;
 use crate::link::join_spec_definition::TypeDirectiveArguments;
 use crate::link::spec::Identity;
 use crate::link::spec::Version;
+use crate::link::spec::APOLLO_SPEC_DOMAIN;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::Link;
 use crate::link::DEFAULT_LINK_NAME;
@@ -297,7 +297,7 @@ pub(crate) fn new_empty_fed_2_subgraph_schema() -> Result<FederationSchema, Fede
 
 struct TypeInfo {
     name: NamedType,
-    // HashMap<subgraph_enum_value: String, is_interface_object: bool>
+    // IndexMap<subgraph_enum_value: String, is_interface_object: bool>
     subgraph_info: IndexMap<Name, bool>,
 }
 
@@ -309,13 +309,34 @@ struct TypeInfos {
     input_object_types: Vec<TypeInfo>,
 }
 
-fn get_original_directive_names(
+/// Builds a map of original name to new name for Apollo feature directives. This is
+/// used to handle cases where a directive is renamed via an import statement. For
+/// example, importing a directive with a custom name like
+/// ```graphql
+/// @link(url: "https://specs.apollo.dev/cost/v0.1", import: [{ name: "@cost", as: "@renamedCost" }])
+/// ```
+/// results in a map entry of `cost -> renamedCost` with the `@` prefix removed.
+///
+/// If the directive is imported under its default name, that also results in an entry. So,
+/// ```graphql
+/// @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@cost"])
+/// ```
+/// results in a map entry of `cost -> cost`. This duals as a way to check if a directive
+/// is included in the supergraph schema.
+///
+/// **Important:** This map does _not_ include directives imported from identities other
+/// than `specs.apollo.dev`. This helps us avoid extracting directives to subgraphs
+/// when a custom directive's name conflicts with that of a default one.
+fn get_apollo_directive_names(
     supergraph_schema: &FederationSchema,
-) -> Result<HashMap<Name, Name>, FederationError> {
-    let mut hm: HashMap<Name, Name> = HashMap::new();
+) -> Result<IndexMap<Name, Name>, FederationError> {
+    let mut hm: IndexMap<Name, Name> = IndexMap::default();
     for directive in &supergraph_schema.schema().schema_definition.directives {
         if directive.name.as_str() == "link" {
             if let Ok(link) = Link::from_directive_application(directive) {
+                if link.url.identity.domain != APOLLO_SPEC_DOMAIN {
+                    continue;
+                }
                 for import in link.imports {
                     hm.insert(import.element.clone(), import.imported_name().clone());
                 }
@@ -333,7 +354,7 @@ fn extract_subgraphs_from_fed_2_supergraph(
     join_spec_definition: &'static JoinSpecDefinition,
     filtered_types: &Vec<TypeDefinitionPosition>,
 ) -> Result<(), FederationError> {
-    let original_directive_names = get_original_directive_names(supergraph_schema)?;
+    let original_directive_names = get_apollo_directive_names(supergraph_schema)?;
 
     let TypeInfos {
         object_types,
@@ -444,7 +465,10 @@ fn extract_subgraphs_from_fed_2_supergraph(
         })
         .collect::<Vec<_>>();
     for subgraph in subgraphs.subgraphs.values_mut() {
-        remove_inactive_requires_and_provides_from_subgraph(&mut subgraph.schema)?;
+        remove_inactive_requires_and_provides_from_subgraph(
+            supergraph_schema,
+            &mut subgraph.schema,
+        )?;
         remove_unused_types_from_subgraph(&mut subgraph.schema)?;
         for definition in all_executable_directive_definitions.iter() {
             let pos = DirectiveDefinitionPosition {
@@ -465,7 +489,7 @@ fn add_all_empty_subgraph_types(
     federation_spec_definitions: &IndexMap<Name, &'static FederationSpecDefinition>,
     join_spec_definition: &'static JoinSpecDefinition,
     filtered_types: &Vec<TypeDefinitionPosition>,
-    original_directive_names: &HashMap<Name, Name>,
+    original_directive_names: &IndexMap<Name, Name>,
 ) -> Result<TypeInfos, FederationError> {
     let type_directive_definition =
         join_spec_definition.type_directive_definition(supergraph_schema)?;
@@ -767,7 +791,7 @@ fn extract_object_type_content(
     federation_spec_definitions: &IndexMap<Name, &'static FederationSpecDefinition>,
     join_spec_definition: &JoinSpecDefinition,
     info: &[TypeInfo],
-    original_directive_names: &HashMap<Name, Name>,
+    original_directive_names: &IndexMap<Name, Name>,
 ) -> Result<(), FederationError> {
     let field_directive_definition =
         join_spec_definition.field_directive_definition(supergraph_schema)?;
@@ -943,7 +967,7 @@ fn extract_interface_type_content(
     federation_spec_definitions: &IndexMap<Name, &'static FederationSpecDefinition>,
     join_spec_definition: &JoinSpecDefinition,
     info: &[TypeInfo],
-    original_directive_names: &HashMap<Name, Name>,
+    original_directive_names: &IndexMap<Name, Name>,
 ) -> Result<(), FederationError> {
     let field_directive_definition =
         join_spec_definition.field_directive_definition(supergraph_schema)?;
@@ -1231,7 +1255,7 @@ fn extract_enum_type_content(
     federation_spec_definitions: &IndexMap<Name, &'static FederationSpecDefinition>,
     join_spec_definition: &JoinSpecDefinition,
     info: &[TypeInfo],
-    original_directive_names: &HashMap<Name, Name>,
+    original_directive_names: &IndexMap<Name, Name>,
 ) -> Result<(), FederationError> {
     // This was added in join 0.3, so it can genuinely be None.
     let enum_value_directive_definition =
@@ -1340,7 +1364,7 @@ fn extract_input_object_type_content(
     federation_spec_definitions: &IndexMap<Name, &'static FederationSpecDefinition>,
     join_spec_definition: &JoinSpecDefinition,
     info: &[TypeInfo],
-    original_directive_names: &HashMap<Name, Name>,
+    original_directive_names: &IndexMap<Name, Name>,
 ) -> Result<(), FederationError> {
     let field_directive_definition =
         join_spec_definition.field_directive_definition(supergraph_schema)?;
@@ -1447,7 +1471,7 @@ fn add_subgraph_field(
     is_shareable: bool,
     field_directive_application: Option<&FieldDirectiveArguments>,
     cost_spec_definition: Option<&'static CostSpecDefinition>,
-    original_directive_names: &HashMap<Name, Name>,
+    original_directive_names: &IndexMap<Name, Name>,
 ) -> Result<(), FederationError> {
     let field_directive_application =
         field_directive_application.unwrap_or_else(|| &FieldDirectiveArguments {
@@ -1562,7 +1586,7 @@ fn add_subgraph_input_field(
     subgraph: &mut FederationSubgraph,
     field_directive_application: Option<&FieldDirectiveArguments>,
     cost_spec_definition: Option<&'static CostSpecDefinition>,
-    original_directive_names: &HashMap<Name, Name>,
+    original_directive_names: &IndexMap<Name, Name>,
 ) -> Result<(), FederationError> {
     let field_directive_application =
         field_directive_application.unwrap_or_else(|| &FieldDirectiveArguments {
@@ -1975,6 +1999,7 @@ fn add_federation_operations(
 /// unnecessarily. Besides, if a usage adds something useless, there is a chance it hasn't fully
 /// understood something, and warning about that fact through an error is more helpful.
 fn remove_inactive_requires_and_provides_from_subgraph(
+    supergraph_schema: &FederationSchema,
     schema: &mut FederationSchema,
 ) -> Result<(), FederationError> {
     let federation_spec_definition = get_federation_spec_definition_from_subgraph(schema)?;
@@ -2026,6 +2051,7 @@ fn remove_inactive_requires_and_provides_from_subgraph(
 
     for pos in object_or_interface_field_definition_positions {
         remove_inactive_applications(
+            supergraph_schema,
             schema,
             federation_spec_definition,
             FieldSetDirectiveKind::Requires,
@@ -2033,6 +2059,7 @@ fn remove_inactive_requires_and_provides_from_subgraph(
             pos.clone(),
         )?;
         remove_inactive_applications(
+            supergraph_schema,
             schema,
             federation_spec_definition,
             FieldSetDirectiveKind::Provides,
@@ -2050,6 +2077,7 @@ enum FieldSetDirectiveKind {
 }
 
 fn remove_inactive_applications(
+    supergraph_schema: &FederationSchema,
     schema: &mut FederationSchema,
     federation_spec_definition: &'static FederationSpecDefinition,
     directive_kind: FieldSetDirectiveKind,
@@ -2059,7 +2087,7 @@ fn remove_inactive_applications(
     let mut replacement_directives = Vec::new();
     let field = object_or_interface_field_definition_position.get(schema.schema())?;
     for directive in field.directives.get_all(name_in_schema) {
-        let (fields, parent_type_pos) = match directive_kind {
+        let (fields, parent_type_pos, target_schema) = match directive_kind {
             FieldSetDirectiveKind::Provides => {
                 let fields = federation_spec_definition
                     .provides_directive_arguments(directive)?
@@ -2067,7 +2095,7 @@ fn remove_inactive_applications(
                 let parent_type_pos: CompositeTypeDefinitionPosition = schema
                     .get_type(field.ty.inner_named_type().clone())?
                     .try_into()?;
-                (fields, parent_type_pos)
+                (fields, parent_type_pos, schema.schema())
             }
             FieldSetDirectiveKind::Requires => {
                 let fields = federation_spec_definition
@@ -2078,7 +2106,8 @@ fn remove_inactive_applications(
                         .parent()
                         .clone()
                         .into();
-                (fields, parent_type_pos)
+                // @requires needs to be validated against the supergraph schema
+                (fields, parent_type_pos, supergraph_schema.schema())
             }
         };
         // TODO: The assume_valid_ref() here is non-ideal, in the sense that the error messages we
@@ -2088,7 +2117,7 @@ fn remove_inactive_applications(
         // At best, we could try to shift this computation to after the subgraph schema validation
         // step, but its unclear at this time whether performing this shift affects correctness (and
         // it takes time to determine that). So for now, we keep this here.
-        let valid_schema = Valid::assume_valid_ref(schema.schema());
+        let valid_schema = Valid::assume_valid_ref(target_schema);
         // TODO: In the JS codebase, this function ends up getting additionally used in the schema
         // upgrader, where parsing the field set may error. In such cases, we end up skipping those
         // directives instead of returning error here, as it pollutes the list of error messages
