@@ -3178,9 +3178,9 @@ impl SimultaneousPaths {
                 product.saturating_mul(options.len())
             });
         if num_options > 1_000_000 {
-            return Err(FederationError::internal(
-                "flat_cartesian_product: excessive number of combinations: {num_options}",
-            ));
+            return Err(FederationError::internal(format!(
+                "flat_cartesian_product: excessive number of combinations: {num_options}"
+            )));
         }
         let mut product = Vec::with_capacity(num_options);
 
