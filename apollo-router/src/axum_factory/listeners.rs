@@ -7,7 +7,6 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
-use std::time::Instant;
 
 use axum::response::*;
 use axum::Router;
@@ -15,7 +14,6 @@ use futures::channel::oneshot;
 use futures::prelude::*;
 use hyper::server::conn::Http;
 use multimap::MultiMap;
-use parking_lot::Mutex;
 #[cfg(unix)]
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
@@ -32,8 +30,8 @@ use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::ListenAddr;
 
-static MAX_OPEN_FILE_WARNING: Mutex<Option<Instant>> = Mutex::new(None);
 static SESSION_COUNT: AtomicU64 = AtomicU64::new(0);
+static MAX_FILE_HANDLES_WARN: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Debug)]
 pub(crate) struct ListenAddrAndRouter(pub(crate) ListenAddr, pub(crate) Router);
@@ -199,29 +197,6 @@ pub(super) async fn get_extra_listeners(
     Ok(listeners_and_routers)
 }
 
-async fn check_open_files() {
-    {
-        let mut max_open_file_warning = MAX_OPEN_FILE_WARNING.lock();
-        match *max_open_file_warning {
-            None => {
-                tracing::error!(
-                    "reached the max open file limit, cannot accept any new connection"
-                );
-                *max_open_file_warning = Some(Instant::now());
-            }
-            Some(last) => {
-                if Instant::now() - last > Duration::from_secs(60) {
-                    tracing::error!(
-                        "still at the max open file limit, cannot accept any new connection"
-                    );
-                    *max_open_file_warning = Some(Instant::now());
-                }
-            }
-        }
-    }
-    tokio::time::sleep(Duration::from_millis(1)).await;
-}
-
 pub(super) fn serve_router_on_listen_addr(
     mut listener: Listener,
     address: ListenAddr,
@@ -254,12 +229,9 @@ pub(super) fn serve_router_on_listen_addr(
 
                     match res {
                         Ok(res) => {
-                            {
-                                let mut max_open_file_warning = MAX_OPEN_FILE_WARNING.lock();
-                                if max_open_file_warning.is_some() {
-                                    tracing::info!("can accept connections again");
-                                    *max_open_file_warning = None;
-                                }
+                            if MAX_FILE_HANDLES_WARN.load(Ordering::SeqCst) {
+                                tracing::info!("can accept connections again");
+                                MAX_FILE_HANDLES_WARN.store(false, Ordering::SeqCst);
                             }
                             // We only want to recognise sessions if we are the main graphql port.
                             if main_graphql_port {
@@ -451,7 +423,11 @@ pub(super) fn serve_router_on_listen_addr(
                             _ => {
                                 match e.raw_os_error() {
                                     Some(libc::EMFILE) | Some(libc::ENFILE) => {
-                                        check_open_files().await;
+                                        tracing::error!(
+                                            "reached the max open file limit, cannot accept any new connection"
+                                        );
+                                        MAX_FILE_HANDLES_WARN.store(true, Ordering::SeqCst);
+                                        tokio::time::sleep(Duration::from_millis(1)).await;
                                     }
                                     _ => {}
                                 }
