@@ -13,7 +13,7 @@ The Demand Control feature is in [preview](/resources/product-launch-stages/#pro
 
 We welcome your feedback during the preview, especially feedback about the following:
 
-<br />
+<br/>
 
 - Whether the available tools are sufficient to enable you to understand how users are querying your supergraph.
 
@@ -50,8 +50,8 @@ Follow this workflow to configure and tune demand control for your router:
 Start by measuring the costs of the operations served by your router.
 
 1. In your `router.yaml`, configure demand control to `measure` mode and define telemetry to monitor the results. For example:
-   - Set `preview_demand_control.mode` to `measure`.
-   - Define a custom histogram of operation costs.
+    - Set `preview_demand_control.mode` to `measure`.
+    - Define a custom histogram of operation costs.
 
 ```yaml title="Example router.yaml to measure operation costs"
 # Demand control enabled in measure mode.
@@ -95,11 +95,12 @@ telemetry:
   instrumentation:
     instruments:
       supergraph:
-        cost.actual: true # The actual cost
-        cost.estimated: # The estimated cost
+        cost.actual: true        # The actual cost
+        cost.estimated:          # The estimated cost
           attributes:
-            cost.result: true # Of the estimated costs which of these would have been rejected
-        cost.delta: true # Actual - estimated
+            cost.result: true    # Of the estimated costs which of these would have been rejected
+        cost.delta: true         # Actual - estimated
+
 ```
 
 <Tip>
@@ -116,10 +117,10 @@ telemetry:
             aggregation:
               histogram:
                 buckets:
-                  - 0 # Define the buckets here
+                  - 0          # Define the buckets here
                   - 10
                   - 100
-                  - 1000 # More granularity for costs in the 1000s
+                  - 1000       # More granularity for costs in the 1000s
                   - 2000
                   - 3000
                   - 4000
@@ -171,22 +172,14 @@ cost_estimated_count{cost_result="COST_OK",otel_scope_name="apollo/router"} 20
 
 An example chart of a histogram:
 
-<img
-  class="screenshot"
-  src="../images/demand-control-example-histogram.png"
-  width="600"
-/>
+<img class="screenshot" src="../images/demand-control-example-histogram.png" width="600" />
+
 
 You can also chart the percentage of operations that would be allowed or rejected with the current configuration:
 
-<img
-  class="screenshot"
-  src="../images/demand-control-example-cost-result.png"
-  width="600"
-/>
+<img class="screenshot" src="../images/demand-control-example-cost-result.png" width="600" />
 
 Although estimated costs won't necessarily match actual costs, you can use the metrics to ascertain the following:
-
 - Whether any operations have underestimated costs
 - What to set `static_estimated.list_size` as the actual maximum list size
 - What to set `static_estimated.max` as the maximum cost of an allowed operation
@@ -214,7 +207,8 @@ telemetry:
               - cost: result
               - "COST_ESTIMATED_TOO_EXPENSIVE"
           attributes:
-            graphql.operation.name: true # Graphql operation name is added as an attribute
+            graphql.operation.name: true                             # Graphql operation name is added as an attribute
+
 ```
 
 This custom instrument may not be suitable when you have many operation names, such as a public internet-facing API. You can add conditions to reduce the number of returned operations. For example, use a condition that outputs results only when the cost delta is greater than a threshold:
@@ -235,12 +229,12 @@ telemetry:
           condition:
             all:
               - eq: # Only show rejected operations
-                  - cost: result
-                  - "COST_ESTIMATED_TOO_EXPENSIVE"
-              #highlight-start
+                 - cost: result
+                 - "COST_ESTIMATED_TOO_EXPENSIVE"
+#highlight-start
               - gt: # Only show cost delta > 100
-                  - cost: delta
-                  - 100
+                 - cost: delta
+                 - 100
 #highlight-end
 ```
 
@@ -249,7 +243,7 @@ telemetry:
 For example, the following table has the estimated cost of operations:
 
 | Operation name       | Estimated cost |
-| -------------------- | -------------- |
+|----------------------|----------------|
 | `ExtractAll`         | 9020           |
 | `GetAllProducts`     | 1435           |
 | `GetLatestProducts`  | 120            |
@@ -289,6 +283,7 @@ telemetry:
     instruments:
       graphql:
         list.length: true
+
 ```
 
 This configuration generates many metrics and may be too costly for your APM. To reduce the amount of metrics generated, you can set conditions on the instrument.
@@ -330,11 +325,7 @@ graphql_list_length_restricted_count{graphql_field_name="allProducts",graphql_ty
 
 You can configure your APM to chart the histogram:
 
-<img
-  class="screenshot"
-  src="../images/demand-control-example-list-lengths.svg"
-  width="600"
-/>
+<img class="screenshot" src="../images/demand-control-example-list-lengths.svg" width="600" />
 
 The chart shows that the actual list sizes for the `allProducts` field are at most 100, so you should update your `static_estimated.list_size` to be 100:
 
@@ -350,24 +341,17 @@ preview_demand_control:
 
 Rerunning the router and remeasuring costs with the updated `static_estimated.list_size` should result in new histograms and percentages of rejected operations. For example:
 
-<img
-  class="screenshot"
-  src="../images/demand-control-example-updated-costs.png"
-  width="600"
-/>
+<img class="screenshot" src="../images/demand-control-example-updated-costs.png" width="600" />
 
-<img
-  class="screenshot"
-  src="../images/demand-control-example-updated-cost-result.png"
-  width="600"
-/>
+
+<img class="screenshot" src="../images/demand-control-example-updated-cost-result.png" width="600" />
 
 Although there are no more cost deltas reported, the estimated costs have increased. You still have to adjust the maximum cost.
 
 Looking at the top N operations, you may see that the estimated costs have been updated. For example:
 
 | Operation name       | Estimated cost |
-| -------------------- | -------------- |
+|----------------------|----------------|
 | `ExtractAll`         | 390200         |
 | `GetAllProducts`     | 44350          |
 | `GetLatestProducts`  | 11200          |
@@ -400,19 +384,19 @@ From the previous step, you can set the maximum cost to a value that allows all 
 ```yaml title="router.yaml"
 preview_demand_control:
   enabled: true
-  mode: enforce # Change mode from measure to enforce
+  mode: enforce               # Change mode from measure to enforce
   strategy:
     static_estimated:
       list_size: 100
-      max: 50000 # Updated max cost allows all operations except ExtractAll
+      max: 50000              # Updated max cost allows all operations except ExtractAll
 ```
 
 ## Next steps
 
+
 Continue to monitor the costs of operations and take action if the estimation model becomes inaccurate. For example, update the estimation model if the maximum number of list items changes.
 
 You can set alerts in your APM for events that may require changing your demand control settings. Events to alert include:
-
 - Unexpected increase in the number of requests rejected by demand control.
 - Increased max list size of your data.
 - Increased delta metric.
@@ -431,9 +415,10 @@ To calculate the total cost of an operation, the router sums the total costs bas
 
 The cost of each operation type:
 
-|      | Mutation | Query | Subscription |
-| ---- | -------- | ----- | ------------ |
-| type | 10       | 0     | 0            |
+|           | Mutation | Query | Subscription |
+| --------- | -------- | ----- | ------------ |
+| type      | 10       | 0     | 0            |
+
 
 The cost of each GraphQL element type, per operation type:
 
@@ -511,8 +496,6 @@ type Author {
 
 </ExpansionPanel>
 
-Learn more about the `@cost` directive [here](/federation/federated-schemas/federated-directives/#cost).
-
 ### Estimated and actual costs
 
 For an operation with list fields, the router must run the operation to get the actual number of items in its lists. Without actual list sizes, the cost of an operation can only be estimated before it's executed, where you assume the size of lists.
@@ -551,13 +534,14 @@ When `preview_demand_control` is enabled, the router measures the cost of each o
 
 Customize `preview_demand_control` with the following settings:
 
-| Option                       | Valid values         | Default value | Description                                                                                                                        |
-| ---------------------------- | -------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `enabled`                    | boolean              | `false`       | Set `true` to measure operation costs or enforce operation cost limits.                                                            |
-| `mode`                       | `measure`, `enforce` | --            | - `measure` collects information about the cost of operations.<br/>- `enforce` rejects operations exceeding configured cost limits |
-| `strategy`                   | `static_estimated`   | --            | `static_estimated` estimates the cost of an operation before it is sent to a subgraph                                              |
-| `static_estimated.list_size` | integer              | --            | The assumed maximum size of a list for fields that return lists.                                                                   |
-| `static_estimated.max`       | integer              | --            | The maximum cost of an accepted operation. An operation with a higher cost than this is rejected.                                  |
+| Option              | Valid values            | Default value | Description                                                                                          |
+| ------------------- | ----------------------- | ------------- | ---------------------------------------------------------------------------------------------------- |
+| `enabled`             | boolean                 | `false`       | Set `true` to measure operation costs or enforce operation cost limits.                              |
+| `mode`                | `measure`, `enforce`    |     --          | - `measure` collects information about the cost of operations.<br/>- `enforce` rejects operations exceeding configured cost limits |
+| `strategy`            | `static_estimated`      |     --          | `static_estimated` estimates the cost of an operation before it is sent to a subgraph                 |
+| `static_estimated.list_size`  | integer                 |     --          | The assumed maximum size of a list for fields that return lists.                                      |
+| `static_estimated.max`        | integer                 |     --          | The maximum cost of an accepted operation. An operation with a higher cost than this is rejected. |
+
 
 ## Telemetry for demand control
 
@@ -577,28 +561,29 @@ You can define router telemetry to gather cost information and gain insights int
 
 | Instrument       | Description                                                |
 | ---------------- | ---------------------------------------------------------- |
-| `cost.actual`    | The actual cost of an operation, measured after execution. |
-| `cost.estimated` | The estimated cost of an operation before execution.       |
-| `cost.delta`     | The difference between the actual and estimated cost.      |
+| `cost.actual`    | The actual cost of an operation, measured after execution.  |
+| `cost.estimated` | The estimated cost of an operation before execution.        |
+| `cost.delta`     | The difference between the actual and estimated cost.       |
 
 ### Attributes
 
 Attributes for `cost` can be applied to instruments, spans, and events—anywhere `supergraph` attributes are used.
 
-| Attribute        | Value   | Description                                                                                      |
-| ---------------- | ------- | ------------------------------------------------------------------------------------------------ |
-| `cost.actual`    | boolean | The actual cost of an operation, measured after execution.                                       |
-| `cost.estimated` | boolean | The estimated cost of an operation before execution.                                             |
-| `cost.delta`     | boolean | The difference between the actual and estimated cost.                                            |
-| `cost.result`    | boolean | The return code of the cost calculation. `COST_OK` or an [error code](../errors/#demand-control) |
+| Attribute      | Value  | Description                                                |
+| --------------- | ----- | ---------------------------------------------------------- |
+| `cost.actual`     | boolean      | The actual cost of an operation, measured after execution.  |
+| `cost.estimated`  | boolean      | The estimated cost of an operation before execution.        |
+| `cost.delta`      | boolean      | The difference between the actual and estimated cost.       |
+| `cost.result`     | boolean      | The return code of the cost calculation. `COST_OK` or an [error code](../errors/#demand-control)      |
 
 ### Selectors
 
 Selectors for `cost` can be applied to instruments, spans, and events—anywhere `supergraph` attributes are used.
 
-| Key    | Value                                    | Default | Description                                                       |
-| ------ | ---------------------------------------- | ------- | ----------------------------------------------------------------- |
+| Key  | Value      | Default | Description                                        |
+| ---- | ---------- | ------- | -------------------------------------------------- |
 | `cost` | `estimated`, `actual`, `delta`, `result` |         | The estimated, actual, or delta cost values, or the result string |
+
 
 ### Examples
 
