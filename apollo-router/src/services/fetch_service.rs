@@ -29,6 +29,8 @@ use crate::services::FetchResponse;
 use crate::services::SubgraphServiceFactory;
 use crate::spec::Schema;
 
+/// The fetch service delegates to either the subgraph service or connector service depending
+/// on whether connectors are present in the subgraph.
 #[derive(Clone)]
 pub(crate) struct FetchService {
     pub(crate) subgraph_service_factory: Arc<SubgraphServiceFactory>,

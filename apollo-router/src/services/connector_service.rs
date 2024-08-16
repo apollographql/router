@@ -1,4 +1,4 @@
-//! Tower fetcher for fetch node execution.
+//! Tower service for connectors.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -47,6 +47,7 @@ pub(crate) const APOLLO_CONNECTOR_SOURCE_NAME: Key =
 pub(crate) const APOLLO_CONNECTOR_SOURCE_DETAIL: Key =
     Key::from_static_str("apollo.connector.source.detail");
 
+/// A service for executing connector requests.
 #[derive(Clone)]
 pub(crate) struct ConnectorService {
     pub(crate) http_service_factory: Arc<IndexMap<String, HttpClientServiceFactory>>,

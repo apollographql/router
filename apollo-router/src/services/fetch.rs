@@ -1,4 +1,4 @@
-#![allow(missing_docs)] // FIXME
+//! Fetch request and response types.
 
 use std::sync::Arc;
 
