@@ -431,8 +431,9 @@ pub trait FallibleIterator: Sized + Itertools {
     // named differently :(
     // Once stabilized, this method should probably be removed.
     fn find_ok<F, T, E>(&mut self, predicate: F) -> Result<Option<T>, E>
-        where Self: Iterator<Item = Result<T, E>>,
-              F: FnMut(&T) -> bool,
+    where
+        Self: Iterator<Item = Result<T, E>>,
+        F: FnMut(&T) -> bool,
     {
         self.process_results(|mut results| results.find(predicate))
     }
