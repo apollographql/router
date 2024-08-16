@@ -360,6 +360,21 @@ Looking at the top N operations, you may see that the estimated costs have been 
 
 All operations except `ExtractAll` are in a range of acceptable costs.
 
+<MinVersion version="1.53.0">
+
+#### `@listSize`
+
+</MinVersion>
+
+If some of your fields have list sizes that significantly differ from `static_estimated.list_size`, you can provide the router with more information.
+
+The `@listSize` directive can be configured in multiple ways:
+
+1. Use the `assumedSize` argument to define a static size for a field.
+2. Use `slicingArguments` to indicate that a field's size is dynamically controlled by one or more of its arguments. This works well if some of the arguments are paging parameters.
+
+Learn more about the `@listSize` directive [here](/federation/federated-schemas/federated-directives/#listsize).
+
 ### Enforce cost limits
 
 After determining the cost estimation model of your operations, you should update and enforce the new cost limits.
@@ -436,6 +451,47 @@ Assuming each review having exactly one author, the total cost of the query is 2
 
 ```text disableCopy=true showLineNumbers=false
 1 Query (0 cost) + 6 product objects (6) + 6 name scalars (0) + 10 review objects (10) + 10 author objects (10) + 10 name scalars (0) = 26 total cost
+```
+
+</ExpansionPanel>
+
+<MinVersion version="1.53.0">
+
+#### `@cost`
+
+</MinVersion>
+
+You can further customize the cost calculation with the `@cost` directive. This directive takes a `weight` argument which replaces the default weights outlined above.
+
+Revisiting the products query above, if the `topProducts.name` field is annotated with `@cost(weight: 5)`, then the total cost of the query increases to 56.
+
+<ExpansionPanel title="An example annotated Products schema">
+
+```graphql
+type Query {
+  topProducts: [Product]
+}
+
+type Product {
+  name: String! @cost(weight: 5)
+  reviews: [Review]
+}
+
+type Review {
+  author: Author!
+}
+
+type Author {
+  name: String!
+}
+```
+
+</ExpansionPanel>
+
+<ExpansionPanel title="Example query's updated cost calculation">
+
+```text disableCopy=true showLineNumbers=false
+1 Query (0 cost) + 6 product objects (6) + 6 name scalars (30) + 10 review objects (10) + 10 author objects (10) + 10 name scalars (0) = 56 total cost
 ```
 
 </ExpansionPanel>
