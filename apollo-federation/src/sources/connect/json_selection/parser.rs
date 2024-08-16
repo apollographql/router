@@ -200,25 +200,25 @@ impl PathSelection {
         Ok((input, Self { path }))
     }
 
-    pub fn is_single_key(&self) -> bool {
+    pub(super) fn is_single_key(&self) -> bool {
         self.path.is_single_key()
     }
 
-    pub fn from_slice(keys: &[Key], selection: Option<SubSelection>) -> Self {
+    pub(super) fn from_slice(keys: &[Key], selection: Option<SubSelection>) -> Self {
         Self {
             path: PathList::from_slice(keys, selection),
         }
     }
 
-    pub fn collect_paths(&self) -> Vec<Key> {
+    pub(super) fn collect_paths(&self) -> Vec<Key> {
         self.path.collect_paths()
     }
 
-    pub fn next_subselection(&self) -> Option<&SubSelection> {
+    pub(super) fn next_subselection(&self) -> Option<&SubSelection> {
         self.path.next_subselection()
     }
 
-    pub fn next_mut_subselection(&mut self) -> Option<&mut SubSelection> {
+    pub(super) fn next_mut_subselection(&mut self) -> Option<&mut SubSelection> {
         self.path.next_mut_subselection()
     }
 }
@@ -356,14 +356,14 @@ impl PathList {
         Ok((input, Self::Empty))
     }
 
-    pub(crate) fn is_single_key(&self) -> bool {
+    pub(super) fn is_single_key(&self) -> bool {
         match self {
             Self::Key(_, rest) => matches!(rest.as_ref(), Self::Selection(_) | Self::Empty),
             _ => false,
         }
     }
 
-    pub(crate) fn from_slice(properties: &[Key], selection: Option<SubSelection>) -> Self {
+    pub(super) fn from_slice(properties: &[Key], selection: Option<SubSelection>) -> Self {
         match properties {
             [] => selection.map_or(Self::Empty, Self::Selection),
             [head, tail @ ..] => {
@@ -376,7 +376,7 @@ impl PathList {
     ///
     /// This method attempts to collect as many paths as possible, shorting out once
     /// a non path selection is encountered.
-    pub(crate) fn collect_paths(&self) -> Vec<Key> {
+    pub(super) fn collect_paths(&self) -> Vec<Key> {
         let mut results = Vec::new();
 
         // Collect as many as possible
@@ -391,7 +391,7 @@ impl PathList {
     }
 
     /// Find the next subselection, traversing nested chains if needed
-    pub(crate) fn next_subselection(&self) -> Option<&SubSelection> {
+    pub(super) fn next_subselection(&self) -> Option<&SubSelection> {
         match self {
             Self::Var(_, tail) => tail.next_subselection(),
             Self::Key(_, tail) => tail.next_subselection(),
@@ -402,7 +402,7 @@ impl PathList {
     }
 
     /// Find the next subselection, traversing nested chains if needed. Returns a mutable reference
-    pub(crate) fn next_mut_subselection(&mut self) -> Option<&mut SubSelection> {
+    pub(super) fn next_mut_subselection(&mut self) -> Option<&mut SubSelection> {
         match self {
             Self::Var(_, tail) => tail.next_mut_subselection(),
             Self::Key(_, tail) => tail.next_mut_subselection(),
