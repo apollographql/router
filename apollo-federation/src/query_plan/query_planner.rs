@@ -2,7 +2,6 @@ use std::cell::Cell;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
-use apollo_compiler::collections::HashMap;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::validation::Valid;
@@ -798,7 +797,7 @@ fn compute_plan_for_defer_conditionals(
 pub(crate) struct RebasedFragments {
     original_fragments: NamedFragments,
     /// Map key: subgraph name
-    rebased_fragments: HashMap<Arc<str>, NamedFragments>,
+    rebased_fragments: IndexMap<Arc<str>, NamedFragments>,
 }
 
 impl RebasedFragments {
