@@ -35,7 +35,6 @@ async fn test_type_conditions_enabled() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[should_panic] // Generate query fragments is not implemented in the rust planner yet
 async fn test_type_conditions_enabled_generate_query_fragments() {
     _test_type_conditions_enabled_generate_query_fragments("legacy").await;
     _test_type_conditions_enabled_generate_query_fragments("new").await;
