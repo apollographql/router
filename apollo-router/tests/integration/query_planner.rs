@@ -18,7 +18,6 @@ async fn fed1_schema_with_legacy_qp() {
         .await;
     router.start().await;
     router.assert_started().await;
-
     router.execute_default_query().await;
     router.graceful_shutdown().await;
 }
@@ -97,6 +96,39 @@ async fn fed1_schema_with_legacy_qp_reload_to_new_keep_previous_config() {
     router
         .assert_log_contains("error while reloading, continuing with previous configuration")
         .await;
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_lifecycle_query_planner_init_total{init_error_kind="fed1",init_is_success="false",otel_scope_name="apollo/router"} 1"#,
+            None,
+        )
+        .await;
+    router.execute_default_query().await;
+    router.graceful_shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn fed1_schema_with_legacy_qp_reload_to_both_best_effort_keep_previous_config() {
+    let config = format!("{PROMETHEUS_METRICS_CONFIG}\n{LEGACY_QP}");
+    let mut router = IntegrationTest::builder()
+        .config(config)
+        .supergraph("../examples/graphql/local.graphql")
+        .build()
+        .await;
+    router.start().await;
+    router.assert_started().await;
+    router.execute_default_query().await;
+
+    let config = format!("{PROMETHEUS_METRICS_CONFIG}\n{BOTH_BEST_EFFORT_QP}");
+    router.update_config(&config).await;
+    router
+        .assert_log_contains(
+            "Failed to initialize the new query planner, falling back to legacy: \
+            The supergraph schema failed to produce a valid API schema: \
+            Supergraphs composed with federation version 1 are not supported.\
+            Please recompose your supergraph with federation version 2 or greater",
+        )
+        .await;
+
     router
         .assert_metrics_contains(
             r#"apollo_router_lifecycle_query_planner_init_total{init_error_kind="fed1",init_is_success="false",otel_scope_name="apollo/router"} 1"#,
@@ -188,7 +220,34 @@ async fn progressive_override_with_legacy_qp_change_to_new_qp_keeps_old_config()
         .await;
     router
         .assert_metrics_contains(
-            r#"apollo_router_lifecycle_query_planner_init{init_error_kind="overrides",init_is_success="false",otel_scope_name="apollo/router"} 1"#,
+            r#"apollo_router_lifecycle_query_planner_init_total{init_error_kind="overrides",init_is_success="false",otel_scope_name="apollo/router"} 1"#,
+            None,
+        )
+        .await;
+    router.execute_default_query().await;
+    router.graceful_shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn progressive_override_with_legacy_qp_reload_to_both_best_effort_keep_previous_config() {
+    if !graph_os_enabled() {
+        return;
+    }
+    let config = format!("{PROMETHEUS_METRICS_CONFIG}\n{LEGACY_QP}");
+    let mut router = IntegrationTest::builder()
+        .config(config)
+        .supergraph("src/plugins/progressive_override/testdata/supergraph.graphql")
+        .build()
+        .await;
+    router.start().await;
+    router.assert_started().await;
+    router.execute_default_query().await;
+
+    let config = format!("{PROMETHEUS_METRICS_CONFIG}\n{BOTH_BEST_EFFORT_QP}");
+    router.update_config(&config).await;
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_lifecycle_query_planner_init_total{init_error_kind="overrides",init_is_success="false",otel_scope_name="apollo/router"} 1"#,
             None,
         )
         .await;
@@ -202,7 +261,7 @@ async fn context_with_legacy_qp() {
         return;
     }
     let mut router = IntegrationTest::builder()
-        .config(LEGACY_QP)
+        .config(PROMETHEUS_METRICS_CONFIG)
         .supergraph("tests/fixtures/set_context/supergraph.graphql")
         .build()
         .await;
@@ -237,7 +296,7 @@ async fn context_with_new_qp() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn conext_with_legacy_qp_change_to_new_qp_keeps_old_config() {
+async fn context_with_legacy_qp_change_to_new_qp_keeps_old_config() {
     if !graph_os_enabled() {
         return;
     }
@@ -257,7 +316,30 @@ async fn conext_with_legacy_qp_change_to_new_qp_keeps_old_config() {
         .await;
     router
         .assert_metrics_contains(
-            r#"apollo_router_lifecycle_query_planner_init{init_error_kind="context",init_is_success="false",otel_scope_name="apollo/router"} 1"#,
+            r#"aapollo_router_lifecycle_query_planner_init_total{init_error_kind="context",init_is_success="false",otel_scope_name="apollo/router"} 1"#,
+            None,
+        )
+        .await;
+    router.execute_default_query().await;
+    router.graceful_shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn context_with_legacy_qp_reload_to_both_best_effort_keep_previous_config() {
+    if !graph_os_enabled() {
+        return;
+    }
+    let config = format!("{PROMETHEUS_METRICS_CONFIG}\n{LEGACY_QP}");
+    let mut router = IntegrationTest::builder().config(config).build().await;
+    router.start().await;
+    router.assert_started().await;
+    router.execute_default_query().await;
+
+    let config = format!("{PROMETHEUS_METRICS_CONFIG}\n{BOTH_BEST_EFFORT_QP}");
+    router.update_config(&config).await;
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_lifecycle_query_planner_init_total{init_error_kind="context",init_is_success="false",otel_scope_name="apollo/router"} 1"#,
             None,
         )
         .await;
