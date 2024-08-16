@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::DirectiveList as ComponentDirectiveList;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
-use indexmap::IndexMap;
-use indexmap::IndexSet;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
@@ -116,10 +116,10 @@ impl BaseQueryGraphBuilder {
         query_graph.sources.insert(source.clone(), schema);
         query_graph
             .types_to_nodes_by_source
-            .insert(source.clone(), IndexMap::new());
+            .insert(source.clone(), IndexMap::default());
         query_graph
             .root_kinds_to_nodes_by_source
-            .insert(source.clone(), IndexMap::new());
+            .insert(source.clone(), IndexMap::default());
         Self { query_graph }
     }
 
@@ -196,7 +196,7 @@ impl BaseQueryGraphBuilder {
             self.query_graph
                 .types_to_nodes_mut()?
                 .entry(pos.type_name().clone())
-                .or_insert_with(IndexSet::new)
+                .or_default()
                 .insert(node);
         }
         Ok(node)
@@ -291,7 +291,7 @@ impl SchemaQueryGraphBuilder {
         if let Some(subgraph_metadata) = self.base.query_graph.schema()?.subgraph_metadata() {
             Ok(subgraph_metadata
                 .external_metadata()
-                .is_external(field_definition_position)?)
+                .is_external(field_definition_position))
         } else {
             Ok(false)
         }
@@ -1007,7 +1007,7 @@ impl FederatedQueryGraphBuilder {
     }
 
     fn add_federated_root_nodes(&mut self) -> Result<(), FederationError> {
-        let mut root_kinds = IndexSet::new();
+        let mut root_kinds = IndexSet::default();
         for (source, root_kinds_to_nodes) in &self.base.query_graph.root_kinds_to_nodes_by_source {
             if *source == self.base.query_graph.current_source {
                 continue;
@@ -1023,15 +1023,15 @@ impl FederatedQueryGraphBuilder {
     }
 
     fn copy_types_to_nodes(&mut self) -> Result<(), FederationError> {
-        let mut federated_type_to_nodes = IndexMap::new();
+        let mut federated_type_to_nodes = IndexMap::default();
         for (source, types_to_nodes) in &self.base.query_graph.types_to_nodes_by_source {
             if *source == self.base.query_graph.current_source {
                 continue;
             }
             for (type_name, nodes) in types_to_nodes {
-                let federated_nodes = federated_type_to_nodes
+                let federated_nodes: &mut IndexSet<_> = federated_type_to_nodes
                     .entry(type_name.clone())
-                    .or_insert_with(IndexSet::new);
+                    .or_default();
                 for node in nodes {
                     federated_nodes.insert(*node);
                 }
@@ -1339,8 +1339,9 @@ impl FederatedQueryGraphBuilder {
                 let application = subgraph_data
                     .federation_spec_definition
                     .requires_directive_arguments(directive)?;
+                // @requires field set is validated against the supergraph
                 let conditions = parse_field_set(
-                    schema,
+                    &self.supergraph_schema,
                     field_definition_position.parent().type_name().clone(),
                     application.fields,
                 )?;
@@ -1867,7 +1868,7 @@ impl FederatedQueryGraphBuilder {
         for edge in self.base.query_graph.graph.edge_indices() {
             let edge_weight = self.base.query_graph.edge_weight(edge)?;
             let (_, tail) = self.base.query_graph.edge_endpoints(edge)?;
-            let mut non_trivial_followups = IndexSet::new();
+            let mut non_trivial_followups = IndexSet::default();
             for followup_edge_ref in self
                 .base
                 .query_graph
@@ -1902,7 +1903,8 @@ impl FederatedQueryGraphBuilder {
                                 }
                                 .into());
                             };
-                            if conditions.selections == followup_conditions.selections {
+
+                            if conditions == followup_conditions {
                                 continue;
                             }
                         }
@@ -1926,7 +1928,7 @@ impl FederatedQueryGraphBuilder {
                         // since we can do "start of query" -> C and that's always better.
                         if matches!(
                             followup_edge_weight.transition,
-                            QueryGraphEdgeTransition::SubgraphEnteringTransition
+                            QueryGraphEdgeTransition::RootTypeResolution { .. }
                         ) {
                             continue;
                         }
@@ -1953,7 +1955,7 @@ struct FederatedQueryGraphBuilderSubgraphs {
 impl FederatedQueryGraphBuilderSubgraphs {
     fn new(base: &BaseQueryGraphBuilder) -> Result<Self, FederationError> {
         let mut subgraphs = FederatedQueryGraphBuilderSubgraphs {
-            map: IndexMap::new(),
+            map: IndexMap::default(),
         };
         for (source, schema) in &base.query_graph.sources {
             if *source == base.query_graph.current_source {
@@ -2053,11 +2055,11 @@ fn resolvable_key_applications<'doc>(
 
 #[cfg(test)]
 mod tests {
+    use apollo_compiler::collections::IndexMap;
+    use apollo_compiler::collections::IndexSet;
     use apollo_compiler::name;
     use apollo_compiler::Name;
     use apollo_compiler::Schema;
-    use indexmap::IndexMap;
-    use indexmap::IndexSet;
     use petgraph::graph::NodeIndex;
     use petgraph::visit::EdgeRef;
     use petgraph::Direction;
@@ -2107,7 +2109,7 @@ mod tests {
         head: NodeIndex,
         field_names: IndexSet<Name>,
     ) -> Result<IndexMap<Name, NodeIndex>, FederationError> {
-        let mut result = IndexMap::new();
+        let mut result = IndexMap::default();
         for field_name in field_names {
             // PORT_NOTE: In the JS codebase, there were a lot of asserts here, but they were all
             // duplicated with single_edge() (or they tested the JS codebase's graph representation,
@@ -2181,7 +2183,7 @@ mod tests {
                 .keys()
                 .cloned()
                 .collect::<IndexSet<_>>(),
-            IndexSet::from([SchemaRootDefinitionKind::Query])
+            IndexSet::from_iter([SchemaRootDefinitionKind::Query])
         );
 
         let root_node = query_graph
@@ -2207,7 +2209,7 @@ mod tests {
         let root_fields = named_edges(
             &query_graph,
             *root_node,
-            IndexSet::from([name!("__typename"), name!("t1")]),
+            IndexSet::from_iter([name!("__typename"), name!("t1")]),
         )?;
 
         let root_typename_tail = root_fields.get("__typename").unwrap();
@@ -2241,7 +2243,7 @@ mod tests {
         let t1_fields = named_edges(
             &query_graph,
             *t1_node,
-            IndexSet::from([name!("__typename"), name!("f1"), name!("f2"), name!("f3")]),
+            IndexSet::from_iter([name!("__typename"), name!("f1"), name!("f2"), name!("f3")]),
         )?;
 
         let t1_typename_tail = t1_fields.get("__typename").unwrap();
@@ -2311,7 +2313,7 @@ mod tests {
         let t2_fields = named_edges(
             &query_graph,
             *t2_node,
-            IndexSet::from([name!("__typename"), name!("t")]),
+            IndexSet::from_iter([name!("__typename"), name!("t")]),
         )?;
 
         let t2_typename_tail = t2_fields.get("__typename").unwrap();

@@ -39,8 +39,6 @@ const SUBGRAPH_B: &str = r#"
 "#;
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure (missing directives on fetch operation)
 fn test_if_directives_at_the_operation_level_are_passed_down_to_subgraph_queries() {
     let planner = planner!(
         subgraphA: SUBGRAPH_A,
@@ -134,8 +132,8 @@ fn test_if_directives_at_the_operation_level_are_passed_down_to_subgraph_queries
     insta::assert_snapshot!(b_fetch_nodes[0].operation_document, @r#"
       query Operation__subgraphB__1($representations: [_Any!]!) @operation {
         _entities(representations: $representations) {
-          ... on Foo {
-            baz @field
+          ... on T {
+            f1 @field
           }
         }
       }
@@ -144,17 +142,18 @@ fn test_if_directives_at_the_operation_level_are_passed_down_to_subgraph_queries
     insta::assert_snapshot!(b_fetch_nodes[1].operation_document, @r#"
       query Operation__subgraphB__2($representations: [_Any!]!) @operation {
         _entities(representations: $representations) {
-          ... on T {
-            f1 @field
+          ... on Foo {
+            baz @field
           }
         }
       }
     "#);
+    // This checks a regression where the `variable_usages` included the `representations` variable.
+    assert_eq!(b_fetch_nodes[0].variable_usages.len(), 0);
+    assert_eq!(b_fetch_nodes[1].variable_usages.len(), 0);
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure (missing `mutation` keyword and operation name)
 fn test_if_directives_on_mutations_are_passed_down_to_subgraph_queries() {
     let planner = planner!(
         subgraphA: SUBGRAPH_A,
@@ -173,7 +172,7 @@ fn test_if_directives_on_mutations_are_passed_down_to_subgraph_queries() {
       @r###"
       QueryPlan {
         Fetch(service: "subgraphA") {
-              mutation TestMutation__subgraphA__0 {
+          {
             updateFoo(bar: "something") @field {
               id @field
               bar @field
@@ -198,8 +197,6 @@ fn test_if_directives_on_mutations_are_passed_down_to_subgraph_queries() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure (missing directives on fetch query)
 fn test_if_directives_with_arguments_applied_on_queries_are_ok() {
     let planner = planner!(
       Subgraph1: r#"
@@ -244,8 +241,6 @@ fn test_if_directives_with_arguments_applied_on_queries_are_ok() {
 }
 
 #[test]
-#[should_panic(expected = r#"unused variable: `$some_var`"#)]
-// TODO: investigate this failure
 fn subgraph_query_retains_the_query_variables_used_in_the_directives_applied_to_the_query() {
     let planner = planner!(
       Subgraph1: r#"
@@ -267,7 +262,15 @@ fn subgraph_query_retains_the_query_variables_used_in_the_directives_applied_to_
             test
           }
         "#,
-      @r#""#
+      @r###"
+      QueryPlan {
+        Fetch(service: "Subgraph1") {
+          {
+            test
+          }
+        },
+      }
+      "###
     );
 
     let fetch_nodes = find_fetch_nodes_for_subgraph("Subgraph1", &plan);

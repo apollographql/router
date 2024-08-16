@@ -1,5 +1,7 @@
 use std::fmt;
 
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
@@ -12,8 +14,6 @@ use apollo_compiler::schema::InputValueDefinition;
 use apollo_compiler::schema::Value;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use indexmap::IndexMap;
-use indexmap::IndexSet;
 use lazy_static::lazy_static;
 
 use crate::error::FederationError;

@@ -1,7 +1,7 @@
 ---
-title: Subgraph Entity Caching for the Apollo Router
+title: Subgraph Entity Caching for the GraphOS Router
 subtitle: Configure Redis-backed caching for entities
-description: Subgraph entity caching for Apollo Router with GraphOS Enterprise. Cache and reuse individual entities across queries.
+description: Subgraph entity caching for GraphOS Router with GraphOS Enterprise. Cache and reuse individual entities across queries.
 minVersion: 1.40.0
 ---
 
@@ -9,11 +9,11 @@ minVersion: 1.40.0
 
 <PreviewFeature />
 
-Learn how the Apollo Router can cache subgraph query responses using Redis to improve your query latency for entities in the supergraph.
+Learn how the GraphOS Router can cache subgraph query responses using Redis to improve your query latency for entities in the supergraph.
 
 ## Overview
 
-An entity gets its fields from one or more subgraphs. To respond to a client request for an entity, the Apollo Router must make multiple subgraph requests. Different clients requesting the same entity can make redundant, identical subgraph requests. 
+An entity gets its fields from one or more subgraphs. To respond to a client request for an entity, the GraphOS Router must make multiple subgraph requests. Different clients requesting the same entity can make redundant, identical subgraph requests. 
 
 Entity caching enables the router to respond to identical subgraph queries with cached subgraph responses. The router uses Redis to cache data from subgraph query responses. Because cached data is keyed per subgraph and entity, different clients making the same client query&mdash;with the same or different query arguments&mdash;hit the same cache entries of subgraph response data.
 
@@ -63,11 +63,11 @@ With entity caching enabled for this example, the router can:
 
 ## Use entity caching
 
-Follow this guide to enable and configure entity caching in the Apollo Router.
+Follow this guide to enable and configure entity caching in the GraphOS Router.
 
 ### Prerequisites
 
-To use entity caching in the Apollo Router, you must set up:
+To use entity caching in the GraphOS Router, you must set up:
 
 - A Redis instance or cluster that your router instances can communicate with
 - A [GraphOS Enterprise plan](https://www.apollographql.com/pricing/) that [connects your router to GraphOS](./overview/#environment-variables).
@@ -85,28 +85,29 @@ For example:
 # Enable entity caching globally
 preview_entity_cache:
   enabled: true
-
-  # Configure Redis
-  redis:
-    urls: ["redis://..."]
-    timeout: 5ms # Optional, by default: 2ms
-    ttl: 24h # Optional, by default no expiration
-
   subgraph:
     all:
       enabled: true
+      # Configure Redis
+      redis:
+        urls: ["redis://..."]
+        timeout: 5ms # Optional, by default: 2ms
+        ttl: 24h # Optional, by default no expiration
     # Configure entity caching per subgraph, overrides options from the "all" section
     subgraphs:
       products:
         ttl: 120s # overrides the global TTL
       inventory:
         enabled: false # disable for a specific subgraph
+      accounts:
+        private_id: "user_id"
 ```
 
 ### Configure time to live (TTL)
 
-Besides configuring a global TTL for all the entries in Redis, the Apollo Router also honors the [`Cache-Control` header](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control) returned with the subgraph response. It generates a `Cache-Control` header for the client response by aggregating the TTL information from all response parts.
-A TTL has to be configured for all subgraphs using entity caching, either defined in the per subgraph configuration or inherited from the global configuration.
+To decide whether to cache an entity, the router honors the [`Cache-Control` header](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control) returned with the subgraph response. Because `Cache-Control` might not contain a `max-age` or `s-max-age` option, a default TTL must either be defined per subgraph configuration or inherited from the global configuration.
+
+The router also generates a `Cache-Control` header for the client response by aggregating the TTL information from all response parts. If a subgraph doesn't return the header, its response is assumed to be `no-store`.
 
 ### Customize Redis cache key
 
@@ -125,6 +126,118 @@ This entry contains an object with the `all` field to affect all subgraph reques
 
 ```
 
+### Private information caching
+
+A subgraph can return a response with the header `Cache-Control: private`, indicating that it contains user-personalized data. Although this usually forbids intermediate servers from storing data, the router may be able to recognize different users and store their data in different parts of the cache.
+
+To set up private information caching, you can configure the `private_id` option. `private_id` is a string pointing at a field in the request context that contains data used to recognize users (for example, user id, or `sub` claim in JWT).
+
+As an example, if you are using the router's JWT authentication plugin, you can first configure the `private_id` option in the `accounts` subgraph to point to the `user_id` key in context, then use a Rhai script to set that key from the JWT's `sub` claim:
+
+```yaml title="router.yaml"
+preview_entity_cache:
+  enabled: true
+  subgraph:
+    all:
+      enabled: true
+      redis:
+        urls: ["redis://..."]
+    subgraphs:
+      accounts:
+        private_id: "user_id"
+authentication:
+  router:
+    jwt:
+      jwks:
+        - url: https://auth-server/jwks.json
+```
+
+```rhai title="main.rhai"
+fn supergraph_service(service) {
+  let request_callback = |request| {
+    let claims = request.context[Router.APOLLO_AUTHENTICATION_JWT_CLAIMS];
+
+    if claims != () {
+      let private_id = claims["sub"];
+      request.context["user_id"] = private_id;
+    }
+  };
+
+  service.map_request(request_callback);
+}
+```
+
+The router implements the following sequence to determine whether a particular query returns private data:
+
+- Upon seeing a query for the first time, the router requests the cache as if it were a public-only query.
+- When the subgraph returns the response with private data, the router recognizes it and stores the data in a user-specific part of the cache.
+- The router stores the query in a list of known queries with private data.
+- When the router subsequently sees a known query:
+  - If the private id isn't provided, the router doesn't interrogate the cache, but it instead transmits the subgraph response directly.
+  - If the private id is provided, the router queries the part of the cache for the current user and checks the subgraph if nothing is available.
+
+### Observability
+
+The router supports a [`cache` selector](./telemetry/instrumentation/selectors#subgraph) in telemetry for the subgraph service. The selector returns the number of cache hits or misses by an entity for a subgraph request.
+
+## Spans
+
+You can add a new attribute on the subgraph span for the number of cache hits. For example:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    spans:
+      subgraph:
+        attributes:
+          cache.hit:
+            cache: hit
+```
+
+## Metrics
+
+The router provides the `telemetry.instrumentation.instruments.cache` instrument to enable cache metrics:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    instruments:
+      cache: # Cache instruments configuration
+        apollo.router.operations.entity.cache: # A counter which counts the number of cache hit and miss for subgraph requests
+          attributes:
+            entity.type: true # Include the entity type name. default: false
+            subgraph.name: # Custom attributes to include the subgraph name in the metric
+              subgraph_name: true
+            supergraph.operation.name: # Add custom attribute to display the supergraph operation name
+              supergraph_operation_name: string
+            # You can add more custom attributes using subgraph selectors
+```
+
+You can use custom instruments to create metrics for the subgraph service. The following example creates a custom instrument to generate a histogram that measures the subgraph request duration when there's at least one cache hit for the "inventory" subgraph:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    instruments:
+      subgraph:
+        only_cache_hit_on_subgraph_inventory:
+          type: histogram
+          value: duration
+          unit: hit
+          description: histogram of subgraph request duration when we have cache hit on subgraph inventory
+          condition:
+            all:
+            - eq:
+              - subgraph_name: true # subgraph selector
+              - inventory
+            - gt: # If the number of cache hit is greater than 0
+              - cache: hit
+              # entity_type: Product # Here you could also only check for the entity type Product, it's `all` by default if we don't specify this config.
+              - 0
+
+```
+
+
 ## Implementation notes
 
 ### Cache-Control header requirement
@@ -134,6 +247,10 @@ The Router currently cannot know which types or fields should be cached, so it r
 ### Responses with errors not cached
 
 To prevent transient errors from affecting the cache for a long duration, subgraph responses with errors are not cached.
+
+### Cached entities with unavailable subgraph
+
+If some entities were obtained from the cache, but the subgraphs that provided them are unavailable, the router will return a response with the cached entities, and the other entities nullified (schema permitting), along with an error message for the nullified entities.
 
 ### Authorization and entity caching
 

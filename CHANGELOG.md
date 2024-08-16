@@ -4,6 +4,442 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.52.0] - 2024-07-30
+
+## 🚀 Features
+
+### Provide helm support for when router's health_check's default path is not being used([Issue #5652](https://github.com/apollographql/router/issues/5652))
+
+When helm chart is defining the liveness and readiness check probes, if the router has been configured to use a non-default health_check path, use that rather than the default ( /health ) 
+
+By [Jon Christiansen](https://github.com/theJC) in https://github.com/apollographql/router/pull/5653
+
+### Support new span and metrics formats for entity caching ([PR #5625](https://github.com/apollographql/router/pull/5625))
+
+Metrics of the router's entity cache have been converted to the latest format with support for custom telemetry.
+
+The following example configuration shows the the `cache` instrument, the `cache` selector in the subgraph service, and the `cache` attribute of a subgraph span: 
+
+```yaml
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: none
+      cache:
+        apollo.router.operations.entity.cache:
+          attributes:
+            entity.type: true
+            subgraph.name:
+              subgraph_name: true
+            supergraph.operation.name:
+              supergraph_operation_name: string
+      subgraph:
+        only_cache_hit_on_subgraph_products:
+          type: counter
+          value:
+            cache: hit
+          unit: hit
+          description: counter of subgraph request cache hit on subgraph products
+          condition:
+            all:
+            - eq:
+              - subgraph_name: true
+              - products
+            - gt:
+              - cache: hit
+              - 0
+          attributes:
+            subgraph.name: true
+            supergraph.operation.name:
+              supergraph_operation_name: string
+
+```
+
+To learn more, go to [Entity caching docs](https://www.apollographql.com/docs/router/configuration/entity-caching).
+
+By [@Geal](https://github.com/Geal) and [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5625
+
+### Helm: Support renaming key for retrieving APOLLO_KEY secret ([Issue #5661](https://github.com/apollographql/router/issues/5661))
+
+A user of the router Helm chart can now rename the key used to retrieve the value of the secret key referenced by `APOLLO_KEY`.
+
+Previously, the router Helm chart hardcoded the key name to `managedFederationApiKey`. This didn't support users whose infrastructure required custom key names when getting secrets, such as Kubernetes users who need to use specific key names to access a `secretStore` or `externalSecret`. This change provides a user the ability to control the name of the key to use in retrieving that value.
+
+By [Jon Christiansen](https://github.com/theJC) in https://github.com/apollographql/router/pull/5662
+
+## 🐛 Fixes
+
+### Prevent Datadog timeout errors in logs ([Issue #2058](https://github.com/apollographql/router/issue/2058))
+
+The router's Datadog exporter has been updated to reduce the frequency of logged errors related to connection pools.
+
+Previously, the connection pools used by the Datadog exporter frequently timed out, and each timeout logged an error like the following:
+
+```
+2024-07-19T15:28:22.970360Z ERROR  OpenTelemetry trace error occurred: error sending request for url (http://127.0.0.1:8126/v0.5/traces): connection error: Connection reset by peer (os error 54)
+```
+
+Now, the pool timeout for the Datadog exporter has been changed so that timeout errors happen much less frequently.  
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/5692
+
+### Allow service version overrides ([PR #5689](https://github.com/apollographql/router/pull/5689))
+
+The router now supports configuration of `service.version` via YAML file configuration. This enables users to produce custom versioned builds of the router.
+
+
+The following example overrides the version to be `1.0`:
+```yaml
+telemetry:
+  exporters:
+    tracing:
+      common:
+        resource:
+          service.version: 1.0
+```
+
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/5689
+
+### Populate Datadog `span.kind` ([PR #5609](https://github.com/apollographql/router/pull/5609))
+
+Because Datadog traces use `span.kind` to differentiate between different types of spans, the router now ensures that `span.kind` is correctly populated using the OpenTelemetry span kind, which has a 1-2-1 mapping to those set out in [dd-trace](https://github.com/DataDog/dd-trace-go/blob/main/ddtrace/ext/span_kind.go).
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/5609
+
+### Remove unnecessary internal metric events from traces and spans ([PR #5649](https://github.com/apollographql/router/pull/5649))
+
+The router no longer includes some internal metric events in traces and spans that shouldn't have been included originally.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5649
+
+### Support Datadog span metrics ([PR #5609](https://github.com/apollographql/router/pull/5609))
+
+When using the APM view in Datadog, the router now displays span metrics for top-level spans or spans with the `_dd.measured` flag set.
+
+The router sets the `_dd.measured` flag by default for the following spans:
+
+* `request`
+* `router`
+* `supergraph`
+* `subgraph`
+* `subgraph_request`
+* `http_request`
+* `query_planning`
+* `execution`
+* `query_parsing`
+
+To enable or disable span metrics for any span, configure `span_metrics` for the Datadog exporter:
+
+```yaml
+telemetry:
+  exporters:
+    tracing:
+      datadog:
+        enabled: true
+        span_metrics:
+          # Disable span metrics for supergraph
+          supergraph: false
+          # Enable span metrics for my_custom_span
+          my_custom_span: true
+```
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/5609 and https://github.com/apollographql/router/pull/5703
+
+### Use spawn_blocking for query parsing and validation ([PR #5235](https://github.com/apollographql/router/pull/5235))
+
+To prevent its executor threads from blocking on large queries, the router now runs query parsing and validation in a Tokio blocking task.
+
+By [@xuorig](https://github.com/xuorig) in https://github.com/apollographql/router/pull/5235
+
+## 🛠 Maintenance
+
+### chore: Update rhai to latest release (1.19.0) ([PR #5655](https://github.com/apollographql/router/pull/5655))
+
+In Rhai 1.18.0, there were changes to how exceptions within functions were created. For details see: https://github.com/rhaiscript/rhai/blob/7e0ac9d3f4da9c892ed35a211f67553a0b451218/CHANGELOG.md?plain=1#L12
+
+We've modified how we handle errors raised by Rhai to comply with this change, which means error message output is affected. The change means that errors in functions will no longer document which function the error occurred in, for example:
+
+```diff
+-         "rhai execution error: 'Runtime error: I have raised an error (line 223, position 5)\nin call to function 'process_subgraph_response_string''"
++         "rhai execution error: 'Runtime error: I have raised an error (line 223, position 5)'"
+```
+
+Making this change allows us to keep up with the latest version (1.19.0) of Rhai.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/5655
+
+### Add version in the entity cache hash ([PR #5701](https://github.com/apollographql/router/pull/5701))
+
+The hashing algorithm of the router's entity cache has been updated to include the entity cache version.
+
+[!IMPORTANT]
+If you have previously enabled [entity caching](https://www.apollographql.com/docs/router/configuration/entity-caching), you should expect additional cache regeneration costs when updating to this version of the router while the new hashing algorithm comes into service.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5701
+
+### Improve testing by avoiding cache effects and redacting tracing details ([PR #5638](https://github.com/apollographql/router/pull/5638))
+
+We've had some problems with flaky tests and this PR addresses some of them.
+
+The router executes in parallel and concurrently. Many of our tests use snapshots to try and make assertions that functionality is continuing to work correctly. Unfortunately, concurrent/parallel execution and static snapshots don't co-operate very well. Results may appear in pseudo-random order (compared to snapshot expectations) and so tests become flaky and fail without obvious cause.
+
+The problem becomes particularly acute with features which are specifically designed for highly concurrent operation, such as batching.
+
+This set of changes addresses some of the router testing problems by:
+
+1. Making items in a batch test different enough that caching effects are avoided.
+2. Redacting various details so that sequencing is not as much of an issue in the otel traces tests.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/5638
+
+## 📚 Documentation
+
+### Update router naming conventions ([PR #5400](https://github.com/apollographql/router/pull/5400))
+
+Renames our router product to distinguish between our non-commercial and commercial offerings. Instead of referring to the **Apollo Router**, we now refer to the following:
+- **Apollo Router Core** is Apollo’s free-and-open (ELv2 licensed) implementation of a routing runtime for supergraphs. 
+- **GraphOS Router** is based on the Apollo Router Core and fully integrated with GraphOS. GraphOS Routers provide access to GraphOS’s commercial runtime features.
+
+
+By [@shorgi](https://github.com/shorgi) in https://github.com/apollographql/router/pull/5400
+
+## 🧪 Experimental
+
+### Enable Rust-based API schema implementation ([PR #5623](https://github.com/apollographql/router/pull/5623))
+
+The router has transitioned to solely using a Rust-based API schema generation implementation. 
+
+Previously, the router used a Javascript-based implementation. After testing for a few months, we've validated the improved performance and robustness of the new Rust-based implementation, so the router now only uses it.
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/5623
+
+
+
+# [1.51.0] - 2024-07-16
+
+## 🚀 Features
+
+### Support conditional coprocessor execution per stage of request lifecycle ([PR #5557](https://github.com/apollographql/router/pull/5557))
+
+The router now supports conditional execution of the coprocessor for each stage of the request lifecycle (except for the `Execution` stage).
+
+To configure, define conditions for a specific stage by using selectors based on headers or context entries. For example, based on a supergraph response you can configure the coprocessor not to execute for any subscription:
+  
+
+
+```yaml title=router.yaml
+coprocessor:
+  url: http://127.0.0.1:3000 # mandatory URL which is the address of the coprocessor
+  timeout: 2s # optional timeout (2 seconds in this example). If not set, defaults to 1 second
+  supergraph:
+    response: 
+      condition:
+        not:
+          eq:
+          - subscription
+          - operation_kind: string
+      body: true
+```
+
+To learn more, see the documentation about [coprocessor conditions](https://www.apollographql.com/docs/router/customizations/coprocessor/#conditions).
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5557
+
+### Add option to deactivate introspection response caching ([PR #5583](https://github.com/apollographql/router/pull/5583))
+
+The router now supports an option to deactivate introspection response caching. Because the router caches responses as introspection happens in the query planner, cached introspection responses may consume too much of the distributed cache or fill it up. Setting this option prevents introspection responses from filling up the router's distributed cache.
+
+To deactivate introspection caching, set `supergraph.query_planning.legacy_introspection_caching` to `false`:
+
+
+```yaml
+supergraph:
+  query_planning:
+    legacy_introspection_caching: false
+```
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/5583
+
+### Add 'subgraph_on_graphql_error' selector for subgraph ([PR #5622](https://github.com/apollographql/router/pull/5622))
+
+The router now supports the `subgraph_on_graphql_error` selector for the subgraph service, which it already supported for the router and supergraph services. Subgraph service support enables easier detection of GraphQL errors in response bodies of subgraph requests.
+
+An example configuration with `subgraph_on_graphql_error` configured:  
+
+```yaml
+telemetry:
+  instrumentation:
+    instruments:
+      subgraph:
+        http.client.request.duration:
+          attributes:
+            subgraph.graphql.errors: # attribute containing a boolean set to true if response.errors is not empty
+              subgraph_on_graphql_error: true
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5622
+
+## 🐛 Fixes
+
+### Add `response_context` in event selector for `event_*` instruments ([PR #5565](https://github.com/apollographql/router/pull/5565))
+
+The router now supports creating custom instruments with a value set to `event_*` and using both a condition executed on an event and the `response_context` selector in attributes. Previous releases didn't support the `response_context` selector in attributes.
+
+An example configuration:
+
+```yaml
+telemetry:
+  instrumentation:
+    instruments:
+      supergraph:
+        sf.graphql_router.errors:
+          value: event_unit
+          type: counter
+          unit: count
+          description: "graphql errors handled by the apollo router"
+          condition:
+            eq:
+            - true
+            - on_graphql_error: true
+          attributes:
+            "operation":
+              response_context: "operation_name" # This was not working before
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5565
+
+### Provide valid trace IDs for unsampled traces in Rhai scripts  ([PR #5606](https://github.com/apollographql/router/pull/5606))
+
+The `traceid()` function in a Rhai script for the router now returns a valid trace ID for all traces. 
+
+Previously, `traceid()` didn't return a trace ID if the trace wasn't selected for sampling.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5606
+
+### Allow query batching and entity caching to work together ([PR #5598](https://github.com/apollographql/router/pull/5598))
+
+The router now supports entity caching and subgraph batching to run simultaneously. Specifically, this change updates entity caching to ignore a subgraph request if the request is part of a batch.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/5598
+
+### Gracefully handle subgraph response with `-1` values inside error locations ([PR #5633](https://github.com/apollographql/router/pull/5633))
+
+This router now gracefully handles responses that contain invalid "`-1`" positional values for error locations in queries by ignoring those invalid locations.
+
+This change resolves the problem of GraphQL Java and GraphQL Kotlin using `{ "line": -1, "column": -1 }` values if they can't determine an error's location in a query, but the GraphQL specification [requires both `line` and `column` to be positive numbers](https://spec.graphql.org/draft/#sel-GAPHRPFCCaCGX5zM).  
+
+As an example, a subgraph can respond with invalid error locations:
+```json
+{
+    "data": { "topProducts": null },
+    "errors": [{
+        "message":"Some error on subgraph",
+        "locations": [
+            { "line": -1, "column": -1 },
+        ],
+        "path":["topProducts"]
+    }]
+}
+```
+
+With this change, the router returns a response that ignores the invalid locations:
+
+```json
+{
+    "data": { "topProducts": null },
+    "errors": [{
+        "message":"Some error on subgraph",
+        "path":["topProducts"]
+    }]
+}
+```
+
+By [@IvanGoncharov](https://github.com/IvanGoncharov) in https://github.com/apollographql/router/pull/5633
+
+### Return request timeout and rate limited error responses as structured errors ([PR #5578](https://github.com/apollographql/router/pull/5578))
+
+The router now returns request timeout errors (`408 Request Timeout`) and request rate limited errors (`429 Too Many Requests`) as structured GraphQL errors (for example, `{"errors": [...]}`). Previously, the router returned these as plaintext errors to clients.
+
+Both types of errors are properly tracked in telemetry, including the `apollo_router_graphql_error_total` metric. 
+
+By [@IvanGoncharov](https://github.com/IvanGoncharov) in https://github.com/apollographql/router/pull/5578
+
+### Fix span names and resource mapping for Datadog trace exporter ([Issue #5282](https://github.com/apollographql/router/issues/5282))
+
+> [!NOTE]
+> This is an **incremental** improvement, but we expect more improvements in Router v1.52.0 after https://github.com/apollographql/router/pull/5609/ lands.
+
+The router now uses _static span names_ by default. This change fixes the user experience of the Datadog trace exporter when sending traces with Datadog native configuration.
+
+The router has two ways of sending traces to Datadog:
+
+1. The [OpenTelemetry for Datadog](https://www.apollographql.com/docs/router/configuration/telemetry/exporters/tracing/datadog/#otlp-configuration) approach (which is the recommended method).  This is identified by `otlp` in YAML configuration, and it is *not* impacted by this fix.
+2. The ["Datadog native" configuration](https://www.apollographql.com/docs/router/configuration/telemetry/exporters/tracing/datadog/#datadog-native-configuration).  This is identified by the use of a `datadog:` key in YAML configuration.
+
+This change fixes a bug in the latter approach that broke some Datadog experiences, such as the "Resources" section of the [Datadog APM Service Catalog](https://docs.datadoghq.com/service_catalog/) page.
+
+We now use static span names by default, with resource mappings providing additional context when requested, which enables the desired behavior which was not possible before.
+
+_If for some reason you wish to maintain the existing behavior, you must either update your spans and resource mappings, or keep your spans and instead configure the router to use _dynamic span names_ and disable resource mapping._
+
+Enabling resource mapping and fixed span names is configured by the `enable_span_mapping` and `fixed_span_names` options:
+
+```yaml
+telemetry:
+  exporters:
+    tracing:
+      datadog:
+        enabled: true
+        # Enables resource mapping, previously disabled by default, but now enabled.
+        enable_span_mapping: true
+        # Enables fixed span names, defaults to true.
+        fixed_span_names: true
+
+  instrumentation:
+    spans:
+      mode: spec_compliant
+```
+
+With `enable_span_mapping` set to `true` (now default), the following resource mappings are applied:
+
+| OpenTelemetry Span Name | Datadog Span Operation Name |
+|-------------------------|-----------------------------|
+| `request`               | `http.route`                |
+| `router`                | `http.route`                |
+| `supergraph`            | `graphql.operation.name`    |
+| `query_planning`        | `graphql.operation.name`    |
+| `subgraph`              | `subgraph.name`             |
+| `subgraph_request`      | `graphql.operation.name`    |
+| `http_request`          | `http.route`                |
+
+You can override the default resource mappings by specifying the `resource_mapping` configuration:
+
+```yaml
+telemetry:
+  exporters:
+    tracing:
+      datadog:
+        enabled: true
+        resource_mapping:
+          # Use `my.span.attribute` as the resource name for the `router` span
+          router: "my.span.attribute"
+```
+
+To learn more, see the [Datadog trace exporter](https://www.apollographql.com/docs/router/configuration/telemetry/exporters/tracing/datadog) documentation.
+
+By [@bnjjj](https://github.com/bnjjj) and [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/5386
+
+## 📚 Documentation
+
+### Update documentation for `ignore_other_prefixes` ([PR #5592](https://github.com/apollographql/router/pull/5592))
+
+Update [JWT authentication documentation](https://www.apollographql.com/docs/router/configuration/authn-jwt/) to clarify the behavior of the `ignore_other_prefixes` configuration option.
+
+By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/apollographql/router/pull/5592
+
+
+
 # [1.50.0] - 2024-07-02
 
 ## 🚀 Features

@@ -35,12 +35,12 @@
 //! ## `reuse_fragments` methods (putting everything together)
 //! Recursive optimization of selection and selection sets.
 
-use std::collections::HashMap;
-use std::collections::HashSet;
-use std::ops::Not;
 use std::sync::Arc;
 
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
+use apollo_compiler::executable::VariableDefinition;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 
@@ -59,7 +59,36 @@ use super::SelectionMapperReturn;
 use super::SelectionOrSet;
 use super::SelectionSet;
 use crate::error::FederationError;
+use crate::operation::FragmentSpread;
+use crate::operation::FragmentSpreadData;
+use crate::operation::SelectionValue;
 use crate::schema::position::CompositeTypeDefinitionPosition;
+
+#[derive(Debug)]
+struct ReuseContext<'a> {
+    fragments: &'a NamedFragments,
+    operation_variables: Option<IndexSet<&'a Name>>,
+}
+
+impl<'a> ReuseContext<'a> {
+    fn for_fragments(fragments: &'a NamedFragments) -> Self {
+        Self {
+            fragments,
+            operation_variables: None,
+        }
+    }
+
+    // Taking two separate parameters so the caller can still mutate the operation's selection set.
+    fn for_operation(
+        fragments: &'a NamedFragments,
+        operation_variables: &'a [Node<VariableDefinition>],
+    ) -> Self {
+        Self {
+            fragments,
+            operation_variables: Some(operation_variables.iter().map(|var| &var.name).collect()),
+        }
+    }
+}
 
 //=============================================================================
 // Add __typename field for abstract types in named fragment definitions
@@ -86,7 +115,7 @@ impl NamedFragments {
                 )?;
             let mut mapped_selection_set = mapper(&expanded_selection_set)?;
             // `mapped_selection_set` must be fragment-spread-free.
-            mapped_selection_set.reuse_fragments(&result)?;
+            mapped_selection_set.reuse_fragments(&ReuseContext::for_fragments(&result))?;
             let updated = Fragment {
                 selection_set: mapped_selection_set,
                 schema: fragment.schema.clone(),
@@ -171,7 +200,7 @@ impl NamedFragments {
         // PORT_NOTE: The JS version asserts if `updated` is empty or not. But, we really want to
         // check the `updated` has the same set of fragments. To avoid performance hit, only the
         // size is checked here.
-        if updated.size() != self.size() {
+        if updated.len() != self.len() {
             return Err(FederationError::internal(
                 "Unexpected change in the number of fragments",
             ));
@@ -194,7 +223,7 @@ impl Selection {
     /// empty). Otherwise, we have no diff.
     fn minus(&self, other: &Selection) -> Result<Option<Selection>, FederationError> {
         if let (Some(self_sub_selection), Some(other_sub_selection)) =
-            (self.selection_set()?, other.selection_set()?)
+            (self.selection_set(), other.selection_set())
         {
             let diff = self_sub_selection.minus(other_sub_selection)?;
             if !diff.is_empty() {
@@ -215,7 +244,7 @@ impl Selection {
     /// - Otherwise, the intersection is same as `self`.
     fn intersection(&self, other: &Selection) -> Result<Option<Selection>, FederationError> {
         if let (Some(self_sub_selection), Some(other_sub_selection)) =
-            (self.selection_set()?, other.selection_set()?)
+            (self.selection_set(), other.selection_set())
         {
             let common = self_sub_selection.intersection(other_sub_selection)?;
             if !common.is_empty() {
@@ -363,7 +392,7 @@ impl NamedFragments {
 // `Option<FieldsConflictValidator>`. However, `None` validator makes it clearer that validation is
 // unnecessary.
 struct FieldsConflictValidator {
-    by_response_name: HashMap<Name, HashMap<Field, Option<Arc<FieldsConflictValidator>>>>,
+    by_response_name: IndexMap<Name, IndexMap<Field, Option<Arc<FieldsConflictValidator>>>>,
 }
 
 impl FieldsConflictValidator {
@@ -377,7 +406,8 @@ impl FieldsConflictValidator {
 
     fn for_level<'a>(level: &[&'a SelectionSet]) -> Self {
         // Group `level`'s fields by the response-name/field
-        let mut at_level: HashMap<Name, HashMap<Field, Vec<&'a SelectionSet>>> = HashMap::new();
+        let mut at_level: IndexMap<Name, IndexMap<Field, Vec<&'a SelectionSet>>> =
+            IndexMap::default();
         for selection_set in level {
             for field_selection in selection_set.field_selections() {
                 let response_name = field_selection.field.response_name();
@@ -392,10 +422,10 @@ impl FieldsConflictValidator {
         }
 
         // Collect validators per response-name/field
-        let mut by_response_name = HashMap::new();
+        let mut by_response_name = IndexMap::default();
         for (response_name, fields) in at_level {
-            let mut at_response_name: HashMap<Field, Option<Arc<FieldsConflictValidator>>> =
-                HashMap::new();
+            let mut at_response_name: IndexMap<Field, Option<Arc<FieldsConflictValidator>>> =
+                IndexMap::default();
             for (field, selection_sets) in fields {
                 if selection_sets.is_empty() {
                     at_response_name.insert(field, None);
@@ -602,7 +632,7 @@ struct FragmentRestrictionAtType {
 
 #[derive(Default)]
 struct FragmentRestrictionAtTypeCache {
-    map: HashMap<(Name, CompositeTypeDefinitionPosition), Arc<FragmentRestrictionAtType>>,
+    map: IndexMap<(Name, CompositeTypeDefinitionPosition), Arc<FragmentRestrictionAtType>>,
 }
 
 impl FragmentRestrictionAtTypeCache {
@@ -615,8 +645,8 @@ impl FragmentRestrictionAtTypeCache {
         // the lifetime does not really want to work out.
         // (&'cache mut self) -> Result<&'cache FragmentRestrictionAtType>
         match self.map.entry((fragment.name.clone(), ty.clone())) {
-            std::collections::hash_map::Entry::Occupied(entry) => Ok(Arc::clone(entry.get())),
-            std::collections::hash_map::Entry::Vacant(entry) => Ok(Arc::clone(
+            indexmap::map::Entry::Occupied(entry) => Ok(Arc::clone(entry.get())),
+            indexmap::map::Entry::Vacant(entry) => Ok(Arc::clone(
                 entry.insert(Arc::new(fragment.expanded_selection_set_at_type(ty)?)),
             )),
         }
@@ -665,7 +695,7 @@ impl Fragment {
         ty: &CompositeTypeDefinitionPosition,
     ) -> Result<FragmentRestrictionAtType, FederationError> {
         let expanded_selection_set = self.selection_set.expand_all_fragments()?;
-        let normalized_selection_set = expanded_selection_set.flatten_unnecessary_fragments(
+        let selection_set = expanded_selection_set.flatten_unnecessary_fragments(
             ty,
             /*named_fragments*/ &Default::default(),
             &self.schema,
@@ -677,7 +707,7 @@ impl Fragment {
             // Thus, we have to use the full validator in this case. (see
             // https://github.com/graphql/graphql-spec/issues/1085 for details.)
             return Ok(FragmentRestrictionAtType::new(
-                normalized_selection_set.clone(),
+                selection_set.clone(),
                 Some(FieldsConflictValidator::from_selection_set(
                     &expanded_selection_set,
                 )),
@@ -693,13 +723,11 @@ impl Fragment {
         // validator because we know the non-trimmed parts cannot create field conflict issues so
         // we're trying to build a smaller validator, but it's ok if trimmed is not as small as it
         // theoretically can be.
-        let trimmed = expanded_selection_set.minus(&normalized_selection_set)?;
-        let validator = trimmed
-            .is_empty()
-            .not()
-            .then(|| FieldsConflictValidator::from_selection_set(&trimmed));
+        let trimmed = expanded_selection_set.minus(&selection_set)?;
+        let validator =
+            (!trimmed.is_empty()).then(|| FieldsConflictValidator::from_selection_set(&trimmed));
         Ok(FragmentRestrictionAtType::new(
-            normalized_selection_set.clone(),
+            selection_set.clone(),
             validator,
         ))
     }
@@ -782,7 +810,8 @@ enum SelectionSetOrFragment {
 }
 
 impl SelectionSet {
-    /// Reduce the list of applicable fragments by eliminating ones that are subsumed by another.
+    /// Reduce the list of applicable fragments by eliminating fragments that directly include
+    /// another fragment.
     //
     // We have found the list of fragments that applies to some subset of sub-selection. In
     // general, we want to now produce the selection set with spread for those fragments plus
@@ -838,7 +867,7 @@ impl SelectionSet {
     ) {
         // Note: It's not possible for two fragments to include each other. So, we don't need to
         //       worry about inclusion cycles.
-        let included_fragments: HashSet<Name> = applicable_fragments
+        let included_fragments: IndexSet<Name> = applicable_fragments
             .iter()
             .filter(|(fragment, _)| {
                 applicable_fragments
@@ -861,7 +890,7 @@ impl SelectionSet {
     fn try_apply_fragments(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
-        fragments: &NamedFragments,
+        context: &ReuseContext<'_>,
         validator: &mut FieldsConflictMultiBranchValidator,
         fragments_at_type: &mut FragmentRestrictionAtTypeCache,
         full_match_condition: FullMatchingFragmentCondition,
@@ -873,7 +902,9 @@ impl SelectionSet {
         // fragment whose type _is_ the fragment condition (at which point, this
         // `can_apply_directly_at_type` method will apply. Also note that this is because we have
         // this restriction that calling `expanded_selection_set_at_type` is ok.
-        let candidates = fragments.get_all_may_apply_directly_at_type(parent_type);
+        let candidates = context
+            .fragments
+            .get_all_may_apply_directly_at_type(parent_type);
 
         // First, we check which of the candidates do apply inside the selection set, if any. If we
         // find a candidate that applies to the whole selection set, then we stop and only return
@@ -886,6 +917,27 @@ impl SelectionSet {
                 fragments_at_type.expanded_selection_set_at_type(candidate, parent_type)?;
             if at_type.is_useless() {
                 continue;
+            }
+
+            // I don't love this, but fragments may introduce new fields to the operation, including
+            // fields that use variables that are not declared in the operation. There are two ways
+            // to work around this: adjusting the fragments so they only list the fields that we
+            // actually need, or excluding fragments that introduce variable references from reuse.
+            // The former would be ideal, as we would not execute more fields than required. It's
+            // also much trickier to do. The latter fixes this particular issue but leaves the
+            // output in a less than ideal state.
+            // The consideration here is: `generate_query_fragments` has significant advantages
+            // over fragment reuse, and so we do not want to invest a lot of time into improving
+            // fragment reuse. We do the simple, less-than-ideal thing.
+            if let Some(variable_definitions) = &context.operation_variables {
+                let fragment_variables = candidate.used_variables();
+                if fragment_variables
+                    .difference(variable_definitions)
+                    .next()
+                    .is_some()
+                {
+                    continue;
+                }
             }
 
             // As we check inclusion, we ignore the case where the fragment queries __typename
@@ -1080,21 +1132,19 @@ impl NamedFragments {
         selection_set: &SelectionSet,
         min_usage_to_optimize: u32,
     ) -> Result<SelectionSet, FederationError> {
-        let min_usage_to_optimize: i32 = min_usage_to_optimize.try_into().unwrap_or(i32::MAX);
-
         // Call `reduce_inner` repeatedly until we reach a fix-point, since newly computed
         // selection set may drop some fragment references due to normalization, which could lead
         // to further reduction.
         // - It is hard to avoid this chain reaction, since we need to account for the effects of
         //   normalization.
-        let mut last_size = self.size();
+        let mut last_size = self.len();
         let mut last_selection_set = selection_set.clone();
         while last_size > 0 {
             let new_selection_set =
                 self.reduce_inner(&last_selection_set, min_usage_to_optimize)?;
 
             // Reached a fix-point => stop
-            if self.size() == last_size {
+            if self.len() == last_size {
                 // Assumes that `new_selection_set` is the same as `last_selection_set` in this
                 // case.
                 break;
@@ -1113,27 +1163,23 @@ impl NamedFragments {
             // case without additional complexity.
 
             // Prepare the next iteration
-            last_size = self.size();
+            last_size = self.len();
             last_selection_set = new_selection_set;
         }
         Ok(last_selection_set)
     }
 
     /// The inner loop body of `reduce` method.
-    /// - Takes i32 `min_usage_to_optimize` since `collect_used_fragment_names` counts usages in
-    ///   i32.
     fn reduce_inner(
         &mut self,
         selection_set: &SelectionSet,
-        min_usage_to_optimize: i32,
+        min_usage_to_optimize: u32,
     ) -> Result<SelectionSet, FederationError> {
-        // Initial computation of fragment usages in `selection_set`.
-        let mut usages = HashMap::new();
-        selection_set.collect_used_fragment_names(&mut usages);
+        let mut usages = selection_set.used_fragments();
 
         // Short-circuiting: Nothing was used => Drop everything (selection_set is unchanged).
         if usages.is_empty() {
-            self.retain(|_, _| false);
+            *self = Default::default();
             return Ok(selection_set.clone());
         }
 
@@ -1149,7 +1195,7 @@ impl NamedFragments {
         // - We take advantage of the fact that `NamedFragments` is already sorted in dependency
         //   order.
         // PORT_NOTE: The `computeFragmentsToKeep` function is implemented here.
-        let original_size = self.size();
+        let original_size = self.len();
         for fragment in self.iter_rev() {
             let usage_count = usages.get(&fragment.name).copied().unwrap_or_default();
             if usage_count >= min_usage_to_optimize {
@@ -1167,7 +1213,7 @@ impl NamedFragments {
         });
 
         // Short-circuiting: Nothing was dropped (fully used) => Nothing to change.
-        if self.size() == original_size {
+        if self.len() == original_size {
             return Ok(selection_set.clone());
         }
 
@@ -1204,8 +1250,12 @@ impl NamedFragments {
         )
     }
 
-    fn update_usages(usages: &mut HashMap<Name, i32>, fragment: &Node<Fragment>, usage_count: i32) {
-        let mut inner_usages = HashMap::new();
+    fn update_usages(
+        usages: &mut IndexMap<Name, u32>,
+        fragment: &Node<Fragment>,
+        usage_count: u32,
+    ) {
+        let mut inner_usages = IndexMap::default();
         fragment.collect_used_fragment_names(&mut inner_usages);
 
         for (name, inner_count) in inner_usages {
@@ -1220,17 +1270,17 @@ impl NamedFragments {
 impl Selection {
     fn reuse_fragments_inner(
         &self,
-        fragments: &NamedFragments,
+        context: &ReuseContext<'_>,
         validator: &mut FieldsConflictMultiBranchValidator,
         fragments_at_type: &mut FragmentRestrictionAtTypeCache,
     ) -> Result<Selection, FederationError> {
         match self {
             Selection::Field(field) => Ok(field
-                .reuse_fragments_inner(fragments, validator, fragments_at_type)?
+                .reuse_fragments_inner(context, validator, fragments_at_type)?
                 .into()),
             Selection::FragmentSpread(_) => Ok(self.clone()), // Do nothing
             Selection::InlineFragment(inline_fragment) => Ok(inline_fragment
-                .reuse_fragments_inner(fragments, validator, fragments_at_type)?
+                .reuse_fragments_inner(context, validator, fragments_at_type)?
                 .into()),
         }
     }
@@ -1239,7 +1289,7 @@ impl Selection {
 impl FieldSelection {
     fn reuse_fragments_inner(
         &self,
-        fragments: &NamedFragments,
+        context: &ReuseContext<'_>,
         validator: &mut FieldsConflictMultiBranchValidator,
         fragments_at_type: &mut FragmentRestrictionAtTypeCache,
     ) -> Result<Self, FederationError> {
@@ -1257,28 +1307,24 @@ impl FieldSelection {
         // First, see if we can reuse fragments for the selection of this field.
         let opt = selection_set.try_apply_fragments(
             &base_composite_type,
-            fragments,
+            context,
             &mut field_validator,
             fragments_at_type,
             FullMatchingFragmentCondition::ForFieldSelection,
         )?;
 
-        let mut optimized;
-        match opt {
+        let mut optimized = match opt {
             SelectionSetOrFragment::Fragment(fragment) => {
                 let fragment_selection = FragmentSpreadSelection::from_fragment(
                     &fragment,
                     /*directives*/ &Default::default(),
                 );
-                optimized =
-                    SelectionSet::from_selection(base_composite_type, fragment_selection.into());
+                SelectionSet::from_selection(base_composite_type, fragment_selection.into())
             }
-            SelectionSetOrFragment::SelectionSet(selection_set) => {
-                optimized = selection_set;
-            }
-        }
+            SelectionSetOrFragment::SelectionSet(selection_set) => selection_set,
+        };
         optimized =
-            optimized.reuse_fragments_inner(fragments, &mut field_validator, fragments_at_type)?;
+            optimized.reuse_fragments_inner(context, &mut field_validator, fragments_at_type)?;
         Ok(self.with_updated_selection_set(Some(optimized)))
     }
 }
@@ -1303,17 +1349,17 @@ impl From<FragmentSelection> for Selection {
 impl InlineFragmentSelection {
     fn reuse_fragments_inner(
         &self,
-        fragments: &NamedFragments,
+        context: &ReuseContext<'_>,
         validator: &mut FieldsConflictMultiBranchValidator,
         fragments_at_type: &mut FragmentRestrictionAtTypeCache,
     ) -> Result<FragmentSelection, FederationError> {
-        let mut optimized = self.selection_set.clone();
+        let optimized;
 
         let type_condition_position = &self.inline_fragment.type_condition_position;
         if let Some(type_condition_position) = type_condition_position {
             let opt = self.selection_set.try_apply_fragments(
                 type_condition_position,
-                fragments,
+                context,
                 validator,
                 fragments_at_type,
                 FullMatchingFragmentCondition::ForInlineFragmentSelection {
@@ -1358,34 +1404,37 @@ impl InlineFragmentSelection {
                             )
                             .into(),
                         );
-                        // fall-through
                     }
                 }
                 SelectionSetOrFragment::SelectionSet(selection_set) => {
                     optimized = selection_set;
-                    // fall-through
                 }
             }
+        } else {
+            optimized = self.selection_set.clone();
         }
 
-        // Then, recurse inside the field sub-selection (note that if we matched some fragments
-        // above, this recursion will "ignore" those as `FragmentSpreadSelection`'s
-        // `reuse_fragments()` is a no-op).
-        optimized = optimized.reuse_fragments_inner(fragments, validator, fragments_at_type)?;
-        Ok(InlineFragmentSelection::new(self.inline_fragment.clone(), optimized).into())
+        Ok(InlineFragmentSelection::new(
+            self.inline_fragment.clone(),
+            // Then, recurse inside the field sub-selection (note that if we matched some fragments
+            // above, this recursion will "ignore" those as `FragmentSpreadSelection`'s
+            // `reuse_fragments()` is a no-op).
+            optimized.reuse_fragments_inner(context, validator, fragments_at_type)?,
+        )
+        .into())
     }
 }
 
 impl SelectionSet {
     fn reuse_fragments_inner(
         &self,
-        fragments: &NamedFragments,
+        context: &ReuseContext<'_>,
         validator: &mut FieldsConflictMultiBranchValidator,
         fragments_at_type: &mut FragmentRestrictionAtTypeCache,
     ) -> Result<SelectionSet, FederationError> {
-        self.lazy_map(fragments, |selection| {
+        self.lazy_map(context.fragments, |selection| {
             Ok(selection
-                .reuse_fragments_inner(fragments, validator, fragments_at_type)?
+                .reuse_fragments_inner(context, validator, fragments_at_type)?
                 .into())
         })
     }
@@ -1394,7 +1443,7 @@ impl SelectionSet {
         self.iter().any(|selection| {
             matches!(selection, Selection::FragmentSpread(_))
                 || selection
-                    .try_selection_set()
+                    .selection_set()
                     .map(|subselection| subselection.contains_fragment_spread())
                     .unwrap_or(false)
         })
@@ -1402,16 +1451,16 @@ impl SelectionSet {
 
     /// ## Errors
     /// Returns an error if the selection set contains a named fragment spread.
-    fn reuse_fragments(&mut self, fragments: &NamedFragments) -> Result<(), FederationError> {
-        if fragments.is_empty() {
+    fn reuse_fragments(&mut self, context: &ReuseContext<'_>) -> Result<(), FederationError> {
+        if context.fragments.is_empty() {
             return Ok(());
         }
 
         if self.contains_fragment_spread() {
-            return Err(FederationError::internal("optimize() must only be used on selection sets that do not contain named fragment spreads"));
+            return Err(FederationError::internal("reuse_fragments() must only be used on selection sets that do not contain named fragment spreads"));
         }
 
-        // Calling optimize() will not match a fragment that would have expanded at
+        // Calling reuse_fragments() will not match a fragment that would have expanded at
         // top-level. That is, say we have the selection set `{ x y }` for a top-level `Query`, and
         // we have a fragment
         // ```
@@ -1420,12 +1469,12 @@ impl SelectionSet {
         //   y
         // }
         // ```
-        // then calling `self.optimize(fragments)` would only apply check if F apply to
+        // then calling `self.reuse_fragments(fragments)` would only apply check if F apply to
         // `x` and then `y`.
         //
         // To ensure the fragment match in this case, we "wrap" the selection into a trivial
         // fragment of the selection parent, so in the example above, we create selection `... on
-        // Query { x y}`. With that, `optimize` will correctly match on the `on Query`
+        // Query { x y }`. With that, `reuse_fragments` will correctly match on the `on Query`
         // fragment; after which we can unpack the final result.
         let wrapped = InlineFragmentSelection::from_selection_set(
             self.type_position.clone(), // parent type
@@ -1436,7 +1485,7 @@ impl SelectionSet {
             FieldsConflictValidator::from_selection_set(self),
         );
         let optimized = wrapped.reuse_fragments_inner(
-            fragments,
+            context,
             &mut validator,
             &mut FragmentRestrictionAtTypeCache::default(),
         )?;
@@ -1456,7 +1505,7 @@ impl SelectionSet {
 }
 
 impl Operation {
-    // PORT_NOTE: The JS version of `optimize` takes an optional `minUsagesToOptimize` argument.
+    // PORT_NOTE: The JS version of `reuse_fragments` takes an optional `minUsagesToOptimize` argument.
     //            However, it's only used in tests. So, it's removed in the Rust version.
     const DEFAULT_MIN_USAGES_TO_OPTIMIZE: u32 = 2;
 
@@ -1473,7 +1522,8 @@ impl Operation {
 
         // Optimize the operation's selection set by re-using existing fragments.
         let before_optimization = self.selection_set.clone();
-        self.selection_set.reuse_fragments(fragments)?;
+        self.selection_set
+            .reuse_fragments(&ReuseContext::for_operation(fragments, &self.variables))?;
         if before_optimization == self.selection_set {
             return Ok(());
         }
@@ -1499,6 +1549,25 @@ impl Operation {
         fragments: &NamedFragments,
     ) -> Result<(), FederationError> {
         self.reuse_fragments_inner(fragments, Self::DEFAULT_MIN_USAGES_TO_OPTIMIZE)
+    }
+
+    /// Optimize the parsed size of the operation by generating fragments based on the selections
+    /// in the operation.
+    pub(crate) fn generate_fragments(&mut self) -> Result<(), FederationError> {
+        // Currently, this method simply pulls out every inline fragment into a named fragment. If
+        // multiple inline fragments are the same, they use the same named fragment.
+        //
+        // This method can generate named fragments that are only used once. It's not ideal, but it
+        // also doesn't seem that bad. Avoiding this is possible but more work, and keeping this
+        // as simple as possible is a big benefit for now.
+        //
+        // When we have more advanced correctness testing, we can add more features to fragment
+        // generation, like factoring out partial repeated slices of selection sets or only
+        // introducing named fragments for patterns that occur more than once.
+        let mut generator = FragmentGenerator::default();
+        generator.visit_selection_set(&mut self.selection_set)?;
+        self.named_fragments = generator.into_inner();
+        Ok(())
     }
 
     /// Used by legacy roundtrip tests.
@@ -1531,11 +1600,204 @@ impl Operation {
     }
 }
 
+/// Returns a consistent GraphQL name for the given index.
+fn fragment_name(mut index: usize) -> Name {
+    /// https://spec.graphql.org/draft/#NameContinue
+    const NAME_CHARS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+    /// https://spec.graphql.org/draft/#NameStart
+    const NAME_START_CHARS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_";
+
+    if index < NAME_START_CHARS.len() {
+        Name::new_static_unchecked(&NAME_START_CHARS[index..index + 1])
+    } else {
+        let mut s = String::new();
+
+        let i = index % NAME_START_CHARS.len();
+        s.push(NAME_START_CHARS.as_bytes()[i].into());
+        index /= NAME_START_CHARS.len();
+
+        while index > 0 {
+            let i = index % NAME_CHARS.len();
+            s.push(NAME_CHARS.as_bytes()[i].into());
+            index /= NAME_CHARS.len();
+        }
+
+        Name::new_unchecked(&s)
+    }
+}
+
+#[derive(Debug, Default)]
+struct FragmentGenerator {
+    fragments: NamedFragments,
+    // XXX(@goto-bus-stop): This is temporary to support mismatch testing with JS!
+    names: IndexMap<(String, usize), usize>,
+}
+
+impl FragmentGenerator {
+    fn next_name(&self) -> Name {
+        fragment_name(self.fragments.len())
+    }
+
+    // XXX(@goto-bus-stop): This is temporary to support mismatch testing with JS!
+    // In the future, we will just use `.next_name()`.
+    fn generate_name(&mut self, frag: &InlineFragmentSelection) -> Name {
+        use std::fmt::Write as _;
+
+        let type_condition = frag
+            .inline_fragment
+            .type_condition_position
+            .as_ref()
+            .map_or_else(
+                || "undefined".to_string(),
+                |condition| condition.to_string(),
+            );
+        let selections = frag.selection_set.selections.len();
+        let mut name = format!("_generated_on{type_condition}_{selections}");
+
+        let key = (type_condition, selections);
+        let index = self
+            .names
+            .entry(key)
+            .and_modify(|index| *index += 1)
+            .or_default();
+        _ = write!(&mut name, "_{index}");
+
+        Name::new_unchecked(&name)
+    }
+
+    /// Is a selection set worth using for a newly generated named fragment?
+    fn is_worth_using(selection_set: &SelectionSet) -> bool {
+        let mut iter = selection_set.iter();
+        let Some(first) = iter.next() else {
+            // An empty selection is not worth using (and invalid!)
+            return false;
+        };
+        let Selection::Field(field) = first else {
+            return true;
+        };
+        // If there's more than one selection, or one selection with a subselection,
+        // it's probably worth using
+        iter.next().is_some() || field.selection_set.is_some()
+    }
+
+    /// Modify the selection set so that eligible inline fragments are moved to named fragment spreads.
+    fn visit_selection_set(
+        &mut self,
+        selection_set: &mut SelectionSet,
+    ) -> Result<(), FederationError> {
+        let mut new_selection_set = SelectionSet::empty(
+            selection_set.schema.clone(),
+            selection_set.type_position.clone(),
+        );
+
+        for (_key, selection) in Arc::make_mut(&mut selection_set.selections).iter_mut() {
+            match selection {
+                SelectionValue::Field(mut field) => {
+                    if let Some(selection_set) = field.get_selection_set_mut() {
+                        self.visit_selection_set(selection_set)?;
+                    }
+                    new_selection_set
+                        .add_local_selection(&Selection::Field(Arc::clone(field.get())))?;
+                }
+                SelectionValue::FragmentSpread(frag) => {
+                    new_selection_set
+                        .add_local_selection(&Selection::FragmentSpread(Arc::clone(frag.get())))?;
+                }
+                SelectionValue::InlineFragment(frag)
+                    if !Self::is_worth_using(&frag.get().selection_set) =>
+                {
+                    new_selection_set
+                        .add_local_selection(&Selection::InlineFragment(Arc::clone(frag.get())))?;
+                }
+                SelectionValue::InlineFragment(mut candidate) => {
+                    self.visit_selection_set(candidate.get_selection_set_mut())?;
+
+                    let directives = &candidate.get().inline_fragment.directives;
+                    let skip_include = directives
+                        .iter()
+                        .map(|directive| match directive.name.as_str() {
+                            "skip" | "include" => Ok(directive.clone()),
+                            _ => Err(()),
+                        })
+                        .collect::<Result<executable::DirectiveList, _>>();
+
+                    // If there are any directives *other* than @skip and @include,
+                    // we can't just transfer them to the generated fragment spread,
+                    // so we have to keep this inline fragment.
+                    let Ok(skip_include) = skip_include else {
+                        new_selection_set.add_local_selection(&Selection::InlineFragment(
+                            Arc::clone(candidate.get()),
+                        ))?;
+                        continue;
+                    };
+
+                    // XXX(@goto-bus-stop): This is temporary to support mismatch testing with JS!
+                    // JS does not special-case @skip and @include. It never extracts a fragment if
+                    // there's any directives on it. This code duplicates the body from the
+                    // previous condition so it's very easy to remove when we're ready :)
+                    if !skip_include.is_empty() {
+                        new_selection_set.add_local_selection(&Selection::InlineFragment(
+                            Arc::clone(candidate.get()),
+                        ))?;
+                        continue;
+                    }
+
+                    let existing = self.fragments.iter().find(|existing| {
+                        existing.type_condition_position
+                            == candidate.get().inline_fragment.casted_type()
+                            && existing.selection_set == candidate.get().selection_set
+                    });
+
+                    let existing = if let Some(existing) = existing {
+                        existing
+                    } else {
+                        // XXX(@goto-bus-stop): This is temporary to support mismatch testing with JS!
+                        // This should be reverted to `self.next_name();` when we're ready.
+                        let name = self.generate_name(candidate.get());
+                        self.fragments.insert(Fragment {
+                            schema: selection_set.schema.clone(),
+                            name: name.clone(),
+                            type_condition_position: candidate.get().inline_fragment.casted_type(),
+                            directives: Default::default(),
+                            selection_set: candidate.get().selection_set.clone(),
+                        });
+                        self.fragments.get(&name).unwrap()
+                    };
+                    new_selection_set.add_local_selection(&Selection::from(
+                        FragmentSpreadSelection {
+                            spread: FragmentSpread::new(FragmentSpreadData {
+                                schema: selection_set.schema.clone(),
+                                fragment_name: existing.name.clone(),
+                                type_condition_position: existing.type_condition_position.clone(),
+                                directives: skip_include.into(),
+                                fragment_directives: existing.directives.clone(),
+                                selection_id: crate::operation::SelectionId::new(),
+                            }),
+                            selection_set: existing.selection_set.clone(),
+                        },
+                    ))?;
+                }
+            }
+        }
+
+        *selection_set = new_selection_set;
+
+        Ok(())
+    }
+
+    /// Consumes the generator and returns the fragments it generated.
+    fn into_inner(self) -> NamedFragments {
+        self.fragments
+    }
+}
+
 //=============================================================================
 // Tests
 
 #[cfg(test)]
 mod tests {
+    use apollo_compiler::ExecutableDocument;
+
     use super::*;
     use crate::operation::tests::*;
 
@@ -1554,6 +1816,13 @@ mod tests {
             validate_operation(&$operation.schema, &optimized.to_string());
             insta::assert_snapshot!(optimized, @$expected)
         }};
+    }
+
+    #[test]
+    fn generated_fragment_names() {
+        assert_eq!(fragment_name(0), "a");
+        assert_eq!(fragment_name(100), "Vb");
+        assert_eq!(fragment_name(usize::MAX), "oS5Uz8g3Iqw");
     }
 
     #[test]
@@ -3089,6 +3358,143 @@ mod tests {
                       }
                     }
                   }
+        "###);
+    }
+
+    #[test]
+    fn reuse_fragments_with_directive_on_typename() {
+        let schema = r#"
+            type Query {
+              t1: T
+              t2: T
+              t3: T
+            }
+
+            type T {
+              a: Int
+              b: Int
+              c: Int
+              d: Int
+            }
+        "#;
+        let query = r#"
+            query A ($if: Boolean!) {
+              t1 { b a ...x }
+              t2 { ...x }
+            }
+            query B {
+              # Because this inline fragment is exactly the same shape as `x`,
+              # except for a `__typename` field, it may be tempting to reuse it.
+              # But `x.__typename` has a directive with a variable, and this query
+              # does not have that variable declared, so it can't be used.
+              t3 { ... on T { a c } }
+            }
+            fragment x on T {
+                __typename @include(if: $if)
+                a
+                c
+            }
+        "#;
+        let schema = parse_schema(schema);
+        let query = ExecutableDocument::parse_and_validate(schema.schema(), query, "query.graphql")
+            .unwrap();
+
+        let operation_a =
+            Operation::from_operation_document(schema.clone(), &query, Some("A")).unwrap();
+        let operation_b =
+            Operation::from_operation_document(schema.clone(), &query, Some("B")).unwrap();
+        let expanded_b = operation_b.expand_all_fragments_and_normalize().unwrap();
+
+        assert_optimized!(expanded_b, operation_a.named_fragments, @r###"
+        query B {
+          t3 {
+            a
+            c
+          }
+        }
+        "###);
+    }
+
+    #[test]
+    fn reuse_fragments_with_non_intersecting_types() {
+        let schema = r#"
+            type Query {
+              t: T
+              s: S
+              s2: S
+              i: I
+            }
+
+            interface I {
+                a: Int
+                b: Int
+            }
+
+            type T implements I {
+              a: Int
+              b: Int
+
+              c: Int
+              d: Int
+            }
+            type S implements I {
+              a: Int
+              b: Int
+
+              f: Int
+              g: Int
+            }
+        "#;
+        let query = r#"
+            query A ($if: Boolean!) {
+              t { ...x }
+              s { ...x }
+              i { ...x }
+            }
+            query B {
+              s {
+                # this matches fragment x once it is flattened,
+                # because the `...on T` condition does not intersect with our
+                # current type `S`
+                __typename
+                a b
+              }
+              s2 {
+                # same snippet to get it to use the fragment
+                __typename
+                a b
+              }
+            }
+            fragment x on I {
+                __typename
+                a
+                b
+                ... on T { c d @include(if: $if) }
+            }
+        "#;
+        let schema = parse_schema(schema);
+        let query = ExecutableDocument::parse_and_validate(schema.schema(), query, "query.graphql")
+            .unwrap();
+
+        let operation_a =
+            Operation::from_operation_document(schema.clone(), &query, Some("A")).unwrap();
+        let operation_b =
+            Operation::from_operation_document(schema.clone(), &query, Some("B")).unwrap();
+        let expanded_b = operation_b.expand_all_fragments_and_normalize().unwrap();
+
+        assert_optimized!(expanded_b, operation_a.named_fragments, @r###"
+        query B {
+          s {
+            __typename
+            a
+            b
+          }
+          s2 {
+            __typename
+            a
+            b
+          }
+        }
         "###);
     }
 

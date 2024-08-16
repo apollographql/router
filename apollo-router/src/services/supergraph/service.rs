@@ -454,6 +454,7 @@ async fn subscription_task(
                 formatted_query_plan: query_plan.formatted_query_plan.clone(),
                 query: query_plan.query.clone(),
                 query_metrics: query_plan.query_metrics,
+                estimated_size: Default::default(),
             })
         }),
         _ => {
@@ -801,7 +802,7 @@ impl PluggableSupergraphServiceBuilder {
             schema.clone(),
             subgraph_schemas,
             &configuration,
-            IndexMap::new(),
+            IndexMap::default(),
         )
         .await?;
 

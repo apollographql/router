@@ -1,24 +1,23 @@
 ---
 title: Deploy in Kubernetes
-subtitle: Self-hosted deployment of Apollo Router in Kubernetes
-description: Deploy the Apollo Router in Kubernetes using Helm charts. Customize configurations, enable metrics, and choose values for migration.
+subtitle: Self-hosted deployment of the router in Kubernetes
+description: Deploy the Apollo GraphOS Router or Apollo Router Core in Kubernetes using Helm charts. Customize configurations, enable metrics, and choose values for migration.
 ---
 
-import { Link } from 'gatsby';
 import ElasticNotice from '../../shared/elastic-notice.mdx';
 import HelmShowOutput from '../../shared/helm-show-router-output.mdx';
 import CoprocTypicalConfig from '../../shared/coproc-typical-config.mdx';
 
-Learn how to deploy a self-hosted Apollo Router in Kubernetes using Helm charts.
+Learn how to deploy a self-hosted router (GraphOS Router or Apollo Router Core) in Kubernetes using Helm charts.
 
 ```mermaid
 flowchart LR;
   clients(Clients);
   subgraph "Kubernetes cluster";
   lb(["<b>Load Balancer</b>"])
-  router_a(["<b>Apollo Router</b>"]);
+  router_a(["<b>Router</b>"]);
   coproc_a(["<b>Coprocessor</b>"]);
-  router_b(["<b>Apollo Router</b>"]);
+  router_b(["<b>Router</b>"]);
   coproc_b(["<b>Coprocessor</b>"]);
   router_a <-.-> coproc_a;
   router_b <-.-> coproc_b;
@@ -39,7 +38,7 @@ The following guides provide the steps to:
 
 ## About the router Helm chart
 
-[Helm](https://helm.sh) is a package manager for Kubernetes (k8s). Apollo provides an application Helm chart with each release of Apollo Router in GitHub. Since the router version 0.14.0, Apollo has released the router Helm chart as an [Open Container Initiative (OCI)](https://helm.sh/docs/topics/registries/) image in our GitHub container registry.
+[Helm](https://helm.sh) is a package manager for Kubernetes (k8s). Apollo provides an application Helm chart with each release of Apollo Router Core in GitHub. Since the router version 0.14.0, Apollo has released the router Helm chart as an [Open Container Initiative (OCI)](https://helm.sh/docs/topics/registries/) image in a GitHub container registry.
 
 <Note>
 
@@ -51,7 +50,7 @@ You customize a deployed router with the same [command-line options and YAML con
 
 ## Basic deployment
 
-Follow this guide to deploy the Apollo Router using Helm to install the basic chart provided with each router release. 
+Follow this guide to deploy the  Router using Helm to install the basic chart provided with each router release. 
 
 Each router chart has a `values.yaml` file with router and deployment settings. The released, unedited file has a few explicit settings, including:
 
@@ -61,7 +60,7 @@ Each router chart has a `values.yaml` file with router and deployment settings. 
 
 <ExpansionPanel title="Click to expand values.yaml for router v1.31.0">
 
-The values of the Helm chart for Apollo Router v1.31.0 in the GitHub container repository, as output by the `helm show` command:
+The values of the Helm chart for Apollo Router Core v1.31.0 in the GitHub container repository, as output by the `helm show` command:
 
 ```bash
 helm show values oci://ghcr.io/apollographql/helm-charts/router
@@ -73,7 +72,7 @@ helm show values oci://ghcr.io/apollographql/helm-charts/router
 
 ### Set up Helm
 
-1. Install [Helm](https://helm.sh/docs/intro/install/) **version 3.x**. The Apollo Router's Helm chart requires Helm v3.x.
+1. Install [Helm](https://helm.sh/docs/intro/install/) **version 3.x**. The router's Helm chart requires Helm v3.x.
 
     <Note>
 
@@ -107,7 +106,7 @@ For an example, see the [Setup from Apollo's Reference Architecture](https://git
 
 To manage the system resources you need to deploy the router on Kubernetes:
 
-* Read [Managing Apollo Router resources in Kubernetes](/technotes/TN0016-router-resource-management/).
+* Read [Managing router resources in Kubernetes](/technotes/TN0016-router-resource-management/).
 * Use the [router resource estimator](/technotes/TN0045-router_resource_estimator/).
 
 </Tip>
@@ -249,7 +248,7 @@ This is not specifically a router issue and Istio has instructions on how to man
 
 ## Configure for migration from gateway
 
-When [migrating from `@apollo/gateway` to the Apollo Router](../migrating-from-gateway), consider the following tips to maximize the compatibility of your router deployment.
+When [migrating from `@apollo/gateway` to the router](../migrating-from-gateway), consider the following tips to maximize the compatibility of your router deployment.
 
 ### Increase maximum request bytes
 
@@ -286,3 +285,26 @@ The gateway propagates subgraph errors to clients, but the router doesn't by def
       include_subgraph_errors:
         all: true
   ```
+
+## Troubleshooting
+
+### Pods terminating due to memory pressure 
+
+If your deployment of routers is terminating due to memory pressure, you can add router cache metrics to monitor and remediate your system:
+
+1. Add and track the following metrics to your monitoring system:
+  
+    * `apollo.router.cache.storage.estimated_size`
+    * `apollo_router_cache_size`
+    * ratio of `apollo_router_cache_hits` to `apollo_router_cache_misses`
+
+2. Observe and monitor the metrics:
+
+    * Observe the `apollo.router.cache.storage.estimated_size` to see if it grows over time and correlates with pod memory usage.
+    * Observe the ratio of cache hits to misses to determine if the cache is being effective.
+
+3. Based on your observations, try some remediating adjustments:
+
+    * Lower the cache size if the cache reaches near 100% hit-rate but the cache size is still growing.
+    * Increase the pod memory if the cache hit rate is low and the cache size is still growing.
+    * Lower the cache size if the latency of query planning cache misses is acceptable and memory availability is limited.

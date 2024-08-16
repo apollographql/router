@@ -1,6 +1,8 @@
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 
 const SUBGRAPH: &str = r#"
+      directive @custom on INLINE_FRAGMENT | FRAGMENT_SPREAD
+
       type Query {
         t: T
         t2: T
@@ -21,11 +23,9 @@ const SUBGRAPH: &str = r#"
 "#;
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: generate_query_fragments (https://apollographql.atlassian.net/browse/FED-76)
 fn it_respects_generate_query_fragments_option() {
     let planner = planner!(
-        config = QueryPlannerConfig { generate_query_fragments: true, ..Default::default() },
+        config = QueryPlannerConfig { generate_query_fragments: true, reuse_query_fragments: false, ..Default::default() },
         Subgraph1: SUBGRAPH,
     );
     assert_plan!(
@@ -48,34 +48,32 @@ fn it_respects_generate_query_fragments_option() {
 
       // Note: `... on B {}` won't be replaced, since it has only one field.
         @r###"
-      QueryPlan {
-        Fetch(service: "Subgraph1") {
-          {
-            t {
-              __typename
-              ..._generated_onA2_0
-              ... on B {
-                z
-              }
+    QueryPlan {
+      Fetch(service: "Subgraph1") {
+        {
+          t {
+            __typename
+            ..._generated_onA_2_0
+            ... on B {
+              z
             }
           }
-          
-          fragment _generated_onA2_0 on A {
-            x
-            y
-          }
-        },
-      }
+        }
+
+        fragment _generated_onA_2_0 on A {
+          x
+          y
+        }
+      },
+    }
     "###
     );
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: generate_query_fragments (https://apollographql.atlassian.net/browse/FED-76)
 fn it_handles_nested_fragment_generation() {
     let planner = planner!(
-        config = QueryPlannerConfig { generate_query_fragments: true, ..Default::default() },
+        config = QueryPlannerConfig { generate_query_fragments: true, reuse_query_fragments: false, ..Default::default() },
         Subgraph1: SUBGRAPH,
     );
     assert_plan!(
@@ -102,43 +100,41 @@ fn it_handles_nested_fragment_generation() {
 
         // Note: `... on B {}` won't be replaced, since it has only one field.
         @r###"
-      QueryPlan {
-        Fetch(service: "Subgraph1") {
-          {
-            t {
-              __typename
-              ..._generated_onA3_0
+    QueryPlan {
+      Fetch(service: "Subgraph1") {
+        {
+          t {
+            __typename
+            ..._generated_onA_3_0
+          }
+        }
+
+        fragment _generated_onA_2_0 on A {
+          x
+          y
+        }
+
+        fragment _generated_onA_3_0 on A {
+          x
+          y
+          t {
+            __typename
+            ..._generated_onA_2_0
+            ... on B {
+              z
             }
           }
-
-          fragment _generated_onA2_0 on A {
-            x
-            y
-          }
-
-          fragment _generated_onA3_0 on A {
-            x
-            y
-            t {
-              __typename
-              ..._generated_onA2_0
-              ... on B {
-                z
-              }
-            }
-          }
-        },
-      }
-        "###
+        }
+      },
+    }
+    "###
     );
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: generate_query_fragments (https://apollographql.atlassian.net/browse/FED-76)
 fn it_handles_fragments_with_one_non_leaf_field() {
     let planner = planner!(
-        config = QueryPlannerConfig { generate_query_fragments: true, ..Default::default() },
+        config = QueryPlannerConfig { generate_query_fragments: true, reuse_query_fragments: false, ..Default::default() },
         Subgraph1: SUBGRAPH,
     );
 
@@ -158,35 +154,103 @@ fn it_handles_fragments_with_one_non_leaf_field() {
         }
         "#,
         @r###"
-      QueryPlan {
-        Fetch(service: "Subgraph1") {
-          {
-            t {
-              __typename
-              ..._generated_onA1_0
-            }
+    QueryPlan {
+      Fetch(service: "Subgraph1") {
+        {
+          t {
+            __typename
+            ..._generated_onA_1_0
           }
+        }
 
-          fragment _generated_onA1_0 on A {
-            t {
-              __typename
-              ... on B {
-                z
-              }
+        fragment _generated_onA_1_0 on A {
+          t {
+            __typename
+            ... on B {
+              z
             }
           }
-        },
-      }
-        "###
+        }
+      },
+    }
+    "###
     );
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: generate_query_fragments (https://apollographql.atlassian.net/browse/FED-76)
+fn it_migrates_skip_include() {
+    let planner = planner!(
+        config = QueryPlannerConfig { generate_query_fragments: true, reuse_query_fragments: false, ..Default::default() },
+        Subgraph1: SUBGRAPH,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+        query ($var: Boolean!) {
+          t {
+            ... on A {
+              x
+              y
+              t {
+                ... on A @include(if: $var) {
+                  x
+                  y
+                }
+                ... on A @skip(if: $var) {
+                  x
+                  y
+                }
+                ... on A @custom {
+                  x
+                  y
+                }
+              }
+            }
+          }
+        }
+        "#,
+
+        // Note: `... on A @custom {}` won't be replaced, since it has a custom directive. Even
+        // though it also supports being used on a named fragment spread, we cannot assume that
+        // the behaviour is exactly the same.
+        @r###"
+    QueryPlan {
+      Fetch(service: "Subgraph1") {
+        {
+          t {
+            __typename
+            ..._generated_onA_3_0
+          }
+        }
+
+        fragment _generated_onA_3_0 on A {
+          x
+          y
+          t {
+            __typename
+            ... on A @include(if: $var) {
+              x
+              y
+            }
+            ... on A @skip(if: $var) {
+              x
+              y
+            }
+            ... on A @custom {
+              x
+              y
+            }
+          }
+        }
+      },
+    }
+    "###
+    );
+}
+#[test]
 fn it_identifies_and_reuses_equivalent_fragments_that_arent_identical() {
     let planner = planner!(
-        config = QueryPlannerConfig { generate_query_fragments: true, ..Default::default() },
+        config = QueryPlannerConfig { generate_query_fragments: true, reuse_query_fragments: false, ..Default::default() },
         Subgraph1: SUBGRAPH,
     );
     assert_plan!(
@@ -208,35 +272,33 @@ fn it_identifies_and_reuses_equivalent_fragments_that_arent_identical() {
         }
       "#,
         @r###"
-      QueryPlan {
-        Fetch(service: "Subgraph1") {
-          {
-            t {
-              __typename
-              ..._generated_onA2_0
-            }
-            t2 {
-              __typename
-              ..._generated_onA2_0
-            }
+    QueryPlan {
+      Fetch(service: "Subgraph1") {
+        {
+          t {
+            __typename
+            ..._generated_onA_2_0
           }
+          t2 {
+            __typename
+            ..._generated_onA_2_0
+          }
+        }
 
-          fragment _generated_onA2_0 on A {
-            x
-            y
-          }
-        },
-      }
+        fragment _generated_onA_2_0 on A {
+          x
+          y
+        }
+      },
+    }
     "###
     );
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: generate_query_fragments (https://apollographql.atlassian.net/browse/FED-76)
 fn fragments_that_share_a_hash_but_are_not_identical_generate_their_own_fragment_definitions() {
     let planner = planner!(
-        config = QueryPlannerConfig { generate_query_fragments: true, ..Default::default() },
+        config = QueryPlannerConfig { generate_query_fragments: true, reuse_query_fragments: false, ..Default::default() },
         Subgraph1: SUBGRAPH,
     );
     assert_plan!(
@@ -258,30 +320,30 @@ fn fragments_that_share_a_hash_but_are_not_identical_generate_their_own_fragment
         }
       "#,
         @r###"
-      QueryPlan {
-        Fetch(service: "Subgraph1") {
-          {
-            t {
-              __typename
-              ..._generated_onA2_0
-            }
-            t2 {
-              __typename
-              ..._generated_onA2_1
-            }
+    QueryPlan {
+      Fetch(service: "Subgraph1") {
+        {
+          t {
+            __typename
+            ..._generated_onA_2_0
           }
+          t2 {
+            __typename
+            ..._generated_onA_2_1
+          }
+        }
 
-          fragment _generated_onA2_0 on A {
-            x
-            y
-          }
+        fragment _generated_onA_2_0 on A {
+          x
+          y
+        }
 
-          fragment _generated_onA2_1 on A {
-            y
-            z
-          }
-        },
-      }
+        fragment _generated_onA_2_1 on A {
+          y
+          z
+        }
+      },
+    }
     "###
     );
 }

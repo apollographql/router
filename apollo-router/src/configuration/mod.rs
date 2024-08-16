@@ -161,10 +161,6 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) experimental_chaos: Chaos,
 
-    /// Set the API schema generation implementation to use.
-    #[serde(default)]
-    pub(crate) experimental_api_schema_generation_mode: ApiSchemaMode,
-
     /// Set the Apollo usage report signature and referenced field generation implementation to use.
     #[serde(default)]
     pub(crate) experimental_apollo_metrics_generation_mode: ApolloMetricsGenerationMode,
@@ -204,21 +200,6 @@ impl PartialEq for Configuration {
     }
 }
 
-/// API schema generation modes.
-#[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
-#[derivative(Debug)]
-#[serde(rename_all = "lowercase")]
-pub(crate) enum ApiSchemaMode {
-    /// Use the new Rust-based implementation.
-    New,
-    /// Use the old JavaScript-based implementation.
-    Legacy,
-    /// Use Rust-based and Javascript-based implementations side by side, logging warnings if the
-    /// implementations disagree.
-    #[default]
-    Both,
-}
-
 /// Apollo usage report signature and referenced field generation modes.
 #[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
 #[derivative(Debug)]
@@ -237,16 +218,32 @@ pub(crate) enum ApolloMetricsGenerationMode {
 /// Query planner modes.
 #[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
 #[derivative(Debug)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum QueryPlannerMode {
     /// Use the new Rust-based implementation.
+    ///
+    /// Raises an error at Router startup if the the new planner does not support the schema
+    /// (such as using legacy Apollo Federation 1)
     New,
     /// Use the old JavaScript-based implementation.
     #[default]
     Legacy,
-    /// Use Rust-based and Javascript-based implementations side by side, logging warnings if the
-    /// implementations disagree.
+    /// Use primarily the Javascript-based implementation,
+    /// but also schedule background jobs to run the Rust implementation and compare results,
+    /// logging warnings if the implementations disagree.
+    ///
+    /// Raises an error at Router startup if the the new planner does not support the schema
+    /// (such as using legacy Apollo Federation 1)
     Both,
+    /// Use primarily the Javascript-based implementation,
+    /// but also schedule on a best-effort basis background jobs
+    /// to run the Rust implementation and compare results,
+    /// logging warnings if the implementations disagree.
+    ///
+    /// Falls back to `legacy` with a warning
+    /// if the the new planner does not support the schema
+    /// (such as using legacy Apollo Federation 1)
+    BothBestEffort,
 }
 
 impl<'de> serde::Deserialize<'de> for Configuration {
@@ -275,7 +272,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             batching: Batching,
             experimental_type_conditioned_fetching: bool,
             experimental_apollo_metrics_generation_mode: ApolloMetricsGenerationMode,
-            experimental_api_schema_generation_mode: ApiSchemaMode,
             experimental_query_planner_mode: QueryPlannerMode,
         }
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
@@ -295,7 +291,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             persisted_queries: ad_hoc.persisted_queries,
             limits: ad_hoc.limits,
             experimental_chaos: ad_hoc.experimental_chaos,
-            experimental_api_schema_generation_mode: ad_hoc.experimental_api_schema_generation_mode,
             experimental_apollo_metrics_generation_mode: ad_hoc
                 .experimental_apollo_metrics_generation_mode,
             experimental_type_conditioned_fetching: ad_hoc.experimental_type_conditioned_fetching,
@@ -343,7 +338,6 @@ impl Configuration {
         operation_limits: Option<Limits>,
         chaos: Option<Chaos>,
         uplink: Option<UplinkConfig>,
-        experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
         experimental_type_conditioned_fetching: Option<bool>,
         batching: Option<Batching>,
         experimental_apollo_metrics_generation_mode: Option<ApolloMetricsGenerationMode>,
@@ -362,8 +356,6 @@ impl Configuration {
             persisted_queries: persisted_query.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
-            experimental_api_schema_generation_mode: experimental_api_schema_generation_mode
-                .unwrap_or_default(),
             experimental_apollo_metrics_generation_mode:
                 experimental_apollo_metrics_generation_mode.unwrap_or_default(),
             experimental_query_planner_mode: experimental_query_planner_mode.unwrap_or_default(),
@@ -467,7 +459,6 @@ impl Configuration {
         chaos: Option<Chaos>,
         uplink: Option<UplinkConfig>,
         batching: Option<Batching>,
-        experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
         experimental_type_conditioned_fetching: Option<bool>,
         experimental_apollo_metrics_generation_mode: Option<ApolloMetricsGenerationMode>,
         experimental_query_planner_mode: Option<QueryPlannerMode>,
@@ -481,8 +472,6 @@ impl Configuration {
             cors: cors.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
-            experimental_api_schema_generation_mode: experimental_api_schema_generation_mode
-                .unwrap_or_default(),
             experimental_apollo_metrics_generation_mode:
                 experimental_apollo_metrics_generation_mode.unwrap_or_default(),
             experimental_query_planner_mode: experimental_query_planner_mode.unwrap_or_default(),

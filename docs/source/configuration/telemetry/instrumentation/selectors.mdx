@@ -1,11 +1,11 @@
 ---
 title: Selectors
 subtitle: Select data from the router pipeline to extract
-description: Extract and select data from the Apollo Router's pipeline services to attach to telemetry.
+description: Extract and select data from the Apollo GraphOS Router's pipeline services to attach to telemetry.
 ---
 import RouterServices from '../../../../shared/router-lifecycle-services.mdx';
 
-A _selector_ is used to extract data from the Apollo Router's request lifecycle (pipeline) services and attach them to telemetry, specifically [spans](./spans), [instruments](./instruments), [conditions](./conditions) and [events](./events).
+A _selector_ is used to extract data from the GraphOS Router's request lifecycle (pipeline) services and attach them to telemetry, specifically [spans](./spans), [instruments](./instruments), [conditions](./conditions) and [events](./events).
 
 An example of a selector, `request_header`, of the router service on a custom span attribute:
 
@@ -83,7 +83,7 @@ The subgraph service executes multiple times during query execution, with each e
 | `subgraph_request_header`   | Yes         |                  | The name of a subgraph request header                                          |
 | `subgraph_response_header`  | Yes         |                  | The name of a subgraph response header                                         |
 | `subgraph_response_status`  | Yes         | `code`\|`reason` | The status of a subgraph response                                              |
-| `subgraph_on_graphql_error` | No          | `true`\|`false`  | Boolean set to true if the subgrapoh response payload contains a graphql error |
+| `subgraph_on_graphql_error` | No          | `true`\|`false`  | Boolean set to true if the subgraph response payload contains a graphql error |
 | `supergraph_operation_name` | Yes         | `string`\|`hash` | The operation name from the supergraph query                                   |
 | `supergraph_operation_kind` | Yes         | `string`         | The operation kind from the supergraph query                                   |
 | `supergraph_query`          | Yes         | `string`         | The graphql query to the supergraph                                            |

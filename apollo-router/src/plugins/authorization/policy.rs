@@ -188,7 +188,7 @@ impl<'a> traverse::Visitor for PolicyExtractionVisitor<'a> {
 pub(crate) struct PolicyFilteringVisitor<'a> {
     schema: &'a schema::Schema,
     fragments: HashMap<&'a Name, &'a ast::FragmentDefinition>,
-    implementers_map: &'a HashMap<Name, Implementers>,
+    implementers_map: &'a apollo_compiler::collections::HashMap<Name, Implementers>,
     dry_run: bool,
     request_policies: HashSet<String>,
     pub(crate) query_requires_policies: bool,
@@ -223,7 +223,7 @@ impl<'a> PolicyFilteringVisitor<'a> {
     pub(crate) fn new(
         schema: &'a schema::Schema,
         executable: &'a ast::Document,
-        implementers_map: &'a HashMap<Name, Implementers>,
+        implementers_map: &'a apollo_compiler::collections::HashMap<Name, Implementers>,
         successful_policies: HashSet<String>,
         dry_run: bool,
     ) -> Option<Self> {
