@@ -2,7 +2,7 @@
 
 Fix filtering for custom metrics that use demand control cost information in their conditions. This allows a telemetry config such as:
 
-```
+```yaml
 telemetry:
   instrumentation:
     instruments:
@@ -21,7 +21,7 @@ telemetry:
 
 Additionally, this fixes an issue with attribute comparisons which would silently fail to compare integers to float values. Now, users can write integer values in conditions that compare against selectors that select floats:
 
-```
+```yaml
 telemetry:
   instrumentation:
     instruments:
