@@ -2327,7 +2327,10 @@ impl SelectionSet {
             return Ok(Conditions::Boolean(false));
         };
         let conditions = first_selection.conditions()?;
-        if selections.fallible_any(|selection| selection.conditions().map(|c| c != conditions))? {
+        if selections
+            .map(|selection| selection.conditions())
+            .ok_and_any(|cond| cond != conditions)?
+        {
             Ok(Conditions::Boolean(true))
         } else {
             Ok(conditions)

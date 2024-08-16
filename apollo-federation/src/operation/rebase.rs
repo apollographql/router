@@ -787,7 +787,7 @@ impl SelectionSet {
     ) -> Result<bool, FederationError> {
         self.selections
             .values()
-            .fallible_all(|selection| Ok(!selection.can_add_to(parent_type, schema)?))
+            .fallible_all(|selection| selection.can_add_to(parent_type, schema))
     }
 }
 

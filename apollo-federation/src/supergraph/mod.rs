@@ -3,6 +3,7 @@ mod subgraph;
 
 use std::fmt::Write;
 use std::ops::Deref;
+use std::ops::Not;
 use std::sync::Arc;
 
 use apollo_compiler::ast::Argument;
@@ -80,6 +81,8 @@ use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 use crate::schema::type_and_directive_specification::UnionTypeSpecification;
 use crate::schema::FederationSchema;
+use crate::schema::ValidFederationSchema;
+use crate::utils::FallibleIterator;
 
 /// Assumes the given schema has been validated.
 ///
@@ -96,16 +99,19 @@ pub(crate) fn extract_subgraphs_from_supergraph(
     let (mut subgraphs, federation_spec_definitions, graph_enum_value_name_to_subgraph_name) =
         collect_empty_subgraphs(supergraph_schema, join_spec_definition)?;
 
-    let mut filtered_types = Vec::new();
-    for type_definition_position in supergraph_schema.get_types() {
-        if !join_spec_definition
-            .is_spec_type_name(supergraph_schema, type_definition_position.type_name())?
-            && !link_spec_definition
-                .is_spec_type_name(supergraph_schema, type_definition_position.type_name())?
-        {
-            filtered_types.push(type_definition_position);
-        }
-    }
+    let filtered_types: Vec<_> = supergraph_schema
+        .get_types()
+        .fallible_filter(|type_definition_position| {
+            join_spec_definition
+                .is_spec_type_name(supergraph_schema, type_definition_position.type_name())
+                .map(Not::not)
+        })
+        .and_then_filter(|type_definition_position| {
+            link_spec_definition
+                .is_spec_type_name(supergraph_schema, type_definition_position.type_name())
+                .map(Not::not)
+        })
+        .try_collect()?;
     if is_fed_1 {
         let unsupported =
             SingleFederationError::UnsupportedFederationVersion {
@@ -403,11 +409,11 @@ fn add_all_empty_subgraph_types(
 
     for type_definition_position in filtered_types {
         let type_ = type_definition_position.get(supergraph_schema.schema())?;
-        let mut type_directive_applications = Vec::new();
-        for directive in type_.directives().get_all(&type_directive_definition.name) {
-            type_directive_applications
-                .push(join_spec_definition.type_directive_arguments(directive)?);
-        }
+        let type_directive_applications: Vec<_> = type_
+            .directives()
+            .get_all(&type_directive_definition.name)
+            .map(|directive| join_spec_definition.type_directive_arguments(directive))
+            .try_collect()?;
         let types_mut = match &type_definition_position {
             TypeDefinitionPosition::Scalar(pos) => {
                 // Scalar are a bit special in that they don't have any sub-component, so we don't

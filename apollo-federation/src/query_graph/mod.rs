@@ -27,6 +27,7 @@ use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::ValidFederationSchema;
+use crate::utils::FallibleIterator;
 
 pub mod build_query_graph;
 pub(crate) mod condition_resolver;
@@ -620,20 +621,22 @@ impl QueryGraph {
         let composite_type_position: CompositeTypeDefinitionPosition =
             type_position.clone().try_into()?;
         let type_ = composite_type_position.get(subgraph_schema.schema())?;
-        for key in type_.directives().get_all(&key_directive_definition.name) {
-            let key_value = metadata
-                .federation_spec_definition()
-                .key_directive_arguments(key)?;
-            let selection = parse_field_set(
-                subgraph_schema,
-                composite_type_position.type_name().clone(),
-                key_value.fields,
-            )?;
-            if !external_metadata.selects_any_external_field(&selection) {
-                return Ok(Some(selection));
-            }
-        }
-        Ok(None)
+        type_
+            .directives()
+            .get_all(&key_directive_definition.name)
+            .map(|key| {
+                metadata
+                    .federation_spec_definition()
+                    .key_directive_arguments(key)
+            })
+            .and_then(|key_value| {
+                parse_field_set(
+                    subgraph_schema,
+                    composite_type_position.type_name().clone(),
+                    key_value.fields,
+                )
+            })
+            .find_ok(|selection| !external_metadata.selects_any_external_field(selection))
     }
 
     pub(crate) fn edge_for_field(&self, node: NodeIndex, field: &Field) -> Option<EdgeIndex> {
@@ -849,20 +852,15 @@ impl QueryGraph {
 
         let ty = type_name.get(schema.schema())?;
 
-        for key in ty.directives().get_all(&key_directive_definition.name) {
-            let Some(value) = key.argument_by_name("fields").and_then(|arg| arg.as_str()) else {
-                continue;
-            };
-            let selection = parse_field_set(schema, ty.name().clone(), value)?;
-            let has_external = metadata
-                .external_metadata()
-                .selects_any_external_field(&selection);
-            if !has_external {
-                return Ok(Some(selection));
-            }
-        }
-
-        Ok(None)
+        ty.directives()
+            .get_all(&key_directive_definition.name)
+            .filter_map(|key| key.argument_by_name("fields").and_then(|arg| arg.as_str()))
+            .map(|value| parse_field_set(schema, ty.name().clone(), value))
+            .find_ok(|selection| {
+                !metadata
+                    .external_metadata()
+                    .selects_any_external_field(selection)
+            })
     }
 
     pub(crate) fn is_cross_subgraph_edge(&self, edge: EdgeIndex) -> Result<bool, FederationError> {
@@ -901,17 +899,15 @@ impl QueryGraph {
             .federation_spec_definition()
             .provides_directive_definition(schema)?;
 
-        for object_type_definition_position in
-            schema.possible_runtime_types(interface_field_definition_position.parent().into())?
-        {
-            let field_pos = object_type_definition_position
-                .field(interface_field_definition_position.field_name.clone());
-            let field = field_pos.get(schema.schema())?;
-            if field.directives.has(&provides_directive_definition.name) {
-                return Ok(true);
-            }
-        }
-
-        Ok(false)
+        schema
+            .possible_runtime_types(interface_field_definition_position.parent().into())?
+            .into_iter()
+            .map(|object_type_definition_position| {
+                object_type_definition_position
+                    .field(interface_field_definition_position.field_name.clone())
+            })
+            .map(|field_pos| field_pos.get(schema.schema()))
+            .ok_and_any(|field| field.directives.has(&provides_directive_definition.name))
+            .map_err(Into::into)
     }
 }
