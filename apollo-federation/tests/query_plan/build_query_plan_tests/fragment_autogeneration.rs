@@ -53,14 +53,14 @@ fn it_respects_generate_query_fragments_option() {
         {
           t {
             __typename
-            ...a
+            ..._generated_onA_2_0
             ... on B {
               z
             }
           }
         }
 
-        fragment a on A {
+        fragment _generated_onA_2_0 on A {
           x
           y
         }
@@ -105,21 +105,21 @@ fn it_handles_nested_fragment_generation() {
         {
           t {
             __typename
-            ...b
+            ..._generated_onA_3_0
           }
         }
 
-        fragment a on A {
+        fragment _generated_onA_2_0 on A {
           x
           y
         }
 
-        fragment b on A {
+        fragment _generated_onA_3_0 on A {
           x
           y
           t {
             __typename
-            ...a
+            ..._generated_onA_2_0
             ... on B {
               z
             }
@@ -159,11 +159,11 @@ fn it_handles_fragments_with_one_non_leaf_field() {
         {
           t {
             __typename
-            ...a
+            ..._generated_onA_1_0
           }
         }
 
-        fragment a on A {
+        fragment _generated_onA_1_0 on A {
           t {
             __typename
             ... on B {
@@ -219,22 +219,23 @@ fn it_migrates_skip_include() {
         {
           t {
             __typename
-            ...b
+            ..._generated_onA_3_0
           }
         }
 
-        fragment a on A {
-          x
-          y
-        }
-
-        fragment b on A {
+        fragment _generated_onA_3_0 on A {
           x
           y
           t {
             __typename
-            ...a @include(if: $var)
-            ...a @skip(if: $var)
+            ... on A @include(if: $var) {
+              x
+              y
+            }
+            ... on A @skip(if: $var) {
+              x
+              y
+            }
             ... on A @custom {
               x
               y
@@ -276,15 +277,15 @@ fn it_identifies_and_reuses_equivalent_fragments_that_arent_identical() {
         {
           t {
             __typename
-            ...a
+            ..._generated_onA_2_0
           }
           t2 {
             __typename
-            ...a
+            ..._generated_onA_2_0
           }
         }
 
-        fragment a on A {
+        fragment _generated_onA_2_0 on A {
           x
           y
         }
@@ -324,20 +325,20 @@ fn fragments_that_share_a_hash_but_are_not_identical_generate_their_own_fragment
         {
           t {
             __typename
-            ...a
+            ..._generated_onA_2_0
           }
           t2 {
             __typename
-            ...b
+            ..._generated_onA_2_1
           }
         }
 
-        fragment a on A {
+        fragment _generated_onA_2_0 on A {
           x
           y
         }
 
-        fragment b on A {
+        fragment _generated_onA_2_1 on A {
           y
           z
         }

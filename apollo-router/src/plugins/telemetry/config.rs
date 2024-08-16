@@ -325,6 +325,7 @@ pub(crate) struct RequestPropagation {
     pub(crate) header_name: Option<HeaderName>,
 
     /// The trace ID format that will be used when propagating to subgraph services.
+    #[serde(default)]
     pub(crate) format: TraceIdFormat,
 }
 
