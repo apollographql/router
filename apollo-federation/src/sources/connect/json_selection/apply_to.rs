@@ -385,7 +385,7 @@ impl ApplyTo for LitExpr {
             Self::Bool(b) => Some(JSON::Bool(*b)),
             Self::Null => Some(JSON::Null),
             Self::Object(map) => {
-                let mut output = JSONMap::new();
+                let mut output = JSONMap::with_capacity(map.len());
                 for (key, value) in map {
                     if let Some(value_json) = value.apply_to_path(data, vars, input_path, errors) {
                         output.insert(key.clone(), value_json);
@@ -394,7 +394,7 @@ impl ApplyTo for LitExpr {
                 Some(JSON::Object(output))
             }
             Self::Array(vec) => {
-                let mut output = vec![];
+                let mut output = Vec::with_capacity(vec.len());
                 for value in vec {
                     output.push(
                         value
