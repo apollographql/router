@@ -1667,40 +1667,40 @@ mod tests {
     }
 
     #[test]
-    fn test_metric_rust_qp_initialisation() {
+    fn test_metric_rust_qp_initialization() {
         metric_rust_qp_init(None);
         assert_counter!(
             "apollo.router.lifecycle.query_planner.init",
             1,
-            "init.is_success" = "true"
+            "init.is_success" = true
         );
         metric_rust_qp_init(Some(UNSUPPORTED_CONTEXT));
         assert_counter!(
             "apollo.router.lifecycle.query_planner.init",
             1,
             "init.error_kind" = "context",
-            "init.is_success" = "false"
+            "init.is_success" = false
         );
         metric_rust_qp_init(Some(UNSUPPORTED_OVERRIDES));
         assert_counter!(
             "apollo.router.lifecycle.query_planner.init",
             1,
             "init.error_kind" = "overrides",
-            "init.is_success" = "false"
+            "init.is_success" = false
         );
         metric_rust_qp_init(Some(UNSUPPORTED_FED1));
         assert_counter!(
             "apollo.router.lifecycle.query_planner.init",
             1,
             "init.error_kind" = "fed1",
-            "init.is_success" = "false"
+            "init.is_success" = false
         );
         metric_rust_qp_init(Some(INTERNAL_INIT_ERROR));
         assert_counter!(
             "apollo.router.lifecycle.query_planner.init",
             1,
             "init.error_kind" = "internal",
-            "init.is_success" = "false"
+            "init.is_success" = false
         );
     }
 }
