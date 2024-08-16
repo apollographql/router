@@ -8,7 +8,7 @@ expression: response
   },
   "errors": [
     {
-      "message": "couldn't find mock for query {\"query\":\"{ search { __typename ... on MovieResult { sections { __typename ... on EntityCollectionSection { __typename id } ... on GallerySection { __typename id } } id } ... on ArticleResult { id sections { __typename ... on GallerySection { __typename id } ... on EntityCollectionSection { __typename id } } } } }\",\"operationName\":\"Search__searchSubgraph__0\"}",
+      "message": "couldn't find mock for query {\"query\":\"{ search { __typename ... on MovieResult { sections { __typename ... on EntityCollectionSection { __typename id } ... on GallerySection { __typename id } } id } ... on ArticleResult { id sections { __typename ... on GallerySection { __typename id } ... on EntityCollectionSection { __typename id } } } } }\"}",
       "extensions": {
         "code": "FETCH_ERROR"
       }

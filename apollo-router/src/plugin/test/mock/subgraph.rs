@@ -145,6 +145,7 @@ fn normalize(request: &mut Request) {
     });
 
     request.query = Some(doc.serialize().no_indent().to_string());
+    request.operation_name = None;
 }
 
 impl Service<SubgraphRequest> for MockSubgraph {

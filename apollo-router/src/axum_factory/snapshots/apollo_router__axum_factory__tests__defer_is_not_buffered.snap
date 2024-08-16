@@ -20,7 +20,7 @@ expression: parts
     },
     "errors": [
       {
-        "message": "couldn't find mock for query {\"query\":\"query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { reviews { __typename id product { __typename upc } } } } }\",\"operationName\":\"TopProducts__reviews__1\",\"variables\":{\"representations\":[{\"__typename\":\"Product\",\"upc\":\"1\"},{\"__typename\":\"Product\",\"upc\":\"2\"}]}}",
+        "message": "couldn't find mock for query {\"query\":\"query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { reviews { __typename id product { __typename upc } } } } }\",\"variables\":{\"representations\":[{\"__typename\":\"Product\",\"upc\":\"1\"},{\"__typename\":\"Product\",\"upc\":\"2\"}]}}",
         "extensions": {
           "code": "FETCH_ERROR"
         }
