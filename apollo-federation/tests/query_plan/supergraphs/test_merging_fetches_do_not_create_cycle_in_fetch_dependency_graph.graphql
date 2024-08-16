@@ -1,4 +1,4 @@
-# Composed from subgraphs with hash: bf831e2e6890f60e5c8e93bc52ce549323cb23e8
+# Composed from subgraphs with hash: 58cfa42df5c5f20fb0fbe43d4a506b3654439de1
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
@@ -23,8 +23,10 @@ directive @link(url: String, as: String, for: link__Purpose, import: [link__Impo
 scalar join__FieldSet
 
 enum join__Graph {
-  SUBGRAPH1 @join__graph(name: "Subgraph1", url: "none")
-  SUBGRAPH2 @join__graph(name: "Subgraph2", url: "none")
+  A @join__graph(name: "A", url: "none")
+  B @join__graph(name: "B", url: "none")
+  C @join__graph(name: "C", url: "none")
+  S @join__graph(name: "S", url: "none")
 }
 
 scalar link__Import
@@ -42,19 +44,51 @@ enum link__Purpose {
 }
 
 type Query
-  @join__type(graph: SUBGRAPH1)
-  @join__type(graph: SUBGRAPH2)
+  @join__type(graph: A)
+  @join__type(graph: B)
+  @join__type(graph: C)
+  @join__type(graph: S)
 {
-  t: T
+  start: T! @join__field(graph: S)
 }
 
 type T
-  @join__type(graph: SUBGRAPH1, key: "id")
-  @join__type(graph: SUBGRAPH2, key: "id")
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+  @join__type(graph: S, key: "id")
+{
+  id: String! @join__field(graph: A) @join__field(graph: B, external: true) @join__field(graph: S)
+  u: U! @join__field(graph: A) @join__field(graph: B)
+}
+
+type U
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+  @join__type(graph: C, key: "id", extension: true)
 {
   id: ID!
-  v1: Int
-  v2: Int
-  v3: Int
-  v4: Int
+  a: String! @join__field(graph: A) @join__field(graph: B) @join__field(graph: C, external: true)
+  b: String @join__field(graph: A) @join__field(graph: C, external: true)
+  w: W @join__field(graph: C, requires: "a b")
+}
+
+type W
+  @join__type(graph: B, key: "id", extension: true)
+  @join__type(graph: C, key: "id")
+{
+  id: ID
+  y: Y @join__field(graph: C)
+  w1: Int @join__field(graph: C)
+  w2: Int @join__field(graph: C)
+  w3: Int @join__field(graph: C)
+  w4: Int @join__field(graph: C)
+  w5: Int @join__field(graph: C)
+}
+
+type Y
+  @join__type(graph: C)
+{
+  y1: Int
+  y2: Int
+  y3: Int
 }

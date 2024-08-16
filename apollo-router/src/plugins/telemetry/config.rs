@@ -322,6 +322,10 @@ pub(crate) struct RequestPropagation {
     #[schemars(with = "String")]
     #[serde(deserialize_with = "deserialize_option_header_name")]
     pub(crate) header_name: Option<HeaderName>,
+
+    /// The trace ID format that will be used when propagating to subgraph services.
+    #[serde(default)]
+    pub(crate) format: TraceIdFormat,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -428,6 +432,18 @@ pub(crate) enum AttributeValue {
     String(String),
     /// Array of homogeneous values
     Array(AttributeArray),
+}
+
+impl AttributeValue {
+    pub(crate) fn as_f64(&self) -> Option<f64> {
+        match self {
+            AttributeValue::Bool(_) => None,
+            AttributeValue::I64(v) => Some(*v as f64),
+            AttributeValue::F64(v) => Some(*v),
+            AttributeValue::String(v) => v.parse::<f64>().ok(),
+            AttributeValue::Array(_) => None,
+        }
+    }
 }
 
 impl From<String> for AttributeValue {

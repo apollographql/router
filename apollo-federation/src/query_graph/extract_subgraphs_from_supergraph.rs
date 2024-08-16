@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Write;
 use std::ops::Deref;
@@ -50,6 +49,7 @@ use crate::link::join_spec_definition::JoinSpecDefinition;
 use crate::link::join_spec_definition::TypeDirectiveArguments;
 use crate::link::spec::Identity;
 use crate::link::spec::Version;
+use crate::link::spec::APOLLO_SPEC_DOMAIN;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::Link;
 use crate::link::DEFAULT_LINK_NAME;
@@ -296,7 +296,7 @@ pub(crate) fn new_empty_fed_2_subgraph_schema() -> Result<FederationSchema, Fede
 
 struct TypeInfo {
     name: NamedType,
-    // HashMap<subgraph_enum_value: String, is_interface_object: bool>
+    // IndexMap<subgraph_enum_value: String, is_interface_object: bool>
     subgraph_info: IndexMap<Name, bool>,
 }
 
@@ -308,13 +308,34 @@ struct TypeInfos {
     input_object_types: Vec<TypeInfo>,
 }
 
-fn get_original_directive_names(
+/// Builds a map of original name to new name for Apollo feature directives. This is
+/// used to handle cases where a directive is renamed via an import statement. For
+/// example, importing a directive with a custom name like
+/// ```graphql
+/// @link(url: "https://specs.apollo.dev/cost/v0.1", import: [{ name: "@cost", as: "@renamedCost" }])
+/// ```
+/// results in a map entry of `cost -> renamedCost` with the `@` prefix removed.
+///
+/// If the directive is imported under its default name, that also results in an entry. So,
+/// ```graphql
+/// @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@cost"])
+/// ```
+/// results in a map entry of `cost -> cost`. This duals as a way to check if a directive
+/// is included in the supergraph schema.
+///
+/// **Important:** This map does _not_ include directives imported from identities other
+/// than `specs.apollo.dev`. This helps us avoid extracting directives to subgraphs
+/// when a custom directive's name conflicts with that of a default one.
+fn get_apollo_directive_names(
     supergraph_schema: &FederationSchema,
-) -> Result<HashMap<Name, Name>, FederationError> {
-    let mut hm: HashMap<Name, Name> = HashMap::new();
+) -> Result<IndexMap<Name, Name>, FederationError> {
+    let mut hm: IndexMap<Name, Name> = IndexMap::default();
     for directive in &supergraph_schema.schema().schema_definition.directives {
         if directive.name.as_str() == "link" {
             if let Ok(link) = Link::from_directive_application(directive) {
+                if link.url.identity.domain != APOLLO_SPEC_DOMAIN {
+                    continue;
+                }
                 for import in link.imports {
                     hm.insert(import.element.clone(), import.imported_name().clone());
                 }
@@ -332,7 +353,7 @@ fn extract_subgraphs_from_fed_2_supergraph(
     join_spec_definition: &'static JoinSpecDefinition,
     filtered_types: &Vec<TypeDefinitionPosition>,
 ) -> Result<(), FederationError> {
-    let original_directive_names = get_original_directive_names(supergraph_schema)?;
+    let original_directive_names = get_apollo_directive_names(supergraph_schema)?;
 
     let TypeInfos {
         object_types,
@@ -464,7 +485,7 @@ fn add_all_empty_subgraph_types(
     federation_spec_definitions: &IndexMap<Name, &'static FederationSpecDefinition>,
     join_spec_definition: &'static JoinSpecDefinition,
     filtered_types: &Vec<TypeDefinitionPosition>,
-    original_directive_names: &HashMap<Name, Name>,
+    original_directive_names: &IndexMap<Name, Name>,
 ) -> Result<TypeInfos, FederationError> {
     let type_directive_definition =
         join_spec_definition.type_directive_definition(supergraph_schema)?;
@@ -766,7 +787,7 @@ fn extract_object_type_content(
     federation_spec_definitions: &IndexMap<Name, &'static FederationSpecDefinition>,
     join_spec_definition: &JoinSpecDefinition,
     info: &[TypeInfo],
-    original_directive_names: &HashMap<Name, Name>,
+    original_directive_names: &IndexMap<Name, Name>,
 ) -> Result<(), FederationError> {
     let field_directive_definition =
         join_spec_definition.field_directive_definition(supergraph_schema)?;
@@ -942,7 +963,7 @@ fn extract_interface_type_content(
     federation_spec_definitions: &IndexMap<Name, &'static FederationSpecDefinition>,
     join_spec_definition: &JoinSpecDefinition,
     info: &[TypeInfo],
-    original_directive_names: &HashMap<Name, Name>,
+    original_directive_names: &IndexMap<Name, Name>,
 ) -> Result<(), FederationError> {
     let field_directive_definition =
         join_spec_definition.field_directive_definition(supergraph_schema)?;
@@ -1230,7 +1251,7 @@ fn extract_enum_type_content(
     federation_spec_definitions: &IndexMap<Name, &'static FederationSpecDefinition>,
     join_spec_definition: &JoinSpecDefinition,
     info: &[TypeInfo],
-    original_directive_names: &HashMap<Name, Name>,
+    original_directive_names: &IndexMap<Name, Name>,
 ) -> Result<(), FederationError> {
     // This was added in join 0.3, so it can genuinely be None.
     let enum_value_directive_definition =
@@ -1339,7 +1360,7 @@ fn extract_input_object_type_content(
     federation_spec_definitions: &IndexMap<Name, &'static FederationSpecDefinition>,
     join_spec_definition: &JoinSpecDefinition,
     info: &[TypeInfo],
-    original_directive_names: &HashMap<Name, Name>,
+    original_directive_names: &IndexMap<Name, Name>,
 ) -> Result<(), FederationError> {
     let field_directive_definition =
         join_spec_definition.field_directive_definition(supergraph_schema)?;
@@ -1446,7 +1467,7 @@ fn add_subgraph_field(
     is_shareable: bool,
     field_directive_application: Option<&FieldDirectiveArguments>,
     cost_spec_definition: Option<&'static CostSpecDefinition>,
-    original_directive_names: &HashMap<Name, Name>,
+    original_directive_names: &IndexMap<Name, Name>,
 ) -> Result<(), FederationError> {
     let field_directive_application =
         field_directive_application.unwrap_or_else(|| &FieldDirectiveArguments {
@@ -1561,7 +1582,7 @@ fn add_subgraph_input_field(
     subgraph: &mut FederationSubgraph,
     field_directive_application: Option<&FieldDirectiveArguments>,
     cost_spec_definition: Option<&'static CostSpecDefinition>,
-    original_directive_names: &HashMap<Name, Name>,
+    original_directive_names: &IndexMap<Name, Name>,
 ) -> Result<(), FederationError> {
     let field_directive_application =
         field_directive_application.unwrap_or_else(|| &FieldDirectiveArguments {

@@ -4386,7 +4386,7 @@ expression: "&schema"
       "description": "Query planner modes.",
       "oneOf": [
         {
-          "description": "Use the new Rust-based implementation.",
+          "description": "Use the new Rust-based implementation.\n\nRaises an error at Router startup if the the new planner does not support the schema (such as using legacy Apollo Federation 1)",
           "enum": [
             "new"
           ],
@@ -4400,9 +4400,16 @@ expression: "&schema"
           "type": "string"
         },
         {
-          "description": "Use Rust-based and Javascript-based implementations side by side, logging warnings if the implementations disagree.",
+          "description": "Use primarily the Javascript-based implementation, but also schedule background jobs to run the Rust implementation and compare results, logging warnings if the implementations disagree.\n\nRaises an error at Router startup if the the new planner does not support the schema (such as using legacy Apollo Federation 1)",
           "enum": [
             "both"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Use primarily the Javascript-based implementation, but also schedule on a best-effort basis background jobs to run the Rust implementation and compare results, logging warnings if the implementations disagree.\n\nFalls back to `legacy` with a warning if the the new planner does not support the schema (such as using legacy Apollo Federation 1)",
+          "enum": [
+            "both_best_effort"
           ],
           "type": "string"
         }
@@ -4618,6 +4625,10 @@ expression: "&schema"
     "RequestPropagation": {
       "additionalProperties": false,
       "properties": {
+        "format": {
+          "$ref": "#/definitions/TraceIdFormat",
+          "description": "#/definitions/TraceIdFormat"
+        },
         "header_name": {
           "description": "Choose the header name to expose trace_id (default: apollo-trace-id)",
           "type": "string"

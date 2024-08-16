@@ -877,8 +877,6 @@ fn it_handles_longer_require_chain() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
 fn it_handles_complex_require_chain() {
     // Another "require chain" test but with more complexity as we have a require on multiple fields, some of which being
     // nested, and having requirements of their own.
@@ -994,40 +992,6 @@ fn it_handles_complex_require_chain() {
               }
             },
             Parallel {
-              Sequence {
-                Flatten(path: "t") {
-                  Fetch(service: "Subgraph2") {
-                    {
-                      ... on T {
-                        __typename
-                        id
-                      }
-                    } =>
-                    {
-                      ... on T {
-                        inner2_required
-                        inner1
-                      }
-                    }
-                  },
-                },
-                Flatten(path: "t") {
-                  Fetch(service: "Subgraph3") {
-                    {
-                      ... on T {
-                        __typename
-                        inner2_required
-                        id
-                      }
-                    } =>
-                    {
-                      ... on T {
-                        inner2
-                      }
-                    }
-                  },
-                },
-              },
               Flatten(path: "t") {
                 Fetch(service: "Subgraph7") {
                   {
@@ -1124,6 +1088,40 @@ fn it_handles_complex_require_chain() {
                     {
                       ... on Inner3Type {
                         inner3_nested
+                      }
+                    }
+                  },
+                },
+              },
+              Sequence {
+                Flatten(path: "t") {
+                  Fetch(service: "Subgraph2") {
+                    {
+                      ... on T {
+                        __typename
+                        id
+                      }
+                    } =>
+                    {
+                      ... on T {
+                        inner2_required
+                        inner1
+                      }
+                    }
+                  },
+                },
+                Flatten(path: "t") {
+                  Fetch(service: "Subgraph3") {
+                    {
+                      ... on T {
+                        __typename
+                        inner2_required
+                        id
+                      }
+                    } =>
+                    {
+                      ... on T {
+                        inner2
                       }
                     }
                   },
@@ -1647,6 +1645,29 @@ fn it_handles_multiple_requires_with_multiple_fetches() {
               },
             },
             Parallel {
+              Flatten(path: "t") {
+                Fetch(service: "s2") {
+                  {
+                    ... on T {
+                      __typename
+                      x {
+                        isX
+                      }
+                      v {
+                        y {
+                          isY
+                        }
+                      }
+                      id
+                    }
+                  } =>
+                  {
+                    ... on T {
+                      foo
+                    }
+                  }
+                },
+              },
               Sequence {
                 Flatten(path: "t") {
                   Fetch(service: "s2") {
@@ -1707,29 +1728,6 @@ fn it_handles_multiple_requires_with_multiple_fetches() {
                       }
                     }
                   },
-                },
-              },
-              Flatten(path: "t") {
-                Fetch(service: "s2") {
-                  {
-                    ... on T {
-                      __typename
-                      x {
-                        isX
-                      }
-                      v {
-                        y {
-                          isY
-                        }
-                      }
-                      id
-                    }
-                  } =>
-                  {
-                    ... on T {
-                      foo
-                    }
-                  }
                 },
               },
             },
