@@ -137,12 +137,10 @@ impl MockSubgraphBuilder {
 fn normalize(request: &mut Request) {
     let mut doc = Document::parse(request.query.clone().unwrap(), "request").unwrap();
 
-    doc.definitions.first_mut().map(|d| {
-        if let Definition::OperationDefinition(ref mut op) = d {
-            let o = op.make_mut();
-            o.name.take();
-        }
-    });
+    if let Some(Definition::OperationDefinition(ref mut op)) = doc.definitions.first_mut() {
+        let o = op.make_mut();
+        o.name.take();
+    };
 
     request.query = Some(doc.serialize().no_indent().to_string());
     request.operation_name = None;
