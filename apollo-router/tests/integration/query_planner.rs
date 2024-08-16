@@ -325,7 +325,7 @@ async fn context_with_legacy_qp_change_to_new_qp_keeps_old_config() {
         .await;
     router
         .assert_metrics_contains(
-            r#"aapollo_router_lifecycle_query_planner_init_total{init_error_kind="context",init_is_success="false",otel_scope_name="apollo/router"} 1"#,
+            r#"apollo_router_lifecycle_query_planner_init_total{init_error_kind="context",init_is_success="false",otel_scope_name="apollo/router"} 1"#,
             None,
         )
         .await;
