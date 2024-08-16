@@ -5,6 +5,9 @@
 // JSON structures and values.
 
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
+use std::hash::Hash;
+
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::char;
@@ -27,8 +30,9 @@ use super::helpers::spaces_or_comments;
 use super::parser::parse_string_literal;
 use super::parser::Key;
 use super::parser::PathSelection;
+use super::CollectVarPaths;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum LitExpr {
     String(String),
     Number(serde_json::Number),
@@ -162,6 +166,53 @@ impl LitExpr {
         match self {
             Self::Number(n) => n.as_i64(),
             _ => None,
+        }
+    }
+}
+
+impl CollectVarPaths for LitExpr {
+    fn collect_var_paths(&self) -> IndexSet<&PathSelection> {
+        let mut paths = IndexSet::default();
+        match self {
+            Self::String(_) | Self::Number(_) | Self::Bool(_) | Self::Null => {}
+            Self::Object(map) => {
+                for value in map.values() {
+                    paths.extend(value.collect_var_paths());
+                }
+            }
+            Self::Array(vec) => {
+                for value in vec {
+                    paths.extend(value.collect_var_paths());
+                }
+            }
+            Self::Path(path) => {
+                paths.extend(path.collect_var_paths());
+            }
+        }
+        paths
+    }
+}
+
+impl Hash for LitExpr {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            Self::String(s) => s.hash(state),
+            Self::Number(n) => n.to_string().hash(state),
+            Self::Bool(b) => b.hash(state),
+            Self::Null => "null".hash(state),
+            Self::Object(map) => {
+                // This hashing strategy makes key ordering significant, which
+                // is fine because we don't have an object-order-insensitive
+                // equality check for LitExpr. In other words, LitExpr::Object
+                // behaves like a list of key-value pairs, preserving the order
+                // of the source syntax. Once this LitExpr becomes a JSON value,
+                // we can use the order-insensivity of JSON objects.
+                map.iter().for_each(|key_value| {
+                    key_value.hash(state);
+                });
+            }
+            Self::Array(vec) => vec.hash(state),
+            Self::Path(path) => path.hash(state),
         }
     }
 }

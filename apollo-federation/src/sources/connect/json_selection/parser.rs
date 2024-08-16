@@ -1,5 +1,6 @@
 use std::fmt::Display;
 
+use apollo_compiler::collections::IndexSet;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::char;
@@ -19,6 +20,10 @@ use serde_json_bytes::Value as JSON;
 
 use super::helpers::spaces_or_comments;
 use super::lit_expr::LitExpr;
+
+pub(super) trait CollectVarPaths {
+    fn collect_var_paths(&self) -> IndexSet<&PathSelection>;
+}
 
 // JSONSelection     ::= NakedSubSelection | PathSelection
 // NakedSubSelection ::= NamedSelection* StarSelection?
@@ -62,13 +67,22 @@ impl JSONSelection {
     }
 }
 
+impl CollectVarPaths for JSONSelection {
+    fn collect_var_paths(&self) -> IndexSet<&PathSelection> {
+        match self {
+            JSONSelection::Named(subselect) => subselect.collect_var_paths(),
+            JSONSelection::Path(path) => path.collect_var_paths(),
+        }
+    }
+}
+
 // NamedSelection       ::= NamedPathSelection | NamedFieldSelection | NamedQuotedSelection | NamedGroupSelection
 // NamedPathSelection   ::= Alias PathSelection
 // NamedFieldSelection  ::= Alias? Identifier SubSelection?
 // NamedQuotedSelection ::= Alias LitString SubSelection?
 // NamedGroupSelection  ::= Alias SubSelection
 
-#[derive(Debug, PartialEq, Clone, Serialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Hash)]
 pub enum NamedSelection {
     Field(Option<Alias>, String, Option<SubSelection>),
     Quoted(Alias, String, Option<SubSelection>),
@@ -138,19 +152,6 @@ impl NamedSelection {
         }
     }
 
-    /// Extracts the property path for a given named selection
-    ///
-    // TODO: Expand on what this means once I have a better understanding
-    pub(crate) fn property_path(&self) -> Vec<Key> {
-        match self {
-            NamedSelection::Field(_, name, _) => vec![Key::Field(name.to_string())],
-            NamedSelection::Quoted(_, _, Some(_)) => todo!(),
-            NamedSelection::Quoted(_, name, None) => vec![Key::Quoted(name.to_string())],
-            NamedSelection::Path(_, path) => path.collect_paths(),
-            NamedSelection::Group(alias, _) => vec![Key::Field(alias.name.to_string())],
-        }
-    }
-
     /// Find the next subselection, if present
     pub(crate) fn next_subselection(&self) -> Option<&SubSelection> {
         match self {
@@ -183,13 +184,25 @@ impl NamedSelection {
     }
 }
 
+impl CollectVarPaths for NamedSelection {
+    fn collect_var_paths(&self) -> IndexSet<&PathSelection> {
+        match self {
+            NamedSelection::Field(_, _, Some(sub))
+            | NamedSelection::Quoted(_, _, Some(sub))
+            | NamedSelection::Group(_, sub) => sub.collect_var_paths(),
+            NamedSelection::Path(_, path) => path.collect_var_paths(),
+            _ => IndexSet::default(),
+        }
+    }
+}
+
 // PathSelection ::= (VarPath | KeyPath | AtPath) SubSelection?
 // VarPath       ::= "$" (NO_SPACE Identifier)? PathStep*
 // KeyPath       ::= Key PathStep+
 // AtPath        ::= "@" PathStep*
 // PathStep      ::= "." Key | "->" Identifier MethodArgs?
 
-#[derive(Debug, PartialEq, Clone, Serialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Hash)]
 pub struct PathSelection {
     pub(super) path: PathList,
 }
@@ -210,10 +223,6 @@ impl PathSelection {
         }
     }
 
-    pub(super) fn collect_paths(&self) -> Vec<Key> {
-        self.path.collect_paths()
-    }
-
     pub(super) fn next_subselection(&self) -> Option<&SubSelection> {
         self.path.next_subselection()
     }
@@ -223,13 +232,44 @@ impl PathSelection {
     }
 }
 
+impl CollectVarPaths for PathSelection {
+    fn collect_var_paths(&self) -> IndexSet<&PathSelection> {
+        let mut paths = IndexSet::default();
+        match &self.path {
+            PathList::Var(var_name, tail) => {
+                // The $ and @ variables refer to parts of the current JSON
+                // data, so they do not need to be surfaced as external variable
+                // references.
+                if var_name != "$" && var_name != "@" {
+                    paths.insert(self);
+                }
+                paths.extend(tail.collect_var_paths());
+            }
+            PathList::Key(_, tail) => {
+                paths.extend(tail.collect_var_paths());
+            }
+            PathList::Method(_, opt_args, tail) => {
+                if let Some(args) = opt_args {
+                    for lit_arg in &args.0 {
+                        paths.extend(lit_arg.collect_var_paths());
+                    }
+                }
+                paths.extend(tail.collect_var_paths());
+            }
+            PathList::Selection(sub) => paths.extend(sub.collect_var_paths()),
+            PathList::Empty => {}
+        };
+        paths
+    }
+}
+
 impl From<PathList> for PathSelection {
     fn from(path: PathList) -> Self {
         Self { path }
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Hash)]
 pub(super) enum PathList {
     // A VarPath must start with a variable (either $identifier, $, or @),
     // followed by any number of PathStep items (the Box<PathList>). Because we
@@ -372,24 +412,6 @@ impl PathList {
         }
     }
 
-    /// Collect all nested paths
-    ///
-    /// This method attempts to collect as many paths as possible, shorting out once
-    /// a non path selection is encountered.
-    pub(super) fn collect_paths(&self) -> Vec<Key> {
-        let mut results = Vec::new();
-
-        // Collect as many as possible
-        let mut current = self;
-        while let Self::Key(key, rest) = current {
-            results.push(key.clone());
-
-            current = rest;
-        }
-
-        results
-    }
-
     /// Find the next subselection, traversing nested chains if needed
     pub(super) fn next_subselection(&self) -> Option<&SubSelection> {
         match self {
@@ -413,9 +435,37 @@ impl PathList {
     }
 }
 
+impl CollectVarPaths for PathList {
+    fn collect_var_paths(&self) -> IndexSet<&PathSelection> {
+        let mut paths = IndexSet::default();
+        match self {
+            // PathSelection::collect_var_paths is responsible for adding all
+            // variable &PathSelection items to the set, since this
+            // PathList::Var case cannot be sure it's looking at the beginning
+            // of the path. However, we call rest.collect_var_paths()
+            // recursively because the tail of the list could contain other full
+            // PathSelection variable references.
+            PathList::Var(_, rest) | PathList::Key(_, rest) => {
+                paths.extend(rest.collect_var_paths());
+            }
+            PathList::Method(_, opt_args, rest) => {
+                if let Some(args) = opt_args {
+                    for lit_arg in &args.0 {
+                        paths.extend(lit_arg.collect_var_paths());
+                    }
+                }
+                paths.extend(rest.collect_var_paths());
+            }
+            PathList::Selection(sub) => paths.extend(sub.collect_var_paths()),
+            PathList::Empty => {}
+        }
+        paths
+    }
+}
+
 // SubSelection ::= "{" NakedSubSelection "}"
 
-#[derive(Debug, PartialEq, Clone, Serialize, Default)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Default, Hash)]
 pub struct SubSelection {
     pub(super) selections: Vec<NamedSelection>,
     pub(super) star: Option<StarSelection>,
@@ -495,9 +545,19 @@ pub struct NamedSelectionIndex {
     pos: usize,
 }
 
+impl CollectVarPaths for SubSelection {
+    fn collect_var_paths(&self) -> IndexSet<&PathSelection> {
+        let mut paths = IndexSet::default();
+        for selection in &self.selections {
+            paths.extend(selection.collect_var_paths());
+        }
+        paths
+    }
+}
+
 // StarSelection ::= Alias? "*" SubSelection?
 
-#[derive(Debug, PartialEq, Clone, Serialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Hash)]
 pub struct StarSelection(
     pub(super) Option<Alias>,
     pub(super) Option<Box<SubSelection>>,
@@ -527,7 +587,7 @@ impl StarSelection {
 
 // Alias ::= Identifier ":"
 
-#[derive(Debug, PartialEq, Clone, Serialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Hash)]
 pub struct Alias {
     pub(super) name: String,
 }
@@ -693,7 +753,7 @@ pub fn parse_string_literal(input: &str) -> IResult<&str, String> {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Hash)]
 pub struct MethodArgs(pub(super) Vec<LitExpr>);
 
 // Comma-separated positional arguments for a method, surrounded by parentheses.
@@ -1991,5 +2051,65 @@ mod tests {
                 star: None,
             }),
         );
+    }
+
+    #[test]
+    fn test_collect_var_paths() {
+        {
+            let sel = selection!(
+                r#"
+                $->echo([$args.arg1, $args.arg2, @.items->first])
+            "#
+            );
+            let args_arg1_path = PathSelection::parse("$args.arg1").unwrap().1;
+            let args_arg2_path = PathSelection::parse("$args.arg2").unwrap().1;
+            let var_paths = sel.collect_var_paths();
+            assert!(var_paths.contains(&args_arg1_path));
+            assert!(var_paths.contains(&args_arg2_path));
+            assert_eq!(var_paths.len(), 2);
+        }
+        {
+            let sel = selection!(
+                r#"
+                $this.kind->match(
+                    ["A", $this.a],
+                    ["B", $this.b],
+                    ["C", $this.c],
+                    [@, @->to_lower_case],
+                )
+            "#
+            );
+            let this_kind_path = match &sel {
+                JSONSelection::Path(path) => path,
+                _ => panic!("Expected PathSelection"),
+            };
+            let this_a_path = PathSelection::parse("$this.a").unwrap().1;
+            let this_b_path = PathSelection::parse("$this.b").unwrap().1;
+            let this_c_path = PathSelection::parse("$this.c").unwrap().1;
+            let var_paths = sel.collect_var_paths();
+            assert!(var_paths.contains(this_kind_path));
+            assert!(var_paths.contains(&this_a_path));
+            assert!(var_paths.contains(&this_b_path));
+            assert!(var_paths.contains(&this_c_path));
+            assert_eq!(var_paths.len(), 4);
+        }
+        {
+            let sel = selection!(
+                r#"
+                data.results->slice($start, $end) {
+                    id
+                    __typename: $args.type
+                }
+            "#
+            );
+            let start_path = PathSelection::parse("$start").unwrap().1;
+            let end_path = PathSelection::parse("$end").unwrap().1;
+            let args_type_path = PathSelection::parse("$args.type").unwrap().1;
+            let var_paths = sel.collect_var_paths();
+            assert!(var_paths.contains(&start_path));
+            assert!(var_paths.contains(&end_path));
+            assert!(var_paths.contains(&args_type_path));
+            assert_eq!(var_paths.len(), 3);
+        }
     }
 }
