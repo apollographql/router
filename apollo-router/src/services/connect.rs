@@ -1,4 +1,4 @@
-#![allow(missing_docs)] // FIXME
+//! Connect service request and response types.
 
 use std::sync::Arc;
 
