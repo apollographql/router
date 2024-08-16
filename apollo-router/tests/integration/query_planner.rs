@@ -123,12 +123,11 @@ async fn fed1_schema_with_legacy_qp_reload_to_both_best_effort_keep_previous_con
     router
         .assert_log_contains(
             "Failed to initialize the new query planner, falling back to legacy: \
-            The supergraph schema failed to produce a valid API schema: \
-            Supergraphs composed with federation version 1 are not supported.\
-            Please recompose your supergraph with federation version 2 or greater",
+             The supergraph schema failed to produce a valid API schema: \
+             Supergraphs composed with federation version 1 are not supported. \
+             Please recompose your supergraph with federation version 2 or greater",
         )
         .await;
-
     router
         .assert_metrics_contains(
             r#"apollo_router_lifecycle_query_planner_init_total{init_error_kind="fed1",init_is_success="false",otel_scope_name="apollo/router"} 1"#,
@@ -246,6 +245,16 @@ async fn progressive_override_with_legacy_qp_reload_to_both_best_effort_keep_pre
     let config = format!("{PROMETHEUS_METRICS_CONFIG}\n{BOTH_BEST_EFFORT_QP}");
     router.update_config(&config).await;
     router
+        .assert_log_contains(
+            "Failed to initialize the new query planner, falling back to legacy: \
+             The supergraph schema failed to produce a valid API schema: \
+             `experimental_query_planner_mode: new` or `both` cannot yet \
+             be used with progressive overrides. \
+             Remove uses of progressive overrides to try the experimental query planner, \
+             otherwise switch back to `legacy` or `both_best_effort`.",
+        )
+        .await;
+    router
         .assert_metrics_contains(
             r#"apollo_router_lifecycle_query_planner_init_total{init_error_kind="overrides",init_is_success="false",otel_scope_name="apollo/router"} 1"#,
             None,
@@ -337,6 +346,16 @@ async fn context_with_legacy_qp_reload_to_both_best_effort_keep_previous_config(
 
     let config = format!("{PROMETHEUS_METRICS_CONFIG}\n{BOTH_BEST_EFFORT_QP}");
     router.update_config(&config).await;
+    router
+        .assert_log_contains(
+            "Failed to initialize the new query planner, falling back to legacy: \
+             The supergraph schema failed to produce a valid API schema: \
+             `experimental_query_planner_mode: new` or `both` cannot yet \
+             be used with `@context`. \
+             Remove uses of `@context` to try the experimental query planner, \
+             otherwise switch back to `legacy` or `both_best_effort`.",
+        )
+        .await;
     router
         .assert_metrics_contains(
             r#"apollo_router_lifecycle_query_planner_init_total{init_error_kind="context",init_is_success="false",otel_scope_name="apollo/router"} 1"#,
