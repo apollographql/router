@@ -414,7 +414,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-federation"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "apollo-compiler",
  "derive_more",
@@ -470,7 +470,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "access-json",
  "ahash",
@@ -639,7 +639,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "apollo-parser",
  "apollo-router",
@@ -655,7 +655,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
