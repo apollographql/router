@@ -1,8 +1,8 @@
-use std::collections::HashSet;
 use std::fmt::Display;
 use std::str::FromStr;
 
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
@@ -118,7 +118,7 @@ impl URLTemplate {
     }
 
     pub fn required_parameters(&self) -> Vec<&str> {
-        let mut parameters = HashSet::new();
+        let mut parameters = IndexSet::default();
         for param_value in &self.path {
             parameters.extend(param_value.required_parameters());
         }
@@ -130,8 +130,8 @@ impl URLTemplate {
     }
 
     /// Return all parameters in the template by . delimited string
-    pub fn parameters(&self) -> Result<HashSet<Parameter<'_>>, String> {
-        let mut parameters = HashSet::new();
+    pub fn parameters(&self) -> Result<IndexSet<Parameter<'_>>, String> {
+        let mut parameters = IndexSet::default();
         for param_value in &self.path {
             parameters.extend(param_value.parameters()?);
         }

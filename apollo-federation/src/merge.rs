@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::iter;
@@ -1714,8 +1713,8 @@ fn add_core_feature_inaccessible(supergraph: &mut Schema) {
 // TODO use apollo_compiler::executable::FieldSet
 fn parse_keys<'a>(
     directives: impl Iterator<Item = &'a Component<Directive>> + Sized,
-) -> HashSet<&'a str> {
-    HashSet::from_iter(
+) -> IndexSet<&'a str> {
+    IndexSet::from_iter(
         directives
             .flat_map(|k| {
                 let field_set = directive_string_arg_value(k, &name!("fields")).unwrap();
