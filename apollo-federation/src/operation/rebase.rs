@@ -26,6 +26,7 @@ use crate::error::FederationError;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
+use crate::utils::FallibleIterator;
 
 fn print_possible_runtimes(
     composite_type: &CompositeTypeDefinitionPosition,
@@ -784,12 +785,9 @@ impl SelectionSet {
         parent_type: &CompositeTypeDefinitionPosition,
         schema: &ValidFederationSchema,
     ) -> Result<bool, FederationError> {
-        for selection in self.selections.values() {
-            if !selection.can_add_to(parent_type, schema)? {
-                return Ok(false);
-            }
-        }
-        Ok(true)
+        self.selections
+            .values()
+            .fallible_all(|selection| Ok(!selection.can_add_to(parent_type, schema)?))
     }
 }
 

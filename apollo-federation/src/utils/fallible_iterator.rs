@@ -2,6 +2,25 @@
 
 use itertools::Itertools;
 
+/// A common use for iteator is to collect into a container and grow that container. This trait
+/// extends the standard library's `Extend` trait to work for containers that can be extended with
+/// `T`s to also be extendable with `Result<T, E>`. If an `Err` is encountered, that `Err` is
+/// returned. Notably, this means the container will contain all prior `Ok` values.
+pub trait FallibleExtend<A>: Extend<A> {
+    fn fallible_extend<I, E>(&mut self, iter: I) -> Result<(), E>
+    where
+        I: IntoIterator<Item = Result<A, E>>,
+    {
+        iter.into_iter()
+            .process_results(|results| self.extend(results))
+    }
+
+    // NOTE: The standard extend trait provides `extend_one` and `extend_reserve` methods. These
+    // have not been added and can be if a use arises.
+}
+
+impl<T, A> FallibleExtend<A> for T where T: Extend<A> {}
+
 /// An extension trait for `Iterator`, similar to `Itertools`, that seeks to improve the ergonomics
 /// around fallible operations.
 ///
@@ -394,6 +413,28 @@ pub trait FallibleIterator: Sized + Itertools {
         F: FnMut(E) -> Result<T, EE>,
     {
         OrElse { iter: self, map }
+    }
+
+    /// A convenience method for applying a fallible operation to an iterator of `Result`s and
+    /// returning the first `Err` if one occurs.
+    fn and_then_for_each<F, T, E>(self, inner: F) -> Result<(), E>
+    where
+        Self: Iterator<Item = Result<T, E>>,
+        F: FnMut(T) -> Result<(), E>,
+    {
+        self.and_then(inner).collect()
+    }
+
+    /// Tries to find the first `Ok` value that matches the predicate. If an `Err` is found before
+    /// the finding a match, the `Err` is returned.
+    // NOTE: This is a nightly feature on `Iterator`. To avoid name collisions, this method is
+    // named differently :(
+    // Once stabilized, this method should probably be removed.
+    fn find_ok<F, T, E>(&mut self, predicate: F) -> Result<Option<T>, E>
+        where Self: Iterator<Item = Result<T, E>>,
+              F: FnMut(&T) -> bool,
+    {
+        self.process_results(|mut results| results.find(predicate))
     }
 }
 
