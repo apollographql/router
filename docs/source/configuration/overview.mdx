@@ -790,59 +790,64 @@ To ensure sufficient data to distinguish between genuinely unused values and tho
 Thanks to extended reference reporting, operation checks can more accurately flag issues for changes to enum values and input object fields. See the comparison table below for differences between standard operation checks based on legacy reference reporting and enhanced checks based on extended reference reporting.
 
 <table class="field-table api-ref">
-<tr>
-<th style="min-width: 100px;"></th>
-<th style="min-width: 200px;">
-Standard Check Behavior<br/>
-(Legacy reference reporting)
-</th>
-<th>
-Enhanced Check Behavior<br/>
-(Extended reference reporting)
-</th>
-</tr>
-<tr>
-<td>
+  <thead>
+    <tr>
+      <th style={{ minWidth: '100px' }}></th>
+      <th style={{ minWidth: '200px' }}>
+        Standard Check Behavior<br/>
+        (Legacy reference reporting)
+      </th>
+      <th>
+        Enhanced Check Behavior<br/>
+        (Extended reference reporting)
+      </th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>
 
 ##### Enum value removal
 
-</td>
-<td>Removing any enum values is considered a breaking change if any operations use the enum.</td>
-<td>Removing enum values is only a breaking change if historical operations use the specific enum value(s) that were removed.</td>
-</tr>
-<tr>
-<td>
+      </td>
+      <td>Removing any enum values is considered a breaking change if any operations use the enum.</td>
+      <td>Removing enum values is only a breaking change if historical operations use the specific enum value(s) that were removed.</td>
+    </tr>
+    <tr>
+      <td>
 
 ##### Default argument changes for input object fields
 
-</td>
-
-<td>Changing or removing a default argument is generally considered a breaking change, but changing or removing default values for input object fields isn't.</td>
-<td>
-
-Changing or removing default values for input object fields is considered a breaking change.
+      </td>
+      <td>
+        Changing or removing a default argument is generally considered a breaking change, but changing or removing default values for input object fields isn't.
+      </td>
+      <td>
+        Changing or removing default values for input object fields is considered a breaking change.
 You can [configure checks to ignore default values changes](/graphos/delivery/schema-checks/#ignored-conditions-settings).
 
-</td>
-</tr>
-<tr>
-<td>
+      </td>
+    </tr>
+    <tr>
+      <td>
 
 ##### Nullable input object field removal
-</td>
-<td>Removing a nullable input object field is always considered a breaking change.</td>
-<td>Removing a nullable input object field is only considered a breaking change if the nullable field is present in historical operations. If the nullable field is always omitted in historical operations, its removal isn't considered a breaking change.</td>
-</tr>
-<tr>
-<td>
+      </td>
+      <td>Removing a nullable input object field is always considered a breaking change.</td>
+      <td>Removing a nullable input object field is only considered a breaking change if the nullable field is present in historical operations. If the nullable field is always omitted in historical operations, its removal isn't considered a breaking change.</td>
+    </tr>
+    <tr>
+      <td>
 
 ##### Changing nullable input object fields to non-nullable
 
-</td>
-<td>Changing a nullable input object field to non-nullable is considered a breaking change.</td>
-<td>Changing a nullable input object field to non-nullable is only considered a breaking change if the field had a <code>null</code> value in historical operations. If the field was always a non-null value in historical operations, changing it to non-nullable isn't considered a breaking change.</td>
-</tr>
+      </td>
+      <td>Changing a nullable input object field to non-nullable is considered a breaking change.</td>
+      <td>Changing a nullable input object field to non-nullable is only considered a breaking change if the field had a <code>null</code> value in historical operations. If the field was always a non-null value in historical operations, changing it to non-nullable isn't considered a breaking change.</td>
+    </tr>
+  </tbody>
 </table>
+
 
 <Note>
 
