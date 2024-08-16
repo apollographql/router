@@ -339,7 +339,11 @@ async fn context_with_legacy_qp_reload_to_both_best_effort_keep_previous_config(
         return;
     }
     let config = format!("{PROMETHEUS_METRICS_CONFIG}\n{LEGACY_QP}");
-    let mut router = IntegrationTest::builder().config(config).build().await;
+    let mut router = IntegrationTest::builder()
+        .config(config)
+        .supergraph("tests/fixtures/set_context/supergraph.graphql")
+        .build()
+        .await;
     router.start().await;
     router.assert_started().await;
     router.execute_default_query().await;
