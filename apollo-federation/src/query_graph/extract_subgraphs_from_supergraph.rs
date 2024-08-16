@@ -464,7 +464,10 @@ fn extract_subgraphs_from_fed_2_supergraph(
         })
         .collect::<Vec<_>>();
     for subgraph in subgraphs.subgraphs.values_mut() {
-        remove_inactive_requires_and_provides_from_subgraph(&mut subgraph.schema)?;
+        remove_inactive_requires_and_provides_from_subgraph(
+            supergraph_schema,
+            &mut subgraph.schema,
+        )?;
         remove_unused_types_from_subgraph(&mut subgraph.schema)?;
         for definition in all_executable_directive_definitions.iter() {
             let pos = DirectiveDefinitionPosition {
@@ -1995,6 +1998,7 @@ fn add_federation_operations(
 /// unnecessarily. Besides, if a usage adds something useless, there is a chance it hasn't fully
 /// understood something, and warning about that fact through an error is more helpful.
 fn remove_inactive_requires_and_provides_from_subgraph(
+    supergraph_schema: &FederationSchema,
     schema: &mut FederationSchema,
 ) -> Result<(), FederationError> {
     let federation_spec_definition = get_federation_spec_definition_from_subgraph(schema)?;
@@ -2046,6 +2050,7 @@ fn remove_inactive_requires_and_provides_from_subgraph(
 
     for pos in object_or_interface_field_definition_positions {
         remove_inactive_applications(
+            supergraph_schema,
             schema,
             federation_spec_definition,
             FieldSetDirectiveKind::Requires,
@@ -2053,6 +2058,7 @@ fn remove_inactive_requires_and_provides_from_subgraph(
             pos.clone(),
         )?;
         remove_inactive_applications(
+            supergraph_schema,
             schema,
             federation_spec_definition,
             FieldSetDirectiveKind::Provides,
@@ -2070,6 +2076,7 @@ enum FieldSetDirectiveKind {
 }
 
 fn remove_inactive_applications(
+    supergraph_schema: &FederationSchema,
     schema: &mut FederationSchema,
     federation_spec_definition: &'static FederationSpecDefinition,
     directive_kind: FieldSetDirectiveKind,
@@ -2079,7 +2086,7 @@ fn remove_inactive_applications(
     let mut replacement_directives = Vec::new();
     let field = object_or_interface_field_definition_position.get(schema.schema())?;
     for directive in field.directives.get_all(name_in_schema) {
-        let (fields, parent_type_pos) = match directive_kind {
+        let (fields, parent_type_pos, target_schema) = match directive_kind {
             FieldSetDirectiveKind::Provides => {
                 let fields = federation_spec_definition
                     .provides_directive_arguments(directive)?
@@ -2087,7 +2094,7 @@ fn remove_inactive_applications(
                 let parent_type_pos: CompositeTypeDefinitionPosition = schema
                     .get_type(field.ty.inner_named_type().clone())?
                     .try_into()?;
-                (fields, parent_type_pos)
+                (fields, parent_type_pos, schema.schema())
             }
             FieldSetDirectiveKind::Requires => {
                 let fields = federation_spec_definition
@@ -2098,7 +2105,8 @@ fn remove_inactive_applications(
                         .parent()
                         .clone()
                         .into();
-                (fields, parent_type_pos)
+                // @requires needs to be validated against the supergraph schema
+                (fields, parent_type_pos, supergraph_schema.schema())
             }
         };
         // TODO: The assume_valid_ref() here is non-ideal, in the sense that the error messages we
@@ -2108,7 +2116,7 @@ fn remove_inactive_applications(
         // At best, we could try to shift this computation to after the subgraph schema validation
         // step, but its unclear at this time whether performing this shift affects correctness (and
         // it takes time to determine that). So for now, we keep this here.
-        let valid_schema = Valid::assume_valid_ref(schema.schema());
+        let valid_schema = Valid::assume_valid_ref(target_schema);
         // TODO: In the JS codebase, this function ends up getting additionally used in the schema
         // upgrader, where parsing the field set may error. In such cases, we end up skipping those
         // directives instead of returning error here, as it pollutes the list of error messages
