@@ -487,7 +487,7 @@ impl FetchDependencyGraphNodePath {
         &self,
         element: Arc<OpPathElement>,
     ) -> Result<FetchDependencyGraphNodePath, FederationError> {
-        let response_path = self.updated_response_path(&element).unwrap();
+        let response_path = self.updated_response_path(&element)?;
         let new_possible_types = self.new_possible_types(&element);
         let possible_types_after_last_field = if let &OpPathElement::Field(_) = element.as_ref() {
             new_possible_types.clone()
@@ -603,7 +603,7 @@ impl FetchDependencyGraphNodePath {
                 ));
 
                 // TODO: is there a simpler way to find a field’s type from `&Field`?
-                let mut type_ = &field.field_position.get(self.schema.schema())?.ty;
+                let mut type_ = &field.field_position.get(field.schema.schema())?.ty;
                 loop {
                     match type_ {
                         schema::Type::Named(_) | schema::Type::NonNullNamed(_) => break,
