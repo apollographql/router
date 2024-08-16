@@ -587,6 +587,14 @@ impl Key {
             Key::Quoted(name) => name.clone(),
         }
     }
+    // Like as_string, but without cloning a new String, for times when the Key
+    // itself lives longer than the &str.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Key::Field(name) => name.as_str(),
+            Key::Quoted(name) => name.as_str(),
+        }
+    }
 
     // This method is used to implement the Display trait for Key, and includes
     // a leading '.' character for string keys, as well as proper quoting for

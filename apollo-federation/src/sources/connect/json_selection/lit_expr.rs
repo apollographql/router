@@ -107,9 +107,9 @@ impl LitExpr {
                 |properties| {
                     let mut output = IndexMap::default();
                     if let Some(((first_key, first_value), rest, _trailing_comma)) = properties {
-                        output.insert(first_key, first_value);
+                        output.insert(first_key.to_string(), first_value);
                         for (key, value) in rest {
-                            output.insert(key, value);
+                            output.insert(key.to_string(), value);
                         }
                     }
                     Self::Object(output)

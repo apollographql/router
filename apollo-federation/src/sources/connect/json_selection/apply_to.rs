@@ -192,16 +192,16 @@ impl ApplyTo for NamedSelection {
             selection: &Option<SubSelection>,
         | {
             let input_path_with_key = input_path.append(key.to_json());
-            let name = key.as_string();
-            if let Some(child) = data.get(name.clone()) {
-                let output_name = alias.map_or(&name, |alias| &alias.name);
+            let name = key.as_str();
+            if let Some(child) = data.get(name) {
+                let output_name = alias.map_or(name, |alias| alias.name.as_str());
                 if let Some(selection) = selection {
                     let value = selection.apply_to_path(child, vars, &input_path_with_key, errors);
                     if let Some(value) = value {
-                        output.insert(output_name.clone(), value);
+                        output.insert(output_name, value);
                     }
                 } else {
-                    output.insert(output_name.clone(), child.clone());
+                    output.insert(output_name, child.clone());
                 }
             } else {
                 errors.insert(ApplyToError::new(
@@ -257,7 +257,7 @@ impl ApplyTo for PathSelection {
             PathList::Key(key, tail) => {
                 if let Some((dollar_data, dollar_path)) = vars.get("$") {
                     let input_path_with_key = dollar_path.append(key.to_json());
-                    if let Some(child) = dollar_data.get(key.as_string()) {
+                    if let Some(child) = dollar_data.get(key.as_str()) {
                         tail.apply_to_path(child, vars, &input_path_with_key, errors)
                     } else {
                         errors.insert(ApplyToError::new(
@@ -328,10 +328,7 @@ impl ApplyTo for PathList {
                     return None;
                 }
 
-                if let Some(child) = match key {
-                    Key::Field(name) => data.get(name),
-                    Key::Quoted(name) => data.get(name),
-                } {
+                if let Some(child) = data.get(key.as_str()) {
                     tail.apply_to_path(child, vars, &input_path_with_key, errors)
                 } else {
                     errors.insert(ApplyToError::new(
@@ -459,11 +456,7 @@ impl ApplyTo for SubSelection {
                     }
                     NamedSelection::Path(_, path_selection) => {
                         if let PathList::Key(key, _) = &path_selection.path {
-                            match key {
-                                Key::Field(name) | Key::Quoted(name) => {
-                                    input_names.insert(name.as_str());
-                                }
-                            };
+                            input_names.insert(key.as_str());
                         }
                     }
                     // The contents of groups do not affect the keys matched by
