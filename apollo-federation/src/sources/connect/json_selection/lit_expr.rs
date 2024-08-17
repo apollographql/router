@@ -22,9 +22,6 @@ use nom::sequence::pair;
 use nom::sequence::preceded;
 use nom::sequence::tuple;
 use nom::IResult;
-use serde::ser::SerializeMap;
-use serde::ser::SerializeSeq;
-use serde::Serialize;
 
 use super::helpers::spaces_or_comments;
 use super::parser::parse_string_literal;
@@ -213,35 +210,6 @@ impl Hash for LitExpr {
             }
             Self::Array(vec) => vec.hash(state),
             Self::Path(path) => path.hash(state),
-        }
-    }
-}
-
-impl Serialize for LitExpr {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::ser::Serializer,
-    {
-        match self {
-            Self::String(s) => serializer.serialize_str(s),
-            Self::Number(n) => n.serialize(serializer),
-            Self::Bool(b) => serializer.serialize_bool(*b),
-            Self::Null => serializer.serialize_none(),
-            Self::Object(map) => {
-                let mut state = serializer.serialize_map(Some(map.len()))?;
-                for (key, value) in map {
-                    state.serialize_entry(key, value)?;
-                }
-                state.end()
-            }
-            Self::Array(vec) => {
-                let mut state = serializer.serialize_seq(Some(vec.len()))?;
-                for value in vec {
-                    state.serialize_element(value)?;
-                }
-                state.end()
-            }
-            Self::Path(path) => path.serialize(serializer),
         }
     }
 }

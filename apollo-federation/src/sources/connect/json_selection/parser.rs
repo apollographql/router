@@ -15,7 +15,6 @@ use nom::sequence::pair;
 use nom::sequence::preceded;
 use nom::sequence::tuple;
 use nom::IResult;
-use serde::Serialize;
 use serde_json_bytes::Value as JSON;
 
 use super::helpers::spaces_or_comments;
@@ -28,7 +27,7 @@ pub(super) trait CollectVarPaths {
 // JSONSelection     ::= NakedSubSelection | PathSelection
 // NakedSubSelection ::= NamedSelection* StarSelection?
 
-#[derive(Debug, PartialEq, Clone, Serialize)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum JSONSelection {
     // Although we reuse the SubSelection type for the JSONSelection::Named
     // case, we parse it as a sequence of NamedSelection items without the
@@ -82,7 +81,7 @@ impl CollectVarPaths for JSONSelection {
 // NamedQuotedSelection ::= Alias LitString SubSelection?
 // NamedGroupSelection  ::= Alias SubSelection
 
-#[derive(Debug, PartialEq, Eq, Clone, Serialize, Hash)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub enum NamedSelection {
     Field(Option<Alias>, String, Option<SubSelection>),
     Quoted(Alias, String, Option<SubSelection>),
@@ -202,7 +201,7 @@ impl CollectVarPaths for NamedSelection {
 // AtPath        ::= "@" PathStep*
 // PathStep      ::= "." Key | "->" Identifier MethodArgs?
 
-#[derive(Debug, PartialEq, Eq, Clone, Serialize, Hash)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct PathSelection {
     pub(super) path: PathList,
 }
@@ -269,7 +268,7 @@ impl From<PathList> for PathSelection {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Serialize, Hash)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub(super) enum PathList {
     // A VarPath must start with a variable (either $identifier, $, or @),
     // followed by any number of PathStep items (the Box<PathList>). Because we
@@ -465,7 +464,7 @@ impl CollectVarPaths for PathList {
 
 // SubSelection ::= "{" NakedSubSelection "}"
 
-#[derive(Debug, PartialEq, Eq, Clone, Serialize, Default, Hash)]
+#[derive(Debug, PartialEq, Eq, Clone, Default, Hash)]
 pub struct SubSelection {
     pub(super) selections: Vec<NamedSelection>,
     pub(super) star: Option<StarSelection>,
@@ -557,7 +556,7 @@ impl CollectVarPaths for SubSelection {
 
 // StarSelection ::= Alias? "*" SubSelection?
 
-#[derive(Debug, PartialEq, Eq, Clone, Serialize, Hash)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct StarSelection(
     pub(super) Option<Alias>,
     pub(super) Option<Box<SubSelection>>,
@@ -587,7 +586,7 @@ impl StarSelection {
 
 // Alias ::= Identifier ":"
 
-#[derive(Debug, PartialEq, Eq, Clone, Serialize, Hash)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct Alias {
     pub(super) name: String,
 }
@@ -617,7 +616,7 @@ impl Alias {
 
 // Key ::= Identifier | LitString
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub enum Key {
     Field(String),
     Quoted(String),
@@ -753,7 +752,7 @@ pub fn parse_string_literal(input: &str) -> IResult<&str, String> {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Serialize, Hash)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct MethodArgs(pub(super) Vec<LitExpr>);
 
 // Comma-separated positional arguments for a method, surrounded by parentheses.
