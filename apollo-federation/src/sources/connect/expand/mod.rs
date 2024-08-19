@@ -207,8 +207,6 @@ mod helpers {
     use crate::schema::position::TypeDefinitionPosition;
     use crate::schema::FederationSchema;
     use crate::schema::ValidFederationSchema;
-    use crate::sources::connect::json_selection::ExtractParameters;
-    use crate::sources::connect::json_selection::StaticParameter;
     use crate::sources::connect::url_template::Parameter;
     use crate::sources::connect::ConnectSpecDefinition;
     use crate::sources::connect::Connector;
@@ -799,36 +797,49 @@ mod helpers {
     fn extract_params_from_body(
         connector: &Connector,
     ) -> Result<HashSet<Parameter>, FederationError> {
-        let body_parameters = connector
-            .transport
-            .body
-            .as_ref()
-            .and_then(JSONSelection::extract_parameters)
-            .unwrap_or_default();
+        let mut results = HashSet::with_hasher(Default::default());
 
-        body_parameters
-            .iter()
-            .map(|StaticParameter { name, paths }| {
-                let mut parts = paths.iter();
-                let field = parts.next().ok_or(FederationError::internal(
-                    "expected parameter in JSONSelection to contain a field",
-                ))?;
+        if let Some(body) = &connector.transport.body {
+            use crate::sources::connect::json_selection::CollectVarPaths;
 
-                match *name {
-                    "$args" => Ok(Parameter::Argument {
-                        argument: field,
-                        paths: parts.copied().collect(),
-                    }),
-                    "$this" => Ok(Parameter::Sibling {
-                        field,
-                        paths: parts.copied().collect(),
-                    }),
-                    other => Err(FederationError::internal(format!(
-                        "got unsupported parameter: {other}"
-                    ))),
-                }
-            })
-            .collect::<Result<HashSet<_>, _>>()
+            for var_path in body.collect_var_paths() {
+                match var_path.var_name_and_nested_keys() {
+                    Some(("$args", keys)) => {
+                        let mut keys_iter = keys.into_iter();
+                        let first_key = keys_iter.next().ok_or(FederationError::internal(
+                            "expected at least one key in $args",
+                        ))?;
+                        results.insert(Parameter::Argument {
+                            argument: first_key,
+                            paths: keys_iter.collect(),
+                        });
+                    }
+                    Some(("$this", keys)) => {
+                        let mut keys_iter = keys.into_iter();
+                        let first_key = keys_iter.next().ok_or(FederationError::internal(
+                            "expected at least one key in $this",
+                        ))?;
+                        results.insert(Parameter::Sibling {
+                            field: first_key,
+                            paths: keys_iter.collect(),
+                        });
+                    }
+                    Some((other, _)) => {
+                        return Err(FederationError::internal(format!(
+                            "got unsupported parameter: {other}"
+                        )))
+                    }
+                    _ => {
+                        return Err(FederationError::internal(format!(
+                            "could not extract parameter from path: {:?}",
+                            var_path,
+                        )))
+                    }
+                };
+            }
+        }
+
+        Ok(results)
     }
 }
 

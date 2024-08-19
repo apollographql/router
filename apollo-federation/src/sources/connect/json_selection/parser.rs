@@ -20,7 +20,7 @@ use serde_json_bytes::Value as JSON;
 use super::helpers::spaces_or_comments;
 use super::lit_expr::LitExpr;
 
-pub(super) trait CollectVarPaths {
+pub(crate) trait CollectVarPaths {
     fn collect_var_paths(&self) -> IndexSet<&PathSelection>;
 }
 
@@ -49,7 +49,7 @@ impl JSONSelection {
             JSONSelection::Named(subselect) => {
                 subselect.selections.is_empty() && subselect.star.is_none()
             }
-            JSONSelection::Path(path) => path == &PathSelection::Empty,
+            JSONSelection::Path(path) => path.path == PathList::Empty,
         }
     }
 
@@ -219,6 +219,24 @@ impl PathSelection {
     pub fn parse(input: &str) -> IResult<&str, Self> {
         let (input, path) = PathList::parse(input)?;
         Ok((input, Self { path }))
+    }
+
+    pub(crate) fn var_name_and_nested_keys(&self) -> Option<(&str, Vec<&str>)> {
+        fn keys_of_path_list(path: &PathList) -> Vec<&str> {
+            match path {
+                PathList::Key(key, tail) => {
+                    let mut keys = vec![key.as_str()];
+                    keys.extend(keys_of_path_list(tail));
+                    keys
+                }
+                _ => vec![],
+            }
+        }
+
+        match &self.path {
+            PathList::Var(var_name, tail) => Some((var_name.as_str(), keys_of_path_list(tail))),
+            _ => None,
+        }
     }
 
     pub(super) fn is_single_key(&self) -> bool {

@@ -4,10 +4,10 @@
 // capture both field and argument values and sub-paths, in addition to constant
 // JSON structures and values.
 
-use apollo_compiler::collections::IndexMap;
-use apollo_compiler::collections::IndexSet;
 use std::hash::Hash;
 
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::char;
