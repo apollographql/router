@@ -161,7 +161,7 @@ async fn handle_request(
     );
 
     // FIXME: configurable batch size
-    let mut stream = storage.scan(key_prefix.clone(), Some(10));
+    let mut stream = storage.scan(key_prefix.clone(), Some(100));
     let mut count = 0u64;
     let mut error = None;
 
@@ -184,7 +184,6 @@ async fn handle_request(
                         .map(|k| RedisKey(k.to_string()))
                         .collect::<Vec<_>>();
                     if !keys.is_empty() {
-                        tracing::debug!("deleting keys: {keys:?}");
                         count += keys.len() as u64;
                         storage.delete(keys).await;
 
@@ -270,10 +269,10 @@ impl InvalidationRequest {
     fn key_prefix(&self) -> String {
         match self {
             InvalidationRequest::Subgraph { subgraph } => {
-                format!("version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph}*",)
+                format!("version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph}:*",)
             }
             InvalidationRequest::Type { subgraph, r#type } => {
-                format!("version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph}:type:{type}*",)
+                format!("version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph}:type:{type}:*",)
             }
             InvalidationRequest::Entity {
                 subgraph,
@@ -281,7 +280,7 @@ impl InvalidationRequest {
                 key,
             } => {
                 let entity_key = hash_entity_key(key);
-                format!("version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph}:type:{type}:entity:{entity_key}*")
+                format!("version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph}:type:{type}:entity:{entity_key}:*")
             }
         }
     }

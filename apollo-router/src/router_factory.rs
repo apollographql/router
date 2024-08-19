@@ -532,6 +532,40 @@ caused by
     );
 }
 
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn add_plugin(
+    name: String,
+    factory: &PluginFactory,
+    plugin_config: &Value,
+    schema: Arc<String>,
+    supergraph_schema: Arc<Valid<apollo_compiler::Schema>>,
+    subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+    notify: &crate::notification::Notify<String, crate::graphql::Response>,
+    plugin_instances: &mut Plugins,
+    errors: &mut Vec<ConfigurationError>,
+) {
+    match factory
+        .create_instance(
+            PluginInit::builder()
+                .config(plugin_config.clone())
+                .supergraph_sdl(schema)
+                .supergraph_schema(supergraph_schema)
+                .subgraph_schemas(subgraph_schemas)
+                .notify(notify.clone())
+                .build(),
+        )
+        .await
+    {
+        Ok(plugin) => {
+            let _ = plugin_instances.insert(name, plugin);
+        }
+        Err(err) => errors.push(ConfigurationError::PluginConfiguration {
+            plugin: name,
+            error: err.to_string(),
+        }),
+    }
+}
+
 pub(crate) async fn create_plugins(
     configuration: &Configuration,
     schema: &Schema,
@@ -565,26 +599,18 @@ pub(crate) async fn create_plugins(
     // Use function-like macros to avoid borrow conflicts of captures
     macro_rules! add_plugin {
         ($name: expr, $factory: expr, $plugin_config: expr) => {{
-            match $factory
-                .create_instance(
-                    PluginInit::builder()
-                        .config($plugin_config)
-                        .supergraph_sdl(schema.as_string().clone())
-                        .supergraph_schema(supergraph_schema.clone())
-                        .subgraph_schemas(subgraph_schemas.clone())
-                        .notify(configuration.notify.clone())
-                        .build(),
-                )
-                .await
-            {
-                Ok(plugin) => {
-                    let _ = plugin_instances.insert($name, plugin);
-                }
-                Err(err) => errors.push(ConfigurationError::PluginConfiguration {
-                    plugin: $name,
-                    error: err.to_string(),
-                }),
-            }
+            add_plugin(
+                $name,
+                $factory,
+                &$plugin_config,
+                schema.as_string().clone(),
+                supergraph_schema.clone(),
+                subgraph_schemas.clone(),
+                &configuration.notify.clone(),
+                &mut plugin_instances,
+                &mut errors,
+            )
+            .await;
         }};
     }
 
@@ -842,7 +868,8 @@ fn can_use_with_experimental_query_planner(
 
             Ok(())
         }
-        crate::configuration::QueryPlannerMode::Legacy => Ok(()),
+        crate::configuration::QueryPlannerMode::Legacy
+        | crate::configuration::QueryPlannerMode::BothBestEffort => Ok(()),
     }
 }
 #[cfg(test)]
