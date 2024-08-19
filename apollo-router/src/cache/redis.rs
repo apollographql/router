@@ -171,7 +171,7 @@ impl RedisCacheStorage {
         let client = RedisClient::new(
             client_config,
             Some(PerformanceConfig {
-                default_command_timeout: config.timeout.unwrap_or(Duration::from_millis(2)),
+                default_command_timeout: config.timeout.unwrap_or(Duration::from_millis(500)),
                 ..Default::default()
             }),
             None,

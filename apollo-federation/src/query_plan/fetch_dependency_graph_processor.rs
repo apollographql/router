@@ -1,6 +1,6 @@
-use std::collections::HashSet;
 use std::sync::Arc;
 
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::DirectiveList;
 use apollo_compiler::executable::VariableDefinition;
 use apollo_compiler::Name;
@@ -50,7 +50,7 @@ pub(crate) struct FetchDependencyGraphToQueryPlanProcessor {
     operation_directives: Arc<DirectiveList>,
     operation_compression: SubgraphOperationCompression,
     operation_name: Option<Name>,
-    assigned_defer_labels: Option<HashSet<String>>,
+    assigned_defer_labels: Option<IndexSet<String>>,
     counter: u32,
 }
 
@@ -248,7 +248,7 @@ impl FetchDependencyGraphToQueryPlanProcessor {
         operation_directives: Arc<DirectiveList>,
         operation_compression: SubgraphOperationCompression,
         operation_name: Option<Name>,
-        assigned_defer_labels: Option<HashSet<String>>,
+        assigned_defer_labels: Option<IndexSet<String>>,
     ) -> Self {
         Self {
             variable_definitions,
