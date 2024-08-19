@@ -8,7 +8,7 @@ use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::collections::HashMap;
-use apollo_compiler::collections::HashSet;
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
 use apollo_compiler::name;
@@ -177,8 +177,8 @@ pub(crate) fn extract_subgraphs_from_supergraph(
 
 type CollectEmptySubgraphsOk = (
     FederationSubgraphs,
-    HashMap<Name, &'static FederationSpecDefinition>,
-    HashMap<Name, Arc<str>>,
+    IndexMap<Name, &'static FederationSpecDefinition>,
+    IndexMap<Name, Arc<str>>,
 );
 fn collect_empty_subgraphs(
     supergraph_schema: &FederationSchema,
@@ -188,8 +188,8 @@ fn collect_empty_subgraphs(
     let graph_directive_definition =
         join_spec_definition.graph_directive_definition(supergraph_schema)?;
     let graph_enum = join_spec_definition.graph_enum_definition(supergraph_schema)?;
-    let mut federation_spec_definitions = HashMap::default();
-    let mut graph_enum_value_name_to_subgraph_name = HashMap::default();
+    let mut federation_spec_definitions = IndexMap::default();
+    let mut graph_enum_value_name_to_subgraph_name = IndexMap::default();
     for (enum_value_name, enum_value_definition) in graph_enum.values.iter() {
         let graph_application = enum_value_definition
             .directives
@@ -298,8 +298,8 @@ pub(crate) fn new_empty_fed_2_subgraph_schema() -> Result<FederationSchema, Fede
 
 struct TypeInfo {
     name: NamedType,
-    // HashMap<subgraph_enum_value: String, is_interface_object: bool>
-    subgraph_info: HashMap<Name, bool>,
+    // IndexMap<subgraph_enum_value: String, is_interface_object: bool>
+    subgraph_info: IndexMap<Name, bool>,
 }
 
 struct TypeInfos {
@@ -350,8 +350,8 @@ fn get_apollo_directive_names(
 fn extract_subgraphs_from_fed_2_supergraph(
     supergraph_schema: &FederationSchema,
     subgraphs: &mut FederationSubgraphs,
-    graph_enum_value_name_to_subgraph_name: &HashMap<Name, Arc<str>>,
-    federation_spec_definitions: &HashMap<Name, &'static FederationSpecDefinition>,
+    graph_enum_value_name_to_subgraph_name: &IndexMap<Name, Arc<str>>,
+    federation_spec_definitions: &IndexMap<Name, &'static FederationSpecDefinition>,
     join_spec_definition: &'static JoinSpecDefinition,
     filtered_types: &Vec<TypeDefinitionPosition>,
 ) -> Result<(), FederationError> {
@@ -486,8 +486,8 @@ fn extract_subgraphs_from_fed_2_supergraph(
 fn add_all_empty_subgraph_types(
     supergraph_schema: &FederationSchema,
     subgraphs: &mut FederationSubgraphs,
-    graph_enum_value_name_to_subgraph_name: &HashMap<Name, Arc<str>>,
-    federation_spec_definitions: &HashMap<Name, &'static FederationSpecDefinition>,
+    graph_enum_value_name_to_subgraph_name: &IndexMap<Name, Arc<str>>,
+    federation_spec_definitions: &IndexMap<Name, &'static FederationSpecDefinition>,
     join_spec_definition: &'static JoinSpecDefinition,
     filtered_types: &Vec<TypeDefinitionPosition>,
     original_directive_names: &HashMap<Name, Name>,
@@ -580,8 +580,8 @@ fn add_empty_type(
     type_definition_position: TypeDefinitionPosition,
     type_directive_applications: &Vec<TypeDirectiveArguments>,
     subgraphs: &mut FederationSubgraphs,
-    graph_enum_value_name_to_subgraph_name: &HashMap<Name, Arc<str>>,
-    federation_spec_definitions: &HashMap<Name, &'static FederationSpecDefinition>,
+    graph_enum_value_name_to_subgraph_name: &IndexMap<Name, Arc<str>>,
+    federation_spec_definitions: &IndexMap<Name, &'static FederationSpecDefinition>,
 ) -> Result<TypeInfo, FederationError> {
     // In fed2, we always mark all types with `@join__type` but making sure.
     if type_directive_applications.is_empty() {
@@ -592,7 +592,7 @@ fn add_empty_type(
     }
     let mut type_info = TypeInfo {
         name: type_definition_position.type_name().clone(),
-        subgraph_info: HashMap::default(),
+        subgraph_info: IndexMap::default(),
     };
     for type_directive_application in type_directive_applications {
         let subgraph = get_subgraph(
@@ -788,8 +788,8 @@ fn add_empty_type(
 fn extract_object_type_content(
     supergraph_schema: &FederationSchema,
     subgraphs: &mut FederationSubgraphs,
-    graph_enum_value_name_to_subgraph_name: &HashMap<Name, Arc<str>>,
-    federation_spec_definitions: &HashMap<Name, &'static FederationSpecDefinition>,
+    graph_enum_value_name_to_subgraph_name: &IndexMap<Name, Arc<str>>,
+    federation_spec_definitions: &IndexMap<Name, &'static FederationSpecDefinition>,
     join_spec_definition: &JoinSpecDefinition,
     info: &[TypeInfo],
     original_directive_names: &HashMap<Name, Name>,
@@ -964,8 +964,8 @@ fn extract_object_type_content(
 fn extract_interface_type_content(
     supergraph_schema: &FederationSchema,
     subgraphs: &mut FederationSubgraphs,
-    graph_enum_value_name_to_subgraph_name: &HashMap<Name, Arc<str>>,
-    federation_spec_definitions: &HashMap<Name, &'static FederationSpecDefinition>,
+    graph_enum_value_name_to_subgraph_name: &IndexMap<Name, Arc<str>>,
+    federation_spec_definitions: &IndexMap<Name, &'static FederationSpecDefinition>,
     join_spec_definition: &JoinSpecDefinition,
     info: &[TypeInfo],
     original_directive_names: &HashMap<Name, Name>,
@@ -991,7 +991,7 @@ fn extract_interface_type_content(
         .get(supergraph_schema.schema())?;
         fn get_pos(
             subgraph: &FederationSubgraph,
-            subgraph_info: &HashMap<Name, bool>,
+            subgraph_info: &IndexMap<Name, bool>,
             graph_enum_value: &Name,
             type_name: NamedType,
         ) -> Result<ObjectOrInterfaceTypeDefinitionPosition, FederationError> {
@@ -1160,7 +1160,7 @@ fn extract_interface_type_content(
 fn extract_union_type_content(
     supergraph_schema: &FederationSchema,
     subgraphs: &mut FederationSubgraphs,
-    graph_enum_value_name_to_subgraph_name: &HashMap<Name, Arc<str>>,
+    graph_enum_value_name_to_subgraph_name: &IndexMap<Name, Arc<str>>,
     join_spec_definition: &JoinSpecDefinition,
     info: &[TypeInfo],
 ) -> Result<(), FederationError> {
@@ -1252,8 +1252,8 @@ fn extract_union_type_content(
 fn extract_enum_type_content(
     supergraph_schema: &FederationSchema,
     subgraphs: &mut FederationSubgraphs,
-    graph_enum_value_name_to_subgraph_name: &HashMap<Name, Arc<str>>,
-    federation_spec_definitions: &HashMap<Name, &'static FederationSpecDefinition>,
+    graph_enum_value_name_to_subgraph_name: &IndexMap<Name, Arc<str>>,
+    federation_spec_definitions: &IndexMap<Name, &'static FederationSpecDefinition>,
     join_spec_definition: &JoinSpecDefinition,
     info: &[TypeInfo],
     original_directive_names: &HashMap<Name, Name>,
@@ -1361,8 +1361,8 @@ fn extract_enum_type_content(
 fn extract_input_object_type_content(
     supergraph_schema: &FederationSchema,
     subgraphs: &mut FederationSubgraphs,
-    graph_enum_value_name_to_subgraph_name: &HashMap<Name, Arc<str>>,
-    federation_spec_definitions: &HashMap<Name, &'static FederationSpecDefinition>,
+    graph_enum_value_name_to_subgraph_name: &IndexMap<Name, Arc<str>>,
+    federation_spec_definitions: &IndexMap<Name, &'static FederationSpecDefinition>,
     join_spec_definition: &JoinSpecDefinition,
     info: &[TypeInfo],
     original_directive_names: &HashMap<Name, Name>,
@@ -1634,7 +1634,7 @@ fn decode_type(type_: &str) -> Result<Type, FederationError> {
 
 fn get_subgraph<'subgraph>(
     subgraphs: &'subgraph mut FederationSubgraphs,
-    graph_enum_value_name_to_subgraph_name: &HashMap<Name, Arc<str>>,
+    graph_enum_value_name_to_subgraph_name: &IndexMap<Name, Arc<str>>,
     graph_enum_value: &Name,
 ) -> Result<&'subgraph mut FederationSubgraph, FederationError> {
     let subgraph_name = graph_enum_value_name_to_subgraph_name
@@ -1756,7 +1756,7 @@ impl IntoIterator for ValidFederationSubgraphs {
 }
 
 lazy_static! {
-    static ref EXECUTABLE_DIRECTIVE_LOCATIONS: HashSet<DirectiveLocation> = {
+    static ref EXECUTABLE_DIRECTIVE_LOCATIONS: IndexSet<DirectiveLocation> = {
         [
             DirectiveLocation::Query,
             DirectiveLocation::Mutation,
@@ -2323,7 +2323,7 @@ static JOIN_DIRECTIVE: &str = "join__directive";
 fn extract_join_directives(
     supergraph_schema: &FederationSchema,
     subgraphs: &mut FederationSubgraphs,
-    graph_enum_value_name_to_subgraph_name: &HashMap<Name, Arc<str>>,
+    graph_enum_value_name_to_subgraph_name: &IndexMap<Name, Arc<str>>,
 ) -> Result<(), FederationError> {
     let join_directives = match supergraph_schema
         .referencers()
