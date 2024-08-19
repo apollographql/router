@@ -2,6 +2,8 @@ use std::sync::Arc;
 
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
+use apollo_compiler::executable::Field;
+use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::executable::Directive;
@@ -57,6 +59,70 @@ fn join_field_is_queryable(directive: &Directive) -> bool {
 }
 
 impl SupergraphQueryVisitor<'_> {
+    fn visit_field(
+        &mut self,
+        path: &[SupergraphQueryElement],
+        parent_type: &ExtendedType,
+        field: &Field,
+    ) -> Result<(), FederationError> {
+        let schema = self.supergraph.schema.schema();
+        let definition = schema.type_field(parent_type.name(), &field.name).expect("invalid query");
+
+        let in_subgraphs = definition.directives.get_all("join__field")
+            .filter(|directive| join_field_is_queryable(directive))
+            .filter_map(|directive| directive.argument_by_name("graph"))
+            .filter_map(|value| value.as_enum().cloned())
+            .collect::<Vec<_>>();
+        let in_subgraphs = if in_subgraphs.is_empty() {
+            parent_type.directives()
+                .get_all("join__type")
+                .filter_map(|directive| directive.argument_by_name("graph"))
+                .filter_map(|value| value.as_enum().cloned())
+                .collect::<Vec<_>>()
+        } else {
+            in_subgraphs
+        };
+        let in_subgraphs = if in_subgraphs.is_empty() {
+            let graphs = schema.get_enum("join__Graph").expect("invalid supergraph");
+            graphs.values.keys().cloned().collect()
+        } else {
+            in_subgraphs
+        };
+
+        // If we have different requires conditions in different graphs, does this need branching?
+        /*
+        let requires = definition.directives
+            .get_all("join__field")
+            .filter(|directive| join_field_is_queryable(directive))
+            .find_map(|directive| directive.argument_by_name("requires"))
+            .and_then(|requires| requires.as_str());
+
+        if let Some(requires) = requires {
+            let requires = FieldSet::parse(schema, parent_type.name().clone(), requires, "").unwrap();
+            self.visit_selection_set(path, parent_type, &requires.selection_set)?;
+        }
+        */
+
+        let mut path = path.to_vec();
+        path.push(SupergraphQueryElement {
+            path: FetchDataPathElement::Key(field.response_key().clone()),
+            parent_type: parent_type.name().clone(),
+            in_subgraphs,
+        });
+
+        if !field.selection_set.is_empty() {
+            let output_type = schema
+                .types
+                .get(definition.ty.inner_named_type())
+                .expect("invalid schema");
+            self.visit_selection_set(&path, output_type, &field.selection_set)?;
+        } else {
+            self.paths.push(path);
+        }
+
+        Ok(())
+    }
+
     fn visit_selection_set(
         &mut self,
         path: &[SupergraphQueryElement],
@@ -67,46 +133,7 @@ impl SupergraphQueryVisitor<'_> {
         for selection in &selection_set.selections {
             match selection {
                 Selection::Field(field) => {
-                    let definition = schema.type_field(parent_type.name(), &field.name).expect("invalid query");
-
-                    let in_subgraphs = definition.directives.get_all("join__field")
-                        .filter(|directive| join_field_is_queryable(directive))
-                        .filter_map(|directive| directive.argument_by_name("graph"))
-                        .filter_map(|value| value.as_enum().cloned())
-                        .collect::<Vec<_>>();
-                    let in_subgraphs = if in_subgraphs.is_empty() {
-                        parent_type.directives()
-                            .get_all("join__type")
-                            .filter_map(|directive| directive.argument_by_name("graph"))
-                            .filter_map(|value| value.as_enum().cloned())
-                            .collect::<Vec<_>>()
-                    } else {
-                        in_subgraphs
-                    };
-                    let in_subgraphs = if in_subgraphs.is_empty() {
-                        let graphs = schema.get_enum("join__Graph").expect("invalid supergraph");
-                        graphs.values.keys().cloned().collect()
-                    } else {
-                        in_subgraphs
-                    };
-
-                    let mut path = path.to_vec();
-                    path.push(SupergraphQueryElement {
-                        path: FetchDataPathElement::Key(field.response_key().clone()),
-                        parent_type: parent_type.name().clone(),
-                        in_subgraphs,
-                    });
-
-                    if !field.selection_set.is_empty() {
-                        let output_type = schema
-                            .types
-                            .get(definition.ty.inner_named_type())
-                            .expect("invalid schema");
-                        self.visit_selection_set(&path, output_type, &field.selection_set)?;
-                    } else {
-                        self.paths.push(path);
-                    }
-
+                    self.visit_field(path, parent_type, field)?;
                 },
                 Selection::InlineFragment(frag) => {
                     let type_condition = match &frag.type_condition {
