@@ -139,7 +139,7 @@ async fn execute(
         let request_limit = lock
             .get::<Arc<RequestLimits>>()
             .map(|limits| limits.get((&connector.id).into(), connector.max_requests))
-            .expect("missing request limit");
+            .unwrap_or(None);
         (debug, request_limit)
     });
 
