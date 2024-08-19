@@ -187,7 +187,7 @@ impl PlannerMode {
                 .reuse_query_fragments
                 .unwrap_or(true),
             subgraph_graphql_validation: false,
-            generate_query_fragments: false,
+            generate_query_fragments: configuration.supergraph.generate_query_fragments,
             incremental_delivery:
                 apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig {
                     enable_defer: configuration.supergraph.defer_support,
