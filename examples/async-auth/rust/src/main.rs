@@ -1,3 +1,4 @@
+//! ```text
 //! curl -v \
 //!     --header 'content-type: application/json' \
 //!     --header 'x-client-id: unknown' \
@@ -9,8 +10,8 @@
 //! < date: Mon, 07 Mar 2022 12:08:21 GMT
 //! <
 //! * Connection #0 to host 127.0.0.1 left intact
+//!
 //! {"errors":[{"message":"client-id is not allowed","locations":[],"path":null}]}
-
 //! curl -v \
 //!     --header 'content-type: application/json' \
 //!     --header 'x-client-id: jeremy' \
@@ -21,8 +22,9 @@
 //! < date: Mon, 07 Mar 2022 12:09:08 GMT
 //! <
 //! * Connection #0 to host 127.0.0.1 left intact
+//!
 //! {"data":{"me":{"name":"Ada Lovelace"}}}
-//! The only thing you need to add to your main.rs file is
+//! ```
 
 // adding the module to your main.rs file
 // will automatically register it to the router plugin registry.

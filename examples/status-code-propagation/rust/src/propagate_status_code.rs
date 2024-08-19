@@ -44,7 +44,7 @@ impl Plugin for PropagateStatusCode {
                     // - check for the presence of a value for `status_codes` (first parameter)
                     // update the value if present (second parameter)
                     res.context
-                        .upsert(&"status_code".to_string(), |status_code: u16| {
+                        .upsert("status_code".to_string(), |status_code: u16| {
                             // return the status code with the highest priority
                             for &code in all_status_codes.iter() {
                                 if code == response_status_code || code == status_code {
@@ -210,7 +210,7 @@ mod tests {
                 let context = router_request.context;
                 // Insert several status codes which shall override the router response status
                 context
-                    .insert(&"status_code".to_string(), json!(500u16))
+                    .insert("status_code".to_string(), json!(500u16))
                     .expect("couldn't insert status_code");
 
                 Ok(supergraph::Response::fake_builder()
