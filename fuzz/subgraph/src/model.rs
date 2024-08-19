@@ -127,6 +127,7 @@ impl User {
     }
 }
 
+#[allow(static_mut_refs)]
 fn users() -> &'static [User] {
     static mut USERS: Vec<User> = vec![];
     static INIT: Once = Once::new();
@@ -222,6 +223,7 @@ impl Product {
     }
 }
 
+#[allow(static_mut_refs)]
 fn products() -> &'static [Product] {
     static mut PRODUCTS: Vec<Product> = vec![];
     static INIT: Once = Once::new();
@@ -302,6 +304,7 @@ impl Review {
     }
 }
 
+#[allow(static_mut_refs)]
 fn reviews() -> &'static [Review] {
     static mut REVIEWS: Vec<Review> = vec![];
     static INIT: Once = Once::new();

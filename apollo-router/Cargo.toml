@@ -57,6 +57,10 @@ docs_rs = ["router-bridge/docs_rs"]
 # and not yet ready for production use.
 telemetry_next = []
 
+reqwest-client = []
+reqwest-blocking-client = []
+surf-client = []
+
 # is set when ci builds take place. It allows us to disable some tests when CI is running on certain platforms.
 ci = []
 
