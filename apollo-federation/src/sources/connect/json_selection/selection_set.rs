@@ -85,14 +85,14 @@ impl SubSelection {
         for selection in &self.selections {
             match selection {
                 NamedSelection::Field(alias, name, sub) => {
-                    let key = alias.as_ref().map(|a| a.name.as_str()).unwrap_or(name);
+                    let key = alias.as_ref().map(|a| a.name.as_str()).unwrap_or(name.as_str());
                     if let Some(fields) = field_map.get_vec(key) {
                         if self.star.is_some() {
                             referenced_fields.insert(key);
                         }
                         for field in fields {
                             let field_response_key = field.response_key().as_str();
-                            let alias = if field_response_key == name {
+                            let alias = if field_response_key == name.as_str() {
                                 None
                             } else {
                                 Some(Alias {
@@ -101,26 +101,6 @@ impl SubSelection {
                             };
                             new_selections.push(NamedSelection::Field(
                                 alias,
-                                name.clone(),
-                                sub.as_ref()
-                                    .map(|sub| sub.apply_selection_set(&field.selection_set)),
-                            ));
-                        }
-                    } else if self.star.is_some() {
-                        dropped_fields.insert(key, ());
-                    }
-                }
-                NamedSelection::Quoted(alias, name, sub) => {
-                    let key = alias.name.as_str();
-                    if let Some(fields) = field_map.get_vec(key) {
-                        if self.star.is_some() {
-                            referenced_fields.insert(key);
-                        }
-                        for field in fields {
-                            new_selections.push(NamedSelection::Quoted(
-                                Alias {
-                                    name: field.response_key().to_string(),
-                                },
                                 name.clone(),
                                 sub.as_ref()
                                     .map(|sub| sub.apply_selection_set(&field.selection_set)),
@@ -176,7 +156,7 @@ impl SubSelection {
                 let name = format!("__unused__{dropped}");
                 new_selections.push(NamedSelection::Field(
                     Some(Alias { name }),
-                    dropped.to_string(),
+                    Key::field(dropped),
                     None,
                 ));
             }
@@ -404,7 +384,7 @@ mod tests {
   b_alias: b
   c {
     e
-    h: "h"
+    "h"
     group: {
       j
     }

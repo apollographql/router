@@ -256,13 +256,19 @@ impl PrettyPrintable for NamedSelection {
         }
 
         match self {
-            NamedSelection::Field(alias, field_name, sub) => {
+            Self::Field(alias, field_key, sub) => {
                 if let Some(alias) = alias {
                     result.push_str(alias.name.as_str());
                     result.push_str(": ");
                 }
 
-                result.push_str(field_name.as_str());
+                if field_key.is_quoted() {
+                    let safely_quoted =
+                        serde_json_bytes::Value::String(field_key.as_str().into()).to_string();
+                    result.push_str(safely_quoted.as_str());
+                } else {
+                    result.push_str(field_key.as_str());
+                }
 
                 if let Some(sub) = sub {
                     let sub = sub.pretty_print_with_indentation(true, indentation);
@@ -270,28 +276,14 @@ impl PrettyPrintable for NamedSelection {
                     result.push_str(sub.as_str());
                 }
             }
-            NamedSelection::Quoted(alias, literal, sub) => {
-                result.push_str(alias.name.as_str());
-                result.push_str(": ");
-
-                let safely_quoted =
-                    serde_json_bytes::Value::String(literal.clone().into()).to_string();
-                result.push_str(safely_quoted.as_str());
-
-                if let Some(sub) = sub {
-                    let sub = sub.pretty_print_with_indentation(true, indentation);
-                    result.push(' ');
-                    result.push_str(sub.as_str());
-                }
-            }
-            NamedSelection::Path(alias, path) => {
+            Self::Path(alias, path) => {
                 result.push_str(alias.name.as_str());
                 result.push_str(": ");
 
                 let path = path.pretty_print_with_indentation(true, indentation);
                 result.push_str(path.trim_start());
             }
-            NamedSelection::Group(alias, sub) => {
+            Self::Group(alias, sub) => {
                 result.push_str(alias.name.as_str());
                 result.push_str(": ");
 

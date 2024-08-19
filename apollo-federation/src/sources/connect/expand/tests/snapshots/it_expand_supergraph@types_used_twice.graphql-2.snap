@@ -49,13 +49,17 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                 selections: [
                     Field(
                         None,
-                        "a",
+                        Field(
+                            "a",
+                        ),
                         Some(
                             SubSelection {
                                 selections: [
                                     Field(
                                         None,
-                                        "id",
+                                        Field(
+                                            "id",
+                                        ),
                                         None,
                                     ),
                                 ],
@@ -65,19 +69,25 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                     ),
                     Field(
                         None,
-                        "b",
+                        Field(
+                            "b",
+                        ),
                         Some(
                             SubSelection {
                                 selections: [
                                     Field(
                                         None,
-                                        "a",
+                                        Field(
+                                            "a",
+                                        ),
                                         Some(
                                             SubSelection {
                                                 selections: [
                                                     Field(
                                                         None,
-                                                        "id",
+                                                        Field(
+                                                            "id",
+                                                        ),
                                                         None,
                                                     ),
                                                 ],

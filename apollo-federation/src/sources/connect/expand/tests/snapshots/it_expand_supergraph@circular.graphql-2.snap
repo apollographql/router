@@ -68,7 +68,9 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ci
                 selections: [
                     Field(
                         None,
-                        "id",
+                        Field(
+                            "id",
+                        ),
                         None,
                     ),
                 ],
@@ -150,7 +152,9 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ci
                 selections: [
                     Field(
                         None,
-                        "id",
+                        Field(
+                            "id",
+                        ),
                         None,
                     ),
                 ],

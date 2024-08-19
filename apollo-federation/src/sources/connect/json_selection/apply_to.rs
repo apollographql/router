@@ -198,53 +198,41 @@ impl ApplyToInternal for NamedSelection {
 
         let mut output = JSONMap::new();
 
-        #[rustfmt::skip] // cargo fmt butchers this closure's formatting
-        let mut field_quoted_helper = |
-            alias: Option<&Alias>,
-            key: Key,
-            selection: &Option<SubSelection>,
-        | {
-            let input_path_with_key = input_path.append(key.to_json());
-            let name = key.as_str();
-            if let Some(child) = data.get(name) {
-                let output_name = alias.map_or(name, |alias| alias.name.as_str());
-                if let Some(selection) = selection {
-                    let value = selection.apply_to_path(child, vars, &input_path_with_key, errors);
-                    if let Some(value) = value {
-                        output.insert(output_name, value);
+        match self {
+            Self::Field(alias, key, selection) => {
+                let input_path_with_key = input_path.append(key.to_json());
+                let name = key.as_str();
+                if let Some(child) = data.get(name) {
+                    let output_name = alias.as_ref().map_or(name, |alias| alias.name());
+                    if let Some(selection) = selection {
+                        let value = selection.apply_to_path(child, vars, &input_path_with_key, errors);
+                        if let Some(value) = value {
+                            output.insert(output_name, value);
+                        }
+                    } else {
+                        output.insert(output_name, child.clone());
                     }
                 } else {
-                    output.insert(output_name, child.clone());
+                    errors.insert(ApplyToError::new(
+                        format!(
+                            "Property {} not found in {}",
+                            key.dotted(),
+                            json_type_name(data),
+                        ),
+                        input_path_with_key.to_vec(),
+                    ));
                 }
-            } else {
-                errors.insert(ApplyToError::new(
-                    format!(
-                        "Property {} not found in {}",
-                        key.dotted(),
-                        json_type_name(data),
-                    ),
-                    input_path_with_key.to_vec(),
-                ));
-            }
-        };
-
-        match self {
-            Self::Field(alias, name, selection) => {
-                field_quoted_helper(alias.as_ref(), Key::Field(name.clone()), selection);
-            }
-            Self::Quoted(alias, name, selection) => {
-                field_quoted_helper(Some(alias), Key::Quoted(name.clone()), selection);
             }
             Self::Path(alias, path_selection) => {
                 let value = path_selection.apply_to_path(data, vars, input_path, errors);
                 if let Some(value) = value {
-                    output.insert(alias.name.clone(), value);
+                    output.insert(alias.name(), value);
                 }
             }
             Self::Group(alias, sub_selection) => {
                 let value = sub_selection.apply_to_path(data, vars, input_path, errors);
                 if let Some(value) = value {
-                    output.insert(alias.name.clone(), value);
+                    output.insert(alias.name(), value);
                 }
             }
         };
@@ -462,9 +450,6 @@ impl ApplyToInternal for SubSelection {
             if self.star.is_some() {
                 match named_selection {
                     NamedSelection::Field(_, name, _) => {
-                        input_names.insert(name.as_str());
-                    }
-                    NamedSelection::Quoted(_, name, _) => {
                         input_names.insert(name.as_str());
                     }
                     NamedSelection::Path(_, path_selection) => {

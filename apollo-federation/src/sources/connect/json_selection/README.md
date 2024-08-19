@@ -84,10 +84,9 @@ below.
 JSONSelection        ::= NakedSubSelection | PathSelection
 NakedSubSelection    ::= NamedSelection* StarSelection?
 SubSelection         ::= "{" NakedSubSelection "}"
-NamedSelection       ::= NamedPathSelection | NamedFieldSelection | NamedQuotedSelection | NamedGroupSelection
+NamedSelection       ::= NamedPathSelection | NamedFieldSelection | NamedGroupSelection
 NamedPathSelection   ::= Alias PathSelection
-NamedFieldSelection  ::= Alias? Identifier SubSelection?
-NamedQuotedSelection ::= Alias LitString SubSelection?
+NamedFieldSelection  ::= Alias? Key SubSelection?
 NamedGroupSelection  ::= Alias SubSelection
 Alias                ::= Identifier ":"
 PathSelection        ::= (VarPath | KeyPath | AtPath) SubSelection?

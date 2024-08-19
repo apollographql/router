@@ -57,42 +57,58 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                 selections: [
                     Field(
                         None,
-                        "id",
+                        Field(
+                            "id",
+                        ),
                         None,
                     ),
                     Field(
                         None,
-                        "tagged",
+                        Field(
+                            "tagged",
+                        ),
                         None,
                     ),
                     Field(
                         None,
-                        "hidden",
+                        Field(
+                            "hidden",
+                        ),
                         None,
                     ),
                     Field(
                         None,
-                        "custom",
+                        Field(
+                            "custom",
+                        ),
                         None,
                     ),
                     Field(
                         None,
-                        "authenticated",
+                        Field(
+                            "authenticated",
+                        ),
                         None,
                     ),
                     Field(
                         None,
-                        "requiresScopes",
+                        Field(
+                            "requiresScopes",
+                        ),
                         None,
                     ),
                     Field(
                         None,
-                        "policy",
+                        Field(
+                            "policy",
+                        ),
                         None,
                     ),
                     Field(
                         None,
-                        "overridden",
+                        Field(
+                            "overridden",
+                        ),
                         None,
                     ),
                 ],
@@ -167,42 +183,58 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                 selections: [
                     Field(
                         None,
-                        "id",
+                        Field(
+                            "id",
+                        ),
                         None,
                     ),
                     Field(
                         None,
-                        "tagged",
+                        Field(
+                            "tagged",
+                        ),
                         None,
                     ),
                     Field(
                         None,
-                        "hidden",
+                        Field(
+                            "hidden",
+                        ),
                         None,
                     ),
                     Field(
                         None,
-                        "custom",
+                        Field(
+                            "custom",
+                        ),
                         None,
                     ),
                     Field(
                         None,
-                        "authenticated",
+                        Field(
+                            "authenticated",
+                        ),
                         None,
                     ),
                     Field(
                         None,
-                        "requiresScopes",
+                        Field(
+                            "requiresScopes",
+                        ),
                         None,
                     ),
                     Field(
                         None,
-                        "policy",
+                        Field(
+                            "policy",
+                        ),
                         None,
                     ),
                     Field(
                         None,
-                        "overridden",
+                        Field(
+                            "overridden",
+                        ),
                         None,
                     ),
                 ],
@@ -286,7 +318,9 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                 selections: [
                     Field(
                         None,
-                        "id",
+                        Field(
+                            "id",
+                        ),
                         None,
                     ),
                 ],

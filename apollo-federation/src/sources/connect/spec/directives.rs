@@ -588,12 +588,16 @@ mod tests {
                         selections: [
                             Field(
                                 None,
-                                "id",
+                                Field(
+                                    "id",
+                                ),
                                 None,
                             ),
                             Field(
                                 None,
-                                "name",
+                                Field(
+                                    "name",
+                                ),
                                 None,
                             ),
                         ],
@@ -629,17 +633,23 @@ mod tests {
                         selections: [
                             Field(
                                 None,
-                                "id",
+                                Field(
+                                    "id",
+                                ),
                                 None,
                             ),
                             Field(
                                 None,
-                                "title",
+                                Field(
+                                    "title",
+                                ),
                                 None,
                             ),
                             Field(
                                 None,
-                                "body",
+                                Field(
+                                    "body",
+                                ),
                                 None,
                             ),
                         ],

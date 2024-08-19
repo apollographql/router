@@ -49,12 +49,16 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/no
                 selections: [
                     Field(
                         None,
-                        "id",
+                        Field(
+                            "id",
+                        ),
                         None,
                     ),
                     Field(
                         None,
-                        "a",
+                        Field(
+                            "a",
+                        ),
                         None,
                     ),
                 ],
@@ -122,17 +126,23 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/no
                 selections: [
                     Field(
                         None,
-                        "id",
+                        Field(
+                            "id",
+                        ),
                         None,
                     ),
                     Field(
                         None,
-                        "a",
+                        Field(
+                            "a",
+                        ),
                         None,
                     ),
                     Field(
                         None,
-                        "b",
+                        Field(
+                            "b",
+                        ),
                         None,
                     ),
                 ],

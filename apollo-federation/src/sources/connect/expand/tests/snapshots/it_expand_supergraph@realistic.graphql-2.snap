@@ -71,64 +71,88 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                         selections: [
                                             Field(
                                                 None,
-                                                "name",
+                                                Field(
+                                                    "name",
+                                                ),
                                                 None,
                                             ),
                                             Field(
                                                 None,
-                                                "username",
+                                                Field(
+                                                    "username",
+                                                ),
                                                 None,
                                             ),
                                             Field(
                                                 None,
-                                                "email",
+                                                Field(
+                                                    "email",
+                                                ),
                                                 None,
                                             ),
                                             Field(
                                                 None,
-                                                "status",
+                                                Field(
+                                                    "status",
+                                                ),
                                                 None,
                                             ),
                                             Field(
                                                 None,
-                                                "address",
+                                                Field(
+                                                    "address",
+                                                ),
                                                 Some(
                                                     SubSelection {
                                                         selections: [
                                                             Field(
                                                                 None,
-                                                                "street",
+                                                                Field(
+                                                                    "street",
+                                                                ),
                                                                 None,
                                                             ),
                                                             Field(
                                                                 None,
-                                                                "suite",
+                                                                Field(
+                                                                    "suite",
+                                                                ),
                                                                 None,
                                                             ),
                                                             Field(
                                                                 None,
-                                                                "city",
+                                                                Field(
+                                                                    "city",
+                                                                ),
                                                                 None,
                                                             ),
                                                             Field(
                                                                 None,
-                                                                "zipcode",
+                                                                Field(
+                                                                    "zipcode",
+                                                                ),
                                                                 None,
                                                             ),
                                                             Field(
                                                                 None,
-                                                                "geo",
+                                                                Field(
+                                                                    "geo",
+                                                                ),
                                                                 Some(
                                                                     SubSelection {
                                                                         selections: [
                                                                             Field(
                                                                                 None,
-                                                                                "lat",
+                                                                                Field(
+                                                                                    "lat",
+                                                                                ),
                                                                                 None,
                                                                             ),
                                                                             Field(
                                                                                 None,
-                                                                                "lng",
+                                                                                Field(
+                                                                                    "lng",
+                                                                                ),
                                                                                 None,
                                                                             ),
                                                                         ],
@@ -156,7 +180,9 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                 selections: [
                     Field(
                         None,
-                        "id",
+                        Field(
+                            "id",
+                        ),
                         None,
                     ),
                 ],
@@ -251,12 +277,16 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                 selections: [
                     Field(
                         None,
-                        "id",
+                        Field(
+                            "id",
+                        ),
                         None,
                     ),
                     Field(
                         None,
-                        "name",
+                        Field(
+                            "name",
+                        ),
                         None,
                     ),
                 ],
@@ -331,33 +361,45 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                 selections: [
                     Field(
                         None,
-                        "id",
+                        Field(
+                            "id",
+                        ),
                         None,
                     ),
                     Field(
                         None,
-                        "name",
+                        Field(
+                            "name",
+                        ),
                         None,
                     ),
                     Field(
                         None,
-                        "company",
+                        Field(
+                            "company",
+                        ),
                         Some(
                             SubSelection {
                                 selections: [
                                     Field(
                                         None,
-                                        "name",
+                                        Field(
+                                            "name",
+                                        ),
                                         None,
                                     ),
                                     Field(
                                         None,
-                                        "catchPhrase",
+                                        Field(
+                                            "catchPhrase",
+                                        ),
                                         None,
                                     ),
                                     Field(
                                         None,
-                                        "bs",
+                                        Field(
+                                            "bs",
+                                        ),
                                         None,
                                     ),
                                 ],
@@ -430,64 +472,88 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                 selections: [
                     Field(
                         None,
-                        "id",
+                        Field(
+                            "id",
+                        ),
                         None,
                     ),
                     Field(
                         None,
-                        "name",
+                        Field(
+                            "name",
+                        ),
                         None,
                     ),
                     Field(
                         None,
-                        "username",
+                        Field(
+                            "username",
+                        ),
                         None,
                     ),
                     Field(
                         None,
-                        "email",
+                        Field(
+                            "email",
+                        ),
                         None,
                     ),
                     Field(
                         None,
-                        "address",
+                        Field(
+                            "address",
+                        ),
                         Some(
                             SubSelection {
                                 selections: [
                                     Field(
                                         None,
-                                        "street",
+                                        Field(
+                                            "street",
+                                        ),
                                         None,
                                     ),
                                     Field(
                                         None,
-                                        "suite",
+                                        Field(
+                                            "suite",
+                                        ),
                                         None,
                                     ),
                                     Field(
                                         None,
-                                        "city",
+                                        Field(
+                                            "city",
+                                        ),
                                         None,
                                     ),
                                     Field(
                                         None,
-                                        "zipcode",
+                                        Field(
+                                            "zipcode",
+                                        ),
                                         None,
                                     ),
                                     Field(
                                         None,
-                                        "geo",
+                                        Field(
+                                            "geo",
+                                        ),
                                         Some(
                                             SubSelection {
                                                 selections: [
                                                     Field(
                                                         None,
-                                                        "lat",
+                                                        Field(
+                                                            "lat",
+                                                        ),
                                                         None,
                                                     ),
                                                     Field(
                                                         None,
-                                                        "lng",
+                                                        Field(
+                                                            "lng",
+                                                        ),
                                                         None,
                                                     ),
                                                 ],
@@ -502,38 +568,52 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                     ),
                     Field(
                         None,
-                        "phone",
+                        Field(
+                            "phone",
+                        ),
                         None,
                     ),
                     Field(
                         None,
-                        "website",
+                        Field(
+                            "website",
+                        ),
                         None,
                     ),
                     Field(
                         None,
-                        "company",
+                        Field(
+                            "company",
+                        ),
                         Some(
                             SubSelection {
                                 selections: [
                                     Field(
                                         None,
-                                        "name",
+                                        Field(
+                                            "name",
+                                        ),
                                         None,
                                     ),
                                     Field(
                                         None,
-                                        "catchPhrase",
+                                        Field(
+                                            "catchPhrase",
+                                        ),
                                         None,
                                     ),
                                     Field(
                                         None,
-                                        "bs",
+                                        Field(
+                                            "bs",
+                                        ),
                                         None,
                                     ),
                                     Field(
                                         None,
-                                        "email",
+                                        Field(
+                                            "email",
+                                        ),
                                         None,
                                     ),
                                 ],
