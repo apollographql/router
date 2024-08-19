@@ -89,13 +89,13 @@ This reference lists and describes the options supported by the `router` binary.
 </td>
 <td>
 
-The [supergraph schema](/federation/federated-types/overview/#supergraph-schema) of a router. Specified by absolute or relative path (`-s` / `--supergraph <supergraph_path>`, or `APOLLO_ROUTER_SUPERGRAPH_PATH`), or a comma-separated list of URLs (`APOLLO_ROUTER_SUPERGRAPH_URLS`).
+The [supergraph schema](/federation/federated-types/overview#supergraph-schema) of a router. Specified by absolute or relative path (`-s` / `--supergraph <supergraph_path>`, or `APOLLO_ROUTER_SUPERGRAPH_PATH`), or a comma-separated list of URLs (`APOLLO_ROUTER_SUPERGRAPH_URLS`).
 
 > &#x1F4A1; Avoid embedding tokens in `APOLLO_ROUTER_SUPERGRAPH_URLS` because the URLs may appear in log messages. 
 
 Setting this option disables polling from Apollo Uplink to fetch the latest supergraph schema.
 
-To learn how to compose your supergraph schema with the Rover CLI, see the [Federation quickstart](/federation/quickstart/local-composition/).
+To learn how to compose your supergraph schema with the Rover CLI, see the [Federation quickstart](/federation/quickstart).
 
 **Required** if you are _not_ using managed federation. If you _are_ using managed federation, you may need to set this option when following [advanced deployment workflows](/federation/managed-federation/deployment/#advanced-deployment-workflows).
 
@@ -824,7 +824,7 @@ Thanks to extended reference reporting, operation checks can more accurately fla
       </td>
       <td>
         Changing or removing default values for input object fields is considered a breaking change.
-You can [configure checks to ignore default values changes](/graphos/delivery/schema-checks/#ignored-conditions-settings).
+You can [configure checks to ignore default values changes](/graphos/delivery/schema-checks#ignored-conditions-settings).
 
       </td>
     </tr>
