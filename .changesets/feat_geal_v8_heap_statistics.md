@@ -1,6 +1,6 @@
-### add metrics tracking the V8 heap usage ([PR #5781](https://github.com/apollographql/router/pull/5781))
+### Add V8 heap usage metrics ([PR #5781](https://github.com/apollographql/router/pull/5781))
 
-We add new gauge metrics tracking V8 memory usage:
+The router supports new gauge metrics for tracking heap memory usage of the V8 Javascript engine:
 - `apollo.router.v8.heap.used`: heap memory used by V8, in bytes
 - `apollo.router.v8.heap.total`: total heap allocated by V8, in bytes
 
