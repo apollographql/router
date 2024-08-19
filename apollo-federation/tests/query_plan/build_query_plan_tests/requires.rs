@@ -877,8 +877,6 @@ fn it_handles_longer_require_chain() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
 fn it_handles_complex_require_chain() {
     // Another "require chain" test but with more complexity as we have a require on multiple fields, some of which being
     // nested, and having requirements of their own.
@@ -994,40 +992,6 @@ fn it_handles_complex_require_chain() {
               }
             },
             Parallel {
-              Sequence {
-                Flatten(path: "t") {
-                  Fetch(service: "Subgraph2") {
-                    {
-                      ... on T {
-                        __typename
-                        id
-                      }
-                    } =>
-                    {
-                      ... on T {
-                        inner2_required
-                        inner1
-                      }
-                    }
-                  },
-                },
-                Flatten(path: "t") {
-                  Fetch(service: "Subgraph3") {
-                    {
-                      ... on T {
-                        __typename
-                        inner2_required
-                        id
-                      }
-                    } =>
-                    {
-                      ... on T {
-                        inner2
-                      }
-                    }
-                  },
-                },
-              },
               Flatten(path: "t") {
                 Fetch(service: "Subgraph7") {
                   {
@@ -1124,6 +1088,40 @@ fn it_handles_complex_require_chain() {
                     {
                       ... on Inner3Type {
                         inner3_nested
+                      }
+                    }
+                  },
+                },
+              },
+              Sequence {
+                Flatten(path: "t") {
+                  Fetch(service: "Subgraph2") {
+                    {
+                      ... on T {
+                        __typename
+                        id
+                      }
+                    } =>
+                    {
+                      ... on T {
+                        inner2_required
+                        inner1
+                      }
+                    }
+                  },
+                },
+                Flatten(path: "t") {
+                  Fetch(service: "Subgraph3") {
+                    {
+                      ... on T {
+                        __typename
+                        inner2_required
+                        id
+                      }
+                    } =>
+                    {
+                      ... on T {
+                        inner2
                       }
                     }
                   },
@@ -1731,6 +1729,109 @@ fn it_handles_multiple_requires_with_multiple_fetches() {
                     }
                   },
                 },
+              },
+            },
+          },
+        }
+      "###
+    );
+}
+
+#[test]
+fn handles_requires_from_supergraph() {
+    // This test verifies that @requires field selection set does not have to be locally satisfiable
+    // and is valid as long as it is satisfiable in the supergraph.
+    // In the test below, type U implements interface I only in the Subgraph1, but we can still use
+    // that type information in the @requires selection set in Subgraph2.
+    //
+    // NOTE: While GraphQL does not allow you to return raw interface data, it is still a valid schema.
+    // Since our interface field is marked as @external, its value should always be provided from
+    // other subgraph and should not be resolved locally (as that would lead to a runtime exception
+    // as we don't have any concrete type to return there).
+    let planner = planner!(
+        Subgraph1: r#"
+          type Query {
+            t: T
+          }
+
+          type T @key(fields: "id") {
+            id: ID!
+            i: I
+          }
+
+          interface I {
+            name: String
+          }
+
+          type U implements I {
+            name: String @shareable
+            value: String
+          }
+        "#,
+        Subgraph2: r#"
+          interface I {
+            name: String
+          }
+
+          type U {
+            name: String @shareable
+            value: String @external
+          }
+
+          type T @key(fields: "id") {
+            id: ID!
+            i: I @external
+            r: Int @requires(fields: "i { name ... on U { value } }")
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            t {
+              r
+            }
+          }
+        "#,
+
+        @r###"
+        QueryPlan {
+          Sequence {
+            Fetch(service: "Subgraph1") {
+              {
+                t {
+                  __typename
+                  id
+                  i {
+                    __typename
+                    name
+                    ... on U {
+                      value
+                    }
+                  }
+                }
+              }
+            },
+            Flatten(path: "t") {
+              Fetch(service: "Subgraph2") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                    i {
+                      name
+                      ... on U {
+                        value
+                      }
+                    }
+                  }
+                } =>
+                {
+                  ... on T {
+                    r
+                  }
+                }
               },
             },
           },

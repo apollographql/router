@@ -1,9 +1,9 @@
 use std::borrow::Cow;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveLocation;
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::ty;
 use apollo_compiler::Schema;
@@ -46,10 +46,10 @@ pub fn links_metadata(schema: &Schema) -> Result<Option<LinksMetadata>, LinkErro
     // all of the @link usages (starting with the bootstrapping one) and extract their metadata.
     let link_name_in_schema = &bootstrap_directive.name;
     let mut links = Vec::new();
-    let mut by_identity = HashMap::new();
-    let mut by_name_in_schema = HashMap::new();
-    let mut types_by_imported_name = HashMap::new();
-    let mut directives_by_imported_name = HashMap::new();
+    let mut by_identity = IndexMap::default();
+    let mut by_name_in_schema = IndexMap::default();
+    let mut types_by_imported_name = IndexMap::default();
+    let mut directives_by_imported_name = IndexMap::default();
     let link_applications = schema
         .schema_definition
         .directives

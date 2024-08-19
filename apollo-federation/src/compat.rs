@@ -9,10 +9,13 @@
 
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::executable;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::InputValueDefinition;
 use apollo_compiler::schema::Type;
+use apollo_compiler::validation::Valid;
+use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
@@ -281,10 +284,133 @@ pub fn coerce_schema_default_values(schema: &mut Schema) {
     }
 }
 
+fn coerce_directive_application_values(
+    schema: &Valid<Schema>,
+    directives: &mut executable::DirectiveList,
+) {
+    for directive in directives {
+        let Some(definition) = schema.directive_definitions.get(&directive.name) else {
+            continue;
+        };
+        let directive = directive.make_mut();
+        for arg in &mut directive.arguments {
+            let Some(definition) = definition.argument_by_name(&arg.name) else {
+                continue;
+            };
+            let arg = arg.make_mut();
+            _ = coerce_value(&schema.types, &mut arg.value, &definition.ty);
+        }
+    }
+}
+
+fn coerce_selection_set_values(
+    schema: &Valid<Schema>,
+    selection_set: &mut executable::SelectionSet,
+) {
+    for selection in &mut selection_set.selections {
+        match selection {
+            executable::Selection::Field(field) => {
+                let definition = field.definition.clone(); // Clone so we can mutate `field`.
+                let field = field.make_mut();
+                for arg in &mut field.arguments {
+                    let Some(definition) = definition.argument_by_name(&arg.name) else {
+                        continue;
+                    };
+                    let arg = arg.make_mut();
+                    _ = coerce_value(&schema.types, &mut arg.value, &definition.ty);
+                }
+                coerce_directive_application_values(schema, &mut field.directives);
+                coerce_selection_set_values(schema, &mut field.selection_set);
+            }
+            executable::Selection::FragmentSpread(frag) => {
+                let frag = frag.make_mut();
+                coerce_directive_application_values(schema, &mut frag.directives);
+            }
+            executable::Selection::InlineFragment(frag) => {
+                let frag = frag.make_mut();
+                coerce_directive_application_values(schema, &mut frag.directives);
+                coerce_selection_set_values(schema, &mut frag.selection_set);
+            }
+        }
+    }
+}
+
+fn coerce_operation_values(schema: &Valid<Schema>, operation: &mut Node<executable::Operation>) {
+    let operation = operation.make_mut();
+
+    for variable in &mut operation.variables {
+        let variable = variable.make_mut();
+        let Some(default_value) = &mut variable.default_value else {
+            continue;
+        };
+
+        // On error, the default value is invalid. This would have been caught by validation.
+        // In schemas, we explicitly remove the default value if it's invalid, to match the JS
+        // query planner behaviour.
+        // In queries, I hope we can just reject queries with invalid default values instead of
+        // silently doing the wrong thing :)
+        _ = coerce_value(&schema.types, default_value, &variable.ty);
+    }
+
+    coerce_selection_set_values(schema, &mut operation.selection_set);
+}
+
+pub fn coerce_executable_values(schema: &Valid<Schema>, document: &mut ExecutableDocument) {
+    if let Some(operation) = &mut document.operations.anonymous {
+        coerce_operation_values(schema, operation);
+    }
+    for operation in document.operations.named.values_mut() {
+        coerce_operation_values(schema, operation);
+    }
+}
+
 /// Applies default value coercion and removes non-semantic directives so that
 /// the apollo-rs serialized output of the schema matches the result of
 /// `printSchema(buildSchema()` in graphql-js.
 pub fn make_print_schema_compatible(schema: &mut Schema) {
     remove_non_semantic_directives(schema);
     coerce_schema_default_values(schema);
+}
+
+#[cfg(test)]
+mod tests {
+    use apollo_compiler::validation::Valid;
+    use apollo_compiler::ExecutableDocument;
+    use apollo_compiler::Schema;
+
+    use super::coerce_executable_values;
+
+    fn parse_and_coerce(schema: &Valid<Schema>, input: &str) -> String {
+        let mut document = ExecutableDocument::parse(schema, input, "test.graphql").unwrap();
+        coerce_executable_values(schema, &mut document);
+        document.to_string()
+    }
+
+    #[test]
+    fn coerces_list_values() {
+        let schema = Schema::parse_and_validate(
+            r#"
+        type Query {
+          test(
+            bools: [Boolean],
+            ints: [Int],
+            strings: [String],
+            floats: [Float],
+          ): Int
+        }
+        "#,
+            "schema.graphql",
+        )
+        .unwrap();
+
+        insta::assert_snapshot!(parse_and_coerce(&schema, r#"
+        {
+          test(bools: true, ints: 1, strings: "string", floats: 2.0)
+        }
+        "#), @r#"
+        {
+          test(bools: [true], ints: [1], strings: ["string"], floats: [2.0])
+        }
+        "#);
+    }
 }

@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::iter;
 use std::ops::Deref;
@@ -928,7 +926,7 @@ impl FetchDependencyGraph {
     /// edges. In RS implementation we first collect the edges and then remove them. This has a side
     /// effect that if we ever end up with a cycle in a graph (which is an invalid state), this method
     /// may result in infinite loop.
-    fn collect_redundant_edges(&self, node_index: NodeIndex, acc: &mut HashSet<EdgeIndex>) {
+    fn collect_redundant_edges(&self, node_index: NodeIndex, acc: &mut IndexSet<EdgeIndex>) {
         let mut stack = vec![];
         for start_index in self.children_of(node_index) {
             stack.extend(self.children_of(start_index));
@@ -946,7 +944,7 @@ impl FetchDependencyGraph {
     /// If any deeply nested child of this node has an edge to any direct child of this node, the
     /// direct child is removed, as we know it is also reachable through the deeply nested route.
     fn remove_redundant_edges(&mut self, node_index: NodeIndex) {
-        let mut redundant_edges = HashSet::new();
+        let mut redundant_edges = IndexSet::default();
         self.collect_redundant_edges(node_index, &mut redundant_edges);
 
         if !redundant_edges.is_empty() {
@@ -1005,7 +1003,7 @@ impl FetchDependencyGraph {
 
         // Two phases for mutability reasons: first all redundant edges coming out of all nodes are
         // collected and then they are all removed.
-        let mut redundant_edges = HashSet::new();
+        let mut redundant_edges = IndexSet::default();
         for node_index in self.graph.node_indices() {
             self.collect_redundant_edges(node_index, &mut redundant_edges);
         }
@@ -1063,7 +1061,7 @@ impl FetchDependencyGraph {
             node.selection_set.selection_set.selections.is_empty()
                 && !self.is_root_node(node_index, node)
         };
-        let to_remove: HashSet<NodeIndex> = self
+        let to_remove: IndexSet<NodeIndex> = self
             .graph
             .node_references()
             .filter_map(|(node_index, node)| is_removable(node_index, node).then_some(node_index))
@@ -1302,7 +1300,7 @@ impl FetchDependencyGraph {
                         .any(|input| input.contains(selection)));
                 };
 
-                let impl_type_names: HashSet<_> = self
+                let impl_type_names: IndexSet<_> = self
                     .supergraph_schema
                     .possible_runtime_types(condition_in_supergraph.clone().into())?
                     .iter()
@@ -1769,7 +1767,7 @@ impl FetchDependencyGraph {
         let handled_defers_in_current = defers_in_current
             .iter()
             .map(|info| info.label.clone())
-            .collect::<HashSet<_>>();
+            .collect::<IndexSet<_>>();
         let unhandled_defer_nodes = all_deferred_nodes
             .keys()
             .filter(|label| !handled_defers_in_current.contains(*label))
@@ -2106,7 +2104,7 @@ impl FetchDependencyGraph {
         merged_id: NodeIndex,
         path_in_this: &OpPath,
     ) {
-        let mut new_parent_relations = HashMap::new();
+        let mut new_parent_relations = IndexMap::default();
         for child_id in self.children_of(merged_id) {
             // This could already be a child of `this`. Typically, we can have case where we have:
             //     1
@@ -2282,6 +2280,46 @@ impl std::fmt::Display for FetchDependencyGraph {
             fmt_node(self, node_id, f, 0)?;
         }
         Ok(())
+    }
+}
+
+// Necessary for `petgraph::dot::Dot::with_attr_getters` calls to compile, but not executed.
+impl std::fmt::Display for FetchDependencyGraphNode {
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Err(std::fmt::Error)
+    }
+}
+
+// Necessary for `petgraph::dot::Dot::with_attr_getters` calls to compile, but not executed.
+impl std::fmt::Display for FetchDependencyGraphEdge {
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Err(std::fmt::Error)
+    }
+}
+
+impl FetchDependencyGraph {
+    // GraphViz output for FetchDependencyGraph
+    pub fn to_dot(&self) -> String {
+        fn label_node(node_id: NodeIndex, node: &FetchDependencyGraphNode) -> String {
+            let label_str = node.multiline_display(node_id).to_string();
+            format!("label=\"{}\"", label_str.replace('"', "\\\""))
+        }
+
+        fn label_edge(edge_id: EdgeIndex) -> String {
+            format!("label=\"{}\"", edge_id.index())
+        }
+
+        let config = [
+            petgraph::dot::Config::NodeNoLabel,
+            petgraph::dot::Config::EdgeNoLabel,
+        ];
+        petgraph::dot::Dot::with_attr_getters(
+            &self.graph,
+            &config,
+            &(|_, er| label_edge(er.id())),
+            &(|_, (node_id, node)| label_node(node_id, node)),
+        )
+        .to_string()
     }
 }
 
@@ -2560,6 +2598,81 @@ impl FetchDependencyGraphNode {
                     (None, _) => {
                         // [{ id }]
                         write!(f, "[{}]", self.node.selection_set.selection_set)?;
+                    }
+                }
+
+                Ok(())
+            }
+        }
+
+        FetchDependencyNodeDisplay { node: self, index }
+    }
+
+    // A variation of `fn display` with multiline output, which is more suitable for
+    // GraphViz output.
+    pub fn multiline_display(&self, index: NodeIndex) -> impl std::fmt::Display + '_ {
+        use std::fmt;
+        use std::fmt::Display;
+        use std::fmt::Formatter;
+
+        struct DisplayList<'a, T: Display>(&'a [T]);
+        impl<T: Display> Display for DisplayList<'_, T> {
+            fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+                let mut iter = self.0.iter();
+                if let Some(x) = iter.next() {
+                    write!(f, "{x}")?;
+                }
+                for x in iter {
+                    write!(f, "::{x}")?;
+                }
+                Ok(())
+            }
+        }
+
+        struct FetchDependencyNodeDisplay<'a> {
+            node: &'a FetchDependencyGraphNode,
+            index: NodeIndex,
+        }
+
+        impl Display for FetchDependencyNodeDisplay<'_> {
+            fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+                write!(f, "[{}]", self.index.index())?;
+                if self.node.defer_ref.is_some() {
+                    write!(f, "(deferred)")?;
+                }
+                if let Some(&id) = self.node.id.get() {
+                    write!(f, "{{id: {id}}}")?;
+                }
+
+                write!(f, " {}", self.node.subgraph_name)?;
+
+                match (self.node.merge_at.as_deref(), self.node.inputs.as_deref()) {
+                    (Some(merge_at), Some(inputs)) => {
+                        write!(
+                            f,
+                            // @(path::to::*::field)[{input1,input2} => { id }]
+                            "\n@({})\n{}\n=>\n{}\n",
+                            DisplayList(merge_at),
+                            inputs,
+                            self.node.selection_set.selection_set
+                        )?;
+                    }
+                    (Some(merge_at), None) => {
+                        write!(
+                            f,
+                            // @(path::to::*::field)[{} => { id }]
+                            "\n@({})\n{{}}\n=>\n{}\n",
+                            DisplayList(merge_at),
+                            self.node.selection_set.selection_set
+                        )?;
+                    }
+                    (None, _) => {
+                        // [(type){ id }]
+                        write!(
+                            f,
+                            "\n({})\n{}",
+                            self.node.parent_type, self.node.selection_set.selection_set
+                        )?;
                     }
                 }
 

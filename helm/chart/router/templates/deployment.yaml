@@ -172,3 +172,13 @@ spec:
       topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+  {{- if .Values.rollingUpdate }}
+  strategy:
+    rollingUpdate:
+      {{- if  (hasKey .Values.rollingUpdate "maxUnavailable") }}
+      maxUnavailable: {{ .Values.rollingUpdate.maxUnavailable }}
+      {{- end }}
+      {{- if (hasKey .Values.rollingUpdate "maxSurge") }}
+      maxSurge: {{ .Values.rollingUpdate.maxSurge }}
+      {{- end }}
+  {{- end }}

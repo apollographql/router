@@ -5,5 +5,6 @@ mod jaeger;
 mod logging;
 mod metrics;
 mod otlp;
+mod propagation;
 #[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
 mod zipkin;

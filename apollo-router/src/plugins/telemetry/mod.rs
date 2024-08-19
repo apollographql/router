@@ -939,6 +939,7 @@ impl Telemetry {
         if let Some(from_request_header) = &propagation.request.header_name {
             propagators.push(Box::new(CustomTraceIdPropagator::new(
                 from_request_header.to_string(),
+                propagation.request.format.clone(),
             )));
         }
 
@@ -2020,13 +2021,15 @@ fn store_ftv1(subgraph_name: &ByteString, resp: SubgraphResponse) -> SubgraphRes
 struct CustomTraceIdPropagator {
     header_name: String,
     fields: [String; 1],
+    format: TraceIdFormat,
 }
 
 impl CustomTraceIdPropagator {
-    fn new(header_name: String) -> Self {
+    fn new(header_name: String, format: TraceIdFormat) -> Self {
         Self {
             fields: [header_name.clone()],
             header_name,
+            format,
         }
     }
 
@@ -2058,9 +2061,9 @@ impl TextMapPropagator for CustomTraceIdPropagator {
     fn inject_context(&self, cx: &opentelemetry::Context, injector: &mut dyn Injector) {
         let span = cx.span();
         let span_context = span.span_context();
-        if span_context.is_valid() {
-            let header_value = format!("{}", span_context.trace_id());
-            injector.set(&self.header_name, header_value);
+        if span_context.trace_id() != TraceId::INVALID {
+            let formatted_trace_id = self.format.format(span_context.trace_id());
+            injector.set(&self.header_name, formatted_trace_id);
         }
     }
 
@@ -2130,6 +2133,14 @@ mod tests {
     use http::StatusCode;
     use insta::assert_snapshot;
     use itertools::Itertools;
+    use opentelemetry_api::propagation::Injector;
+    use opentelemetry_api::propagation::TextMapPropagator;
+    use opentelemetry_api::trace::SpanContext;
+    use opentelemetry_api::trace::SpanId;
+    use opentelemetry_api::trace::TraceContextExt;
+    use opentelemetry_api::trace::TraceFlags;
+    use opentelemetry_api::trace::TraceId;
+    use opentelemetry_api::trace::TraceState;
     use serde_json::Value;
     use serde_json_bytes::json;
     use serde_json_bytes::ByteString;
@@ -2151,6 +2162,7 @@ mod tests {
     use crate::error::FetchError;
     use crate::graphql;
     use crate::graphql::Error;
+    use crate::graphql::IntoGraphQLErrors;
     use crate::graphql::Request;
     use crate::http_ext;
     use crate::json_ext::Object;
@@ -2159,6 +2171,9 @@ mod tests {
     use crate::plugin::test::MockSubgraphService;
     use crate::plugin::test::MockSupergraphService;
     use crate::plugin::DynPlugin;
+    use crate::plugins::demand_control::CostContext;
+    use crate::plugins::demand_control::DemandControlError;
+    use crate::plugins::telemetry::config::TraceIdFormat;
     use crate::plugins::telemetry::handle_error_internal;
     use crate::services::router::body::get_body_bytes;
     use crate::services::RouterRequest;
@@ -3195,11 +3210,164 @@ mod tests {
         let trace_id = String::from("04f9e396-465c-4840-bc2b-f493b8b1a7fc");
         let expected_trace_id = String::from("04f9e396465c4840bc2bf493b8b1a7fc");
 
-        let propagator = CustomTraceIdPropagator::new(header.clone());
+        let propagator = CustomTraceIdPropagator::new(header.clone(), TraceIdFormat::Uuid);
         let mut headers: HashMap<String, String> = HashMap::new();
         headers.insert(header, trace_id);
         let span = propagator.extract_span_context(&headers);
         assert!(span.is_some());
         assert_eq!(span.unwrap().trace_id().to_string(), expected_trace_id);
+    }
+
+    #[test]
+    fn test_header_propagation_format() {
+        struct Injected(HashMap<String, String>);
+        impl Injector for Injected {
+            fn set(&mut self, key: &str, value: String) {
+                self.0.insert(key.to_string(), value);
+            }
+        }
+        let mut injected = Injected(HashMap::new());
+        let _ctx = opentelemetry::Context::new()
+            .with_remote_span_context(SpanContext::new(
+                TraceId::from_u128(0x04f9e396465c4840bc2bf493b8b1a7fc),
+                SpanId::INVALID,
+                TraceFlags::default(),
+                false,
+                TraceState::default(),
+            ))
+            .attach();
+        let propagator = CustomTraceIdPropagator::new("my_header".to_string(), TraceIdFormat::Uuid);
+        propagator.inject_context(&opentelemetry::Context::current(), &mut injected);
+        assert_eq!(
+            injected.0.get("my_header").unwrap(),
+            "04f9e396-465c-4840-bc2b-f493b8b1a7fc"
+        );
+    }
+
+    async fn make_failed_demand_control_request(plugin: &dyn DynPlugin, cost_details: CostContext) {
+        let mut mock_service = MockSupergraphService::new();
+        mock_service
+            .expect_call()
+            .times(1)
+            .returning(move |req: SupergraphRequest| {
+                req.context.extensions().with_lock(|mut lock| {
+                    lock.insert(cost_details.clone());
+                });
+
+                let errors = if cost_details.result == "COST_ESTIMATED_TOO_EXPENSIVE" {
+                    DemandControlError::EstimatedCostTooExpensive {
+                        estimated_cost: cost_details.estimated,
+                        max_cost: (cost_details.estimated - 5.0).max(0.0),
+                    }
+                    .into_graphql_errors()
+                    .unwrap()
+                } else if cost_details.result == "COST_ACTUAL_TOO_EXPENSIVE" {
+                    DemandControlError::ActualCostTooExpensive {
+                        actual_cost: cost_details.actual,
+                        max_cost: (cost_details.actual - 5.0).max(0.0),
+                    }
+                    .into_graphql_errors()
+                    .unwrap()
+                } else {
+                    Vec::new()
+                };
+
+                SupergraphResponse::fake_builder()
+                    .context(req.context)
+                    .data(
+                        serde_json::to_value(graphql::Response::builder().errors(errors).build())
+                            .unwrap(),
+                    )
+                    .build()
+            });
+
+        let mut service = plugin.supergraph_service(BoxService::new(mock_service));
+        let router_req = SupergraphRequest::fake_builder().build().unwrap();
+        let _router_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(router_req)
+            .await
+            .unwrap()
+            .next_response()
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_demand_control_delta_filter() {
+        async {
+            let plugin = create_plugin_with_config(include_str!(
+                "testdata/demand_control_delta_filter.router.yaml"
+            ))
+            .await;
+            make_failed_demand_control_request(
+                plugin.as_ref(),
+                CostContext {
+                    estimated: 10.0,
+                    actual: 8.0,
+                    result: "COST_ACTUAL_TOO_EXPENSIVE",
+                    strategy: "static_estimated",
+                },
+            )
+            .await;
+
+            assert_histogram_sum!("cost.rejected.operations", 8.0);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_demand_control_result_filter() {
+        async {
+            let plugin = create_plugin_with_config(include_str!(
+                "testdata/demand_control_result_filter.router.yaml"
+            ))
+            .await;
+            make_failed_demand_control_request(
+                plugin.as_ref(),
+                CostContext {
+                    estimated: 10.0,
+                    actual: 0.0,
+                    result: "COST_ESTIMATED_TOO_EXPENSIVE",
+                    strategy: "static_estimated",
+                },
+            )
+            .await;
+
+            assert_histogram_sum!("cost.rejected.operations", 10.0);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_demand_control_result_attributes() {
+        async {
+            let plugin = create_plugin_with_config(include_str!(
+                "testdata/demand_control_result_attribute.router.yaml"
+            ))
+            .await;
+            make_failed_demand_control_request(
+                plugin.as_ref(),
+                CostContext {
+                    estimated: 10.0,
+                    actual: 0.0,
+                    result: "COST_ESTIMATED_TOO_EXPENSIVE",
+                    strategy: "static_estimated",
+                },
+            )
+            .await;
+
+            assert_histogram_sum!(
+                "cost.estimated",
+                10.0,
+                "cost.result" = "COST_ESTIMATED_TOO_EXPENSIVE"
+            );
+        }
+        .with_metrics()
+        .await;
     }
 }

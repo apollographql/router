@@ -1,4 +1,4 @@
 [toolchain]
 # renovate-automation: rustc version
-channel = "1.76.0"
+channel = "1.76.0" # If updated, remove `rowan` dependency from apollo-router/Cargo.toml
 components = [ "rustfmt", "clippy" ]

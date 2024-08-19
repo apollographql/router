@@ -414,7 +414,7 @@ where
                 tracing::info!(
                     histogram.apollo_router_uplink_fetch_duration_seconds =
                         now.elapsed().as_secs_f64(),
-                    query = std::any::type_name::<Query>(),
+                    query,
                     url = url.to_string(),
                     "kind" = "http_error",
                     error = e.to_string(),
@@ -441,7 +441,7 @@ fn query_name<Query>() -> &'static str {
     let mut query = std::any::type_name::<Query>();
     query = query
         .strip_suffix("Query")
-        .expect("Uplink structs mut be named xxxQuery")
+        .expect("Uplink structs must be named xxxQuery")
         .get(query.rfind("::").map(|index| index + 2).unwrap_or_default()..)
         .expect("cannot fail");
     query

@@ -1339,8 +1339,9 @@ impl FederatedQueryGraphBuilder {
                 let application = subgraph_data
                     .federation_spec_definition
                     .requires_directive_arguments(directive)?;
+                // @requires field set is validated against the supergraph
                 let conditions = parse_field_set(
-                    schema,
+                    &self.supergraph_schema,
                     field_definition_position.parent().type_name().clone(),
                     application.fields,
                 )?;

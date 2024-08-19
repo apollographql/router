@@ -144,8 +144,31 @@ telemetry:
    
          # If you have your own way to generate a trace id and you want to pass it via a custom request header
          request:
+           # The name of the header to read the trace id from
            header_name: my-trace-id
+           # The format of the trace when propagating to subgraphs.
+           format: uuid
 ```
+
+#### `request` configuration reference
+
+| Option        | Values                                                        | Default                           | Description                         |
+|---------------|---------------------------------------------------------------|-----------------------------------|-------------------------------------|
+| `header_name` |                                                               |  |  The name of the http header to use for propagation.                                   |
+| `format`      | `hexadecimal`\|`open_telemetry`\|`decimal`\|`datadog`\|`uuid` | `hexadecimal`                     | The output format of the `trace_id` |
+
+Valid values for `format`:
+* `hexadecimal` - 32-character hexadecimal string (e.g. `0123456789abcdef0123456789abcdef`)
+* `open_telemetry` - 32-character hexadecimal string (e.g. `0123456789abcdef0123456789abcdef`)
+* `decimal` - 16-character decimal string (e.g. `1234567890123456`)
+* `datadog` - 16-character decimal string (e.g. `1234567890123456`)
+* `uuid` - 36-character UUID string (e.g. `01234567-89ab-cdef-0123-456789abcdef`)
+
+<Note>
+
+Incoming trace IDs must be in `open_telemetry` or `uuid` format.
+
+</Note>
 
 ### Limits
 

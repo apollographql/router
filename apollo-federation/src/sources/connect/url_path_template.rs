@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::fmt::Display;
 
 use apollo_compiler::collections::IndexMap;
@@ -188,7 +187,7 @@ impl URLPathTemplate {
     }
 
     pub fn required_parameters(&self) -> Vec<String> {
-        let mut parameters = HashSet::new();
+        let mut parameters = IndexSet::default();
         for param_value in &self.path {
             parameters.extend(param_value.required_parameters());
         }
