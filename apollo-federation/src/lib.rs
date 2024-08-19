@@ -35,6 +35,7 @@ pub(crate) mod operation;
 pub mod query_graph;
 pub mod query_plan;
 pub mod schema;
+pub mod simulation;
 pub mod subgraph;
 pub(crate) mod supergraph;
 pub(crate) mod utils;

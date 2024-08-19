@@ -104,6 +104,14 @@ enum Command {
         #[command(flatten)]
         planner: QueryPlannerArgs,
     },
+    /// Plan and test a query.
+    Simulate {
+        query: PathBuf,
+        /// Path(s) to one supergraph schema file, `-` for stdin or multiple subgraph schemas.
+        schemas: Vec<PathBuf>,
+        #[command(flatten)]
+        planner: QueryPlannerArgs,
+    },
 }
 
 impl QueryPlannerArgs {
@@ -154,6 +162,11 @@ fn main() -> ExitCode {
             operations_dir,
             planner,
         } => cmd_bench(&supergraph_schema, &operations_dir, planner),
+        Command::Simulate {
+            query,
+            schemas,
+            planner,
+        } => cmd_plan_correctness(&query, &schemas, planner),
     };
     match result {
         Err(error) => {
@@ -318,6 +331,27 @@ fn cmd_bench(
     for r in results {
         println!("{}", r);
     }
+    Ok(())
+}
+
+fn cmd_plan_correctness(
+    query_path: &Path,
+    schema_paths: &[PathBuf],
+    planner: QueryPlannerArgs,
+) -> Result<(), FederationError> {
+    let query = read_input(query_path);
+    let supergraph = load_supergraph(schema_paths)?;
+    let query_doc =
+        ExecutableDocument::parse_and_validate(supergraph.schema.schema(), query, query_path)?;
+    let config = QueryPlannerConfig::from(planner);
+
+    apollo_federation::simulation::simulate_supergraph_query(&supergraph, &query_doc, None)?;
+
+    let planner = QueryPlanner::new(&supergraph, config)?;
+    let plan = planner.build_query_plan(&query_doc, None)?;
+
+    apollo_federation::simulation::simulate_query_plan(&supergraph, &plan)?;
+
     Ok(())
 }
 
