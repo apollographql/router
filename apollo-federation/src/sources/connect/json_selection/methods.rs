@@ -33,7 +33,44 @@ type ArrowMethod = fn(
 ) -> Option<JSON>;
 
 lazy_static! {
-    pub(super) static ref ARROW_METHODS: IndexMap<String, ArrowMethod> = {
+    // This set controls which ->methods are exposed for use in connector
+    // schemas. Non-public methods are still implemented and tested, but will
+    // not be returned from lookup_arrow_method outside of tests.
+    static ref PUBLIC_ARROW_METHODS: IndexSet<&'static str> = {
+        let mut public_methods = IndexSet::default();
+
+        public_methods.insert("echo");
+        // public_methods.insert("typeof");
+        public_methods.insert("map");
+        // public_methods.insert("eq");
+        public_methods.insert("match");
+        // public_methods.insert("matchIf");
+        // public_methods.insert("match_if");
+        // public_methods.insert("add");
+        // public_methods.insert("sub");
+        // public_methods.insert("mul");
+        // public_methods.insert("div");
+        // public_methods.insert("mod");
+        public_methods.insert("first");
+        public_methods.insert("last");
+        public_methods.insert("slice");
+        public_methods.insert("size");
+        // public_methods.insert("has");
+        // public_methods.insert("get");
+        // public_methods.insert("keys");
+        // public_methods.insert("values");
+        public_methods.insert("entries");
+        // public_methods.insert("not");
+        // public_methods.insert("or");
+        // public_methods.insert("and");
+
+        public_methods
+    };
+
+    // This map registers all the built-in ->methods that are currently
+    // implemented, even the non-public ones that are not included in the
+    // PUBLIC_ARROW_METHODS set.
+    static ref ARROW_METHODS: IndexMap<String, ArrowMethod> = {
         let mut methods = IndexMap::<String, ArrowMethod>::default();
 
         // This built-in method returns its first input argument as-is, ignoring
@@ -97,6 +134,14 @@ lazy_static! {
 
         methods
     };
+}
+
+pub(super) fn lookup_arrow_method(method_name: &str) -> Option<&ArrowMethod> {
+    if cfg!(test) || PUBLIC_ARROW_METHODS.contains(method_name) {
+        ARROW_METHODS.get(method_name)
+    } else {
+        None
+    }
 }
 
 fn echo_method(

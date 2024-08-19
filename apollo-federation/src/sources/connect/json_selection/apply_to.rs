@@ -13,7 +13,7 @@ use serde_json_bytes::Value as JSON;
 use super::helpers::json_type_name;
 use super::immutable::InputPath;
 use super::lit_expr::LitExpr;
-use super::methods::ARROW_METHODS;
+use super::methods::lookup_arrow_method;
 use super::parser::*;
 
 pub(super) type VarsWithPathsMap<'a> = IndexMap<String, (&'a JSON, InputPath<JSON>)>;
@@ -343,7 +343,7 @@ impl ApplyTo for PathList {
                 }
             }
             Self::Method(method_name, method_args, tail) => {
-                if let Some(method) = ARROW_METHODS.get(method_name) {
+                if let Some(method) = lookup_arrow_method(method_name) {
                     method(
                         method_name.as_str(),
                         method_args,
