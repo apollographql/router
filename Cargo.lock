@@ -572,6 +572,7 @@ dependencies = [
  "rhai",
  "rmp",
  "router-bridge",
+ "rowan",
  "rstack",
  "rust-embed",
  "rustls",

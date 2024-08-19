@@ -88,6 +88,13 @@ impl Identity {
             name: name!("inaccessible"),
         }
     }
+
+    pub fn cost_identity() -> Identity {
+        Identity {
+            domain: APOLLO_SPEC_DOMAIN.to_string(),
+            name: name!("cost"),
+        }
+    }
 }
 
 /// The version of a `@link` specification, in the form of a major and minor version numbers.

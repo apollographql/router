@@ -1,5 +1,4 @@
-use std::collections::HashMap;
-
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
@@ -146,7 +145,7 @@ fn same_arguments(
     let right = right
         .iter()
         .map(|arg| (&arg.name, arg))
-        .collect::<HashMap<_, _>>();
+        .collect::<IndexMap<_, _>>();
 
     left.iter().all(|arg| {
         right

@@ -1339,8 +1339,9 @@ impl FederatedQueryGraphBuilder {
                 let application = subgraph_data
                     .federation_spec_definition
                     .requires_directive_arguments(directive)?;
+                // @requires field set is validated against the supergraph
                 let conditions = parse_field_set(
-                    schema,
+                    &self.supergraph_schema,
                     field_definition_position.parent().type_name().clone(),
                     application.fields,
                 )?;
@@ -1902,7 +1903,8 @@ impl FederatedQueryGraphBuilder {
                                 }
                                 .into());
                             };
-                            if conditions.selections == followup_conditions.selections {
+
+                            if conditions == followup_conditions {
                                 continue;
                             }
                         }
@@ -1926,7 +1928,7 @@ impl FederatedQueryGraphBuilder {
                         // since we can do "start of query" -> C and that's always better.
                         if matches!(
                             followup_edge_weight.transition,
-                            QueryGraphEdgeTransition::SubgraphEnteringTransition
+                            QueryGraphEdgeTransition::RootTypeResolution { .. }
                         ) {
                             continue;
                         }
