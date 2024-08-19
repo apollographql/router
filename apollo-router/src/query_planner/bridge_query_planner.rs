@@ -81,7 +81,7 @@ pub(crate) struct BridgeQueryPlanner {
 }
 
 #[derive(Clone)]
-enum PlannerMode {
+pub(crate) enum PlannerMode {
     Js(Arc<Planner<QueryPlanResult>>),
     Both {
         js: Arc<Planner<QueryPlanResult>>,
@@ -115,6 +115,7 @@ impl PlannerMode {
         schema: &Schema,
         configuration: &Configuration,
         old_planner: Option<Arc<Planner<QueryPlanResult>>>,
+        rust_planner: Option<Arc<QueryPlanner>>,
     ) -> Result<Self, ServiceBuildError> {
         Ok(match configuration.experimental_query_planner_mode {
             QueryPlannerMode::New => Self::Rust {
@@ -124,16 +125,51 @@ impl PlannerMode {
                     old_planner,
                 )
                 .await?,
-                rust: Self::rust(schema, configuration)?,
+                rust: rust_planner
+                    .expect("expected Rust QP instance for `experimental_query_planner_mode: new`"),
             },
             QueryPlannerMode::Legacy => {
                 Self::Js(Self::js(&schema.raw_sdl, configuration, old_planner).await?)
             }
             QueryPlannerMode::Both => Self::Both {
                 js: Self::js(&schema.raw_sdl, configuration, old_planner).await?,
-                rust: Self::rust(schema, configuration)?,
+                rust: rust_planner.expect(
+                    "expected Rust QP instance for `experimental_query_planner_mode: both`",
+                ),
             },
+            QueryPlannerMode::BothBestEffort => {
+                if let Some(rust) = rust_planner {
+                    Self::Both {
+                        js: Self::js(&schema.raw_sdl, configuration, old_planner).await?,
+                        rust,
+                    }
+                } else {
+                    Self::Js(Self::js(&schema.raw_sdl, configuration, old_planner).await?)
+                }
+            }
         })
+    }
+
+    pub(crate) fn maybe_rust(
+        schema: &Schema,
+        configuration: &Configuration,
+    ) -> Result<Option<Arc<QueryPlanner>>, ServiceBuildError> {
+        match configuration.experimental_query_planner_mode {
+            QueryPlannerMode::Legacy => Ok(None),
+            QueryPlannerMode::New | QueryPlannerMode::Both => {
+                Ok(Some(Self::rust(schema, configuration)?))
+            }
+            QueryPlannerMode::BothBestEffort => match Self::rust(schema, configuration) {
+                Ok(planner) => Ok(Some(planner)),
+                Err(error) => {
+                    tracing::warn!(
+                        "Failed to initialize the new query planner, \
+                         falling back to legacy: {error}"
+                    );
+                    Ok(None)
+                }
+            },
+        }
     }
 
     fn rust(
@@ -325,9 +361,11 @@ impl BridgeQueryPlanner {
     pub(crate) async fn new(
         schema: Arc<Schema>,
         configuration: Arc<Configuration>,
-        old_planner: Option<Arc<Planner<QueryPlanResult>>>,
+        old_js_planner: Option<Arc<Planner<QueryPlanResult>>>,
+        rust_planner: Option<Arc<QueryPlanner>>,
     ) -> Result<Self, ServiceBuildError> {
-        let planner = PlannerMode::new(&schema, &configuration, old_planner).await?;
+        let planner =
+            PlannerMode::new(&schema, &configuration, old_js_planner, rust_planner).await?;
 
         let subgraph_schemas = Arc::new(planner.subgraphs().await?);
 
@@ -606,6 +644,7 @@ impl BridgeQueryPlanner {
                         formatted_query_plan,
                         query: Arc::new(selections),
                         query_metrics,
+                        estimated_size: Default::default(),
                     }),
                 })
             }
@@ -991,7 +1030,7 @@ mod tests {
             let sdl = include_str!("../testdata/minimal_supergraph.graphql");
             let config = Arc::default();
             let schema = Schema::parse(sdl, &config).unwrap();
-            let _planner = BridgeQueryPlanner::new(schema.into(), config, None)
+            let _planner = BridgeQueryPlanner::new(schema.into(), config, None, None)
                 .await
                 .unwrap();
 
@@ -1008,7 +1047,7 @@ mod tests {
             let sdl = include_str!("../testdata/minimal_fed2_supergraph.graphql");
             let config = Arc::default();
             let schema = Schema::parse(sdl, &config).unwrap();
-            let _planner = BridgeQueryPlanner::new(schema.into(), config, None)
+            let _planner = BridgeQueryPlanner::new(schema.into(), config, None, None)
                 .await
                 .unwrap();
 
@@ -1027,7 +1066,7 @@ mod tests {
         let schema = Arc::new(Schema::parse(EXAMPLE_SCHEMA, &Default::default()).unwrap());
         let query = include_str!("testdata/unknown_introspection_query.graphql");
 
-        let planner = BridgeQueryPlanner::new(schema.clone(), Default::default(), None)
+        let planner = BridgeQueryPlanner::new(schema.clone(), Default::default(), None, None)
             .await
             .unwrap();
 
@@ -1127,7 +1166,7 @@ mod tests {
         let configuration = Arc::new(configuration);
 
         let schema = Schema::parse(EXAMPLE_SCHEMA, &configuration).unwrap();
-        let planner = BridgeQueryPlanner::new(schema.into(), configuration.clone(), None)
+        let planner = BridgeQueryPlanner::new(schema.into(), configuration.clone(), None, None)
             .await
             .unwrap();
 
@@ -1435,7 +1474,7 @@ mod tests {
         let configuration = Arc::new(configuration);
 
         let schema = Schema::parse(schema, &configuration).unwrap();
-        let planner = BridgeQueryPlanner::new(schema.into(), configuration.clone(), None)
+        let planner = BridgeQueryPlanner::new(schema.into(), configuration.clone(), None, None)
             .await
             .unwrap();
 

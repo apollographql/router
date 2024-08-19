@@ -1,0 +1,147 @@
+---
+source: apollo-federation/src/sources/connect/expand/tests/mod.rs
+expression: connectors.by_service_name
+---
+{
+    "connectors-subgraph_Query_users_0": Connector {
+        id: ConnectId {
+            label: "connectors-subgraph.example http: GET ",
+            subgraph_name: "connectors-subgraph",
+            source_name: Some(
+                "example",
+            ),
+            directive: ObjectOrInterfaceFieldDirectivePosition {
+                field: Object(Query.users),
+                directive_name: "connect",
+                directive_index: 0,
+            },
+        },
+        transport: HttpJsonTransport {
+            source_url: Some(
+                Url {
+                    scheme: "http",
+                    cannot_be_a_base: false,
+                    username: "",
+                    password: None,
+                    host: Some(
+                        Domain(
+                            "example",
+                        ),
+                    ),
+                    port: None,
+                    path: "/",
+                    query: None,
+                    fragment: None,
+                },
+            ),
+            connect_template: URLTemplate {
+                base: None,
+                path: [],
+                query: {},
+            },
+            method: Get,
+            headers: {},
+            body: None,
+        },
+        selection: Named(
+            SubSelection {
+                selections: [
+                    Field(
+                        None,
+                        "id",
+                        None,
+                    ),
+                    Field(
+                        None,
+                        "a",
+                        None,
+                    ),
+                ],
+                star: None,
+            },
+        ),
+        config: None,
+        max_requests: None,
+        entity_resolver: None,
+    },
+    "connectors-subgraph_Query_user_0": Connector {
+        id: ConnectId {
+            label: "connectors-subgraph.example http: GET /{$args.id!}",
+            subgraph_name: "connectors-subgraph",
+            source_name: Some(
+                "example",
+            ),
+            directive: ObjectOrInterfaceFieldDirectivePosition {
+                field: Object(Query.user),
+                directive_name: "connect",
+                directive_index: 0,
+            },
+        },
+        transport: HttpJsonTransport {
+            source_url: Some(
+                Url {
+                    scheme: "http",
+                    cannot_be_a_base: false,
+                    username: "",
+                    password: None,
+                    host: Some(
+                        Domain(
+                            "example",
+                        ),
+                    ),
+                    port: None,
+                    path: "/",
+                    query: None,
+                    fragment: None,
+                },
+            ),
+            connect_template: URLTemplate {
+                base: None,
+                path: [
+                    ParameterValue {
+                        parts: [
+                            Var(
+                                VariableExpression {
+                                    var_path: "$args.id",
+                                    batch_separator: None,
+                                    required: true,
+                                },
+                            ),
+                        ],
+                    },
+                ],
+                query: {},
+            },
+            method: Get,
+            headers: {},
+            body: None,
+        },
+        selection: Named(
+            SubSelection {
+                selections: [
+                    Field(
+                        None,
+                        "id",
+                        None,
+                    ),
+                    Field(
+                        None,
+                        "a",
+                        None,
+                    ),
+                    Field(
+                        None,
+                        "b",
+                        None,
+                    ),
+                ],
+                star: None,
+            },
+        ),
+        config: None,
+        max_requests: None,
+        entity_resolver: Some(
+            Explicit,
+        ),
+    },
+}

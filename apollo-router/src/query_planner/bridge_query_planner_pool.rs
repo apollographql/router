@@ -19,6 +19,7 @@ use super::QueryPlanResult;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::metrics::meter_provider;
+use crate::query_planner::PlannerMode;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
 use crate::spec::Schema;
@@ -28,7 +29,7 @@ static CHANNEL_SIZE: usize = 1_000;
 
 #[derive(Clone)]
 pub(crate) struct BridgeQueryPlannerPool {
-    planners: Vec<Arc<Planner<QueryPlanResult>>>,
+    js_planners: Vec<Arc<Planner<QueryPlanResult>>>,
     sender: Sender<(
         QueryPlannerRequest,
         oneshot::Sender<Result<QueryPlannerResponse, QueryPlannerError>>,
@@ -48,11 +49,13 @@ impl BridgeQueryPlannerPool {
     }
 
     pub(crate) async fn new_from_planners(
-        old_planners: Vec<Arc<Planner<QueryPlanResult>>>,
+        old_js_planners: Vec<Arc<Planner<QueryPlanResult>>>,
         schema: Arc<Schema>,
         configuration: Arc<Configuration>,
         size: NonZeroUsize,
     ) -> Result<Self, ServiceBuildError> {
+        let rust_planner = PlannerMode::maybe_rust(&schema, &configuration)?;
+
         let mut join_set = JoinSet::new();
 
         let (sender, receiver) = bounded::<(
@@ -60,15 +63,16 @@ impl BridgeQueryPlannerPool {
             oneshot::Sender<Result<QueryPlannerResponse, QueryPlannerError>>,
         )>(CHANNEL_SIZE);
 
-        let mut old_planners_iterator = old_planners.into_iter();
+        let mut old_js_planners_iterator = old_js_planners.into_iter();
 
         (0..size.into()).for_each(|_| {
             let schema = schema.clone();
             let configuration = configuration.clone();
+            let rust_planner = rust_planner.clone();
 
-            let old_planner = old_planners_iterator.next();
+            let old_planner = old_js_planners_iterator.next();
             join_set.spawn(async move {
-                BridgeQueryPlanner::new(schema, configuration, old_planner).await
+                BridgeQueryPlanner::new(schema, configuration, old_planner, rust_planner).await
             });
         });
 
@@ -122,7 +126,7 @@ impl BridgeQueryPlannerPool {
             .init();
 
         Ok(Self {
-            planners,
+            js_planners: planners,
             sender,
             schema,
             subgraph_schemas,
@@ -131,7 +135,7 @@ impl BridgeQueryPlannerPool {
     }
 
     pub(crate) fn planners(&self) -> Vec<Arc<Planner<QueryPlanResult>>> {
-        self.planners.clone()
+        self.js_planners.clone()
     }
 
     pub(crate) fn schema(&self) -> Arc<Schema> {

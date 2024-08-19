@@ -11,7 +11,7 @@ extend schema
         { name: "valid-with-value", value: "text/html" }
         { name: "valid-with-from", from: "valid-with-from" }
         { name: "no-from-or-value" }
-        { from: "x-missing-name"}
+        { from: "x-missing-name" }
         { name: "from-and-value", from: "from-and-value", value: "text/html" }
         { name: "x-name-collision", value: "text/html" }
         { name: "X-NAME-COLLISION", from: "x-name-collision" }
@@ -27,5 +27,5 @@ extend schema
 
 type Query {
   resources: [String!]!
-    @connect(source: "v1", http: { GET: "/resources" }, selection: "")
+    @connect(source: "v1", http: { GET: "/resources" }, selection: "$")
 }

@@ -758,7 +758,9 @@ where
         let parent_cx = self.parent_context(attrs, &ctx);
 
         // Record new trace id if there is no active parent span
-        let trace_id = if parent_cx.span().span_context().is_valid() {
+        let trace_id = if parent_cx.span().span_context().is_valid()
+            || parent_cx.span().span_context().trace_id() != opentelemetry::trace::TraceId::INVALID
+        {
             // It probably means we have a remote parent trace
             parent_cx.span().span_context().trace_id()
         } else {

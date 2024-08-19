@@ -16,7 +16,6 @@ use tracing::instrument;
 use tracing::Instrument;
 
 use super::rewrites;
-use super::rewrites::DataRewrite;
 use super::selection::execute_selection_set;
 use super::selection::Selection;
 use super::subgraph_context::ContextualArguments;
@@ -369,12 +368,10 @@ impl Variables {
 impl FetchNode {
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn subgraph_fetch(
+        &self,
         service: BoxService,
         subgraph_request: SubgraphRequest,
-        service_name: &str,
         current_dir: &Path,
-        requires: &[Selection],
-        output_rewrites: &Option<Vec<DataRewrite>>,
         schema: &Schema,
         paths: Vec<Vec<Path>>,
         operation_str: &str,
@@ -393,13 +390,13 @@ impl FetchNode {
                     FetchError::SubrequestHttpError { .. } => *inner,
                     _ => FetchError::SubrequestHttpError {
                         status_code: None,
-                        service: service_name.to_string(),
+                        service: self.service_name.to_string(),
                         reason: inner.to_string(),
                     },
                 },
                 Err(e) => FetchError::SubrequestHttpError {
                     status_code: None,
-                    service: service_name.to_string(),
+                    service: self.service_name.to_string(),
                     reason: e.to_string(),
                 },
             }) {
@@ -412,27 +409,19 @@ impl FetchNode {
             Ok(res) => res.response.into_parts(),
         };
 
-        super::log::trace_subfetch(service_name, operation_str, &variables, &response);
+        super::log::trace_subfetch(&self.service_name, operation_str, &variables, &response);
 
         if !response.is_primary() {
             return (
                 Value::default(),
                 vec![FetchError::SubrequestUnexpectedPatchResponse {
-                    service: service_name.to_string(),
+                    service: self.service_name.to_string(),
                 }
                 .to_graphql_error(Some(current_dir.to_owned()))],
             );
         }
 
-        let (value, errors) = Self::response_at_path(
-            schema,
-            current_dir,
-            paths,
-            response,
-            requires,
-            output_rewrites,
-            service_name,
-        );
+        let (value, errors) = self.response_at_path(schema, current_dir, paths, response);
         (value, errors)
     }
 
@@ -455,15 +444,13 @@ impl FetchNode {
 
     #[instrument(skip_all, level = "debug", name = "response_insert")]
     pub(crate) fn response_at_path<'a>(
+        &'a self,
         schema: &Schema,
         current_dir: &'a Path,
         inverted_paths: Vec<Vec<Path>>,
         response: graphql::Response,
-        requires: &[Selection],
-        output_rewrites: &Option<Vec<DataRewrite>>,
-        service_name: &str,
     ) -> (Value, Vec<Error>) {
-        if !requires.is_empty() {
+        if !self.requires.is_empty() {
             let entities_path = Path(vec![json_ext::PathElement::Key(
                 "_entities".to_string(),
                 None,
@@ -521,7 +508,7 @@ impl FetchNode {
                         let mut value = Value::default();
 
                         for (index, mut entity) in array.into_iter().enumerate() {
-                            rewrites::apply_rewrites(schema, &mut entity, output_rewrites);
+                            rewrites::apply_rewrites(schema, &mut entity, &self.output_rewrites);
 
                             if let Some(paths) = inverted_paths.get(index) {
                                 if paths.len() > 1 {
@@ -547,7 +534,7 @@ impl FetchNode {
             if errors.is_empty() {
                 tracing::warn!(
                     "Subgraph response from '{}' was missing key `_entities` and had no errors. This is likely a bug in the subgraph.",
-                    service_name
+                    self.service_name
                 );
             }
 
@@ -577,7 +564,7 @@ impl FetchNode {
                 })
                 .collect();
             let mut data = response.data.unwrap_or_default();
-            rewrites::apply_rewrites(schema, &mut data, output_rewrites);
+            rewrites::apply_rewrites(schema, &mut data, &self.output_rewrites);
             (Value::from_path(current_dir, data), errors)
         }
     }

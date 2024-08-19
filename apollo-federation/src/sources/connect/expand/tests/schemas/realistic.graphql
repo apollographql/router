@@ -84,6 +84,7 @@ enum link__Purpose {
 type Query
   @join__type(graph: CONNECTORS)
 {
+  filterUsersByEmailDomain(email: EmailAddress!): [User] @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "example", http: {GET: "/filter/users", body: "emailDomain: $args.email"}, selection: "id\nname"})
   usersByCompany(company: CompanyInput!): [User] @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "example", http: {GET: "/by-company/{$args.company.name}"}, selection: "id\nname\ncompany {\n  name\n  catchPhrase\n  bs\n}"})
   user(id: ID!): User @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "example", http: {GET: "/{$args.id}"}, selection: "id\nname\nusername\nemail\naddress {\n  street\n  suite\n  city\n  zipcode\n  geo {\n    lat\n    lng\n  }\n}\nphone\nwebsite\ncompany {\n  name\n  catchPhrase\n  bs\n  email\n}", entity: true})
 }

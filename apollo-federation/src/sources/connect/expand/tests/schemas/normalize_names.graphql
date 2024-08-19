@@ -1,0 +1,61 @@
+schema
+@link(url: "https://specs.apollo.dev/link/v1.0")
+@link(url: "https://specs.apollo.dev/join/v0.4", for: EXECUTION)
+@join__directive(graphs: [CONNECTORS_SUBGRAPH], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"]})
+@join__directive(graphs: [CONNECTORS_SUBGRAPH], name: "source", args: {name: "example", http: {baseURL: "http://example"}})
+{
+    query: Query
+}
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+scalar join__DirectiveArguments
+
+scalar join__FieldSet
+
+enum join__Graph {
+    CONNECTORS_SUBGRAPH @join__graph(name: "connectors-subgraph", url: "none")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+    """
+    `SECURITY` features provide metadata necessary to securely resolve fields.
+    """
+    SECURITY
+
+    """
+    `EXECUTION` features provide metadata necessary for operation execution.
+    """
+    EXECUTION
+}
+
+type Query
+@join__type(graph: CONNECTORS_SUBGRAPH)
+{
+    users: [User] @join__field(graph: CONNECTORS_SUBGRAPH) @join__directive(graphs: [CONNECTORS_SUBGRAPH], name: "connect", args: {source: "example", http: {GET: "/"}, selection: "id a"})
+    user(id: ID!): User @join__field(graph: CONNECTORS_SUBGRAPH) @join__directive(graphs: [CONNECTORS_SUBGRAPH], name: "connect", args: {source: "example", http: {GET: "/{$args.id}"}, selection: "id a b", entity: true})
+}
+
+type User
+@join__type(graph: CONNECTORS_SUBGRAPH, key: "id")
+{
+    id: ID!
+    a: String @join__field(graph: CONNECTORS_SUBGRAPH)
+    b: String @join__field(graph: CONNECTORS_SUBGRAPH)
+}

@@ -86,6 +86,7 @@ expression: connectors.by_service_name
             },
         ),
         config: None,
+        max_requests: None,
         entity_resolver: None,
     },
 }

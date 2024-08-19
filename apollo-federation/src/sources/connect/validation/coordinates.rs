@@ -4,6 +4,7 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 
 use super::DirectiveName;
+use crate::sources::connect::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_ENTITY_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_SELECTION_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
@@ -49,6 +50,14 @@ pub(super) fn connect_directive_selection_coordinate(
     field: &Name,
 ) -> String {
     format!("`@{connect_directive_name}({CONNECT_SELECTION_ARGUMENT_NAME}:)` on `{object_name}.{field}`", object_name = object.name)
+}
+
+pub(super) fn connect_directive_http_body_coordinate(
+    connect_directive_name: &Name,
+    object: &Node<ObjectType>,
+    field: &Name,
+) -> String {
+    format!("`@{connect_directive_name}({HTTP_ARGUMENT_NAME}: {{{CONNECT_BODY_ARGUMENT_NAME}:}})` on `{object_name}.{field}`", object_name = object.name)
 }
 
 pub(super) fn directive_http_header_coordinate(

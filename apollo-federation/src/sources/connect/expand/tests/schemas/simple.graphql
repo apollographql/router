@@ -62,5 +62,5 @@ type User
   a: String @join__field(graph: CONNECTORS)
   b: String @join__field(graph: CONNECTORS)
   c: String @join__field(graph: CONNECTORS, external: true) @join__field(graph: GRAPHQL)
-  d: String @join__field(graph: CONNECTORS, requires: "c") @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "example", http: {GET: "/{$this.c}/d"}, selection: "$"})
+  d: String @join__field(graph: CONNECTORS, requires: "c") @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "example", http: {GET: "/{$this.c}/d", body: "with_b: $this.b"}, selection: "$"})
 }

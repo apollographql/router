@@ -1,4 +1,5 @@
-//! Tower fetcher for fetch node execution.
+//! Tower service for connectors.
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::task::Poll;
@@ -8,6 +9,7 @@ use apollo_federation::sources::connect::Connector;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use opentelemetry::Key;
+use parking_lot::Mutex;
 use tower::BoxError;
 use tower::ServiceExt;
 use tracing::Instrument;
@@ -16,9 +18,13 @@ use super::connect::BoxService;
 use super::http::HttpClientServiceFactory;
 use super::http::HttpRequest;
 use super::new_service::ServiceFactory;
+use crate::plugins::connectors::error::Error as ConnectorError;
 use crate::plugins::connectors::handle_responses::handle_responses;
+use crate::plugins::connectors::http::Response as ConnectorResponse;
+use crate::plugins::connectors::http::Result as ConnectorResult;
 use crate::plugins::connectors::make_requests::make_requests;
 use crate::plugins::connectors::plugin::ConnectorContext;
+use crate::plugins::connectors::request_limit::RequestLimits;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
 use crate::plugins::connectors::tracing::CONNECT_SPAN_NAME;
 use crate::plugins::subscription::SubscriptionConfig;
@@ -41,6 +47,7 @@ pub(crate) const APOLLO_CONNECTOR_SOURCE_NAME: Key =
 pub(crate) const APOLLO_CONNECTOR_SOURCE_DETAIL: Key =
     Key::from_static_str("apollo.connector.source.detail");
 
+/// A service for executing connector requests.
 #[derive(Clone)]
 pub(crate) struct ConnectorService {
     pub(crate) http_service_factory: Arc<IndexMap<String, HttpClientServiceFactory>>,
@@ -125,32 +132,47 @@ async fn execute(
     schema: &Valid<apollo_compiler::Schema>,
 ) -> Result<ConnectResponse, BoxError> {
     let context = request.context.clone();
-    let context2 = context.clone();
     let original_subgraph_name = connector.id.subgraph_name.to_string();
 
-    let mut debug = context
-        .extensions()
-        .with_lock(|mut lock| lock.remove::<ConnectorContext>());
+    let (debug, request_limit) = context.extensions().with_lock(|lock| {
+        let debug = lock.get::<Arc<Mutex<ConnectorContext>>>().cloned();
+        let request_limit = lock
+            .get::<Arc<RequestLimits>>()
+            .map(|limits| limits.get((&connector.id).into(), connector.max_requests))
+            .expect("missing request limit");
+        (debug, request_limit)
+    });
 
-    let requests = make_requests(request, connector, &mut debug).map_err(BoxError::from)?;
+    let requests = make_requests(request, connector, &debug).map_err(BoxError::from)?;
 
     let tasks = requests.into_iter().map(move |(req, key)| {
+        // Returning an error from this closure causes all tasks to be cancelled and the operation
+        // to fail. This is the reason for the Result-wrapped-in-a-Result here. An `Err` on the
+        // inner result fails just that one task, but an `Err` on the outer result cancels all the
+        // tasks and fails the whole operation.
         let context = context.clone();
         let original_subgraph_name = original_subgraph_name.clone();
+        let request_limit = request_limit.clone();
         async move {
-            let context = context.clone();
-
+            if let Some(request_limit) = request_limit {
+                if !request_limit.allow() {
+                    return Ok(ConnectorResponse {
+                        result: ConnectorResult::Err(ConnectorError::RequestLimitExceeded),
+                        key,
+                    });
+                }
+            }
             let client = http_client_factory.create(&original_subgraph_name);
             let req = HttpRequest {
                 http_request: req,
                 context,
             };
             let res = client.oneshot(req).await?;
-            let mut res = res.http_response;
-            let extensions = res.extensions_mut();
-            extensions.insert(key);
 
-            Ok::<_, BoxError>(res)
+            Ok::<_, BoxError>(ConnectorResponse {
+                result: ConnectorResult::HttpResponse(res.http_response),
+                key,
+            })
         }
     });
 
@@ -158,17 +180,9 @@ async fn execute(
         .await
         .map_err(BoxError::from)?;
 
-    let result = handle_responses(responses, connector, &mut debug, schema)
+    handle_responses(responses, connector, &debug, schema)
         .await
-        .map_err(BoxError::from);
-
-    if let Some(debug) = debug {
-        context2
-            .extensions()
-            .with_lock(|mut lock| lock.insert::<ConnectorContext>(debug));
-    }
-
-    result
+        .map_err(BoxError::from)
 }
 
 #[derive(Clone)]

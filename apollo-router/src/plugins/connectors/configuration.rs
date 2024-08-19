@@ -21,6 +21,10 @@ pub(crate) struct ConnectorsConfig {
     /// Enables connector debugging information on response extensions if the feature is enabled
     #[serde(default)]
     pub(crate) debug_extensions: bool,
+
+    /// The maximum number of requests for a connector source
+    #[serde(default)]
+    pub(crate) max_requests_per_operation_per_source: Option<usize>,
 }
 
 /// Configuration for a connector subgraph
@@ -41,6 +45,9 @@ pub(crate) struct SubgraphConnectorConfiguration {
 pub(crate) struct SourceConfiguration {
     /// Override the `@source(http: {baseURL:})`
     pub(crate) override_url: Option<Url>,
+
+    /// The maximum number of requests for this source
+    pub(crate) max_requests_per_operation: Option<usize>,
 }
 
 /// Modifies connectors with values from the configuration
@@ -56,15 +63,18 @@ pub(crate) fn apply_config(config: &Configuration, mut connectors: Connectors) -
         let Some(subgraph_config) = config.subgraphs.get(&connector.id.subgraph_name) else {
             continue;
         };
-        let source_config = connector
+        if let Some(source_config) = connector
             .id
             .source_name
             .as_ref()
-            .and_then(|source_name| subgraph_config.sources.get(source_name));
-        if let Some(url) =
-            source_config.and_then(|source_config| source_config.override_url.as_ref())
+            .and_then(|source_name| subgraph_config.sources.get(source_name))
         {
-            connector.transport.source_url = Some(url.clone());
+            if let Some(url) = source_config.override_url.as_ref() {
+                connector.transport.source_url = Some(url.clone());
+            }
+            if let Some(max_requests) = source_config.max_requests_per_operation {
+                connector.max_requests = Some(max_requests);
+            }
         }
 
         connector.config = Some(subgraph_config.custom.clone());

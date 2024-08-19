@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use apollo_federation::sources::connect::ApplyToError;
 use bytes::Bytes;
 use futures::future::ready;
@@ -5,6 +7,7 @@ use futures::stream::once;
 use futures::StreamExt;
 use http::HeaderValue;
 use itertools::Itertools;
+use parking_lot::Mutex;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::json;
@@ -15,16 +18,19 @@ use crate::layers::ServiceExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::connectors::configuration::ConnectorsConfig;
+use crate::plugins::connectors::request_limit::RequestLimits;
 use crate::register_plugin;
 use crate::services::router::body::RouterBody;
 use crate::services::supergraph;
 
 const CONNECTORS_DEBUG_HEADER_NAME: &str = "Apollo-Connectors-Debugging";
 const CONNECTORS_DEBUG_ENV: &str = "APOLLO_CONNECTORS_DEBUGGING";
+const CONNECTORS_MAX_REQUESTS_ENV: &str = "APOLLO_CONNECTORS_MAX_REQUESTS_PER_OPERATION";
 
 #[derive(Debug, Clone)]
 struct Connectors {
     debug_extensions: bool,
+    max_requests: Option<usize>,
 }
 
 #[async_trait::async_trait]
@@ -41,47 +47,71 @@ impl Plugin for Connectors {
             );
         }
 
-        Ok(Connectors { debug_extensions })
+        let max_requests = init
+            .config
+            .max_requests_per_operation_per_source
+            .or(std::env::var(CONNECTORS_MAX_REQUESTS_ENV)
+                .ok()
+                .and_then(|v| v.parse().ok()));
+
+        Ok(Connectors {
+            debug_extensions,
+            max_requests,
+        })
     }
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         let conf_enabled = self.debug_extensions;
+        let max_requests = self.max_requests;
         service
             .map_future_with_request_data(
                 move |req: &supergraph::Request| {
-                    let is_enabled = conf_enabled
+                    let is_debug_enabled = conf_enabled
                         && req
                             .supergraph_request
                             .headers()
                             .get(CONNECTORS_DEBUG_HEADER_NAME)
                             == Some(&HeaderValue::from_static("true"));
-                    if is_enabled {
-                        req.context.extensions().with_lock(|mut lock| {
-                            lock.insert::<ConnectorContext>(ConnectorContext::default());
-                        });
-                    }
 
-                    is_enabled
+                    req.context.extensions().with_lock(|mut lock| {
+                        lock.insert::<Arc<RequestLimits>>(Arc::new(
+                            RequestLimits::new(max_requests)
+                        ));
+                        if is_debug_enabled {
+                            lock.insert::<Arc<Mutex<ConnectorContext>>>(Arc::new(Mutex::new(
+                                ConnectorContext::default(),
+                            )));
+                        }
+                    });
+
+                    is_debug_enabled
                 },
-                move |is_enabled: bool, f| async move {
+                move |is_debug_enabled: bool, f| async move {
                     let mut res: supergraph::ServiceResult = f.await;
 
                     res = match res {
                         Ok(mut res) => {
-                            if is_enabled {
-                                if let Some(debug) = res
-                                    .context
-                                    .extensions()
-                                    .with_lock(|mut lock| lock.remove::<ConnectorContext>())
+                            res.context.extensions().with_lock(|mut lock| {
+                                if let Some(limits) = lock.remove::<Arc<RequestLimits>>() {
+                                    limits.log();
+                                }
+                            });
+                            if is_debug_enabled {
+                                if let Some(debug) =
+                                    res.context.extensions().with_lock(|mut lock| {
+                                        lock.remove::<Arc<Mutex<ConnectorContext>>>()
+                                    })
                                 {
                                     let (parts, stream) = res.response.into_parts();
                                     let (mut first, rest) = stream.into_future().await;
 
                                     if let Some(first) = &mut first {
-                                        first.extensions.insert(
-                                            "apolloConnectorsDebugging",
-                                            json!({"version": "1", "data": debug.serialize() }),
-                                        );
+                                        if let Some(inner) = Arc::into_inner(debug) {
+                                            first.extensions.insert(
+                                                "apolloConnectorsDebugging",
+                                                json!({"version": "1", "data": inner.into_inner().serialize() }),
+                                            );
+                                        }
                                     }
                                     res.response = http::Response::from_parts(
                                         parts,

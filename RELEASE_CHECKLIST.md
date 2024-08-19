@@ -49,13 +49,11 @@ The examples below will use [the GitHub CLI (`gh`)](https://cli.github.com/) to 
 
 Make sure you have the following software installed and available in your `PATH`.
 
-  - `gh`: [The GitHub CLI](https://cli.github.com/)
-  - `cargo`: [Cargo & Rust Installation](https://doc.rust-lang.org/cargo/getting-started/installation.html)
-  - `helm`: see <https://helm.sh/docs/intro/install/>
-  - `helm-docs`: see <https://github.com/norwoodj/helm-docs#installation>
-  - `cargo-about`: install with `cargo install --locked cargo-about`
-  - `cargo-deny`: install with `cargo install --locked cargo-deny`
-  - `set-version` from `cargo-edit`: `cargo install --locked cargo-edit`
+- `gh`: [The GitHub CLI](https://cli.github.com/)
+- `cargo`: [Cargo & Rust Installation](https://doc.rust-lang.org/cargo/getting-started/installation.html)
+- `helm`: see <https://helm.sh/docs/intro/install/>
+- `helm-docs`: see <https://github.com/norwoodj/helm-docs#installation>
+- `cargo-about`, `cargo-deny`, & `cargo-edit`: install the same versions as CI (`.circleci/config.yml#install_extra_tools`)
 
 #### Pick a version
 
@@ -206,7 +204,7 @@ Start following the steps below to start a release PR.  The process is **not ful
 
 11. Finally, publish the Crates from your local computer (this also needs to be moved to CI, but requires changing the release containers to be Rust-enabled and to restore the caches):
 
-    > Note: This command may appear unnecessarily specific, but it will help avoid publishing a version to Crates.io that doesn't match what you're currently releasing. (e.g., in the event that you've changed branches in another window) 
+    > Note: This command may appear unnecessarily specific, but it will help avoid publishing a version to Crates.io that doesn't match what you're currently releasing. (e.g., in the event that you've changed branches in another window)
 
     ```
     cargo publish -p apollo-federation@"${APOLLO_ROUTER_RELEASE_VERSION}${APOLLO_ROUTER_PRERELEASE_SUFFIX}" &&
@@ -448,7 +446,7 @@ Start following the steps below to start a release PR.  The process is **not ful
 
 18. Finally, publish the Crates (`apollo-federation` followed by `apollo-router`) from your local computer from the `main` branch (this also needs to be moved to CI, but requires changing the release containers to be Rust-enabled and to restore the caches):
 
-    > Note: This command may appear unnecessarily specific, but it will help avoid publishing a version to Crates.io that doesn't match what you're currently releasing. (e.g., in the event that you've changed branches in another window) 
+    > Note: This command may appear unnecessarily specific, but it will help avoid publishing a version to Crates.io that doesn't match what you're currently releasing. (e.g., in the event that you've changed branches in another window)
 
     ```
     cargo publish -p apollo-federation@"${APOLLO_ROUTER_RELEASE_VERSION}" &&
@@ -638,7 +636,7 @@ prep release branch created
 Make local edits to the newly rendered `CHANGELOG.md` entries to do some initial editoral.
 
         These things should have *ALWAYS* been resolved earlier in the review process of the PRs that introduced the changes, but they must be double checked:
-    
+
          - There are no breaking changes.
          - Entries are in categories (e.g., Fixes vs Features) that make sense.
          - Titles stand alone and work without their descriptions.
