@@ -1652,7 +1652,7 @@ impl FragmentGenerator {
                 |condition| condition.to_string(),
             );
         let selections = frag.selection_set.selections.len();
-        let mut name = format!("_generated_on{type_condition}_{selections}");
+        let mut name = format!("_generated_on{type_condition}{selections}");
 
         let key = (type_condition, selections);
         let index = self
