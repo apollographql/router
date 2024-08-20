@@ -13,7 +13,7 @@ type Query {
 type User {
   id: ID!
   name: String!
-  bestFriend: User
+  favoriteColor: String
     @connect(
       http: { GET: "http://127.0.0.1:8000/resources" }
       entity: true

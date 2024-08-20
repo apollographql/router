@@ -165,6 +165,20 @@ fn validate_field(
         return errors;
     };
 
+    // direct recursion isn't allowed, like a connector on User.friends: [User]
+    if matches!(category, ObjectCategory::Other) && &object.name == field.ty.inner_named_type() {
+        errors.push(Message {
+                    code: Code::CircularReference,
+                    message: format!(
+                        "Direct circular reference detected in `{}.{}: {}`. For more information, see https://go.apollo.dev/connectors/limitations#circular-references",
+                        object.name,
+                        field.name,
+                        field.ty
+                    ),
+                    locations: field.line_column_range(source_map).into_iter().collect(),
+                });
+    }
+
     errors.extend(validate_selection(field, connect_directive, object, schema));
 
     errors.extend(validate_entity_arg(
