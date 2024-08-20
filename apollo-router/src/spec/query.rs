@@ -581,7 +581,9 @@ impl Query {
                                     Ok(())
                                 } else {
                                     parameters.validation_errors.push(Error {
-                                        message: format!("Expected a valid enum value for type {enum_type}"),
+                                        message: format!(
+                                            "Expected a valid enum value for type {enum_type}"
+                                        ),
                                         path: Some(Path::from_response_slice(path)),
                                         ..Error::default()
                                     });
@@ -591,7 +593,9 @@ impl Query {
                             }
                             None => {
                                 parameters.validation_errors.push(Error {
-                                    message: format!("Expected a valid enum value for type {enum_type}"),
+                                    message: format!(
+                                        "Expected a valid enum value for type {enum_type}"
+                                    ),
                                     path: Some(Path::from_response_slice(path)),
                                     ..Error::default()
                                 });
@@ -673,12 +677,14 @@ impl Query {
                     }
                     v => {
                         parameters.validation_errors.push(Error {
-                            message: format!("Invalid non-object value {v:?} for composite type {type_name}"),
+                            message: format!(
+                                "Invalid non-object value {v:?} for composite type {type_name}"
+                            ),
                             path: Some(Path::from_response_slice(path)),
                             ..Error::default()
                         });
                         *output = Value::Null;
-                        return Ok(());
+                        Ok(())
                     }
                 }
             }
