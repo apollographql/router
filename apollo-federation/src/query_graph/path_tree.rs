@@ -464,7 +464,6 @@ where
 mod tests {
     use std::sync::Arc;
 
-    use apollo_compiler::executable::DirectiveList;
     use apollo_compiler::ExecutableDocument;
     use petgraph::stable_graph::NodeIndex;
     use petgraph::visit::EdgeRef;
@@ -542,8 +541,8 @@ mod tests {
                 schema: query_graph.schema().unwrap().clone(),
                 field_position: field_def.clone(),
                 alias: None,
-                arguments: Arc::new(Vec::new()),
-                directives: Arc::new(DirectiveList::new()),
+                arguments: Default::default(),
+                directives: Default::default(),
                 sibling_typename: None,
             };
             let trigger = OpGraphPathTrigger::OpPathElement(OpPathElement::Field(Field::new(data)));
