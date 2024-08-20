@@ -30,6 +30,7 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::ResponsePathElement;
 use crate::json_ext::Value;
+use crate::json_ext::ValueExt;
 use crate::plugins::authorization::UnauthorizedPaths;
 use crate::query_planner::fetch::OperationKind;
 use crate::query_planner::fetch::QueryHash;
@@ -482,7 +483,10 @@ impl Query {
                 Value::Null => Ok(()),
                 v => {
                     parameters.validation_errors.push(Error {
-                        message: format!("Invalid non-list value {v:?} returned by subgraph for list type {field_type}"),
+                        message: format!(
+                            "Invalid non-list value of type {} for list type {field_type}",
+                            v.json_type_name()
+                        ),
                         path: Some(Path::from_response_slice(path)),
                         ..Error::default()
                     });
@@ -624,7 +628,7 @@ impl Query {
                                 };
                             } else {
                                 parameters.validation_errors.push(Error {
-                                    message: format!("Invalid non-string value {typename_val} for __typename at {path:?}"),
+                                    message: format!("Invalid non-string value of type {} for __typename at {path:?}", typename_val.json_type_name()),
                                     path: Some(Path::from_response_slice(path)),
                                     ..Error::default()
                                 });
@@ -678,7 +682,7 @@ impl Query {
                     v => {
                         parameters.validation_errors.push(Error {
                             message: format!(
-                                "Invalid non-object value {v:?} for composite type {type_name}"
+                                "Invalid non-object value of type {} for composite type {type_name}", v.json_type_name()
                             ),
                             path: Some(Path::from_response_slice(path)),
                             ..Error::default()
