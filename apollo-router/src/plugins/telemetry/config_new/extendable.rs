@@ -265,7 +265,7 @@ where
         if let Some(Stage::Request) = &restricted_stage {
             for (name, custom) in &self.custom {
                 if !custom.is_active(Stage::Request) {
-                    return Err(format!("cannot set the attribute {name:?} because it's using a selector computed in another stage than 'request' because it won't be computed"));
+                    return Err(format!("cannot set the attribute {name:?} because it is using a selector computed in another stage than 'request' so it will not be computed"));
                 }
             }
         }

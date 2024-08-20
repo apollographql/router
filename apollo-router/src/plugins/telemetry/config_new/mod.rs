@@ -87,31 +87,6 @@ impl From<EventOn> for Stage {
     }
 }
 
-impl PartialOrd for Stage {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        match self {
-            Stage::Request => {
-                if *other != Self::Request {
-                    Some(std::cmp::Ordering::Less)
-                } else {
-                    Some(std::cmp::Ordering::Equal)
-                }
-            }
-            Stage::Response
-            | Stage::ResponseEvent
-            | Stage::ResponseField
-            | Stage::Error
-            | Stage::Drop => {
-                if *other != Self::Request {
-                    Some(std::cmp::Ordering::Greater)
-                } else {
-                    Some(std::cmp::Ordering::Less)
-                }
-            }
-        }
-    }
-}
-
 pub(crate) trait Selector {
     type Request;
     type Response;

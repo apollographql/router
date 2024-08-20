@@ -579,6 +579,7 @@ mod test {
     use crate::plugins::telemetry::config_new::test::field;
     use crate::plugins::telemetry::config_new::test::ty;
     use crate::plugins::telemetry::config_new::Selector;
+    use crate::plugins::telemetry::config_new::Stage;
     use crate::Context;
 
     enum TestSelector {
@@ -653,8 +654,12 @@ mod test {
             }
         }
 
-        fn is_active(&self, _stage: crate::plugins::telemetry::config_new::Stage) -> bool {
-            true
+        fn is_active(&self, stage: crate::plugins::telemetry::config_new::Stage) -> bool {
+            match self {
+                Req => matches!(stage, Stage::Request),
+                Resp => matches!(stage, Stage::Response | Stage::ResponseEvent | Stage::ResponseField),
+                Static(_) => true,
+            }
         }
     }
 
@@ -848,6 +853,22 @@ mod test {
         assert!(eq(Resp, 1).resp_event(Some(1i64)));
         assert!(eq(Resp, 1).field(Some(1i64)));
         assert!(eq(Resp, "error").error(Some("error")));
+    }
+
+    #[test]
+    fn test_condition_validate() {
+        assert!(eq(Req, 1).validate(Some(Stage::Request)).is_ok());
+        assert!(eq(Req, 1).validate(Some(Stage::Response)).is_ok());
+        assert!(eq(1, Req).validate(Some(Stage::Request)).is_ok());
+        assert!(eq(1, Req).validate(Some(Stage::Response)).is_ok());
+        assert!(eq(Resp, 1).validate(Some(Stage::Request)).is_err());
+        assert!(eq(Resp, 1).validate(None).is_ok());
+        assert!(eq(1, Resp).validate(None).is_ok());
+        assert!(eq(1, Resp).validate(Some(Stage::Request)).is_err());
+        assert!(exists(Resp).validate(Some(Stage::Request)).is_err());
+        assert!(exists(Req).validate(None).is_ok());
+        assert!(exists(Req).validate(Some(Stage::Request)).is_ok());
+        assert!(exists(Resp).validate(None).is_ok());
     }
 
     #[test]
