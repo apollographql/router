@@ -231,8 +231,8 @@ mod tests {
     use insta::assert_debug_snapshot;
 
     use super::*;
-    use crate::query_graph::extract_subgraphs_from_supergraph::extract_subgraphs_from_supergraph;
     use crate::schema::FederationSchema;
+    use crate::supergraph::extract_subgraphs_from_supergraph;
     use crate::ValidFederationSubgraphs;
 
     static SIMPLE_SUPERGRAPH: &str = include_str!("./tests/schemas/simple.graphql");

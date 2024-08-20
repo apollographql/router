@@ -44,8 +44,6 @@ use crate::operation::SelectionMap;
 use crate::operation::SelectionSet;
 use crate::operation::VariableCollector;
 use crate::operation::TYPENAME_FIELD;
-use crate::query_graph::extract_subgraphs_from_supergraph::FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME;
-use crate::query_graph::extract_subgraphs_from_supergraph::FEDERATION_REPRESENTATIONS_VAR_NAME;
 use crate::query_graph::graph_path::concat_op_paths;
 use crate::query_graph::graph_path::concat_paths_in_parents;
 use crate::query_graph::graph_path::OpGraphPathContext;
@@ -74,6 +72,8 @@ use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
 use crate::subgraph::spec::ANY_SCALAR_NAME;
 use crate::subgraph::spec::ENTITIES_QUERY;
+use crate::supergraph::FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME;
+use crate::supergraph::FEDERATION_REPRESENTATIONS_VAR_NAME;
 use crate::utils::logging::snapshot;
 
 /// Represents the value of a `@defer(label:)` argument.

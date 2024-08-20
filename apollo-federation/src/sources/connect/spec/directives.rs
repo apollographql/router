@@ -389,11 +389,11 @@ mod tests {
     use apollo_compiler::name;
     use apollo_compiler::Schema;
 
-    use crate::query_graph::extract_subgraphs_from_supergraph::extract_subgraphs_from_supergraph;
     use crate::schema::FederationSchema;
     use crate::sources::connect::spec::schema::SourceDirectiveArguments;
     use crate::sources::connect::spec::schema::CONNECT_DIRECTIVE_NAME_IN_SPEC;
     use crate::sources::connect::spec::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
+    use crate::supergraph::extract_subgraphs_from_supergraph;
     use crate::ValidFederationSubgraphs;
 
     static SIMPLE_SUPERGRAPH: &str = include_str!("../tests/schemas/simple.graphql");
