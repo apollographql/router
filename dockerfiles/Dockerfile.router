@@ -65,7 +65,7 @@ RUN \
 \nset -e \
 \n \
 \nif [ -f "/usr/bin/heaptrack" ]; then \
-\n    exec heaptrack -o /dist/data/router_heaptrack /dist/router "$@" \
+\n    exec heaptrack -o /dist/data/router_heaptrack/${hostname} /dist/router "$@" \
 \nelse \
 \n    exec /dist/router "$@" \
 \nfi \
