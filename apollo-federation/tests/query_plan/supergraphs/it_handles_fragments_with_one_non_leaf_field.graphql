@@ -1,10 +1,12 @@
-# Composed from subgraphs with hash: c53638411cdc10eaf883495993b90fdcc03b8d0e
+# Composed from subgraphs with hash: 9d07e44c7cffd48b0677fce186f5ba41a864bc13
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
 {
   query: Query
 }
+
+directive @custom on FRAGMENT_SPREAD | INLINE_FRAGMENT
 
 directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 

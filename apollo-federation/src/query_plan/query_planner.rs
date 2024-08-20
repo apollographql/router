@@ -15,7 +15,7 @@ use crate::error::SingleFederationError;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::operation::normalize_operation;
 use crate::operation::NamedFragments;
-use crate::operation::RebasedFragments;
+use crate::operation::Operation;
 use crate::operation::SelectionSet;
 use crate::query_graph::build_federated_query_graph;
 use crate::query_graph::path_tree::OpPathTree;
@@ -368,7 +368,6 @@ impl QueryPlanner {
             }
         }
 
-        let reuse_query_fragments = self.config.reuse_query_fragments;
         let normalized_operation = normalize_operation(
             operation,
             NamedFragments::new(&document.fragments, &self.api_schema),
@@ -433,22 +432,25 @@ impl QueryPlanner {
             );
         };
 
-        let rebased_fragments = if reuse_query_fragments {
+        let operation_compression = if self.config.generate_query_fragments {
+            SubgraphOperationCompression::GenerateFragments
+        } else if self.config.reuse_query_fragments {
             // For all subgraph fetches we query `__typename` on every abstract types (see
             // `FetchDependencyGraphNode::to_plan_node`) so if we want to have a chance to reuse
             // fragments, we should make sure those fragments also query `__typename` for every
             // abstract type.
-            Some(RebasedFragments::new(
+            SubgraphOperationCompression::ReuseFragments(RebasedFragments::new(
                 normalized_operation
                     .named_fragments
                     .add_typename_field_for_abstract_types_in_named_fragments()?,
             ))
         } else {
-            None
+            SubgraphOperationCompression::Disabled
         };
         let mut processor = FetchDependencyGraphToQueryPlanProcessor::new(
-            operation.variables.clone(),
-            rebased_fragments,
+            normalized_operation.variables.clone(),
+            normalized_operation.directives.clone(),
+            operation_compression,
             operation.name.clone(),
             assigned_defer_labels,
         );
@@ -769,6 +771,67 @@ fn compute_plan_for_defer_conditionals(
         message: String::from("@defer is currently not supported"),
     }
     .into())
+}
+
+/// Tracks fragments from the original operation, along with versions rebased on other subgraphs.
+pub(crate) struct RebasedFragments {
+    original_fragments: NamedFragments,
+    /// Map key: subgraph name
+    rebased_fragments: IndexMap<Arc<str>, NamedFragments>,
+}
+
+impl RebasedFragments {
+    fn new(fragments: NamedFragments) -> Self {
+        Self {
+            original_fragments: fragments,
+            rebased_fragments: Default::default(),
+        }
+    }
+
+    fn for_subgraph(
+        &mut self,
+        subgraph_name: impl Into<Arc<str>>,
+        subgraph_schema: &ValidFederationSchema,
+    ) -> &NamedFragments {
+        self.rebased_fragments
+            .entry(subgraph_name.into())
+            .or_insert_with(|| {
+                self.original_fragments
+                    .rebase_on(subgraph_schema)
+                    .unwrap_or_default()
+            })
+    }
+}
+
+pub(crate) enum SubgraphOperationCompression {
+    ReuseFragments(RebasedFragments),
+    GenerateFragments,
+    Disabled,
+}
+
+impl SubgraphOperationCompression {
+    /// Compress a subgraph operation.
+    pub(crate) fn compress(
+        &mut self,
+        subgraph_name: &Arc<str>,
+        subgraph_schema: &ValidFederationSchema,
+        operation: Operation,
+    ) -> Result<Operation, FederationError> {
+        match self {
+            Self::ReuseFragments(fragments) => {
+                let rebased = fragments.for_subgraph(Arc::clone(subgraph_name), subgraph_schema);
+                let mut operation = operation;
+                operation.reuse_fragments(rebased)?;
+                Ok(operation)
+            }
+            Self::GenerateFragments => {
+                let mut operation = operation;
+                operation.generate_fragments()?;
+                Ok(operation)
+            }
+            Self::Disabled => Ok(operation),
+        }
+    }
 }
 
 #[cfg(test)]

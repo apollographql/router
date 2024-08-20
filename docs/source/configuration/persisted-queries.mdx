@@ -11,7 +11,7 @@ minVersion: 1.25.0
 
 ## Differences from automatic persisted queries
 
-The Apollo Router also supports a related feature called [automatic persisted queries](./in-memory-caching#caching-automatic-persisted-queries-apq) (APQ). With APQ, clients can execute a GraphQL operation by sending the SHA256 hash of its operation string instead of the entire string. **APQ doesn't support safelisting** because the router updates its APQ cache over time with _any_ operations it receives.
+The Apollo Router Core also supports a related feature called [automatic persisted queries](./in-memory-caching#caching-automatic-persisted-queries-apq) (APQ). With APQ, clients can execute a GraphQL operation by sending the SHA256 hash of its operation string instead of the entire string. **APQ doesn't support safelisting** because the router updates its APQ cache over time with _any_ operations it receives.
 
 For more details on differences between APQ and this feature, see the [GraphOS persisted queries documentation](/graphos/operations/persisted-queries#differences-from-automatic-persisted-queries).
 
@@ -138,4 +138,4 @@ To enable safelisting, you _must_ turn off [automatic persisted queries](./in-me
 
 ## Limitations
 
-* **Unsupported with offline license**. An Apollo Router using an [offline Enterprise license](../enterprise-features/#offline-enterprise-license) cannot use safelisting with persisted queries. The feature relies on Apollo Uplink to fetch persisted query manifests, so it doesn't work as designed when the router is disconnected from Uplink.
+* **Unsupported with offline license**. An GraphOS Router using an [offline Enterprise license](../enterprise-features/#offline-enterprise-license) cannot use safelisting with persisted queries. The feature relies on Apollo Uplink to fetch persisted query manifests, so it doesn't work as designed when the router is disconnected from Uplink.

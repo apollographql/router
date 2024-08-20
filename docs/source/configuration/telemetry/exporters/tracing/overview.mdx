@@ -1,10 +1,10 @@
 ---
 title: Router Tracing
-subtitle: Collect tracing information from the Apollo Router
-description: Collect and export tracing information from the Apollo Router. Supports OpenTelemetry Protocol (OTLP), Datadog, New Relic, Jaeger, Zipkin.
+subtitle: Collect tracing information from the router
+description: Collect and export tracing information from the Apollo GraphOS Router or Apollo Router Core. Supports OpenTelemetry Protocol (OTLP), Datadog, New Relic, Jaeger, Zipkin.
 ---
 
-The Apollo Router supports collection of traces with [OpenTelemetry](https://opentelemetry.io/), with exporters for:
+The GraphOS Router and Apollo Router Core support collection of traces with [OpenTelemetry](https://opentelemetry.io/), with exporters for:
 
 * [Jaeger](./jaeger)
 * [Zipkin](./zipkin)
@@ -12,13 +12,13 @@ The Apollo Router supports collection of traces with [OpenTelemetry](https://ope
 * [New Relic](./new-relic)
 * [OpenTelemetry Protocol (OTLP)](./otlp) over HTTP or gRPC
 
-The Apollo Router generates [**spans**](../../instrumentation/spans) that include the various phases of serving a request and associated dependencies. This is useful for showing how response time is affected by:
+The router generates [**spans**](../../instrumentation/spans) that include the various phases of serving a request and associated dependencies. This is useful for showing how response time is affected by:
 
 * Sub-request response times
 * Query shape (sub-request dependencies)
-* Apollo Router post-processing
+* Router post-processing
 
-Span data is sent to a collector such as [Jaeger](https://www.jaegertracing.io/), which can assemble spans into a gantt chart for analysis.
+Span data is sent to a collector such as [Jaeger](https://www.jaegertracing.io/), which can assemble spans into a Gantt chart for analysis.
 
 <Tip>
 
@@ -144,8 +144,31 @@ telemetry:
    
          # If you have your own way to generate a trace id and you want to pass it via a custom request header
          request:
+           # The name of the header to read the trace id from
            header_name: my-trace-id
+           # The format of the trace when propagating to subgraphs.
+           format: uuid
 ```
+
+#### `request` configuration reference
+
+| Option        | Values                                                        | Default                           | Description                         |
+|---------------|---------------------------------------------------------------|-----------------------------------|-------------------------------------|
+| `header_name` |                                                               |  |  The name of the http header to use for propagation.                                   |
+| `format`      | `hexadecimal`\|`open_telemetry`\|`decimal`\|`datadog`\|`uuid` | `hexadecimal`                     | The output format of the `trace_id` |
+
+Valid values for `format`:
+* `hexadecimal` - 32-character hexadecimal string (e.g. `0123456789abcdef0123456789abcdef`)
+* `open_telemetry` - 32-character hexadecimal string (e.g. `0123456789abcdef0123456789abcdef`)
+* `decimal` - 16-character decimal string (e.g. `1234567890123456`)
+* `datadog` - 16-character decimal string (e.g. `1234567890123456`)
+* `uuid` - 36-character UUID string (e.g. `01234567-89ab-cdef-0123-456789abcdef`)
+
+<Note>
+
+Incoming trace IDs must be in `open_telemetry` or `uuid` format.
+
+</Note>
 
 ### Limits
 
@@ -227,4 +250,4 @@ Using this configuration you will have a response header called `my-trace-id` co
 ## Related topics
 
 * [Connecting OpenTelemetry traces to Prometheus](/technotes/TN0003-opentelemetry-traces-to-prometheus)
-* [Sending Apollo Router traces and metrics to APM tools using OpenTelemetry](/technotes/TN0015-router-to-apm-via-opentelemetry/)
+* [Sending router traces and metrics to APM tools using OpenTelemetry](/technotes/TN0015-router-to-apm-via-opentelemetry/)
