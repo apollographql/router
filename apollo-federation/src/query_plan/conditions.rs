@@ -1,14 +1,15 @@
 use std::sync::Arc;
 
 use apollo_compiler::ast::Directive;
-use apollo_compiler::executable::DirectiveList;
-use apollo_compiler::executable::Name;
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable::Value;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
 use indexmap::map::Entry;
-use indexmap::IndexMap;
+use serde::Serialize;
 
 use crate::error::FederationError;
+use crate::operation::DirectiveList;
 use crate::operation::Selection;
 use crate::operation::SelectionMap;
 use crate::operation::SelectionSet;
@@ -19,7 +20,7 @@ use crate::query_graph::graph_path::OpPathElement;
 /// Accordingly, there is much logic around merging and short-circuiting; `OperationConditional` is
 /// the more appropriate struct when trying to record the original structure/intent of those
 /// `@skip`/`@include` applications.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) enum Conditions {
     Variables(VariableConditions),
     Boolean(bool),
@@ -34,7 +35,7 @@ pub(crate) enum Condition {
 /// A list of variable conditions, represented as a map from variable names to whether that variable
 /// is negated in the condition. We maintain the invariant that there's at least one condition (i.e.
 /// the map is non-empty), and that there's at most one condition per variable name.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct VariableConditions(Arc<IndexMap<Name, bool>>);
 
 impl VariableConditions {
@@ -91,8 +92,8 @@ impl Conditions {
     }
 
     pub(crate) fn from_directives(directives: &DirectiveList) -> Result<Self, FederationError> {
-        let mut variables = IndexMap::new();
-        for directive in directives {
+        let mut variables = IndexMap::default();
+        for directive in directives.iter_sorted() {
             let negated = match directive.name.as_str() {
                 "include" => false,
                 "skip" => true,
@@ -133,7 +134,7 @@ impl Conditions {
         match (new_conditions, self) {
             (Conditions::Boolean(_), _) | (_, Conditions::Boolean(_)) => new_conditions.clone(),
             (Conditions::Variables(new_conditions), Conditions::Variables(handled_conditions)) => {
-                let mut filtered = IndexMap::new();
+                let mut filtered = IndexMap::default();
                 for (cond_name, &cond_negated) in new_conditions.0.iter() {
                     match handled_conditions.is_negated(cond_name) {
                         Some(handled_cond) if cond_negated != handled_cond => {
@@ -212,7 +213,7 @@ pub(crate) fn remove_conditions_from_selection_set(
                 // We remove any of the conditions on the element and recurse.
                 let updated_element =
                     remove_conditions_of_element(element.clone(), variable_conditions);
-                let new_selection = if let Ok(Some(selection_set)) = selection.selection_set() {
+                let new_selection = if let Some(selection_set) = selection.selection_set() {
                     let updated_selection_set =
                         remove_conditions_from_selection_set(selection_set, conditions)?;
                     if updated_element == element {
@@ -256,7 +257,7 @@ pub(crate) fn remove_unneeded_top_level_fragment_directives(
                 selection_map.insert(selection.clone());
             }
             Selection::InlineFragment(inline_fragment) => {
-                let fragment = inline_fragment.inline_fragment.data();
+                let fragment = &inline_fragment.inline_fragment;
                 if fragment.type_condition_position.is_none() {
                     // if there is no type condition we should preserve the directive info
                     selection_map.insert(selection.clone());
@@ -284,8 +285,8 @@ pub(crate) fn remove_unneeded_top_level_fragment_directives(
                     }
 
                     // We can skip some of the fragment directives directive.
-                    let final_selection =
-                        inline_fragment.with_updated_directives(DirectiveList(needed_directives));
+                    let final_selection = inline_fragment
+                        .with_updated_directives(DirectiveList::from_iter(needed_directives));
                     selection_map.insert(Selection::InlineFragment(Arc::new(final_selection)));
                 }
             }
@@ -307,19 +308,17 @@ fn remove_conditions_of_element(
     element: OpPathElement,
     conditions: &VariableConditions,
 ) -> OpPathElement {
-    let updated_directives: DirectiveList = DirectiveList(
-        element
-            .directives()
-            .iter()
-            .filter(|d| {
-                !matches_condition_for_kind(d, conditions, ConditionKind::Include)
-                    && !matches_condition_for_kind(d, conditions, ConditionKind::Skip)
-            })
-            .cloned()
-            .collect(),
-    );
+    let updated_directives: DirectiveList = element
+        .directives()
+        .iter()
+        .filter(|d| {
+            !matches_condition_for_kind(d, conditions, ConditionKind::Include)
+                && !matches_condition_for_kind(d, conditions, ConditionKind::Skip)
+        })
+        .cloned()
+        .collect();
 
-    if updated_directives.0.len() == element.directives().len() {
+    if updated_directives.len() == element.directives().len() {
         element
     } else {
         element.with_updated_directives(updated_directives)

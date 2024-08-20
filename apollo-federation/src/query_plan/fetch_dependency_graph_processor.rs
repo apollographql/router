@@ -1,12 +1,13 @@
-use std::collections::HashSet;
+use std::sync::Arc;
 
-use apollo_compiler::ast::Name;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::VariableDefinition;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::NodeStr;
 
+use super::query_planner::SubgraphOperationCompression;
 use crate::error::FederationError;
-use crate::operation::RebasedFragments;
+use crate::operation::DirectiveList;
 use crate::operation::SelectionSet;
 use crate::query_graph::QueryGraph;
 use crate::query_plan::conditions::Conditions;
@@ -44,12 +45,12 @@ const FETCH_COST: QueryPlanCost = 1000.0;
 /// The exact number is a tad  arbitrary however.
 const PIPELINING_COST: QueryPlanCost = 100.0;
 
-#[derive(Clone)]
 pub(crate) struct FetchDependencyGraphToQueryPlanProcessor {
-    variable_definitions: Vec<Node<VariableDefinition>>,
-    fragments: Option<RebasedFragments>,
+    variable_definitions: Arc<Vec<Node<VariableDefinition>>>,
+    operation_directives: DirectiveList,
+    operation_compression: SubgraphOperationCompression,
     operation_name: Option<Name>,
-    assigned_defer_labels: Option<HashSet<NodeStr>>,
+    assigned_defer_labels: Option<IndexSet<String>>,
     counter: u32,
 }
 
@@ -58,14 +59,14 @@ pub(crate) struct FetchDependencyGraphToQueryPlanProcessor {
 /// A plan is essentially some mix of sequences and parallels of fetches. And the plan cost
 /// is about minimizing both:
 ///  1. The expected total latency of executing the plan. Typically, doing 2 fetches in
-///    parallel will most likely have much better latency then executing those exact same
-///    fetches in sequence, and so the cost of the latter must be greater than that of
-///    the former.
+///     parallel will most likely have much better latency then executing those exact same
+///     fetches in sequence, and so the cost of the latter must be greater than that of
+///     the former.
 ///  2. The underlying use of resources. For instance, if we query 2 fields and we have
-///    the choice between getting those 2 fields from a single subgraph in 1 fetch, or
-///    get each from a different subgraph with 2 fetches in parallel, then we want to
-///    favor the former as just doing a fetch in and of itself has a cost in terms of
-///    resources consumed.
+///     the choice between getting those 2 fields from a single subgraph in 1 fetch, or
+///     get each from a different subgraph with 2 fetches in parallel, then we want to
+///     favor the former as just doing a fetch in and of itself has a cost in terms of
+///     resources consumed.
 ///
 /// Do note that at the moment, this cost is solely based on the "shape" of the plan and has
 /// to make some conservative assumption regarding concrete runtime behaviour. In particular,
@@ -243,14 +244,16 @@ fn sequence_cost(values: impl IntoIterator<Item = QueryPlanCost>) -> QueryPlanCo
 
 impl FetchDependencyGraphToQueryPlanProcessor {
     pub(crate) fn new(
-        variable_definitions: Vec<Node<VariableDefinition>>,
-        fragments: Option<RebasedFragments>,
+        variable_definitions: Arc<Vec<Node<VariableDefinition>>>,
+        operation_directives: DirectiveList,
+        operation_compression: SubgraphOperationCompression,
         operation_name: Option<Name>,
-        assigned_defer_labels: Option<HashSet<NodeStr>>,
+        assigned_defer_labels: Option<IndexSet<String>>,
     ) -> Self {
         Self {
             variable_definitions,
-            fragments,
+            operation_directives,
+            operation_compression,
             operation_name,
             assigned_defer_labels,
             counter: 0,
@@ -271,13 +274,15 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
             let counter = self.counter;
             self.counter += 1;
             let subgraph = to_valid_graphql_name(&node.subgraph_name).unwrap_or("".into());
-            format!("{name}__{subgraph}__{counter}").into()
+            // `name` was already a valid name so this concatenation should be too
+            Name::new(&format!("{name}__{subgraph}__{counter}")).unwrap()
         });
         node.to_plan_node(
             query_graph,
             handled_conditions,
             &self.variable_definitions,
-            self.fragments.as_mut(),
+            &self.operation_directives,
+            &mut self.operation_compression,
             op_name,
         )
     }

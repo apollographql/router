@@ -76,7 +76,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ template "router.managedFederation.apiSecretName" . }}
-                  key: managedFederationApiKey
+                  key: {{ (.Values.managedFederation.existingSecretKeyRefKey | default "managedFederationApiKey") }}
                   optional: true
             {{- end }}
             {{- if not (empty .Values.managedFederation.graphRef) }}
@@ -114,12 +114,12 @@ spec:
             {{- toYaml .Values.lifecycle | nindent 12 }}
           livenessProbe:
             httpGet:
-              path: "/health?live"
+              path: {{ (.Values.router.configuration.health_check.path | default "/health") }}{{"?live"}}
               port: {{ splitList ":" ((index .Values.router.configuration "health_check").listen | default ":8088") | last }}
             initialDelaySeconds: {{  ((.Values.probes).liveness).initialDelaySeconds | default 0 }}
           readinessProbe:
             httpGet:
-              path: "/health?ready"
+              path:  {{ (.Values.router.configuration.health_check.path | default "/health") }}{{"?ready"}}
               port: {{ (splitList ":"  ((index .Values.router.configuration "health_check").listen | default ":8088")) | last }}
             initialDelaySeconds: {{ ((.Values.probes).readiness).initialDelaySeconds | default 0 }}
           resources:
@@ -172,3 +172,13 @@ spec:
       topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+  {{- if .Values.rollingUpdate }}
+  strategy:
+    rollingUpdate:
+      {{- if  (hasKey .Values.rollingUpdate "maxUnavailable") }}
+      maxUnavailable: {{ .Values.rollingUpdate.maxUnavailable }}
+      {{- end }}
+      {{- if (hasKey .Values.rollingUpdate "maxSurge") }}
+      maxSurge: {{ .Values.rollingUpdate.maxSurge }}
+      {{- end }}
+  {{- end }}

@@ -37,6 +37,7 @@ use crate::plugin::DynPlugin;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::events::SupergraphEventResponse;
+use crate::plugins::telemetry::consts::QUERY_PLANNING_SPAN_NAME;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use crate::plugins::telemetry::Telemetry;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
@@ -76,7 +77,7 @@ use crate::Configuration;
 use crate::Context;
 use crate::Notify;
 
-pub(crate) const QUERY_PLANNING_SPAN_NAME: &str = "query_planning";
+pub(crate) const FIRST_EVENT_CONTEXT_KEY: &str = "apollo_router::supergraph::first_event";
 
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
@@ -349,6 +350,20 @@ async fn service_call(
                 let supergraph_response_event = context
                     .extensions()
                     .with_lock(|lock| lock.get::<SupergraphEventResponse>().cloned());
+                let mut first_event = true;
+                let mut inserted = false;
+                let ctx = context.clone();
+                let response_stream = response_stream.inspect(move |_| {
+                    if first_event {
+                        first_event = false;
+                    } else if !inserted {
+                        ctx.insert_json_value(
+                            FIRST_EVENT_CONTEXT_KEY,
+                            serde_json_bytes::Value::Bool(false),
+                        );
+                        inserted = true;
+                    }
+                });
                 match supergraph_response_event {
                     Some(supergraph_response_event) => {
                         let mut attrs = Vec::with_capacity(4);
@@ -439,6 +454,7 @@ async fn subscription_task(
                 formatted_query_plan: query_plan.formatted_query_plan.clone(),
                 query: query_plan.query.clone(),
                 query_metrics: query_plan.query_metrics,
+                estimated_size: Default::default(),
             })
         }),
         _ => {
@@ -786,7 +802,7 @@ impl PluggableSupergraphServiceBuilder {
             schema.clone(),
             subgraph_schemas,
             &configuration,
-            IndexMap::new(),
+            IndexMap::default(),
         )
         .await?;
 

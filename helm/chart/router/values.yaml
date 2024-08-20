@@ -21,6 +21,9 @@ managedFederation:
   # -- If using managed federation, use existing Secret which stores the graph API key instead of creating a new one.
   # If set along `managedFederation.apiKey`, a secret with the graph API key will be created using this parameter as name
   existingSecret:
+  # -- If using managed federation, the name of the key within the existing Secret which stores the graph API key.
+  # If set along `managedFederation.apiKey`, a secret with the graph API key will be created using this parameter as key, defaults to using a key of `managedFederationApiKey`
+  existingSecretKeyRefKey:
   # -- If using managed federation, the variant of which graph to use
   graphRef: ""
 
@@ -217,6 +220,13 @@ autoscaling:
   #   - name: <container name>
   #     type: cpu
   #     targetUtilizationPercentage: 75
+
+# -- Sets the [rolling update strategy parameters](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#rolling-update-deployment).  Can take absolute values or % values.
+rollingUpdate:
+  {}
+# Defaults if not set are:
+#  maxUnavailable: 25%
+#  maxSurge: 25%
 
 nodeSelector: {}
 

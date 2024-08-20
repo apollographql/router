@@ -5,7 +5,6 @@ use std::sync::Arc;
 use apollo_compiler::ast;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
-use apollo_compiler::NodeStr;
 use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
@@ -101,7 +100,7 @@ pub(crate) type SubgraphSchemas = HashMap<String, Arc<Valid<apollo_compiler::Sch
 #[serde(rename_all = "camelCase")]
 pub(crate) struct FetchNode {
     /// The name of the service or subgraph that the fetch is querying.
-    pub(crate) service_name: NodeStr,
+    pub(crate) service_name: Arc<str>,
 
     /// The data that is required for the subgraph fetch.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -109,19 +108,19 @@ pub(crate) struct FetchNode {
     pub(crate) requires: Vec<Selection>,
 
     /// The variables that are used for the subgraph fetch.
-    pub(crate) variable_usages: Vec<NodeStr>,
+    pub(crate) variable_usages: Vec<Arc<str>>,
 
     /// The GraphQL subquery that is used for the fetch.
     pub(crate) operation: SubgraphOperation,
 
     /// The GraphQL subquery operation name.
-    pub(crate) operation_name: Option<NodeStr>,
+    pub(crate) operation_name: Option<Arc<str>>,
 
     /// The GraphQL operation kind that is used for the fetch.
     pub(crate) operation_kind: OperationKind,
 
     /// Optional id used by Deferred nodes
-    pub(crate) id: Option<NodeStr>,
+    pub(crate) id: Option<String>,
 
     // Optionally describes a number of "rewrites" that query plan executors should apply to the data that is sent as input of this fetch.
     pub(crate) input_rewrites: Option<Vec<rewrites::DataRewrite>>,
@@ -275,7 +274,7 @@ impl Variables {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         requires: &[Selection],
-        variable_usages: &[NodeStr],
+        variable_usages: &[Arc<str>],
         data: &Value,
         current_dir: &Path,
         request: &Arc<http::Request<Request>>,
@@ -290,12 +289,12 @@ impl Variables {
 
             variables.extend(variable_usages.iter().filter_map(|key| {
                 body.variables
-                    .get_key_value(key.as_str())
+                    .get_key_value(key.as_ref())
                     .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
             }));
 
             let mut inverted_paths: Vec<Vec<Path>> = Vec::new();
-            let mut values: IndexSet<Value> = IndexSet::new();
+            let mut values: IndexSet<Value> = IndexSet::default();
             data.select_values_and_paths(schema, current_dir, |path, value| {
                 // first get contextual values that are required
                 if let Some(context) = subgraph_context.as_mut() {
@@ -354,7 +353,7 @@ impl Variables {
                     .iter()
                     .filter_map(|key| {
                         body.variables
-                            .get_key_value(key.as_str())
+                            .get_key_value(key.as_ref())
                             .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
                     })
                     .collect::<Object>(),
@@ -583,6 +582,7 @@ impl FetchNode {
                         errors.push(error);
                     }
                 } else {
+                    error.path = Some(current_dir.clone());
                     errors.push(error);
                 }
             }
@@ -640,13 +640,17 @@ impl FetchNode {
                 .errors
                 .into_iter()
                 .map(|error| {
-                    let path = error.path.as_ref().map(|path| {
-                        Path::from_iter(current_slice.iter().chain(path.iter()).cloned())
-                    });
+                    let path = error
+                        .path
+                        .as_ref()
+                        .map(|path| {
+                            Path::from_iter(current_slice.iter().chain(path.iter()).cloned())
+                        })
+                        .unwrap_or_else(|| current_dir.clone());
 
                     Error {
                         locations: error.locations,
-                        path,
+                        path: Some(path),
                         message: error.message,
                         extensions: error.extensions,
                     }
@@ -671,7 +675,7 @@ impl FetchNode {
         &mut self,
         subgraph_schemas: &SubgraphSchemas,
     ) -> Result<(), ValidationErrors> {
-        let schema = &subgraph_schemas[self.service_name.as_str()];
+        let schema = &subgraph_schemas[self.service_name.as_ref()];
         self.operation.init_parsed(schema)?;
         Ok(())
     }
@@ -681,7 +685,7 @@ impl FetchNode {
         subgraph_schemas: &SubgraphSchemas,
         supergraph_schema_hash: &str,
     ) -> Result<(), ValidationErrors> {
-        let schema = &subgraph_schemas[self.service_name.as_str()];
+        let schema = &subgraph_schemas[self.service_name.as_ref()];
         let doc = self.operation.init_parsed(schema)?;
 
         if let Ok(hash) = QueryHashVisitor::hash_query(

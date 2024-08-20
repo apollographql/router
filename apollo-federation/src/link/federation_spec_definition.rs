@@ -3,17 +3,18 @@ use apollo_compiler::name;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::schema::Name;
 use apollo_compiler::schema::UnionType;
 use apollo_compiler::schema::Value;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::NodeStr;
 use lazy_static::lazy_static;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::argument::directive_optional_boolean_argument;
-use crate::link::argument::directive_required_fieldset_argument;
+use crate::link::argument::directive_required_string_argument;
+use crate::link::cost_spec_definition::CostSpecDefinition;
+use crate::link::cost_spec_definition::COST_VERSIONS;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
@@ -35,18 +36,19 @@ pub(crate) const FEDERATION_FIELDS_ARGUMENT_NAME: Name = name!("fields");
 pub(crate) const FEDERATION_RESOLVABLE_ARGUMENT_NAME: Name = name!("resolvable");
 pub(crate) const FEDERATION_REASON_ARGUMENT_NAME: Name = name!("reason");
 pub(crate) const FEDERATION_FROM_ARGUMENT_NAME: Name = name!("from");
+pub(crate) const FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME: Name = name!("label");
 
-pub(crate) struct KeyDirectiveArguments {
-    pub(crate) fields: NodeStr,
+pub(crate) struct KeyDirectiveArguments<'doc> {
+    pub(crate) fields: &'doc str,
     pub(crate) resolvable: bool,
 }
 
-pub(crate) struct RequiresDirectiveArguments {
-    pub(crate) fields: NodeStr,
+pub(crate) struct RequiresDirectiveArguments<'doc> {
+    pub(crate) fields: &'doc str,
 }
 
-pub(crate) struct ProvidesDirectiveArguments {
-    pub(crate) fields: NodeStr,
+pub(crate) struct ProvidesDirectiveArguments<'doc> {
+    pub(crate) fields: &'doc str,
 }
 
 #[derive(Debug)]
@@ -108,7 +110,7 @@ impl FederationSpecDefinition {
     pub(crate) fn key_directive(
         &self,
         schema: &FederationSchema,
-        fields: NodeStr,
+        fields: &str,
         resolvable: bool,
     ) -> Result<Directive, FederationError> {
         let name_in_schema = self
@@ -121,7 +123,7 @@ impl FederationSpecDefinition {
             arguments: vec![
                 Node::new(Argument {
                     name: FEDERATION_FIELDS_ARGUMENT_NAME,
-                    value: Node::new(Value::String(fields)),
+                    value: Node::new(Value::String(fields.to_owned())),
                 }),
                 Node::new(Argument {
                     name: FEDERATION_RESOLVABLE_ARGUMENT_NAME,
@@ -131,12 +133,12 @@ impl FederationSpecDefinition {
         })
     }
 
-    pub(crate) fn key_directive_arguments(
+    pub(crate) fn key_directive_arguments<'doc>(
         &self,
-        application: &Node<Directive>,
-    ) -> Result<KeyDirectiveArguments, FederationError> {
+        application: &'doc Node<Directive>,
+    ) -> Result<KeyDirectiveArguments<'doc>, FederationError> {
         Ok(KeyDirectiveArguments {
-            fields: directive_required_fieldset_argument(
+            fields: directive_required_string_argument(
                 application,
                 &FEDERATION_FIELDS_ARGUMENT_NAME,
             )?,
@@ -219,7 +221,7 @@ impl FederationSpecDefinition {
     pub(crate) fn external_directive(
         &self,
         schema: &FederationSchema,
-        reason: Option<NodeStr>,
+        reason: Option<String>,
     ) -> Result<Directive, FederationError> {
         let name_in_schema = self
             .directive_name_in_schema(schema, &FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC)?
@@ -257,7 +259,7 @@ impl FederationSpecDefinition {
     pub(crate) fn requires_directive(
         &self,
         schema: &FederationSchema,
-        fields: NodeStr,
+        fields: String,
     ) -> Result<Directive, FederationError> {
         let name_in_schema = self
             .directive_name_in_schema(schema, &FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC)?
@@ -273,12 +275,12 @@ impl FederationSpecDefinition {
         })
     }
 
-    pub(crate) fn requires_directive_arguments(
+    pub(crate) fn requires_directive_arguments<'doc>(
         &self,
-        application: &Node<Directive>,
-    ) -> Result<RequiresDirectiveArguments, FederationError> {
+        application: &'doc Node<Directive>,
+    ) -> Result<RequiresDirectiveArguments<'doc>, FederationError> {
         Ok(RequiresDirectiveArguments {
-            fields: directive_required_fieldset_argument(
+            fields: directive_required_string_argument(
                 application,
                 &FEDERATION_FIELDS_ARGUMENT_NAME,
             )?,
@@ -303,7 +305,7 @@ impl FederationSpecDefinition {
     pub(crate) fn provides_directive(
         &self,
         schema: &FederationSchema,
-        fields: NodeStr,
+        fields: String,
     ) -> Result<Directive, FederationError> {
         let name_in_schema = self
             .directive_name_in_schema(schema, &FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC)?
@@ -319,12 +321,12 @@ impl FederationSpecDefinition {
         })
     }
 
-    pub(crate) fn provides_directive_arguments(
+    pub(crate) fn provides_directive_arguments<'doc>(
         &self,
-        application: &Node<Directive>,
-    ) -> Result<ProvidesDirectiveArguments, FederationError> {
+        application: &'doc Node<Directive>,
+    ) -> Result<ProvidesDirectiveArguments<'doc>, FederationError> {
         Ok(ProvidesDirectiveArguments {
-            fields: directive_required_fieldset_argument(
+            fields: directive_required_string_argument(
                 application,
                 &FEDERATION_FIELDS_ARGUMENT_NAME,
             )?,
@@ -362,20 +364,41 @@ impl FederationSpecDefinition {
     pub(crate) fn override_directive(
         &self,
         schema: &FederationSchema,
-        from: NodeStr,
+        from: String,
+        label: &Option<&str>,
     ) -> Result<Directive, FederationError> {
         let name_in_schema = self
             .directive_name_in_schema(schema, &FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC)?
             .ok_or_else(|| SingleFederationError::Internal {
                 message: "Unexpectedly could not find federation spec in schema".to_owned(),
             })?;
+
+        let mut arguments = vec![Node::new(Argument {
+            name: FEDERATION_FROM_ARGUMENT_NAME,
+            value: Node::new(Value::String(from)),
+        })];
+
+        if let Some(label) = label {
+            arguments.push(Node::new(Argument {
+                name: FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME,
+                value: Node::new(Value::String(label.to_string())),
+            }));
+        }
         Ok(Directive {
             name: name_in_schema,
-            arguments: vec![Node::new(Argument {
-                name: FEDERATION_FROM_ARGUMENT_NAME,
-                value: Node::new(Value::String(from)),
-            })],
+            arguments,
         })
+    }
+
+    pub(crate) fn get_cost_spec_definition(
+        &self,
+        schema: &FederationSchema,
+    ) -> Option<&'static CostSpecDefinition> {
+        schema
+            .metadata()
+            .and_then(|metadata| metadata.for_identity(&Identity::cost_identity()))
+            .and_then(|link| COST_VERSIONS.find(&link.url.version))
+            .or_else(|| COST_VERSIONS.find_for_federation_version(self.version()))
     }
 }
 
@@ -415,6 +438,22 @@ lazy_static! {
         definitions.add(FederationSpecDefinition::new(Version {
             major: 2,
             minor: 5,
+        }));
+        definitions.add(FederationSpecDefinition::new(Version {
+            major: 2,
+            minor: 6,
+        }));
+        definitions.add(FederationSpecDefinition::new(Version {
+            major: 2,
+            minor: 7,
+        }));
+        definitions.add(FederationSpecDefinition::new(Version {
+            major: 2,
+            minor: 8,
+        }));
+        definitions.add(FederationSpecDefinition::new(Version {
+            major: 2,
+            minor: 9,
         }));
         definitions
     };

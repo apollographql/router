@@ -3,6 +3,7 @@ use std::collections::HashSet;
 
 use apollo_compiler::executable;
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Name;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -69,7 +70,7 @@ pub(crate) fn check(
         root_fields: config_limits.max_root_fields,
         aliases: config_limits.max_aliases,
     };
-    let Ok(operation) = document.get_operation(operation_name) else {
+    let Ok(operation) = document.operations.get(operation_name) else {
         // Undefined or ambiguous operation name.
         // The request is invalid and will be rejected by some other part of the router,
         // if it wasn’t already before we got to this code path.
@@ -124,7 +125,7 @@ enum Computation<T> {
 /// Recursively measure the given selection set against each limit
 fn count<'a>(
     document: &'a executable::ExecutableDocument,
-    fragment_cache: &mut HashMap<&'a executable::Name, Computation<OperationLimits<u32>>>,
+    fragment_cache: &mut HashMap<&'a Name, Computation<OperationLimits<u32>>>,
     selection_set: &'a executable::SelectionSet,
 ) -> OperationLimits<u32> {
     let mut counts = OperationLimits {

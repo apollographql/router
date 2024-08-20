@@ -801,10 +801,11 @@ mod test {
         Ok(())
     }
 
-    fn example_response(_: SubgraphRequest) -> Result<SubgraphResponse, BoxError> {
+    fn example_response(req: SubgraphRequest) -> Result<SubgraphResponse, BoxError> {
         Ok(SubgraphResponse::new_from_response(
             http::Response::default(),
             Context::new(),
+            req.subgraph_name.unwrap_or_else(|| String::from("test")),
         ))
     }
 

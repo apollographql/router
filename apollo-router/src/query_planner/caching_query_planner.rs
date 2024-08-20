@@ -24,7 +24,9 @@ use tower_service::Service;
 use tracing::Instrument;
 
 use super::fetch::QueryHash;
+use crate::cache::estimate_size;
 use crate::cache::storage::InMemoryCache;
+use crate::cache::storage::ValueType;
 use crate::cache::DeduplicatingCache;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
@@ -60,6 +62,7 @@ pub(crate) enum ConfigMode {
     // for now use the JS config as it expected to be identical to the Rust one
     Rust(Arc<QueryPlannerConfig>),
     Both(Arc<QueryPlannerConfig>),
+    BothBestEffort(Arc<QueryPlannerConfig>),
     Js(Arc<QueryPlannerConfig>),
 }
 
@@ -78,6 +81,7 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
     enable_authorization_directives: bool,
     config_mode: ConfigMode,
     introspection: bool,
+    legacy_introspection_caching: bool,
 }
 
 fn init_query_plan_from_redis(
@@ -132,6 +136,9 @@ where
             crate::configuration::QueryPlannerMode::Both => {
                 ConfigMode::Both(Arc::new(configuration.js_query_planner_config()))
             }
+            crate::configuration::QueryPlannerMode::BothBestEffort => {
+                ConfigMode::BothBestEffort(Arc::new(configuration.js_query_planner_config()))
+            }
         };
         Ok(Self {
             cache,
@@ -142,6 +149,10 @@ where
             enable_authorization_directives,
             config_mode,
             introspection: configuration.supergraph.introspection,
+            legacy_introspection_caching: configuration
+                .supergraph
+                .query_planning
+                .legacy_introspection_caching,
         })
     }
 
@@ -225,10 +236,13 @@ where
         } else {
             cache_keys.len()
         };
-        tracing::info!(
-            "warming up the query plan cache with {} queries, this might take a while",
-            capacity
-        );
+
+        if capacity > 0 {
+            tracing::info!(
+                "warming up the query plan cache with {} queries, this might take a while",
+                capacity
+            );
+        }
 
         // persisted queries are added first because they should get a lower priority in the LRU cache,
         // since a lot of them may be there to support old clients
@@ -264,7 +278,10 @@ where
         } in all_cache_keys
         {
             let context = Context::new();
-            let doc = match query_analysis.parse_document(&query, operation.as_deref()) {
+            let doc = match query_analysis
+                .parse_document(&query, operation.as_deref())
+                .await
+            {
                 Ok(doc) => doc,
                 Err(_) => continue,
             };
@@ -305,7 +322,10 @@ where
                 })
                 .await;
             if entry.is_first() {
-                let doc = match query_analysis.parse_document(&query, operation.as_deref()) {
+                let doc = match query_analysis
+                    .parse_document(&query, operation.as_deref())
+                    .await
+                {
                     Ok(doc) => doc,
                     Err(error) => {
                         let e = Arc::new(QueryPlannerError::SpecError(error));
@@ -395,7 +415,7 @@ where
         let qp = self.clone();
         Box::pin(async move {
             let context = request.context.clone();
-            qp.plan(request).await.map(|response| {
+            qp.plan(request).await.inspect(|response| {
                 if let Some(usage_reporting) = context
                     .extensions()
                     .with_lock(|lock| lock.get::<Arc<UsageReporting>>().cloned())
@@ -409,7 +429,6 @@ where
                         usage_reporting.stats_report_key.clone(),
                     );
                 }
-                response
             })
         })
     }
@@ -515,9 +534,16 @@ where
                             errors,
                         }) => {
                             if let Some(content) = content.clone() {
-                                tokio::spawn(async move {
-                                    entry.insert(Ok(content)).await;
-                                });
+                                let can_cache = match &content {
+                                    QueryPlannerContent::Plan { .. } => true,
+                                    _ => self.legacy_introspection_caching,
+                                };
+
+                                if can_cache {
+                                    tokio::spawn(async move {
+                                        entry.insert(Ok(content)).await;
+                                    });
+                                }
                             }
 
                             // This will be overridden when running in ApolloMetricsGenerationMode::New mode
@@ -627,12 +653,11 @@ impl std::fmt::Display for CachingQueryKey {
         let operation = hex::encode(hasher.finalize());
 
         let mut hasher = Sha256::new();
-        hasher.update(&serde_json::to_vec(&self.metadata).expect("serialization should not fail"));
-        hasher.update(
-            &serde_json::to_vec(&self.plan_options).expect("serialization should not fail"),
-        );
+        hasher.update(serde_json::to_vec(&self.metadata).expect("serialization should not fail"));
         hasher
-            .update(&serde_json::to_vec(&self.config_mode).expect("serialization should not fail"));
+            .update(serde_json::to_vec(&self.plan_options).expect("serialization should not fail"));
+        hasher
+            .update(serde_json::to_vec(&self.config_mode).expect("serialization should not fail"));
         hasher.update(&*self.schema_id);
         hasher.update([self.introspection as u8]);
         let metadata = hex::encode(hasher.finalize());
@@ -668,6 +693,17 @@ pub(crate) struct WarmUpCachingQueryKey {
     pub(crate) introspection: bool,
 }
 
+impl ValueType for Result<QueryPlannerContent, Arc<QueryPlannerError>> {
+    fn estimated_size(&self) -> Option<usize> {
+        match self {
+            Ok(QueryPlannerContent::Plan { plan }) => Some(plan.estimated_size()),
+            Ok(QueryPlannerContent::Response { response }) => Some(estimate_size(response)),
+            Ok(QueryPlannerContent::IntrospectionDisabled) => None,
+            Err(e) => Some(estimate_size(e)),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use mockall::mock;
@@ -678,6 +714,7 @@ mod tests {
 
     use super::*;
     use crate::error::PlanErrors;
+    use crate::json_ext::Object;
     use crate::query_planner::QueryPlan;
     use crate::spec::Query;
     use crate::spec::Schema;
@@ -736,14 +773,14 @@ mod tests {
 
         let configuration = Arc::new(crate::Configuration::default());
         let schema = include_str!("testdata/schema.graphql");
-        let schema = Arc::new(Schema::parse_test(schema, &configuration).unwrap());
+        let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
         let mut planner = CachingQueryPlanner::new(
             delegate,
             schema.clone(),
             Default::default(),
             &configuration,
-            IndexMap::new(),
+            IndexMap::default(),
         )
         .await
         .unwrap();
@@ -818,6 +855,7 @@ mod tests {
                     .into(),
                     query: Arc::new(Query::empty()),
                     query_metrics: Default::default(),
+                    estimated_size: Default::default(),
                 };
                 let qp_content = QueryPlannerContent::Plan {
                     plan: Arc::new(query_plan),
@@ -834,7 +872,7 @@ mod tests {
         let configuration = Configuration::default();
 
         let schema =
-            Schema::parse_test(include_str!("testdata/schema.graphql"), &configuration).unwrap();
+            Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap();
 
         let doc = Query::parse_document(
             "query Me { me { username } }",
@@ -849,7 +887,7 @@ mod tests {
             Arc::new(schema),
             Default::default(),
             &configuration,
-            IndexMap::new(),
+            IndexMap::default(),
         )
         .await
         .unwrap();
@@ -880,5 +918,109 @@ mod tests {
             "d1554552698157b05c2a462827fb4367a4548ee5",
             stats_report_key_hash("# IgnitionMeQuery\nquery IgnitionMeQuery{me{id}}")
         );
+    }
+
+    #[test(tokio::test)]
+    async fn test_introspection_cache() {
+        let mut delegate = MockMyQueryPlanner::new();
+        delegate
+            .expect_clone()
+            // This is the main point of the test: if introspection queries are not cached, then the delegate
+            // will be called twice when we send the same request twice
+            .times(2)
+            .returning(|| {
+                let mut planner = MockMyQueryPlanner::new();
+                planner.expect_sync_call().returning(|_| {
+                    let qp_content = QueryPlannerContent::Response {
+                        response: Box::new(
+                            crate::graphql::Response::builder()
+                                .data(Object::new())
+                                .build(),
+                        ),
+                    };
+
+                    Ok(QueryPlannerResponse::builder()
+                        .content(qp_content)
+                        .context(Context::new())
+                        .build())
+                });
+                planner
+            });
+
+        let configuration = Arc::new(crate::Configuration {
+            supergraph: crate::configuration::Supergraph {
+                query_planning: crate::configuration::QueryPlanning {
+                    legacy_introspection_caching: false,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        let schema = include_str!("testdata/schema.graphql");
+        let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
+
+        let mut planner = CachingQueryPlanner::new(
+            delegate,
+            schema.clone(),
+            Default::default(),
+            &configuration,
+            IndexMap::default(),
+        )
+        .await
+        .unwrap();
+
+        let configuration = Configuration::default();
+
+        let doc1 = Query::parse_document(
+            "{
+              __schema {
+                  types {
+                  name
+                }
+              }
+            }",
+            None,
+            &schema,
+            &configuration,
+        )
+        .unwrap();
+
+        let context = Context::new();
+        context
+            .extensions()
+            .with_lock(|mut lock| lock.insert::<ParsedDocument>(doc1));
+
+        assert!(planner
+            .call(query_planner::CachingRequest::new(
+                "{
+                    __schema {
+                        types {
+                        name
+                      }
+                    }
+                  }"
+                .to_string(),
+                Some("".into()),
+                context.clone(),
+            ))
+            .await
+            .is_ok());
+
+        assert!(planner
+            .call(query_planner::CachingRequest::new(
+                "{
+                        __schema {
+                            types {
+                            name
+                          }
+                        }
+                      }"
+                .to_string(),
+                Some("".into()),
+                context.clone(),
+            ))
+            .await
+            .is_ok());
     }
 }

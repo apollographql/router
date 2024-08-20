@@ -1,7 +1,8 @@
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use apollo_compiler::validation::Valid;
-use apollo_compiler::NodeStr;
 use router_bridge::planner::PlanOptions;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
@@ -10,6 +11,7 @@ use serde::Serialize;
 pub(crate) use self::fetch::OperationKind;
 use super::fetch;
 use super::subscription::SubscriptionNode;
+use crate::cache::estimate_size;
 use crate::configuration::Batching;
 use crate::error::CacheResolverError;
 use crate::error::ValidationErrors;
@@ -43,6 +45,10 @@ pub struct QueryPlan {
     pub(crate) formatted_query_plan: Option<Arc<String>>,
     pub(crate) query: Arc<Query>,
     pub(crate) query_metrics: OperationLimits<u32>,
+
+    /// The estimated size in bytes of the query plan
+    #[serde(default)]
+    pub(crate) estimated_size: Arc<AtomicUsize>,
 }
 
 /// This default impl is useful for test users
@@ -65,6 +71,7 @@ impl QueryPlan {
             formatted_query_plan: Default::default(),
             query: Arc::new(Query::empty()),
             query_metrics: Default::default(),
+            estimated_size: Default::default(),
         }
     }
 }
@@ -89,6 +96,14 @@ impl QueryPlan {
     ) -> Result<Vec<Arc<QueryHash>>, CacheResolverError> {
         self.root
             .query_hashes(batching_config, operation, variables, &self.query)
+    }
+
+    pub(crate) fn estimated_size(&self) -> usize {
+        if self.estimated_size.load(Ordering::SeqCst) == 0 {
+            self.estimated_size
+                .store(estimate_size(self), Ordering::SeqCst);
+        }
+        self.estimated_size.load(Ordering::SeqCst)
     }
 }
 
@@ -466,9 +481,9 @@ impl PlanNode {
             Self::Subscription { primary, rest } => match rest {
                 Some(rest) => Box::new(
                     rest.service_usage()
-                        .chain(Some(primary.service_name.as_str())),
+                        .chain(Some(primary.service_name.as_ref())),
                 ) as Box<dyn Iterator<Item = &'a str> + 'a>,
-                None => Box::new(Some(primary.service_name.as_str()).into_iter()),
+                None => Box::new(Some(primary.service_name.as_ref()).into_iter()),
             },
             Self::Flatten(flatten) => flatten.node.service_usage(),
             Self::Defer { primary, deferred } => primary
@@ -591,7 +606,7 @@ pub(crate) struct DeferredNode {
     pub(crate) depends: Vec<Depends>,
 
     /// The optional defer label.
-    pub(crate) label: Option<NodeStr>,
+    pub(crate) label: Option<String>,
     /// Path to the @defer this correspond to. `subselection` start at that `path`.
     pub(crate) query_path: Path,
     /// The part of the original query that "selects" the data to send
@@ -606,5 +621,19 @@ pub(crate) struct DeferredNode {
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Depends {
-    pub(crate) id: NodeStr,
+    pub(crate) id: String,
+}
+
+#[cfg(test)]
+mod test {
+    use crate::query_planner::QueryPlan;
+
+    #[test]
+    fn test_estimated_size() {
+        let query_plan = QueryPlan::fake_builder().build();
+        let size1 = query_plan.estimated_size();
+        let size2 = query_plan.estimated_size();
+        assert!(size1 > 0);
+        assert_eq!(size1, size2);
+    }
 }

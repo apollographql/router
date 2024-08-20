@@ -1,8 +1,8 @@
-use std::collections::HashSet;
 use std::io::Read;
 use std::sync::Mutex;
 use std::sync::OnceLock;
 
+use apollo_compiler::collections::IndexSet;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 use apollo_federation::query_plan::FetchNode;
@@ -96,7 +96,7 @@ pub(crate) fn compose(
     function_path: &'static str,
     subgraph_names_and_schemas: &[(&str, &str)],
 ) -> String {
-    let unique_names: std::collections::HashSet<_> = subgraph_names_and_schemas
+    let unique_names: IndexSet<_> = subgraph_names_and_schemas
         .iter()
         .map(|(name, _)| name)
         .collect();
@@ -127,7 +127,7 @@ pub(crate) fn compose(
     let prefix = "# Composed from subgraphs with hash: ";
 
     let test_name = function_path.rsplit("::").next().unwrap();
-    static SEEN_TEST_NAMES: OnceLock<Mutex<HashSet<&'static str>>> = OnceLock::new();
+    static SEEN_TEST_NAMES: OnceLock<Mutex<IndexSet<&'static str>>> = OnceLock::new();
     let new = SEEN_TEST_NAMES
         .get_or_init(Default::default)
         .lock()
@@ -211,12 +211,12 @@ pub(crate) fn find_fetch_nodes_for_subgraph<'plan>(
     if let Some(node) = &plan.node {
         match node {
             TopLevelPlanNode::Fetch(inner) => {
-                if inner.subgraph_name == subgraph_name {
+                if inner.subgraph_name.as_ref() == subgraph_name {
                     fetch_nodes.push(&**inner)
                 }
             }
             TopLevelPlanNode::Subscription(inner) => {
-                if inner.primary.subgraph_name == subgraph_name {
+                if inner.primary.subgraph_name.as_ref() == subgraph_name {
                     fetch_nodes.push(&inner.primary);
                 }
                 visit_node(subgraph_name, &mut fetch_nodes, inner.rest.as_deref())
@@ -261,7 +261,7 @@ pub(crate) fn find_fetch_nodes_for_subgraph<'plan>(
             let Some(node) = node else { return };
             match node {
                 PlanNode::Fetch(inner) => {
-                    if inner.subgraph_name == subgraph_name {
+                    if inner.subgraph_name.as_ref() == subgraph_name {
                         fetch_nodes.push(&**inner)
                     }
                 }

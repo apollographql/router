@@ -7,8 +7,7 @@ use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::Context;
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(PartialEq))]
+#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum Condition<T> {
     /// A condition to check a selection against a value.
@@ -43,8 +42,7 @@ impl Condition<()> {
     }
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(PartialEq))]
+#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
 pub(crate) enum SelectorOrValue<T> {
     /// A constant value.
@@ -91,15 +89,26 @@ where
                         gt[1] = SelectorOrValue::Value(r);
                         None
                     }
-                    (Some(l), Some(r)) => {
-                        if l > r {
-                            *self = Condition::True;
-                            Some(true)
-                        } else {
-                            *self = Condition::False;
-                            Some(false)
+                    (Some(l), Some(r)) => match (l.as_f64(), r.as_f64()) {
+                        (Some(l), Some(r)) => {
+                            if l > r {
+                                *self = Condition::True;
+                                Some(true)
+                            } else {
+                                *self = Condition::False;
+                                Some(false)
+                            }
                         }
-                    }
+                        _ => {
+                            if l > r {
+                                *self = Condition::True;
+                                Some(true)
+                            } else {
+                                *self = Condition::False;
+                                Some(false)
+                            }
+                        }
+                    },
                 }
             }
             Condition::Lt(lt) => {
@@ -115,15 +124,26 @@ where
                         lt[1] = SelectorOrValue::Value(r);
                         None
                     }
-                    (Some(l), Some(r)) => {
-                        if l < r {
-                            *self = Condition::True;
-                            Some(true)
-                        } else {
-                            *self = Condition::False;
-                            Some(false)
+                    (Some(l), Some(r)) => match (l.as_f64(), r.as_f64()) {
+                        (Some(l), Some(r)) => {
+                            if l < r {
+                                *self = Condition::True;
+                                Some(true)
+                            } else {
+                                *self = Condition::False;
+                                Some(false)
+                            }
                         }
-                    }
+                        _ => {
+                            if l < r {
+                                *self = Condition::True;
+                                Some(true)
+                            } else {
+                                *self = Condition::False;
+                                Some(false)
+                            }
+                        }
+                    },
                 }
             }
             Condition::Exists(exist) => {
@@ -579,6 +599,7 @@ mod test {
 
     #[test]
     fn test_condition_gt() {
+        test_gt("2", "1", "1");
         test_gt(2, 1, 1);
         test_gt(2.0, 1.0, 1.0);
         test_gt("b", "a", "a");
@@ -606,8 +627,10 @@ mod test {
 
     #[test]
     fn test_condition_lt() {
+        test_lt("1", "2", "2");
         test_lt(1, 2, 2);
         test_lt(1.0, 2.0, 2.0);
+        test_lt("1.0", "2.0", "2.0");
         test_lt("a", "b", "b");
         assert_eq!(lt(true, false).req(None), Some(false));
         assert_eq!(lt(false, true).req(None), Some(true));
@@ -709,6 +732,8 @@ mod test {
 
         assert_eq!(gt(Req, 1).req(Some(2i64)), Some(true));
         assert_eq!(gt(Req, 1).req(None), None);
+        assert_eq!(gt("2", Req).req(Some(1i64)), Some(true));
+        assert_eq!(gt("2.1", Req).req(Some(1i64)), Some(true));
         assert_eq!(gt(2, Req).req(Some(1i64)), Some(true));
         assert_eq!(gt(2, Req).req(None), None);
         assert_eq!(gt(Req, Req).req(Some(1i64)), Some(false));
@@ -747,6 +772,7 @@ mod test {
         assert_eq!(lt(2, 1).evaluate_drop(), Some(false));
         assert_eq!(lt(Static(1), 2).evaluate_drop(), Some(true));
         assert_eq!(lt(2, Static(1)).evaluate_drop(), Some(false));
+        assert_eq!(gt("2", "1").evaluate_drop(), Some(true));
         assert_eq!(gt(2, 1).evaluate_drop(), Some(true));
         assert_eq!(gt(1, 2).evaluate_drop(), Some(false));
         assert_eq!(gt(Static(2), 1).evaluate_drop(), Some(true));
@@ -848,9 +874,11 @@ where {
         }
         fn field(&mut self, value: Option<i64>) -> bool {
             match value {
-                None => self.evaluate_response_field(ty(), field(), &json!(false), &Context::new()),
+                None => {
+                    self.evaluate_response_field(&ty(), field(), &json!(false), &Context::new())
+                }
                 Some(value) => {
-                    self.evaluate_response_field(ty(), field(), &json!(value), &Context::new())
+                    self.evaluate_response_field(&ty(), field(), &json!(value), &Context::new())
                 }
             }
         }

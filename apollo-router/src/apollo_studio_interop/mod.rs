@@ -10,7 +10,6 @@ use std::sync::Arc;
 
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::DirectiveList;
-use apollo_compiler::ast::Name;
 use apollo_compiler::ast::OperationType;
 use apollo_compiler::ast::Value;
 use apollo_compiler::ast::VariableDefinition;
@@ -24,6 +23,7 @@ use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use router_bridge::planner::ReferencedFieldsForType;
@@ -285,18 +285,17 @@ pub(crate) fn extract_enums_from_response(
     operation_name: Option<&str>,
     schema: &Valid<Schema>,
     response_body: &Object,
-) -> ReferencedEnums {
-    let mut result = ReferencedEnums::new();
+    existing_refs: &mut ReferencedEnums,
+) {
     if let Some(operation) = query.operation(operation_name) {
         extract_enums_from_selection_set(
             &operation.selection_set,
             &query.fragments,
             schema,
             response_body,
-            &mut result,
+            existing_refs,
         );
     }
-    result
 }
 
 fn add_enum_value_to_map(
@@ -420,7 +419,8 @@ impl UsageGenerator<'_> {
 
         match self
             .signature_doc
-            .get_operation(self.operation_name.as_deref())
+            .operations
+            .get(self.operation_name.as_deref())
             .ok()
         {
             None => "".to_string(),
@@ -494,7 +494,8 @@ impl UsageGenerator<'_> {
 
         match self
             .references_doc
-            .get_operation(self.operation_name.as_deref())
+            .operations
+            .get(self.operation_name.as_deref())
             .ok()
         {
             None => HashMap::new(),
@@ -583,7 +584,8 @@ impl UsageGenerator<'_> {
 
         if let Ok(operation) = self
             .references_doc
-            .get_operation(self.operation_name.as_deref())
+            .operations
+            .get(self.operation_name.as_deref())
         {
             self.process_extended_refs_for_selection_set(&operation.selection_set);
         }

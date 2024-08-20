@@ -5,6 +5,9 @@ use std::future;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
+use ahash::HashMap;
+use ahash::HashMapExt;
+use apollo_compiler::schema::FieldLookupError;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
 use apollo_compiler::ExecutableDocument;
@@ -27,6 +30,7 @@ use crate::json_ext::Object;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugins::demand_control::cost_calculator::schema::DemandControlledSchema;
 use crate::plugins::demand_control::strategy::Strategy;
 use crate::plugins::demand_control::strategy::StrategyFactory;
 use crate::register_plugin;
@@ -199,6 +203,22 @@ impl<T> From<WithErrors<T>> for DemandControlError {
     }
 }
 
+impl<'a> From<FieldLookupError<'a>> for DemandControlError {
+    fn from(value: FieldLookupError) -> Self {
+        match value {
+            FieldLookupError::NoSuchType => DemandControlError::QueryParseFailure(
+                "Attempted to look up a type which does not exist in the schema".to_string(),
+            ),
+            FieldLookupError::NoSuchField(type_name, _) => {
+                DemandControlError::QueryParseFailure(format!(
+                    "Attempted to look up a field on type {}, but the field does not exist",
+                    type_name
+                ))
+            }
+        }
+    }
+}
+
 pub(crate) struct DemandControl {
     config: DemandControlConfig,
     strategy_factory: StrategyFactory,
@@ -223,11 +243,21 @@ impl Plugin for DemandControl {
     type Config = DemandControlConfig;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        let demand_controlled_supergraph_schema =
+            DemandControlledSchema::new(init.supergraph_schema.clone())?;
+        let mut demand_controlled_subgraph_schemas = HashMap::new();
+        for (subgraph_name, subgraph_schema) in init.subgraph_schemas.iter() {
+            let demand_controlled_subgraph_schema =
+                DemandControlledSchema::new(subgraph_schema.clone())?;
+            demand_controlled_subgraph_schemas
+                .insert(subgraph_name.clone(), demand_controlled_subgraph_schema);
+        }
+
         Ok(DemandControl {
             strategy_factory: StrategyFactory::new(
                 init.config.clone(),
-                init.supergraph_schema.clone(),
-                init.subgraph_schemas.clone(),
+                Arc::new(demand_controlled_supergraph_schema),
+                Arc::new(demand_controlled_subgraph_schemas),
             ),
             config: init.config,
         })
@@ -316,12 +346,14 @@ impl Plugin for DemandControl {
 
     fn subgraph_service(
         &self,
-        _subgraph_name: &str,
+        subgraph_name: &str,
         service: subgraph::BoxService,
     ) -> subgraph::BoxService {
         if !self.config.enabled {
             service
         } else {
+            let subgraph_name = subgraph_name.to_owned();
+            let subgraph_name_map_fut = subgraph_name.to_owned();
             ServiceBuilder::new()
                 .checkpoint(move |req: subgraph::Request| {
                     let strategy = req.context.extensions().with_lock(|lock| {
@@ -339,18 +371,22 @@ impl Plugin for DemandControl {
                                 )
                                 .context(req.context.clone())
                                 .extensions(crate::json_ext::Object::new())
+                                .subgraph_name(subgraph_name.clone())
                                 .build(),
                         ),
                     })
                 })
                 .map_future_with_request_data(
-                    |req: &subgraph::Request| {
+                    move |req: &subgraph::Request| {
                         //TODO convert this to expect
-                        req.executable_document.clone().unwrap_or_else(|| {
-                            Arc::new(Valid::assume_valid(ExecutableDocument::new()))
-                        })
+                        (
+                            subgraph_name_map_fut.clone(),
+                            req.executable_document.clone().unwrap_or_else(|| {
+                                Arc::new(Valid::assume_valid(ExecutableDocument::new()))
+                            }),
+                        )
                     },
-                    |req: Arc<Valid<ExecutableDocument>>, fut| async move {
+                    |(subgraph_name, req): (String, Arc<Valid<ExecutableDocument>>), fut| async move {
                         let resp: subgraph::Response = fut.await?;
                         let strategy = resp.context.extensions().with_lock(|lock| {
                             lock.get::<Strategy>().expect("must have strategy").clone()
@@ -362,6 +398,7 @@ impl Plugin for DemandControl {
                                     err.into_graphql_errors()
                                         .expect("must be able to convert to graphql error"),
                                 )
+                                .subgraph_name(subgraph_name)
                                 .context(resp.context.clone())
                                 .extensions(Object::new())
                                 .build(),

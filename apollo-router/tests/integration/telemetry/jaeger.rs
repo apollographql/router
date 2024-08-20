@@ -1,17 +1,17 @@
-#![cfg(all(target_os = "linux", target_arch = "x86_64", test))]
 extern crate core;
 
 use std::collections::HashSet;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use opentelemetry_api::trace::TraceId;
 use serde_json::json;
 use serde_json::Value;
 use tower::BoxError;
 
 use crate::integration::common::Telemetry;
-use crate::integration::common::ValueExt;
 use crate::integration::IntegrationTest;
+use crate::integration::ValueExt;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_reload() -> Result<(), BoxError> {
@@ -295,8 +295,43 @@ async fn test_span_customization() -> Result<(), BoxError> {
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn test_decimal_trace_id() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Jaeger)
+        .config(include_str!("fixtures/jaeger_decimal_trace_id.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    let query = json!({"query":"query ExampleQuery1 {topProducts{name}}","variables":{}});
+
+    let (id, result) = router.execute_query(&query).await;
+    let id_from_router: u128 = result
+        .headers()
+        .get("apollo-custom-trace-id")
+        .unwrap()
+        .to_str()
+        .unwrap_or_default()
+        .parse()
+        .expect("expected decimal trace ID");
+    assert_eq!(format!("{:x}", id_from_router), id.to_string());
+
+    validate_trace(
+        id,
+        &query,
+        Some("ExampleQuery1"),
+        &["client", "router", "subgraph"],
+        false,
+    )
+    .await?;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
 async fn validate_trace(
-    id: String,
+    id: TraceId,
     query: &Value,
     operation_name: Option<&str>,
     services: &[&'static str],
@@ -306,6 +341,7 @@ async fn validate_trace(
         .append_pair("service", services.first().expect("expected root service"))
         .finish();
 
+    let id = id.to_string();
     let url = format!("http://localhost:16686/api/traces/{id}?{params}");
     for _ in 0..10 {
         if find_valid_trace(
@@ -320,7 +356,7 @@ async fn validate_trace(
         {
             return Ok(());
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(1000)).await;
     }
     find_valid_trace(
         &url,
@@ -391,6 +427,12 @@ fn verify_router_span_fields(
             .first(),
         Some(&&Value::String("1.0".to_string()))
     );
+    assert!(router_span
+        .select_path("$.logs[*].fields[?(@.key == 'histogram.apollo_router_span')].value")?
+        .is_empty(),);
+    assert!(router_span
+        .select_path("$.logs[*].fields[?(@.key == 'histogram.apollo_router_span')].value")?
+        .is_empty(),);
     if custom_span_instrumentation {
         assert_eq!(
             router_span

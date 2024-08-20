@@ -1,14 +1,14 @@
 ---
 title: Rhai Script API Reference
-subtitle: For Apollo Router customizations
-description: This reference documents the symbols and behaviors that are specific to Rhai customizations for the Apollo Router. Includes entry point hooks, logging, and more.
+subtitle: APIs for router customizations
+description: This reference documents the symbols and behaviors that are specific to Rhai customizations for the Apollo GraphOS Router and Apollo Router Core. Includes entry point hooks, logging, and more.
 ---
 
-This reference documents the symbols and behaviors that are specific to [Rhai customizations](./rhai/) for the Apollo Router.
+This reference documents the symbols and behaviors that are specific to [Rhai customizations](./rhai/) for the GraphOS Router and Apollo Router Core.
 
 ## Entry point hooks
 
-Your Rhai script's [main file](./rhai/#the-main-file) hooks into the individual services of the Apollo Router's [request-handling lifecycle](./rhai/#router-request-lifecycle). To do so, it defines whichever combination of the following entry point hooks it requires:
+Your Rhai script's [main file](./rhai/#the-main-file) hooks into the individual services of the router's [request-handling lifecycle](./rhai/#router-request-lifecycle). To do so, it defines whichever combination of the following entry point hooks it requires:
 
 ```rhai
 fn router_service(service) {}
@@ -36,7 +36,7 @@ fn supergraph_service(service) {
 
 ## Logging
 
-If your script logs a message with Rhai's built-in `print()` function, it's logged to the Apollo Router's logs at the "info" level:
+If your script logs a message with Rhai's built-in `print()` function, it's logged to the router's logs at the "info" level:
 
 ```rhai
 print("logged at the info level");
@@ -138,7 +138,7 @@ fn process_response(response) {
 }
 
 fn supergraph_service(service) {
-    const response_callback = Fn("process_request");
+    const response_callback = Fn("process_response");
     service.map_response(response_callback);
 }
 ```

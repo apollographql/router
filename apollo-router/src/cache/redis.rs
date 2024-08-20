@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -17,9 +18,11 @@ use fred::types::FromRedis;
 use fred::types::PerformanceConfig;
 use fred::types::ReconnectPolicy;
 use fred::types::RedisConfig;
+use fred::types::ScanResult;
 use fred::types::TlsConfig;
 use fred::types::TlsHostMapping;
 use futures::FutureExt;
+use futures::Stream;
 use tower::BoxError;
 use url::Url;
 
@@ -168,7 +171,7 @@ impl RedisCacheStorage {
         let client = RedisClient::new(
             client_config,
             Some(PerformanceConfig {
-                default_command_timeout: config.timeout.unwrap_or(Duration::from_millis(2)),
+                default_command_timeout: config.timeout.unwrap_or(Duration::from_millis(500)),
                 ..Default::default()
             }),
             None,
@@ -557,6 +560,44 @@ impl RedisCacheStorage {
         };
         tracing::trace!("insert result {:?}", r);
     }
+
+    pub(crate) async fn delete<K: KeyType>(&self, keys: Vec<RedisKey<K>>) -> Option<u32> {
+        let mut h: HashMap<u16, Vec<String>> = HashMap::new();
+        for key in keys.into_iter() {
+            let key = self.make_key(key);
+            let hash = ClusterRouting::hash_key(key.as_bytes());
+            let entry = h.entry(hash).or_default();
+            entry.push(key);
+        }
+
+        // then we query all the key groups at the same time
+        let results: Vec<Result<u32, RedisError>> =
+            futures::future::join_all(h.into_values().map(|keys| self.inner.del(keys))).await;
+        let mut total = 0u32;
+
+        for res in results {
+            match res {
+                Ok(res) => total += res,
+                Err(e) => {
+                    tracing::error!(error = %e, "redis del error");
+                }
+            }
+        }
+
+        Some(total)
+    }
+
+    pub(crate) fn scan(
+        &self,
+        pattern: String,
+        count: Option<u32>,
+    ) -> Pin<Box<dyn Stream<Item = Result<ScanResult, RedisError>> + Send>> {
+        if self.is_cluster {
+            Box::pin(self.inner.scan_cluster(pattern, count, None))
+        } else {
+            Box::pin(self.inner.scan(pattern, count, None))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -565,11 +606,18 @@ mod test {
 
     use url::Url;
 
+    use crate::cache::storage::ValueType;
+
     #[test]
     fn ensure_invalid_payload_serialization_doesnt_fail() {
         #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
         struct Stuff {
             time: SystemTime,
+        }
+        impl ValueType for Stuff {
+            fn estimated_size(&self) -> Option<usize> {
+                None
+            }
         }
 
         let invalid_json_payload = super::RedisValue(Stuff {
