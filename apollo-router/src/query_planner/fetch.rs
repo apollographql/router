@@ -494,6 +494,7 @@ impl FetchNode {
                         errors.push(error);
                     }
                 } else {
+                    error.path = Some(current_dir.clone());
                     errors.push(error);
                 }
             }
@@ -551,13 +552,17 @@ impl FetchNode {
                 .errors
                 .into_iter()
                 .map(|error| {
-                    let path = error.path.as_ref().map(|path| {
-                        Path::from_iter(current_slice.iter().chain(path.iter()).cloned())
-                    });
+                    let path = error
+                        .path
+                        .as_ref()
+                        .map(|path| {
+                            Path::from_iter(current_slice.iter().chain(path.iter()).cloned())
+                        })
+                        .unwrap_or_else(|| current_dir.clone());
 
                     Error {
                         locations: error.locations,
-                        path,
+                        path: Some(path),
                         message: error.message,
                         extensions: error.extensions,
                     }

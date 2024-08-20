@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
+use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
@@ -45,6 +46,10 @@ use crate::schema::ValidFederationSchema;
 use crate::utils::logging::snapshot;
 use crate::ApiSchemaOptions;
 use crate::Supergraph;
+
+pub(crate) const OVERRIDE_LABEL_ARG_NAME: &str = "overrideLabel";
+pub(crate) const CONTEXT_DIRECTIVE: &str = "context";
+pub(crate) const JOIN_FIELD: &str = "join__field";
 
 #[derive(Debug, Clone, Hash)]
 pub struct QueryPlannerConfig {
@@ -208,6 +213,7 @@ impl QueryPlanner {
         config: QueryPlannerConfig,
     ) -> Result<Self, FederationError> {
         config.assert_valid();
+        Self::check_unsupported_features(supergraph)?;
 
         let supergraph_schema = supergraph.schema.clone();
         let api_schema = supergraph.to_api_schema(ApiSchemaOptions {
@@ -533,6 +539,89 @@ impl QueryPlanner {
     pub fn api_schema(&self) -> &ValidFederationSchema {
         &self.api_schema
     }
+
+    fn check_unsupported_features(supergraph: &Supergraph) -> Result<(), FederationError> {
+        // We have a *progressive* override when `join__field` has a
+        // non-null value for `overrideLabel` field.
+        //
+        // This looks at object types' fields and their directive
+        // applications, looking specifically for `@join__field`
+        // arguments list.
+        let has_progressive_overrides = supergraph
+            .schema
+            .schema()
+            .types
+            .values()
+            .filter_map(|extended_type| {
+                // The override label args can be only on ObjectTypes
+                if let ExtendedType::Object(object_type) = extended_type {
+                    Some(object_type)
+                } else {
+                    None
+                }
+            })
+            .flat_map(|object_type| &object_type.fields)
+            .flat_map(|(_, field)| {
+                field
+                    .directives
+                    .iter()
+                    .filter(|d| d.name.as_str() == JOIN_FIELD)
+            })
+            .any(|join_directive| {
+                if let Some(override_label_arg) =
+                    join_directive.argument_by_name(OVERRIDE_LABEL_ARG_NAME)
+                {
+                    // Any argument value for `overrideLabel` that's not
+                    // null can be considered as progressive override usage
+                    if !override_label_arg.is_null() {
+                        return true;
+                    }
+                    return false;
+                }
+                false
+            });
+        if has_progressive_overrides {
+            let message = "\
+                `experimental_query_planner_mode: new` or `both` cannot yet \
+                be used with progressive overrides. \
+                Remove uses of progressive overrides to try the experimental query planner, \
+                otherwise switch back to `legacy` or `both_best_effort`.\
+            ";
+            return Err(SingleFederationError::UnsupportedFeature {
+                message: message.to_owned(),
+                kind: crate::error::UnsupportedFeatureKind::ProgressiveOverrides,
+            }
+            .into());
+        }
+
+        // We will only check for `@context` direcive, since
+        // `@fromContext` can only be used if `@context` is already
+        // applied, and we assume a correctly composed supergraph.
+        //
+        // `@context` can only be applied on Object Types, Interface
+        // Types and Unions. For simplicity of this function, we just
+        // check all 'extended_type` directives.
+        let has_set_context = supergraph
+            .schema
+            .schema()
+            .types
+            .values()
+            .any(|extended_type| extended_type.directives().has(CONTEXT_DIRECTIVE));
+        if has_set_context {
+            let message = "\
+                `experimental_query_planner_mode: new` or `both` cannot yet \
+                be used with `@context`. \
+                Remove uses of `@context` to try the experimental query planner, \
+                otherwise switch back to `legacy` or `both_best_effort`.\
+            ";
+            return Err(SingleFederationError::UnsupportedFeature {
+                message: message.to_owned(),
+                kind: crate::error::UnsupportedFeatureKind::Context,
+            }
+            .into());
+        }
+        Ok(())
+    }
 }
 
 fn compute_root_serial_dependency_graph(
@@ -767,8 +856,9 @@ fn compute_plan_for_defer_conditionals(
     _parameters: &mut QueryPlanningParameters,
     _defer_conditions: IndexMap<String, IndexSet<String>>,
 ) -> Result<Option<PlanNode>, FederationError> {
-    Err(SingleFederationError::Internal {
+    Err(SingleFederationError::UnsupportedFeature {
         message: String::from("@defer is currently not supported"),
+        kind: crate::error::UnsupportedFeatureKind::Defer,
     }
     .into())
 }

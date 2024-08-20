@@ -198,7 +198,6 @@ mod helpers {
     use crate::error::FederationError;
     use crate::link::spec::Identity;
     use crate::link::Link;
-    use crate::query_graph::extract_subgraphs_from_supergraph::new_empty_fed_2_subgraph_schema;
     use crate::schema::position::ObjectFieldDefinitionPosition;
     use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
     use crate::schema::position::ObjectTypeDefinitionPosition;
@@ -217,6 +216,7 @@ mod helpers {
     use crate::subgraph::spec::EXTERNAL_DIRECTIVE_NAME;
     use crate::subgraph::spec::KEY_DIRECTIVE_NAME;
     use crate::subgraph::spec::REQUIRES_DIRECTIVE_NAME;
+    use crate::supergraph::new_empty_fed_2_subgraph_schema;
     use crate::ValidFederationSubgraph;
 
     /// A helper struct for expanding a subgraph into one per connect directive.

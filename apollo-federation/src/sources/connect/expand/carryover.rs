@@ -443,8 +443,8 @@ mod tests {
 
     use super::carryover_directives;
     use crate::merge::merge_federation_subgraphs;
-    use crate::query_graph::extract_subgraphs_from_supergraph::extract_subgraphs_from_supergraph;
     use crate::schema::FederationSchema;
+    use crate::supergraph::extract_subgraphs_from_supergraph;
 
     #[test]
     fn test_carryover() {
