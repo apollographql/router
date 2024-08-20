@@ -720,3 +720,197 @@ fn defer_gets_stripped_out() {
     );
     assert_eq!(plan_one, plan_two)
 }
+
+#[test]
+fn test_merging_fetches_do_not_create_cycle_in_fetch_dependency_graph() {
+    // This is a test for ROUTER-546 (the second part).
+    let planner = planner!(
+        S: r#"
+          type Query {
+            start: T!
+          }
+
+          type T @key(fields: "id") {
+            id: String!
+          }
+          "#,
+        A: r#"
+          type T @key(fields: "id") {
+            id: String! @shareable
+            u: U! @shareable
+          }
+
+          type U @key(fields: "id") {
+            id: ID!
+            a: String! @shareable
+            b: String @shareable
+          }
+          "#,
+        B: r#"
+          type T @key(fields: "id") {
+            id: String! @external
+            u: U! @shareable
+          }
+
+          type U @key(fields: "id") {
+            id: ID!
+            a: String! @shareable
+            # Note: b is not here.
+          }
+
+          # This definition is necessary.
+          extend type W @key(fields: "id") {
+            id: ID @external
+          }
+          "#,
+        C: r#"
+          extend type U @key(fields: "id") {
+            id: ID! @external
+            a: String! @external
+            b: String @external
+            w: W @requires(fields: "a b")
+          }
+
+          type W @key(fields: "id") {
+            id: ID
+            y: Y
+            w1: Int
+            w2: Int
+            w3: Int
+            w4: Int
+            w5: Int
+          }
+
+          type Y {
+            y1: Int
+            y2: Int
+            y3: Int
+          }
+          "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            start {
+              u {
+                w {
+                  id
+                  w1
+                  w2
+                  w3
+                  w4
+                  w5
+                  y {
+                    y1
+                    y2
+                    y3
+                  }
+                }
+              }
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "S") {
+          {
+            start {
+              __typename
+              id
+            }
+          }
+        },
+        Parallel {
+          Sequence {
+            Flatten(path: "start") {
+              Fetch(service: "B") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    u {
+                      __typename
+                      id
+                    }
+                  }
+                }
+              },
+            },
+            Flatten(path: "start.u") {
+              Fetch(service: "A") {
+                {
+                  ... on U {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on U {
+                    b
+                    a
+                  }
+                }
+              },
+            },
+          },
+          Flatten(path: "start") {
+            Fetch(service: "A") {
+              {
+                ... on T {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on T {
+                  u {
+                    __typename
+                    id
+                    b
+                    a
+                  }
+                }
+              }
+            },
+          },
+        },
+        Flatten(path: "start.u") {
+          Fetch(service: "C") {
+            {
+              ... on U {
+                __typename
+                a
+                b
+                id
+              }
+            } =>
+            {
+              ... on U {
+                w {
+                  y {
+                    y1
+                    y2
+                    y3
+                  }
+                  id
+                  w1
+                  w2
+                  w3
+                  w4
+                  w5
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}

@@ -137,6 +137,16 @@ impl PlannerMode {
                     "expected Rust QP instance for `experimental_query_planner_mode: both`",
                 ),
             },
+            QueryPlannerMode::BothBestEffort => {
+                if let Some(rust) = rust_planner {
+                    Self::Both {
+                        js: Self::js(&schema.raw_sdl, configuration, old_planner).await?,
+                        rust,
+                    }
+                } else {
+                    Self::Js(Self::js(&schema.raw_sdl, configuration, old_planner).await?)
+                }
+            }
         })
     }
 
@@ -149,6 +159,16 @@ impl PlannerMode {
             QueryPlannerMode::New | QueryPlannerMode::Both => {
                 Ok(Some(Self::rust(schema, configuration)?))
             }
+            QueryPlannerMode::BothBestEffort => match Self::rust(schema, configuration) {
+                Ok(planner) => Ok(Some(planner)),
+                Err(error) => {
+                    tracing::warn!(
+                        "Failed to initialize the new query planner, \
+                         falling back to legacy: {error}"
+                    );
+                    Ok(None)
+                }
+            },
         }
     }
 
@@ -162,7 +182,7 @@ impl PlannerMode {
                 .reuse_query_fragments
                 .unwrap_or(true),
             subgraph_graphql_validation: false,
-            generate_query_fragments: false,
+            generate_query_fragments: configuration.supergraph.generate_query_fragments,
             incremental_delivery:
                 apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig {
                     enable_defer: configuration.supergraph.defer_support,
