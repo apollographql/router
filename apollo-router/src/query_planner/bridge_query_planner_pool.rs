@@ -11,6 +11,7 @@ use async_channel::Sender;
 use futures::future::BoxFuture;
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry::metrics::ObservableGauge;
+use opentelemetry::metrics::Unit;
 use opentelemetry_api::metrics::Meter;
 use router_bridge::planner::Planner;
 use tokio::sync::oneshot;
@@ -130,6 +131,7 @@ impl BridgeQueryPlannerPool {
         let meter = meter_provider().meter("apollo/router");
         let pool_size_gauge = meter
             .u64_observable_gauge("apollo.router.query_planning.queued")
+            .with_description("Number of queries waiting to be planned")
             .with_callback(move |m| m.observe(sender_for_gauge.len() as u64, &[]))
             .init();
 
@@ -165,6 +167,7 @@ impl BridgeQueryPlannerPool {
         let heap_used_gauge = meter
             .u64_observable_gauge("apollo.router.v8.heap.used")
             .with_description("V8 heap used, in bytes")
+            .with_unit(Unit::new("bytes"))
             .with_callback(move |i| {
                 i.observe(current_heap_used_for_gauge.load(Ordering::SeqCst), &[])
             })
@@ -178,6 +181,7 @@ impl BridgeQueryPlannerPool {
         let heap_total_gauge = meter
             .u64_observable_gauge("apollo.router.v8.heap.total")
             .with_description("V8 heap total, in bytes")
+            .with_unit(Unit::new("bytes"))
             .with_callback(move |i| {
                 i.observe(current_heap_total_for_gauge.load(Ordering::SeqCst), &[])
             })
