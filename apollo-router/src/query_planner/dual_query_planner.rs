@@ -435,6 +435,10 @@ fn vec_matches_result_as_set<T>(
     Ok(())
 }
 
+fn option_to_string(name: Option<impl ToString>) -> String {
+    name.map_or_else(|| "<none>".to_string(), |name| name.to_string())
+}
+
 fn plan_node_matches(this: &PlanNode, other: &PlanNode) -> Result<(), MatchFailure> {
     match (this, other) {
         (PlanNode::Sequence { nodes: this }, PlanNode::Sequence { nodes: other }) => {
@@ -446,12 +450,17 @@ fn plan_node_matches(this: &PlanNode, other: &PlanNode) -> Result<(), MatchFailu
                 .map_err(|err| err.add_description("under Parallel node"))?;
         }
         (PlanNode::Fetch(this), PlanNode::Fetch(other)) => {
-            fetch_node_matches(this, other)
-                .map_err(|err| err.add_description("under Fetch node"))?;
+            fetch_node_matches(this, other).map_err(|err| {
+                err.add_description(&format!(
+                    "under Fetch node (operation name: {})",
+                    option_to_string(this.operation_name.as_ref())
+                ))
+            })?;
         }
         (PlanNode::Flatten(this), PlanNode::Flatten(other)) => {
-            flatten_node_matches(this, other)
-                .map_err(|err| err.add_description("under Flatten node"))?;
+            flatten_node_matches(this, other).map_err(|err| {
+                err.add_description(&format!("under Flatten node (path: {})", this.path))
+            })?;
         }
         (
             PlanNode::Defer { primary, deferred },
