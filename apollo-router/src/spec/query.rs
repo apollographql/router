@@ -605,20 +605,28 @@ impl Query {
 
                 match input {
                     Value::Object(ref mut input_object) => {
-                        if let Some(input_type) =
-                            input_object.get(TYPENAME).and_then(|val| val.as_str())
-                        {
-                            // If there is a __typename, make sure the pointed type is a valid type of the schema. Otherwise, something is wrong, and in case we might
-                            // be inadvertently leaking some data for an @inacessible type or something, nullify the whole object. However, do note that due to `@interfaceObject`,
-                            // some subgraph can have returned a __typename that is the name of an interface in the supergraph, and this is fine (that is, we should not
-                            // return such a __typename to the user, but as long as it's not returned, having it in the internal data is ok and sometimes expected).
-                            let Some(ExtendedType::Object(_) | ExtendedType::Interface(_)) =
-                                parameters.schema.types.get(input_type)
-                            else {
-                                parameters.nullified.push(Path::from_response_slice(path));
+                        if let Some(typename_val) = input_object.get(TYPENAME) {
+                            if let Some(input_type) = typename_val.as_str() {
+                                // If there is a __typename, make sure the pointed type is a valid type of the schema. Otherwise, something is wrong, and in case we might
+                                // be inadvertently leaking some data for an @inacessible type or something, nullify the whole object. However, do note that due to `@interfaceObject`,
+                                // some subgraph can have returned a __typename that is the name of an interface in the supergraph, and this is fine (that is, we should not
+                                // return such a __typename to the user, but as long as it's not returned, having it in the internal data is ok and sometimes expected).
+                                let Some(ExtendedType::Object(_) | ExtendedType::Interface(_)) =
+                                    parameters.schema.types.get(input_type)
+                                else {
+                                    parameters.nullified.push(Path::from_response_slice(path));
+                                    *output = Value::Null;
+                                    return Ok(());
+                                };
+                            } else {
+                                parameters.validation_errors.push(Error {
+                                    message: format!("Invalid non-string value {typename_val} for __typename at {path:?}"),
+                                    path: Some(Path::from_response_slice(path)),
+                                    ..Error::default()
+                                });
                                 *output = Value::Null;
                                 return Ok(());
-                            };
+                            }
                         }
 
                         if output.is_null() {
