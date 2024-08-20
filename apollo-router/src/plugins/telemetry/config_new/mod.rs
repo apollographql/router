@@ -87,7 +87,7 @@ impl From<EventOn> for Stage {
     }
 }
 
-pub(crate) trait Selector {
+pub(crate) trait Selector: std::fmt::Debug {
     type Request;
     type Response;
     type EventResponse;

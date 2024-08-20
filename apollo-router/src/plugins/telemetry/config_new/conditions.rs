@@ -67,7 +67,7 @@ where
                     // Special condition for events
                     if let Some(Stage::Request) = &restricted_stage {
                         if !sel.is_active(Stage::Request) {
-                            return Err(String::from("can't compare a selector computed in another stage than 'request' because it won't be computed at all"));
+                            return Err(format!("selector {sel:?} is only valid for request stage, this log event will never trigger"));
                         }
                     }
                     Ok(())
@@ -75,8 +75,11 @@ where
                 (SelectorOrValue::Selector(sel1), SelectorOrValue::Selector(sel2)) => {
                     // Special condition for events
                     if let Some(Stage::Request) = &restricted_stage {
-                        if !sel1.is_active(Stage::Request) || !sel2.is_active(Stage::Request) {
-                            return Err(String::from("can't compare a selector computed in another stage than 'request' because it won't be computed at all"));
+                        if !sel1.is_active(Stage::Request) {
+                            return Err(format!("selector {sel1:?} is only valid for request stage, this log event will never trigger"));
+                        }
+                        if !sel2.is_active(Stage::Request) {
+                            return Err(format!("selector {sel2:?} is only valid for request stage, this log event will never trigger"));
                         }
                     }
                     Ok(())
@@ -88,7 +91,7 @@ where
                         if sel.is_active(stage) {
                             Ok(())
                         } else {
-                            Err(format!("the 'exists' condition use a selector applied at the wrong stage, this condition will be executed at the {} stage.", stage))
+                            Err(format!("the 'exists' condition use a selector applied at the wrong stage, this condition will be executed at the {} stage", stage))
                         }
                     },
                     None => Ok(())
@@ -581,6 +584,7 @@ mod test {
     use crate::plugins::telemetry::config_new::Stage;
     use crate::Context;
 
+    #[derive(Debug)]
     enum TestSelector {
         Req,
         Resp,
