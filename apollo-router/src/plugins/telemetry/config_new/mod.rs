@@ -17,6 +17,7 @@ use crate::Context;
 pub(crate) mod attributes;
 pub(crate) mod conditions;
 
+pub(crate) mod cache;
 mod conditional;
 pub(crate) mod cost;
 pub(crate) mod events;

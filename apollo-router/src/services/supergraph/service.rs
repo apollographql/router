@@ -801,7 +801,7 @@ impl PluggableSupergraphServiceBuilder {
             schema.clone(),
             subgraph_schemas,
             &configuration,
-            IndexMap::new(),
+            IndexMap::default(),
         )
         .await?;
 

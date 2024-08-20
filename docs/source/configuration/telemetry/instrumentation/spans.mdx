@@ -1,7 +1,7 @@
 ---
 title: Spans
 subtitle: Add router lifecycle context to traces
-description: Use spans to add contextual information from the Apollo Router to traces displayed by your application performance monitors (APM).
+description: Use spans to add contextual information from the Apollo GraphOS Router or Apollo Router Core to traces displayed by your application performance monitors (APM).
 ---
 
 import RouterServices from '../../../../shared/router-lifecycle-services.mdx';
@@ -33,15 +33,15 @@ telemetry:
 
 ### `attributes`
 
-Spans may have attributes attached to them from the Apollo Router pipeline. These attributes are used to filter and group spans in your APM.
+Spans may have attributes attached to them from the router pipeline. These attributes are used to filter and group spans in your APM.
 
 Attributes may be drawn from [standard attributes](./standard-attributes) or [selectors](./selectors). 
 
-<PremiumFeatureFeature>
+<PremiumFeature>
 
 Granular customization of attributes on spans requires a GraphOS [Dedicated or Enterprise plan](https://www.apollographql.com/pricing#observability).
 
-</PremiumFeatureFeature>
+</PremiumFeature>
 
 The attributes that are available depend on the service of the pipeline.
 

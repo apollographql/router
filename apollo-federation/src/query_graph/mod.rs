@@ -3,10 +3,10 @@ use std::fmt::Formatter;
 use std::hash::Hash;
 use std::sync::Arc;
 
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::NamedType;
 use apollo_compiler::Name;
-use indexmap::IndexMap;
-use indexmap::IndexSet;
 use petgraph::graph::DiGraph;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::EdgeReference;
@@ -630,7 +630,7 @@ impl QueryGraph {
                 composite_type_position.type_name().clone(),
                 key_value.fields,
             )?;
-            if !external_metadata.selects_any_external_field(&selection)? {
+            if !external_metadata.selects_any_external_field(&selection) {
                 return Ok(Some(selection));
             }
         }
@@ -759,10 +759,10 @@ impl QueryGraph {
                 let Ok(_): Result<CompositeTypeDefinitionPosition, _> =
                     tail_type_pos.clone().try_into()
                 else {
-                    return Ok(IndexSet::new());
+                    return Ok(IndexSet::default());
                 };
                 let schema = self.schema_by_source(source)?;
-                let mut new_possible_runtime_types = IndexSet::new();
+                let mut new_possible_runtime_types = IndexSet::default();
                 for possible_runtime_type in possible_runtime_types {
                     let field_pos =
                         possible_runtime_type.field(field_definition_position.field_name().clone());
@@ -801,7 +801,7 @@ impl QueryGraph {
                         "Unexpectedly encountered non-object root operation type.",
                     ));
                 };
-                Ok(IndexSet::from([tail_type_pos]))
+                Ok(IndexSet::from_iter([tail_type_pos]))
             }
             QueryGraphEdgeTransition::SubgraphEnteringTransition => {
                 let OutputTypeDefinitionPosition::Object(tail_type_pos) = tail_type_pos.clone()
@@ -810,7 +810,7 @@ impl QueryGraph {
                         "Unexpectedly encountered non-object root operation type.",
                     ));
                 };
-                Ok(IndexSet::from([tail_type_pos]))
+                Ok(IndexSet::from_iter([tail_type_pos]))
             }
             QueryGraphEdgeTransition::InterfaceObjectFakeDownCast { .. } => {
                 Ok(possible_runtime_types.clone())
@@ -857,7 +857,7 @@ impl QueryGraph {
             let selection = parse_field_set(schema, ty.name().clone(), value)?;
             let has_external = metadata
                 .external_metadata()
-                .selects_any_external_field(&selection)?;
+                .selects_any_external_field(&selection);
             if !has_external {
                 return Ok(Some(selection));
             }
