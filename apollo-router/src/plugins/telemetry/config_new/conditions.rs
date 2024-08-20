@@ -656,7 +656,10 @@ mod test {
         fn is_active(&self, stage: crate::plugins::telemetry::config_new::Stage) -> bool {
             match self {
                 Req => matches!(stage, Stage::Request),
-                Resp => matches!(stage, Stage::Response | Stage::ResponseEvent | Stage::ResponseField),
+                Resp => matches!(
+                    stage,
+                    Stage::Response | Stage::ResponseEvent | Stage::ResponseField
+                ),
                 Static(_) => true,
             }
         }
