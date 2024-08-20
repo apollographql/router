@@ -139,6 +139,9 @@ nu-ansi-term = "0.49"
 num-traits = "0.2.19"
 once_cell = "1.19.0"
 
+# Pin rowan to a version pre-MSRV bump. Remove if we update our rust-toolchain.
+rowan = "= 0.15.15"
+
 # Any package that starts with `opentelemetry` needs to be updated with care
 # because it is tightly intertwined with the `tracing` packages on account of
 # the `opentelemetry-tracing` package.
@@ -195,7 +198,7 @@ regex = "1.10.5"
 reqwest.workspace = true
 
 # note: this dependency should _always_ be pinned, prefix the version with an `=`
-router-bridge = "=0.5.27+v2.8.1"
+router-bridge = "=0.5.30+v2.8.3"
 
 rust-embed = { version = "8.4.0", features = ["include-exclude"] }
 rustls = "0.21.12"

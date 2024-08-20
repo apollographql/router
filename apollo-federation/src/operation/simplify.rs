@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use apollo_compiler::executable;
 use apollo_compiler::name;
-use apollo_compiler::Node;
 
 use super::runtime_types_intersect;
+use super::DirectiveList;
 use super::Field;
 use super::FieldData;
 use super::FieldSelection;
@@ -83,22 +83,18 @@ impl FieldSelection {
                 // sub-selection is empty. Which suggest something may be wrong with this part of the query
                 // intent, but the query was valid while keeping an empty sub-selection isn't. So in that
                 // case, we just add some "non-included" __typename field just to keep the query valid.
-                let directives =
-                    executable::DirectiveList(vec![Node::new(executable::Directive {
-                        name: name!("include"),
-                        arguments: vec![Node::new(executable::Argument {
-                            name: name!("if"),
-                            value: Node::new(executable::Value::Boolean(false)),
-                        })],
-                    })]);
+                let directives = DirectiveList::one(executable::Directive {
+                    name: name!("include"),
+                    arguments: vec![(name!("if"), false).into()],
+                });
                 let non_included_typename = Selection::from_field(
                     Field::new(FieldData {
                         schema: schema.clone(),
                         field_position: field_composite_type_position
                             .introspection_typename_field(),
                         alias: None,
-                        arguments: Arc::new(vec![]),
-                        directives: Arc::new(directives),
+                        arguments: Default::default(),
+                        directives,
                         sibling_typename: None,
                     }),
                     None,
@@ -224,14 +220,10 @@ impl InlineFragmentSelection {
                 // We should be able to rebase, or there is a bug, so error if that is the case.
                 // If we rebased successfully then we add "non-included" __typename field selection
                 // just to keep the query valid.
-                let directives =
-                    executable::DirectiveList(vec![Node::new(executable::Directive {
-                        name: name!("include"),
-                        arguments: vec![Node::new(executable::Argument {
-                            name: name!("if"),
-                            value: Node::new(executable::Value::Boolean(false)),
-                        })],
-                    })]);
+                let directives = DirectiveList::one(executable::Directive {
+                    name: name!("include"),
+                    arguments: vec![(name!("if"), false).into()],
+                });
                 let parent_typename_field = if let Some(condition) = this_condition {
                     condition.introspection_typename_field()
                 } else {
@@ -242,8 +234,8 @@ impl InlineFragmentSelection {
                         schema: schema.clone(),
                         field_position: parent_typename_field,
                         alias: None,
-                        arguments: Arc::new(vec![]),
-                        directives: Arc::new(directives),
+                        arguments: Default::default(),
+                        directives,
                         sibling_typename: None,
                     }),
                     None,

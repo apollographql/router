@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::iter;
 use std::ops::Deref;
@@ -14,7 +12,6 @@ use apollo_compiler::ast::Type;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
-use apollo_compiler::executable::DirectiveList;
 use apollo_compiler::executable::VariableDefinition;
 use apollo_compiler::name;
 use apollo_compiler::schema;
@@ -33,7 +30,9 @@ use super::query_planner::SubgraphOperationCompression;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::graphql_definition::DeferDirectiveArguments;
+use crate::operation::ArgumentList;
 use crate::operation::ContainmentOptions;
+use crate::operation::DirectiveList;
 use crate::operation::Field;
 use crate::operation::FieldData;
 use crate::operation::InlineFragment;
@@ -928,7 +927,7 @@ impl FetchDependencyGraph {
     /// edges. In RS implementation we first collect the edges and then remove them. This has a side
     /// effect that if we ever end up with a cycle in a graph (which is an invalid state), this method
     /// may result in infinite loop.
-    fn collect_redundant_edges(&self, node_index: NodeIndex, acc: &mut HashSet<EdgeIndex>) {
+    fn collect_redundant_edges(&self, node_index: NodeIndex, acc: &mut IndexSet<EdgeIndex>) {
         let mut stack = vec![];
         for start_index in self.children_of(node_index) {
             stack.extend(self.children_of(start_index));
@@ -946,7 +945,7 @@ impl FetchDependencyGraph {
     /// If any deeply nested child of this node has an edge to any direct child of this node, the
     /// direct child is removed, as we know it is also reachable through the deeply nested route.
     fn remove_redundant_edges(&mut self, node_index: NodeIndex) {
-        let mut redundant_edges = HashSet::new();
+        let mut redundant_edges = IndexSet::default();
         self.collect_redundant_edges(node_index, &mut redundant_edges);
 
         if !redundant_edges.is_empty() {
@@ -1005,7 +1004,7 @@ impl FetchDependencyGraph {
 
         // Two phases for mutability reasons: first all redundant edges coming out of all nodes are
         // collected and then they are all removed.
-        let mut redundant_edges = HashSet::new();
+        let mut redundant_edges = IndexSet::default();
         for node_index in self.graph.node_indices() {
             self.collect_redundant_edges(node_index, &mut redundant_edges);
         }
@@ -1063,7 +1062,7 @@ impl FetchDependencyGraph {
             node.selection_set.selection_set.selections.is_empty()
                 && !self.is_root_node(node_index, node)
         };
-        let to_remove: HashSet<NodeIndex> = self
+        let to_remove: IndexSet<NodeIndex> = self
             .graph
             .node_references()
             .filter_map(|(node_index, node)| is_removable(node_index, node).then_some(node_index))
@@ -1302,7 +1301,7 @@ impl FetchDependencyGraph {
                         .any(|input| input.contains(selection)));
                 };
 
-                let impl_type_names: HashSet<_> = self
+                let impl_type_names: IndexSet<_> = self
                     .supergraph_schema
                     .possible_runtime_types(condition_in_supergraph.clone().into())?
                     .iter()
@@ -1769,7 +1768,7 @@ impl FetchDependencyGraph {
         let handled_defers_in_current = defers_in_current
             .iter()
             .map(|info| info.label.clone())
-            .collect::<HashSet<_>>();
+            .collect::<IndexSet<_>>();
         let unhandled_defer_nodes = all_deferred_nodes
             .keys()
             .filter(|label| !handled_defers_in_current.contains(*label))
@@ -2106,7 +2105,7 @@ impl FetchDependencyGraph {
         merged_id: NodeIndex,
         path_in_this: &OpPath,
     ) {
-        let mut new_parent_relations = HashMap::new();
+        let mut new_parent_relations = IndexMap::default();
         for child_id in self.children_of(merged_id) {
             // This could already be a child of `this`. Typically, we can have case where we have:
             //     1
@@ -2409,7 +2408,7 @@ impl FetchDependencyGraphNode {
         query_graph: &QueryGraph,
         handled_conditions: &Conditions,
         variable_definitions: &[Node<VariableDefinition>],
-        operation_directives: &Arc<DirectiveList>,
+        operation_directives: &DirectiveList,
         operation_compression: &mut SubgraphOperationCompression,
         operation_name: Option<Name>,
     ) -> Result<Option<super::PlanNode>, FederationError> {
@@ -2710,7 +2709,7 @@ fn operation_for_entities_fetch(
     subgraph_schema: &ValidFederationSchema,
     selection_set: SelectionSet,
     mut variable_definitions: Vec<Node<VariableDefinition>>,
-    operation_directives: &Arc<DirectiveList>,
+    operation_directives: &DirectiveList,
     operation_name: &Option<Name>,
 ) -> Result<Operation, FederationError> {
     variable_definitions.insert(0, representations_variable_definition(subgraph_schema)?);
@@ -2748,11 +2747,10 @@ fn operation_for_entities_fetch(
             schema: subgraph_schema.clone(),
             field_position: entities,
             alias: None,
-            arguments: Arc::new(vec![executable::Argument {
-                name: FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME,
-                value: executable::Value::Variable(FEDERATION_REPRESENTATIONS_VAR_NAME).into(),
-            }
-            .into()]),
+            arguments: ArgumentList::one((
+                FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME,
+                executable::Value::Variable(FEDERATION_REPRESENTATIONS_VAR_NAME),
+            )),
             directives: Default::default(),
             sibling_typename: None,
         })),
@@ -2777,7 +2775,7 @@ fn operation_for_entities_fetch(
         root_kind: SchemaRootDefinitionKind::Query,
         name: operation_name.clone(),
         variables: Arc::new(variable_definitions),
-        directives: Arc::clone(operation_directives),
+        directives: operation_directives.clone(),
         selection_set,
         named_fragments: Default::default(),
     })
@@ -2788,7 +2786,7 @@ fn operation_for_query_fetch(
     root_kind: SchemaRootDefinitionKind,
     selection_set: SelectionSet,
     variable_definitions: Vec<Node<VariableDefinition>>,
-    operation_directives: &Arc<DirectiveList>,
+    operation_directives: &DirectiveList,
     operation_name: &Option<Name>,
 ) -> Result<Operation, FederationError> {
     Ok(Operation {
@@ -2796,7 +2794,7 @@ fn operation_for_query_fetch(
         root_kind,
         name: operation_name.clone(),
         variables: Arc::new(variable_definitions),
-        directives: Arc::clone(operation_directives),
+        directives: operation_directives.clone(),
         selection_set,
         named_fragments: Default::default(),
     })
@@ -3717,7 +3715,7 @@ fn wrap_selection_with_type_and_conditions<T>(
                 schema: supergraph_schema.clone(),
                 parent_type_position: wrapping_type.clone(),
                 type_condition_position: Some(type_condition.clone()),
-                directives: Arc::new([directive].into_iter().collect()),
+                directives: [directive].into_iter().collect(),
                 selection_id: SelectionId::new(),
             }),
             acc,

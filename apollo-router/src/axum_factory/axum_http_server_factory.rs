@@ -303,6 +303,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 main_listener,
                 actual_main_listen_address.clone(),
                 all_routers.main.1,
+                true,
                 all_connections_stopped_sender.clone(),
             );
 
@@ -341,6 +342,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                             listener,
                             listen_addr.clone(),
                             router,
+                            false,
                             all_connections_stopped_sender.clone(),
                         );
                         (

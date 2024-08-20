@@ -1,13 +1,13 @@
-use std::collections::HashSet;
 use std::sync::Arc;
 
-use apollo_compiler::executable::DirectiveList;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::VariableDefinition;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 
 use super::query_planner::SubgraphOperationCompression;
 use crate::error::FederationError;
+use crate::operation::DirectiveList;
 use crate::operation::SelectionSet;
 use crate::query_graph::QueryGraph;
 use crate::query_plan::conditions::Conditions;
@@ -47,10 +47,10 @@ const PIPELINING_COST: QueryPlanCost = 100.0;
 
 pub(crate) struct FetchDependencyGraphToQueryPlanProcessor {
     variable_definitions: Arc<Vec<Node<VariableDefinition>>>,
-    operation_directives: Arc<DirectiveList>,
+    operation_directives: DirectiveList,
     operation_compression: SubgraphOperationCompression,
     operation_name: Option<Name>,
-    assigned_defer_labels: Option<HashSet<String>>,
+    assigned_defer_labels: Option<IndexSet<String>>,
     counter: u32,
 }
 
@@ -245,10 +245,10 @@ fn sequence_cost(values: impl IntoIterator<Item = QueryPlanCost>) -> QueryPlanCo
 impl FetchDependencyGraphToQueryPlanProcessor {
     pub(crate) fn new(
         variable_definitions: Arc<Vec<Node<VariableDefinition>>>,
-        operation_directives: Arc<DirectiveList>,
+        operation_directives: DirectiveList,
         operation_compression: SubgraphOperationCompression,
         operation_name: Option<Name>,
-        assigned_defer_labels: Option<HashSet<String>>,
+        assigned_defer_labels: Option<IndexSet<String>>,
     ) -> Self {
         Self {
             variable_definitions,
