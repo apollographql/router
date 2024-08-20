@@ -11,7 +11,6 @@ use std::sync::Arc;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
-use apollo_compiler::executable::DirectiveList;
 use itertools::Itertools;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
@@ -30,6 +29,7 @@ use crate::link::graphql_definition::BooleanOrVariable;
 use crate::link::graphql_definition::DeferDirectiveArguments;
 use crate::link::graphql_definition::OperationConditional;
 use crate::link::graphql_definition::OperationConditionalKind;
+use crate::operation::DirectiveList;
 use crate::operation::Field;
 use crate::operation::FieldData;
 use crate::operation::HasSelectionKey;
@@ -310,7 +310,7 @@ impl HasSelectionKey for OpPathElement {
 }
 
 impl OpPathElement {
-    pub(crate) fn directives(&self) -> &Arc<DirectiveList> {
+    pub(crate) fn directives(&self) -> &DirectiveList {
         match self {
             OpPathElement::Field(field) => &field.directives,
             OpPathElement::InlineFragment(inline_fragment) => &inline_fragment.directives,
@@ -427,6 +427,7 @@ impl OpPathElement {
         match self {
             Self::Field(_) => Some(self.clone()), // unchanged
             Self::InlineFragment(inline_fragment) => {
+                // TODO(@goto-bus-stop): is this not exactly the wrong way around?
                 let updated_directives: DirectiveList = inline_fragment
                     .directives
                     .get_all("defer")
@@ -3677,18 +3678,16 @@ impl OpPath {
     }
 
     pub(crate) fn conditional_directives(&self) -> DirectiveList {
-        DirectiveList(
-            self.0
-                .iter()
-                .flat_map(|path_element| {
-                    path_element
-                        .directives()
-                        .iter()
-                        .filter(|d| d.name == "include" || d.name == "skip")
-                })
-                .cloned()
-                .collect(),
-        )
+        self.0
+            .iter()
+            .flat_map(|path_element| {
+                path_element
+                    .directives()
+                    .iter()
+                    .filter(|d| d.name == "include" || d.name == "skip")
+            })
+            .cloned()
+            .collect()
     }
 
     /// Filter any fragment element in the provided path whose type condition does not exist in the provided schema.
@@ -3837,7 +3836,6 @@ fn is_useless_followup_element(
 mod tests {
     use std::sync::Arc;
 
-    use apollo_compiler::executable::DirectiveList;
     use apollo_compiler::Name;
     use apollo_compiler::Schema;
     use petgraph::stable_graph::EdgeIndex;
@@ -3850,7 +3848,6 @@ mod tests {
     use crate::query_graph::graph_path::OpGraphPath;
     use crate::query_graph::graph_path::OpGraphPathTrigger;
     use crate::query_graph::graph_path::OpPathElement;
-    use crate::schema::position::FieldDefinitionPosition;
     use crate::schema::position::ObjectFieldDefinitionPosition;
     use crate::schema::ValidFederationSchema;
 
@@ -3881,14 +3878,7 @@ mod tests {
             type_name: Name::new("T").unwrap(),
             field_name: Name::new("t").unwrap(),
         };
-        let data = FieldData {
-            schema: schema.clone(),
-            field_position: FieldDefinitionPosition::Object(pos),
-            alias: None,
-            arguments: Arc::new(Vec::new()),
-            directives: Arc::new(DirectiveList::new()),
-            sibling_typename: None,
-        };
+        let data = FieldData::from_position(&schema, pos.into());
         let trigger = OpGraphPathTrigger::OpPathElement(OpPathElement::Field(Field::new(data)));
         let path = path
             .add(
@@ -3906,14 +3896,7 @@ mod tests {
             type_name: Name::new("ID").unwrap(),
             field_name: Name::new("id").unwrap(),
         };
-        let data = FieldData {
-            schema,
-            field_position: FieldDefinitionPosition::Object(pos),
-            alias: None,
-            arguments: Arc::new(Vec::new()),
-            directives: Arc::new(DirectiveList::new()),
-            sibling_typename: None,
-        };
+        let data = FieldData::from_position(&schema, pos.into());
         let trigger = OpGraphPathTrigger::OpPathElement(OpPathElement::Field(Field::new(data)));
         let path = path
             .add(

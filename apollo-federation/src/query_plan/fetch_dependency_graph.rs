@@ -12,7 +12,6 @@ use apollo_compiler::ast::Type;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
-use apollo_compiler::executable::DirectiveList;
 use apollo_compiler::executable::VariableDefinition;
 use apollo_compiler::name;
 use apollo_compiler::schema;
@@ -31,7 +30,9 @@ use super::query_planner::SubgraphOperationCompression;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::graphql_definition::DeferDirectiveArguments;
+use crate::operation::ArgumentList;
 use crate::operation::ContainmentOptions;
+use crate::operation::DirectiveList;
 use crate::operation::Field;
 use crate::operation::FieldData;
 use crate::operation::InlineFragment;
@@ -2407,7 +2408,7 @@ impl FetchDependencyGraphNode {
         query_graph: &QueryGraph,
         handled_conditions: &Conditions,
         variable_definitions: &[Node<VariableDefinition>],
-        operation_directives: &Arc<DirectiveList>,
+        operation_directives: &DirectiveList,
         operation_compression: &mut SubgraphOperationCompression,
         operation_name: Option<Name>,
     ) -> Result<Option<super::PlanNode>, FederationError> {
@@ -2708,7 +2709,7 @@ fn operation_for_entities_fetch(
     subgraph_schema: &ValidFederationSchema,
     selection_set: SelectionSet,
     mut variable_definitions: Vec<Node<VariableDefinition>>,
-    operation_directives: &Arc<DirectiveList>,
+    operation_directives: &DirectiveList,
     operation_name: &Option<Name>,
 ) -> Result<Operation, FederationError> {
     variable_definitions.insert(0, representations_variable_definition(subgraph_schema)?);
@@ -2746,11 +2747,10 @@ fn operation_for_entities_fetch(
             schema: subgraph_schema.clone(),
             field_position: entities,
             alias: None,
-            arguments: Arc::new(vec![executable::Argument {
-                name: FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME,
-                value: executable::Value::Variable(FEDERATION_REPRESENTATIONS_VAR_NAME).into(),
-            }
-            .into()]),
+            arguments: ArgumentList::one((
+                FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME,
+                executable::Value::Variable(FEDERATION_REPRESENTATIONS_VAR_NAME),
+            )),
             directives: Default::default(),
             sibling_typename: None,
         })),
@@ -2775,7 +2775,7 @@ fn operation_for_entities_fetch(
         root_kind: SchemaRootDefinitionKind::Query,
         name: operation_name.clone(),
         variables: Arc::new(variable_definitions),
-        directives: Arc::clone(operation_directives),
+        directives: operation_directives.clone(),
         selection_set,
         named_fragments: Default::default(),
     })
@@ -2786,7 +2786,7 @@ fn operation_for_query_fetch(
     root_kind: SchemaRootDefinitionKind,
     selection_set: SelectionSet,
     variable_definitions: Vec<Node<VariableDefinition>>,
-    operation_directives: &Arc<DirectiveList>,
+    operation_directives: &DirectiveList,
     operation_name: &Option<Name>,
 ) -> Result<Operation, FederationError> {
     Ok(Operation {
@@ -2794,7 +2794,7 @@ fn operation_for_query_fetch(
         root_kind,
         name: operation_name.clone(),
         variables: Arc::new(variable_definitions),
-        directives: Arc::clone(operation_directives),
+        directives: operation_directives.clone(),
         selection_set,
         named_fragments: Default::default(),
     })
@@ -3715,7 +3715,7 @@ fn wrap_selection_with_type_and_conditions<T>(
                 schema: supergraph_schema.clone(),
                 parent_type_position: wrapping_type.clone(),
                 type_condition_position: Some(type_condition.clone()),
-                directives: Arc::new([directive].into_iter().collect()),
+                directives: [directive].into_iter().collect(),
                 selection_id: SelectionId::new(),
             }),
             acc,
