@@ -132,6 +132,7 @@ impl BridgeQueryPlannerPool {
         let pool_size_gauge = meter
             .u64_observable_gauge("apollo.router.query_planning.queued")
             .with_description("Number of queries waiting to be planned")
+            .with_unit(Unit::new("query"))
             .with_callback(move |m| m.observe(sender_for_gauge.len() as u64, &[]))
             .init();
 
