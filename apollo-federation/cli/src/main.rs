@@ -345,12 +345,19 @@ fn cmd_plan_correctness(
         ExecutableDocument::parse_and_validate(supergraph.schema.schema(), query, query_path)?;
     let config = QueryPlannerConfig::from(planner);
 
-    apollo_federation::simulation::simulate_supergraph_query(&supergraph, &query_doc, None)?;
+    println!("supergraph paths");
+    println!("================");
+    let supergraph_paths =
+        apollo_federation::simulation::simulate_supergraph_query(&supergraph, &query_doc, None)?;
 
     let planner = QueryPlanner::new(&supergraph, config)?;
     let plan = planner.build_query_plan(&query_doc, None)?;
 
-    apollo_federation::simulation::simulate_query_plan(&supergraph, &plan)?;
+    println!("plan paths");
+    println!("==========");
+    let plan_paths = apollo_federation::simulation::simulate_query_plan(&supergraph, &plan)?;
+
+    apollo_federation::simulation::compare_paths(&supergraph_paths, &plan_paths)?;
 
     Ok(())
 }

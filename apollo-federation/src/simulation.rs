@@ -1,19 +1,23 @@
 use std::sync::Arc;
 
-use apollo_compiler::ExecutableDocument;
-use apollo_compiler::Name;
+use apollo_compiler::executable::Directive;
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
-use apollo_compiler::executable::Directive;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::Value;
 use apollo_compiler::validation::Valid;
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Name;
 
 use crate::error::FederationError;
+use crate::query_plan::FetchDataPathElement;
+use crate::query_plan::FetchNode;
+use crate::query_plan::PlanNode;
+use crate::query_plan::QueryPlan;
+use crate::query_plan::TopLevelPlanNode;
 use crate::Supergraph;
-use crate::query_plan::{QueryPlan, TopLevelPlanNode, FetchNode, PlanNode, FetchDataPathElement};
 
 // Questions that we may want to answer for correctness testing.
 // - Does a query plan produce the same response shape as the supergraph query?
@@ -32,15 +36,15 @@ use crate::query_plan::{QueryPlan, TopLevelPlanNode, FetchNode, PlanNode, FetchD
 //   Could also expand each interface selection to all its concrete types. Note some subgraphs may
 //   not have all concrete types.
 
-#[derive(Clone)]
-struct SupergraphQueryElement {
+#[derive(Debug, Clone)]
+pub struct SupergraphQueryElement {
     path: FetchDataPathElement,
     parent_type: Name,
     in_subgraphs: Vec<Name>,
 }
 
-#[derive(Clone)]
-struct SubgraphQueryElement {
+#[derive(Debug, Clone)]
+pub struct SubgraphQueryElement {
     path: FetchDataPathElement,
     parent_type: Name,
     in_subgraph: Name,
@@ -54,7 +58,9 @@ struct SupergraphQueryVisitor<'a> {
 
 // directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 fn join_field_is_queryable(directive: &Directive) -> bool {
-    let is_external = directive.argument_by_name("external").is_some_and(|arg| **arg == Value::Boolean(true));
+    let is_external = directive
+        .argument_by_name("external")
+        .is_some_and(|arg| **arg == Value::Boolean(true));
     !is_external
 }
 
@@ -66,15 +72,20 @@ impl SupergraphQueryVisitor<'_> {
         field: &Field,
     ) -> Result<(), FederationError> {
         let schema = self.supergraph.schema.schema();
-        let definition = schema.type_field(parent_type.name(), &field.name).expect("invalid query");
+        let definition = schema
+            .type_field(parent_type.name(), &field.name)
+            .expect("invalid query");
 
-        let in_subgraphs = definition.directives.get_all("join__field")
+        let in_subgraphs = definition
+            .directives
+            .get_all("join__field")
             .filter(|directive| join_field_is_queryable(directive))
             .filter_map(|directive| directive.argument_by_name("graph"))
             .filter_map(|value| value.as_enum().cloned())
             .collect::<Vec<_>>();
         let in_subgraphs = if in_subgraphs.is_empty() {
-            parent_type.directives()
+            parent_type
+                .directives()
                 .get_all("join__type")
                 .filter_map(|directive| directive.argument_by_name("graph"))
                 .filter_map(|value| value.as_enum().cloned())
@@ -134,19 +145,26 @@ impl SupergraphQueryVisitor<'_> {
             match selection {
                 Selection::Field(field) => {
                     self.visit_field(path, parent_type, field)?;
-                },
+                }
                 Selection::InlineFragment(frag) => {
                     let type_condition = match &frag.type_condition {
                         Some(name) => schema.types.get(name).expect("invalid query"),
                         None => parent_type,
                     };
                     self.visit_selection_set(path, type_condition, &frag.selection_set)?;
-                },
+                }
                 Selection::FragmentSpread(frag) => {
-                    let frag = self.document.fragments.get(&frag.fragment_name).expect("invalid query");
-                    let type_condition =  schema.types.get(frag.type_condition()).expect("invalid query");
+                    let frag = self
+                        .document
+                        .fragments
+                        .get(&frag.fragment_name)
+                        .expect("invalid query");
+                    let type_condition = schema
+                        .types
+                        .get(frag.type_condition())
+                        .expect("invalid query");
                     self.visit_selection_set(path, type_condition, &frag.selection_set)?;
-                },
+                }
             }
         }
 
@@ -158,7 +176,7 @@ pub fn simulate_supergraph_query(
     supergraph: &Supergraph,
     operation_document: &Valid<ExecutableDocument>,
     operation_name: Option<&str>,
-) -> Result<(), FederationError> {
+) -> Result<Vec<Vec<SupergraphQueryElement>>, FederationError> {
     let Ok(operation) = operation_document.operations.get(operation_name) else {
         return Err(FederationError::internal("operation name not found"));
     };
@@ -179,17 +197,26 @@ pub fn simulate_supergraph_query(
 
     visitor.visit_selection_set(&[], root_type, &operation.selection_set)?;
 
-    for path in visitor.paths {
-        for (index, element) in path.into_iter().enumerate() {
+    for path in &visitor.paths {
+        for (index, element) in path.iter().enumerate() {
             if index > 0 {
                 print!(" -> ");
             }
-            print!("{} ({})", element.path, element.in_subgraphs.iter().map(ToString::to_string).collect::<Vec<_>>().join(", "));
+            print!(
+                "{} ({})",
+                element.path,
+                element
+                    .in_subgraphs
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
         }
         println!();
     }
 
-    Ok(())
+    Ok(visitor.paths)
 }
 
 struct QueryPlanVisitor<'a> {
@@ -202,47 +229,43 @@ impl QueryPlanVisitor<'_> {
         match node {
             TopLevelPlanNode::Fetch(fetch) => {
                 self.visit_fetch_node(&[], fetch)?;
-            },
+            }
             TopLevelPlanNode::Sequence(node) => {
                 for node in &node.nodes {
                     self.visit_node(&[], node)?;
                 }
-            },
+            }
             TopLevelPlanNode::Parallel(node) => {
                 for node in &node.nodes {
                     self.visit_node(&[], node)?;
                 }
-            },
+            }
             _ => todo!(),
         }
         Ok(())
     }
 
-    fn visit_node(&mut self, path: &[SubgraphQueryElement], node: &PlanNode) -> Result<(), FederationError> {
+    fn visit_node(
+        &mut self,
+        path: &[SubgraphQueryElement],
+        node: &PlanNode,
+    ) -> Result<(), FederationError> {
         match node {
             PlanNode::Fetch(fetch) => {
                 self.visit_fetch_node(path, fetch)?;
-            },
+            }
             PlanNode::Sequence(node) => {
                 for node in &node.nodes {
                     self.visit_node(path, node)?;
                 }
-            },
+            }
             PlanNode::Parallel(node) => {
                 for node in &node.nodes {
                     self.visit_node(path, node)?;
                 }
-            },
+            }
             PlanNode::Flatten(node) => {
-                // TODO(@goto-bus-stop): this needs to be matched to an existing path.
-                let path = node.path
-                    .iter()
-                    .map(|element| SubgraphQueryElement {
-                        path: element.clone(),
-                        parent_type: Name::new_static_unchecked("(Unknown)"),
-                        in_subgraph: Name::new_static_unchecked("(UNKNOWN)"),
-                    })
-                    .collect::<Vec<_>>();
+                let path = self.map_response_path(&node.path);
                 self.visit_node(&path, &node.node)?;
             }
             _ => todo!(),
@@ -250,8 +273,33 @@ impl QueryPlanVisitor<'_> {
         Ok(())
     }
 
+    fn map_response_path(&self, path: &[FetchDataPathElement]) -> Vec<SubgraphQueryElement> {
+        self.paths
+            .iter()
+            .filter(|existing_path| existing_path.len() >= path.len())
+            .find_map(|existing_path| {
+                let matches = path
+                    .iter()
+                    .filter(|element| matches!(element, FetchDataPathElement::Key(_)))
+                    .enumerate()
+                    .all(|(index, element)| {
+                        let existing_element = &existing_path[index];
+                        existing_element.path == *element
+                    });
+                matches.then(|| {
+                    let len = path
+                        .iter()
+                        .filter(|element| matches!(element, FetchDataPathElement::Key(_)))
+                        .count();
+                    &existing_path[0..len]
+                })
+            })
+            .unwrap()
+            .to_vec()
+    }
+
     fn visit_selection_set(
-        &mut self, 
+        &mut self,
         path: &[SubgraphQueryElement],
         in_subgraph: &Name,
         parent_type: &ExtendedType,
@@ -264,46 +312,84 @@ impl QueryPlanVisitor<'_> {
                 Selection::Field(field) => {
                     let mut path = path.to_vec();
                     path.push(SubgraphQueryElement {
-                        path: FetchDataPathElement::Key(field.name.clone()),
+                        path: FetchDataPathElement::Key(field.response_key().clone()),
                         parent_type: parent_type.name().clone(),
                         in_subgraph: in_subgraph.clone(),
                     });
 
                     if !field.selection_set.is_empty() {
-                        let Ok(definition) = schema.type_field(parent_type.name(), &field.name) else {
-                            return Err(FederationError::internal(format!("Invalid subgraph query: field {}.{} does not exist in subgraph {}", parent_type.name(), field.name, in_subgraph)));
+                        let Ok(definition) = schema.type_field(parent_type.name(), &field.name)
+                        else {
+                            return Err(FederationError::internal(format!(
+                                "Invalid subgraph query: field {}.{} does not exist in subgraph {}",
+                                parent_type.name(),
+                                field.name,
+                                in_subgraph
+                            )));
                         };
                         let output_type = schema
                             .types
                             .get(definition.ty.inner_named_type())
                             .expect("invalid schema");
-                        self.visit_selection_set(&path, in_subgraph, output_type, document, &field.selection_set)?;
+                        self.visit_selection_set(
+                            &path,
+                            in_subgraph,
+                            output_type,
+                            document,
+                            &field.selection_set,
+                        )?;
                     } else {
                         self.paths.push(path);
                     }
-                },
+                }
                 Selection::InlineFragment(frag) => {
                     let type_condition = match &frag.type_condition {
                         Some(name) => schema.types.get(name).expect("invalid query"),
                         None => parent_type,
                     };
-                    self.visit_selection_set(path, in_subgraph, type_condition, document, &frag.selection_set)?;
-                },
+                    self.visit_selection_set(
+                        path,
+                        in_subgraph,
+                        type_condition,
+                        document,
+                        &frag.selection_set,
+                    )?;
+                }
                 Selection::FragmentSpread(frag) => {
-                    let frag = document.fragments.get(&frag.fragment_name).expect("invalid query");
-                    let type_condition =  schema.types.get(frag.type_condition()).expect("invalid query");
-                    self.visit_selection_set(path, in_subgraph, type_condition, document, &frag.selection_set)?;
-                },
+                    let frag = document
+                        .fragments
+                        .get(&frag.fragment_name)
+                        .expect("invalid query");
+                    let type_condition = schema
+                        .types
+                        .get(frag.type_condition())
+                        .expect("invalid query");
+                    self.visit_selection_set(
+                        path,
+                        in_subgraph,
+                        type_condition,
+                        document,
+                        &frag.selection_set,
+                    )?;
+                }
             }
         }
 
         Ok(())
     }
 
-    fn visit_fetch_node(&mut self, path: &[SubgraphQueryElement], node: &FetchNode) -> Result<(), FederationError> {
+    fn visit_fetch_node(
+        &mut self,
+        path: &[SubgraphQueryElement],
+        node: &FetchNode,
+    ) -> Result<(), FederationError> {
         // TODO(@goto-bus-stop): use real translation
-        let in_subgraph = Name::new_unchecked(&node.subgraph_name.to_uppercase());
-        let Ok(operation) = node.operation_document.operations.get(node.operation_name.as_deref()) else {
+        let in_subgraph = Name::new_unchecked(&node.subgraph_name.to_uppercase().replace("-", "_"));
+        let Ok(operation) = node
+            .operation_document
+            .operations
+            .get(node.operation_name.as_deref())
+        else {
             return Err(FederationError::internal("operation name not found"));
         };
 
@@ -315,44 +401,105 @@ impl QueryPlanVisitor<'_> {
             return Err(FederationError::internal("root operation type not found"));
         };
 
+        // For entity queries, we want to mount the selection for each entity type onto `path`,
+        // so we can in essence skip into the `_entities` field. For example if a fetch node is
+        // flattened at `.user`, and it selects `{ _entities { ... on User { username } } }`,
+        // our generated path should be `.user.username`.
         let entities = operation
             .selection_set
             .selections
             .iter()
-            .find_map(|selection| selection.as_field().filter(|field| field.name == "_entities"));
+            .find_map(|selection| {
+                selection
+                    .as_field()
+                    .filter(|field| field.name == "_entities")
+            });
         if let Some(entities) = entities {
             for selection in &entities.selection_set.selections {
                 let Selection::InlineFragment(frag) = selection else {
                     return Err(FederationError::internal("Malformed entities query"));
                 };
 
-                let type_condition = frag.type_condition.as_ref().expect("malformed entities query");
+                let type_condition = frag
+                    .type_condition
+                    .as_ref()
+                    .expect("malformed entities query");
                 let type_condition = schema.types.get(type_condition).expect("invalid query");
-                self.visit_selection_set(path, &in_subgraph, type_condition, &node.operation_document, &frag.selection_set)?;
+                self.visit_selection_set(
+                    path,
+                    &in_subgraph,
+                    type_condition,
+                    &node.operation_document,
+                    &frag.selection_set,
+                )?;
             }
         } else {
-            self.visit_selection_set(path, &in_subgraph, root_type, &node.operation_document, &operation.selection_set)?;
+            self.visit_selection_set(
+                path,
+                &in_subgraph,
+                root_type,
+                &node.operation_document,
+                &operation.selection_set,
+            )?;
         }
 
         Ok(())
     }
 }
 
-pub fn simulate_query_plan(supergraph: &Supergraph, plan: &QueryPlan) -> Result<(), FederationError> {
-    let mut visitor = QueryPlanVisitor { supergraph ,paths:Default::default()};
+pub fn simulate_query_plan(
+    supergraph: &Supergraph,
+    plan: &QueryPlan,
+) -> Result<Vec<Vec<SubgraphQueryElement>>, FederationError> {
+    let mut visitor = QueryPlanVisitor {
+        supergraph,
+        paths: Default::default(),
+    };
 
     if let Some(node) = &plan.node {
         visitor.visit_top_level_node(node)?;
     }
 
-    for path in visitor.paths {
-        for (index, element) in path.into_iter().enumerate() {
+    for path in &visitor.paths {
+        for (index, element) in path.iter().enumerate() {
             if index > 0 {
                 print!(" -> ");
             }
             print!("{} ({})", element.path, element.in_subgraph);
         }
         println!();
+    }
+
+    Ok(visitor.paths)
+}
+
+pub fn compare_paths(
+    supergraph_paths: &[Vec<SupergraphQueryElement>],
+    plan_paths: &[Vec<SubgraphQueryElement>],
+) -> Result<(), FederationError> {
+    for supergraph_path in supergraph_paths {
+        let Some(plan_path) = plan_paths.iter().find(|path| {
+            supergraph_path
+                .iter()
+                .zip(path.iter())
+                .all(|(supergraph_element, plan_element)| {
+                    supergraph_element.path == plan_element.path
+                })
+        }) else {
+            return Err(FederationError::internal(format!(
+                "missing plan path for {supergraph_path:?}"
+            )));
+        };
+
+        if !supergraph_path.iter().zip(plan_path.iter()).all(
+            |(supergraph_element, plan_element)| {
+                supergraph_element
+                    .in_subgraphs
+                    .contains(&plan_element.in_subgraph)
+            },
+        ) {
+            return Err(FederationError::internal("plan path takes impossible path"));
+        }
     }
 
     Ok(())
