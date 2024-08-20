@@ -167,7 +167,7 @@ impl BridgeQueryPlannerPool {
         let heap_used_gauge = meter
             .u64_observable_gauge("apollo.router.v8.heap.used")
             .with_description("V8 heap used, in bytes")
-            .with_unit(Unit::new("bytes"))
+            .with_unit(Unit::new("By"))
             .with_callback(move |i| {
                 i.observe(current_heap_used_for_gauge.load(Ordering::SeqCst), &[])
             })
@@ -181,7 +181,7 @@ impl BridgeQueryPlannerPool {
         let heap_total_gauge = meter
             .u64_observable_gauge("apollo.router.v8.heap.total")
             .with_description("V8 heap total, in bytes")
-            .with_unit(Unit::new("bytes"))
+            .with_unit(Unit::new("By"))
             .with_callback(move |i| {
                 i.observe(current_heap_total_for_gauge.load(Ordering::SeqCst), &[])
             })
