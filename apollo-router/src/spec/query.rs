@@ -184,9 +184,7 @@ impl Query {
                             }
 
                             if !parameters.validation_errors.is_empty() {
-                                response
-                                    .errors
-                                    .extend(parameters.validation_errors.drain(..));
+                                response.errors.extend(&mut parameters.validation_errors);
                             }
 
                             return parameters.nullified;
@@ -247,9 +245,7 @@ impl Query {
                     }
 
                     if !parameters.validation_errors.is_empty() {
-                        response
-                            .errors
-                            .extend(parameters.validation_errors.drain(..));
+                        response.errors.append(&mut parameters.validation_errors);
                     }
 
                     return parameters.nullified;
