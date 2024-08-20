@@ -33,7 +33,7 @@ async fn fed1_schema_with_new_qp() {
     router
         .assert_log_contains(
             "could not create router: \
-             The supergraph schema failed to produce a valid API schema: \
+             failed to initialize the query planner: \
              Supergraphs composed with federation version 1 are not supported.",
         )
         .await;
@@ -51,7 +51,7 @@ async fn fed1_schema_with_both_qp() {
     router
         .assert_log_contains(
             "could not create router: \
-             The supergraph schema failed to produce a valid API schema: \
+             failed to initialize the query planner: \
              Supergraphs composed with federation version 1 are not supported.",
         )
         .await;
@@ -68,8 +68,8 @@ async fn fed1_schema_with_both_best_effort_qp() {
     router.start().await;
     router
         .assert_log_contains(
-            "Failed to initialize the new query planner, falling back to legacy: \
-             The supergraph schema failed to produce a valid API schema: \
+            "Falling back to the legacy query planner: \
+             failed to initialize the query planner: \
              Supergraphs composed with federation version 1 are not supported. \
              Please recompose your supergraph with federation version 2 or greater",
         )
@@ -122,8 +122,8 @@ async fn fed1_schema_with_legacy_qp_reload_to_both_best_effort_keep_previous_con
     router.update_config(&config).await;
     router
         .assert_log_contains(
-            "Failed to initialize the new query planner, falling back to legacy: \
-             The supergraph schema failed to produce a valid API schema: \
+            "Falling back to the legacy query planner: \
+             failed to initialize the query planner: \
              Supergraphs composed with federation version 1 are not supported. \
              Please recompose your supergraph with federation version 2 or greater",
         )
@@ -188,7 +188,7 @@ async fn progressive_override_with_new_qp() {
     router
         .assert_log_contains(
             "could not create router: \
-             The supergraph schema failed to produce a valid API schema: \
+             failed to initialize the query planner: \
              `experimental_query_planner_mode: new` or `both` cannot yet \
              be used with progressive overrides. \
              Remove uses of progressive overrides to try the experimental query planner, \
@@ -246,8 +246,8 @@ async fn progressive_override_with_legacy_qp_reload_to_both_best_effort_keep_pre
     router.update_config(&config).await;
     router
         .assert_log_contains(
-            "Failed to initialize the new query planner, falling back to legacy: \
-             The supergraph schema failed to produce a valid API schema: \
+            "Falling back to the legacy query planner: \
+             failed to initialize the query planner: \
              `experimental_query_planner_mode: new` or `both` cannot yet \
              be used with progressive overrides. \
              Remove uses of progressive overrides to try the experimental query planner, \
@@ -294,7 +294,7 @@ async fn context_with_new_qp() {
     router
         .assert_log_contains(
             "could not create router: \
-             The supergraph schema failed to produce a valid API schema: \
+             failed to initialize the query planner: \
              `experimental_query_planner_mode: new` or `both` cannot yet \
              be used with `@context`. \
              Remove uses of `@context` to try the experimental query planner, \
@@ -352,8 +352,8 @@ async fn context_with_legacy_qp_reload_to_both_best_effort_keep_previous_config(
     router.update_config(&config).await;
     router
         .assert_log_contains(
-            "Failed to initialize the new query planner, falling back to legacy: \
-             The supergraph schema failed to produce a valid API schema: \
+            "Falling back to the legacy query planner: \
+             failed to initialize the query planner: \
              `experimental_query_planner_mode: new` or `both` cannot yet \
              be used with `@context`. \
              Remove uses of `@context` to try the experimental query planner, \

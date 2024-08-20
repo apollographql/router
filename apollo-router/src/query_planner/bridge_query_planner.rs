@@ -167,10 +167,7 @@ impl PlannerMode {
             QueryPlannerMode::BothBestEffort => match Self::rust(schema, configuration) {
                 Ok(planner) => Ok(Some(planner)),
                 Err(error) => {
-                    tracing::warn!(
-                        "Failed to initialize the new query planner, \
-                         falling back to legacy: {error}"
-                    );
+                    tracing::info!("Falling back to the legacy query planner: {error}");
                     Ok(None)
                 }
             },
@@ -221,7 +218,7 @@ impl PlannerMode {
             Ok(_) => metric_rust_qp_init(None),
         }
 
-        Ok(Arc::new(result?))
+        Ok(Arc::new(result.map_err(ServiceBuildError::QpInitError)?))
     }
 
     async fn js(
