@@ -388,6 +388,7 @@ impl Query {
         output: &mut Value,
         path: &mut Vec<ResponsePathElement<'b>>,
         parent_type: &executable::Type,
+        field_or_index: FieldOrIndex<'a>,
         selection_set: &'a [Selection],
     ) -> Result<(), InvalidValue> {
         // for every type, if we have an invalid value, we will replace it with null
@@ -409,6 +410,7 @@ impl Query {
                     output,
                     path,
                     field_type,
+                    field_or_index,
                     selection_set,
                 ) {
                     Err(_) => Err(InvalidValue),
@@ -463,6 +465,7 @@ impl Query {
                                 &mut output_array[i],
                                 path,
                                 field_type,
+                                FieldOrIndex::Index(i),
                                 selection_set,
                             );
                             path.pop();
@@ -476,7 +479,16 @@ impl Query {
                         Ok(()) => Ok(()),
                     }
                 }
-                _ => Ok(()),
+                Value::Null => Ok(()),
+                v => {
+                    parameters.validation_errors.push(Error {
+                        message: format!("Invalid non-list value {v:?} returned by subgraph for list type {field_type}"),
+                        path: Some(Path::from_response_slice(path)),
+                        ..Error::default()
+                    });
+                    *output = Value::Null;
+                    Ok(())
+                }
             },
             executable::Type::Named(name) if name == "Int" => {
                 let opt = if input.is_i64() {
@@ -493,7 +505,7 @@ impl Query {
                     *output = input.clone();
                 } else {
                     parameters.validation_errors.push(Error {
-                        message: "Expected an Int".to_string(),
+                        message: invalid_value_message(parent_type, field_type, field_or_index),
                         path: Some(Path::from_response_slice(path)),
                         ..Error::default()
                     });
@@ -506,7 +518,7 @@ impl Query {
                     *output = input.clone();
                 } else {
                     parameters.validation_errors.push(Error {
-                        message: "Expected a Float".to_string(),
+                        message: invalid_value_message(parent_type, field_type, field_or_index),
                         path: Some(Path::from_response_slice(path)),
                         ..Error::default()
                     });
@@ -519,7 +531,7 @@ impl Query {
                     *output = input.clone();
                 } else {
                     parameters.validation_errors.push(Error {
-                        message: "Expected a Boolean".to_string(),
+                        message: invalid_value_message(parent_type, field_type, field_or_index),
                         path: Some(Path::from_response_slice(path)),
                         ..Error::default()
                     });
@@ -532,7 +544,7 @@ impl Query {
                     *output = input.clone();
                 } else {
                     parameters.validation_errors.push(Error {
-                        message: "Expected a String".to_string(),
+                        message: invalid_value_message(parent_type, field_type, field_or_index),
                         path: Some(Path::from_response_slice(path)),
                         ..Error::default()
                     });
@@ -545,7 +557,7 @@ impl Query {
                     *output = input.clone();
                 } else {
                     parameters.validation_errors.push(Error {
-                        message: "Expected an Id".to_string(),
+                        message: invalid_value_message(parent_type, field_type, field_or_index),
                         path: Some(Path::from_response_slice(path)),
                         ..Error::default()
                     });
@@ -569,7 +581,7 @@ impl Query {
                                     Ok(())
                                 } else {
                                     parameters.validation_errors.push(Error {
-                                        message: "Expected a valid enum value".to_string(),
+                                        message: format!("Expected a valid enum value for type {enum_type}"),
                                         path: Some(Path::from_response_slice(path)),
                                         ..Error::default()
                                     });
@@ -579,7 +591,7 @@ impl Query {
                             }
                             None => {
                                 parameters.validation_errors.push(Error {
-                                    message: "Expected a valid enum value".to_string(),
+                                    message: format!("Expected a valid enum value for type {enum_type}"),
                                     path: Some(Path::from_response_slice(path)),
                                     ..Error::default()
                                 });
@@ -651,10 +663,14 @@ impl Query {
 
                         Ok(())
                     }
-                    _ => {
-                        parameters.nullified.push(Path::from_response_slice(path));
+                    v => {
+                        parameters.validation_errors.push(Error {
+                            message: format!("Invalid non-object value {v:?} for composite type {type_name}"),
+                            path: Some(Path::from_response_slice(path)),
+                            ..Error::default()
+                        });
                         *output = Value::Null;
-                        Ok(())
+                        return Ok(());
                     }
                 }
             }
@@ -731,6 +747,7 @@ impl Query {
                             output_value,
                             path,
                             current_type,
+                            FieldOrIndex::Field(field_name.as_str()),
                             selection_set,
                         );
                         path.pop();
@@ -882,6 +899,7 @@ impl Query {
                             output_value,
                             path,
                             &field_type.0,
+                            FieldOrIndex::Field(field_name_str),
                             selection_set,
                         );
                         path.pop();
@@ -1161,6 +1179,26 @@ pub(crate) struct Operation {
 pub(crate) struct Variable {
     field_type: FieldType,
     default_value: Option<Value>,
+}
+
+enum FieldOrIndex<'a> {
+    Field(&'a str),
+    Index(usize),
+}
+
+fn invalid_value_message(
+    parent_type: &executable::Type,
+    field_type: &executable::Type,
+    field_or_index: FieldOrIndex,
+) -> String {
+    match field_or_index {
+        FieldOrIndex::Field(field_name) => {
+            format!("Invalid value found for field {parent_type}.{field_name}")
+        }
+        FieldOrIndex::Index(i) => {
+            format!("Invalid value found for array element of type {field_type} at index {i}")
+        }
+    }
 }
 
 impl Operation {
