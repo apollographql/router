@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/services/supergraph/tests.rs
-assertion_line: 118
+assertion_line: 119
 expression: response
 ---
 {

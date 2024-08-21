@@ -361,12 +361,23 @@ mod tests {
             "{}\n{}",
             r#"
         schema
-            @core(feature: "https://specs.apollo.dev/core/v0.1")
-            @core(feature: "https://specs.apollo.dev/join/v0.1") {
+            @link(url: "https://specs.apollo.dev/link/v1.0")
+            @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+        {
             query: Query
         }
-        directive @core(feature: String!) repeatable on SCHEMA
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+        directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
         directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+        scalar link__Import
+        scalar join__FieldSet
+
+        enum link__Purpose {
+          SECURITY
+          EXECUTION
+        }
+
         enum join__Graph {
             TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
         }
@@ -459,16 +470,25 @@ mod tests {
     fn routing_urls() {
         let schema = r#"
         schema
-          @core(feature: "https://specs.apollo.dev/core/v0.1"),
-          @core(feature: "https://specs.apollo.dev/join/v0.1")
+          @link(url: "https://specs.apollo.dev/link/v1.0")
+          @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
         {
           query: Query
         }
-        type Query {
+        type Query @join__type(graph: ACCOUNTS) @join__type(graph: INVENTORY) @join__type(graph: PRODUCTS) @join__type(graph: REVIEWS) {
           me: String
         }
-        directive @core(feature: String!) repeatable on SCHEMA
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+        directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
         directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+        scalar link__Import
+        scalar join__FieldSet
+
+        enum link__Purpose {
+          SECURITY
+          EXECUTION
+        }
 
         enum join__Graph {
             ACCOUNTS @join__graph(name:"accounts" url: "http://localhost:4001/graphql")
