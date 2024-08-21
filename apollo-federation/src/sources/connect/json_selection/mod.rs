@@ -1,5 +1,4 @@
 mod apply_to;
-mod graphql;
 mod helpers;
 mod immutable;
 mod known_var;
