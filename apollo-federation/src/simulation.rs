@@ -2,6 +2,7 @@ use apollo_compiler::executable::Directive;
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
+use apollo_compiler::name;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::Value;
 use apollo_compiler::validation::Valid;
@@ -475,6 +476,15 @@ pub fn compare_paths(
     plan_paths: &[Vec<SubgraphQueryElement>],
 ) -> Result<(), FederationError> {
     for supergraph_path in supergraph_paths {
+        if let [single_item] = &supergraph_path[..] {
+            // If the path is just resolving __typename at the root of the operation,
+            // it's not passed on to subgraph fetches, but resolved in the router. So there will
+            // not be a path for it.
+            if single_item.path == FetchDataPathElement::Key(name!(__typename)) {
+                continue;
+            }
+        }
+
         let Some(plan_path) = plan_paths.iter().find(|path| {
             supergraph_path
                 .iter()
