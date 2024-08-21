@@ -17,7 +17,7 @@ use crate::schema::ValidFederationSchema;
 use crate::sources::connect::header::HeaderValue;
 use crate::sources::connect::spec::extract_connect_directive_arguments;
 use crate::sources::connect::spec::extract_source_directive_arguments;
-use crate::sources::connect::ConnectSpecDefinition;
+use crate::sources::connect::ConnectSpec;
 // --- Connector ---------------------------------------------------------------
 
 #[derive(Debug, Clone)]
@@ -27,9 +27,10 @@ pub struct Connector {
     pub selection: JSONSelection,
     pub config: Option<CustomConfiguration>,
     pub max_requests: Option<usize>,
-
     /// The type of entity resolver to use for this connector
     pub entity_resolver: Option<EntityResolver>,
+    /// Which version of the connect spec is this connector using?
+    pub spec: ConnectSpec,
 }
 
 pub type CustomConfiguration = Arc<HashMap<String, Value>>;
@@ -52,19 +53,22 @@ impl Connector {
     pub(crate) fn from_valid_schema(
         schema: &ValidFederationSchema,
         subgraph_name: &str,
+        spec: ConnectSpec,
     ) -> Result<IndexMap<ConnectId, Self>, FederationError> {
         let Some(metadata) = schema.metadata() else {
             return Ok(IndexMap::with_hasher(Default::default()));
         };
 
-        let Some(link) = metadata.for_identity(&ConnectSpecDefinition::identity()) else {
+        let Some(link) = metadata.for_identity(&ConnectSpec::identity()) else {
             return Ok(IndexMap::with_hasher(Default::default()));
         };
 
-        let source_name = ConnectSpecDefinition::source_directive_name(&link);
+        let subgraph_name: Arc<str> = Arc::from(subgraph_name);
+
+        let source_name = ConnectSpec::source_directive_name(&link);
         let source_arguments = extract_source_directive_arguments(schema, &source_name)?;
 
-        let connect_name = ConnectSpecDefinition::connect_directive_name(&link);
+        let connect_name = ConnectSpec::connect_directive_name(&link);
         let connect_arguments = extract_connect_directive_arguments(schema, &connect_name)?;
 
         connect_arguments
@@ -99,8 +103,8 @@ impl Connector {
                 let on_root_type = on_query || on_mutation;
 
                 let id = ConnectId {
-                    label: make_label(subgraph_name, &source_name, &transport),
-                    subgraph_name: subgraph_name.to_string(),
+                    label: make_label(subgraph_name.as_ref(), &source_name, &transport),
+                    subgraph_name: subgraph_name.clone(),
                     source_name: source_name.clone(),
                     directive: args.position,
                 };
@@ -119,6 +123,7 @@ impl Connector {
                     entity_resolver,
                     config: None,
                     max_requests: None,
+                    spec,
                 };
 
                 Ok((id, connector))
@@ -247,7 +252,9 @@ mod tests {
     fn test_from_schema() {
         let subgraphs = get_subgraphs(SIMPLE_SUPERGRAPH);
         let subgraph = subgraphs.get("connectors").unwrap();
-        let connectors = Connector::from_valid_schema(&subgraph.schema, "connectors").unwrap();
+        let connectors =
+            Connector::from_valid_schema(&subgraph.schema, "connectors", ConnectSpec::V0_1)
+                .unwrap();
         assert_debug_snapshot!(&connectors, @r###"
         {
             ConnectId {

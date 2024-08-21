@@ -27,7 +27,7 @@ use crate::schema::position::SchemaDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
 use crate::schema::referencer::DirectiveReferencers;
 use crate::schema::FederationSchema;
-use crate::sources::connect::ConnectSpecDefinition;
+use crate::sources::connect::ConnectSpec;
 
 const TAG_DIRECTIVE_NAME_IN_SPEC: Name = name!("tag");
 const AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC: Name = name!("authenticated");
@@ -37,7 +37,7 @@ const POLICY_DIRECTIVE_NAME_IN_SPEC: Name = name!("policy");
 pub(super) fn carryover_directives(
     from: &FederationSchema,
     to: &mut FederationSchema,
-    specs: impl Iterator<Item = ConnectSpecDefinition>,
+    specs: impl Iterator<Item = ConnectSpec>,
 ) -> Result<(), FederationError> {
     let Some(metadata) = from.metadata() else {
         return Ok(());
@@ -444,8 +444,8 @@ mod tests {
     use super::carryover_directives;
     use crate::merge::merge_federation_subgraphs;
     use crate::schema::FederationSchema;
+    use crate::sources::connect::ConnectSpec;
     use crate::supergraph::extract_subgraphs_from_supergraph;
-    use crate::sources::connect::ConnectSpecDefinition;
 
     #[test]
     fn test_carryover() {
@@ -461,7 +461,7 @@ mod tests {
         carryover_directives(
             &supergraph_schema,
             &mut schema,
-            [ConnectSpecDefinition::V0_1].into_iter(),
+            [ConnectSpec::V0_1].into_iter(),
         )
         .expect("carryover failed");
         assert_snapshot!(schema.schema().serialize().to_string());

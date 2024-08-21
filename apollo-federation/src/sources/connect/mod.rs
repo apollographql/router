@@ -1,6 +1,7 @@
 use std::fmt::Display;
 use std::hash::Hash;
 use std::hash::Hasher;
+use std::sync::Arc;
 
 use apollo_compiler::Name;
 
@@ -21,7 +22,7 @@ pub use json_selection::PathSelection;
 pub use json_selection::StaticParameter;
 pub use json_selection::SubSelection;
 pub use models::CustomConfiguration;
-pub(crate) use spec::ConnectSpecDefinition;
+pub use spec::ConnectSpec;
 pub use url_template::Parameter;
 pub use url_template::URLTemplate;
 
@@ -37,7 +38,7 @@ use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
 #[derive(Debug, Clone)]
 pub struct ConnectId {
     pub label: String,
-    pub subgraph_name: String,
+    pub subgraph_name: Arc<str>,
     pub source_name: Option<String>,
     pub(crate) directive: ObjectOrInterfaceFieldDirectivePosition,
 }
@@ -92,7 +93,7 @@ impl ConnectId {
     ) -> Self {
         Self {
             label: label.to_string(),
-            subgraph_name,
+            subgraph_name: Arc::from(subgraph_name),
             source_name,
             directive: ObjectOrInterfaceFieldDirectivePosition {
                 field: ObjectOrInterfaceFieldDefinitionPosition::Object(
