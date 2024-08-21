@@ -68,12 +68,7 @@ pub(crate) async fn handle_responses<T: HttpBody>(
                     })?;
 
                     let mut res_data = {
-                        // TODO: caching of the transformed JSONSelection with the selection set applied?
-                        let transformed_selection = connector
-                            .selection
-                            .apply_selection_set(response_key.selection_set());
-
-                        let (res, apply_to_errors) = transformed_selection.apply_with_vars(
+                        let (res, apply_to_errors) = response_key.selection().apply_with_vars(
                             &json_data,
                             &response_key.inputs().merge(connector.config.as_ref()),
                         );
@@ -84,7 +79,7 @@ pub(crate) async fn handle_responses<T: HttpBody>(
                                 &json_data,
                                 Some(SelectionData {
                                     source: connector.selection.to_string(),
-                                    transformed: transformed_selection.to_string(),
+                                    transformed: response_key.selection().to_string(),
                                     result: res.clone(),
                                     errors: apply_to_errors,
                                 }),
@@ -240,14 +235,9 @@ fn inject_typename(data: &mut Value, typename: &str) {
 
 #[cfg(test)]
 mod tests {
-    use apollo_compiler::ast::FieldDefinition;
-    use apollo_compiler::ast::Type;
-    use apollo_compiler::executable::Field;
-    use apollo_compiler::executable::Selection;
-    use apollo_compiler::executable::SelectionSet;
+    use std::sync::Arc;
+
     use apollo_compiler::name;
-    use apollo_compiler::Name;
-    use apollo_compiler::Node;
     use apollo_compiler::Schema;
     use apollo_federation::sources::connect::ConnectId;
     use apollo_federation::sources::connect::Connector;
@@ -294,10 +284,7 @@ mod tests {
             name: "hello".to_string(),
             inputs: Default::default(),
             typename: ResponseTypeName::Concrete("String".to_string()),
-            selection_set: SelectionSet {
-                ty: name!(Todo), // TODO
-                selections: Default::default(),
-            },
+            selection: Arc::new(JSONSelection::parse(".data").unwrap().1),
         };
 
         let response2 = http::Response::builder()
@@ -307,10 +294,7 @@ mod tests {
             name: "hello2".to_string(),
             inputs: Default::default(),
             typename: ResponseTypeName::Concrete("String".to_string()),
-            selection_set: SelectionSet {
-                ty: name!(Todo), // TODO
-                selections: Default::default(),
-            },
+            selection: Arc::new(JSONSelection::parse(".data").unwrap().1),
         };
 
         let schema = Schema::parse_and_validate("type Query { hello: String }", "./").unwrap();
@@ -388,14 +372,6 @@ mod tests {
             max_requests: None,
         };
 
-        let id_field_definition = FieldDefinition {
-            description: None,
-            name: Name::new("id").unwrap(),
-            arguments: Default::default(),
-            ty: Type::Named(Name::new("String").unwrap()),
-            directives: Default::default(),
-        };
-        let id_field = Field::new(Name::new("id").unwrap(), Node::from(id_field_definition));
         let response1: http::Response<RouterBody> = http::Response::builder()
             .body(hyper::Body::from(r#"{"data":{"id": "1"}}"#).into())
             .expect("response builder");
@@ -403,10 +379,7 @@ mod tests {
             index: 0,
             inputs: Default::default(),
             typename: ResponseTypeName::Concrete("User".to_string()),
-            selection_set: SelectionSet {
-                ty: name!(Todo), // TODO
-                selections: vec![Selection::Field(Node::new(id_field.clone()))],
-            },
+            selection: Arc::new(JSONSelection::parse(".data").unwrap().1),
         };
 
         let response2 = http::Response::builder()
@@ -416,10 +389,7 @@ mod tests {
             index: 1,
             inputs: Default::default(),
             typename: ResponseTypeName::Concrete("User".to_string()),
-            selection_set: SelectionSet {
-                ty: name!(Todo), // TODO
-                selections: vec![Selection::Field(Node::new(id_field.clone()))],
-            },
+            selection: Arc::new(JSONSelection::parse(".data").unwrap().1),
         };
 
         let schema = Schema::parse_and_validate(
@@ -522,10 +492,7 @@ mod tests {
             inputs: Default::default(),
             field_name: "field".to_string(),
             typename: ResponseTypeName::Concrete("User".to_string()),
-            selection_set: SelectionSet {
-                ty: name!(Todo), // TODO
-                selections: Default::default(),
-            },
+            selection: Arc::new(JSONSelection::parse(".data").unwrap().1),
         };
 
         let response2 = http::Response::builder()
@@ -536,10 +503,7 @@ mod tests {
             inputs: Default::default(),
             field_name: "field".to_string(),
             typename: ResponseTypeName::Concrete("User".to_string()),
-            selection_set: SelectionSet {
-                ty: name!(Todo), // TODO
-                selections: Default::default(),
-            },
+            selection: Arc::new(JSONSelection::parse(".data").unwrap().1),
         };
 
         let schema = Schema::parse_and_validate(
@@ -642,10 +606,7 @@ mod tests {
             index: 0,
             inputs: Default::default(),
             typename: ResponseTypeName::Concrete("User".to_string()),
-            selection_set: SelectionSet {
-                ty: name!(Todo), // TODO
-                selections: Default::default(),
-            },
+            selection: Arc::new(JSONSelection::parse(".data").unwrap().1),
         };
 
         let response2 = http::Response::builder()
@@ -655,10 +616,7 @@ mod tests {
             index: 1,
             inputs: Default::default(),
             typename: ResponseTypeName::Concrete("User".to_string()),
-            selection_set: SelectionSet {
-                ty: name!(Todo), // TODO
-                selections: Default::default(),
-            },
+            selection: Arc::new(JSONSelection::parse(".data").unwrap().1),
         };
 
         let response3 = http::Response::builder()
@@ -669,10 +627,7 @@ mod tests {
             index: 2,
             inputs: Default::default(),
             typename: ResponseTypeName::Concrete("User".to_string()),
-            selection_set: SelectionSet {
-                ty: name!(Todo), // TODO
-                selections: Default::default(),
-            },
+            selection: Arc::new(JSONSelection::parse(".data").unwrap().1),
         };
 
         let schema = Schema::parse_and_validate(
