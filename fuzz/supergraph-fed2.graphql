@@ -1,24 +1,20 @@
 schema
-  @core(feature: "https://specs.apollo.dev/core/v0.2")
-  @core(feature: "https://specs.apollo.dev/join/v0.2", for: EXECUTION) {
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
   query: Query
+  mutation: Mutation
 }
 
-directive @skip(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
-directive @include(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
-
-directive @core(
-  feature: String!
-  as: String
-  for: core__Purpose
-) repeatable on SCHEMA
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
 directive @join__field(
-  graph: join__Graph!
+  graph: join__Graph
   requires: join__FieldSet
   provides: join__FieldSet
   type: String
   external: Boolean
+  override: String
+  usedOverridden: Boolean
 ) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 
 directive @join__graph(name: String!, url: String!) on ENUM_VALUE
@@ -33,9 +29,40 @@ directive @join__type(
   key: join__FieldSet
   extension: Boolean! = false
   resolvable: Boolean! = true
+  isInterfaceObject: Boolean! = false
 ) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
 
-enum core__Purpose {
+directive @join__unionMember(
+  graph: join__Graph!
+  member: String!
+) repeatable on UNION
+
+directive @link(
+  url: String
+  as: String
+  for: link__Purpose
+  import: [link__Import]
+) repeatable on SCHEMA
+
+scalar join__FieldSet
+
+enum join__Graph {
+  ACCOUNTS
+    @join__graph(name: "accounts", url: "https://accounts.demo.starstuff.dev/")
+  INVENTORY
+    @join__graph(
+      name: "inventory"
+      url: "https://inventory.demo.starstuff.dev/"
+    )
+  PRODUCTS
+    @join__graph(name: "products", url: "https://products.demo.starstuff.dev/")
+  REVIEWS
+    @join__graph(name: "reviews", url: "https://reviews.demo.starstuff.dev/")
+}
+
+scalar link__Import
+
+enum link__Purpose {
   """
   `SECURITY` features provide metadata necessary to securely resolve fields.
   """
@@ -47,95 +74,55 @@ enum core__Purpose {
   EXECUTION
 }
 
-type DeliveryEstimates @join__type(graph: INVENTORY) {
-  estimatedDelivery: String
-  fastestDelivery: String
+type Mutation @join__type(graph: PRODUCTS) @join__type(graph: REVIEWS) {
+  createProduct(upc: ID!, name: String): Product @join__field(graph: PRODUCTS)
+  createReview(upc: ID!, id: ID!, body: String): Review
+    @join__field(graph: REVIEWS)
 }
 
-scalar join__FieldSet
-
-enum join__Graph {
-  INVENTORY
-    @join__graph(name: "inventory", url: "http://localhost:4004/graphql")
-  PANDAS @join__graph(name: "pandas", url: "http://localhost:4002/graphql")
-  PRODUCTS @join__graph(name: "products", url: "http://localhost:4003/graphql")
-  USERS @join__graph(name: "users", url: "http://localhost:4001/graphql")
-}
-
-type Panda @join__type(graph: PANDAS) {
-  name: ID!
-  favoriteFood: String
-}
-
-type Product implements ProductItf & SkuItf
-  @join__implements(graph: INVENTORY, interface: "ProductItf")
-  @join__implements(graph: PRODUCTS, interface: "ProductItf")
-  @join__implements(graph: PRODUCTS, interface: "SkuItf")
-  @join__type(graph: INVENTORY, key: "id")
-  @join__type(graph: PRODUCTS, key: "id")
-  @join__type(graph: PRODUCTS, key: "sku package")
-  @join__type(graph: PRODUCTS, key: "sku variation { id }") {
-  id: ID!
-  dimensions: ProductDimension
+type Product
+  @join__type(graph: ACCOUNTS, key: "upc", extension: true)
+  @join__type(graph: INVENTORY, key: "upc")
+  @join__type(graph: PRODUCTS, key: "upc")
+  @join__type(graph: REVIEWS, key: "upc") {
+  upc: String!
+  weight: Int
     @join__field(graph: INVENTORY, external: true)
     @join__field(graph: PRODUCTS)
-  delivery(zip: String): DeliveryEstimates
-    @join__field(graph: INVENTORY, requires: "dimensions { size weight }")
-  sku: String @join__field(graph: PRODUCTS)
-  package: String @join__field(graph: PRODUCTS)
-  variation: ProductVariation @join__field(graph: PRODUCTS)
-  createdBy: User @join__field(graph: PRODUCTS)
-}
-
-type ProductDimension
-  @join__type(graph: INVENTORY)
-  @join__type(graph: PRODUCTS) {
-  size: String
-  weight: Float
-}
-
-interface ProductItf implements SkuItf
-  @join__implements(graph: PRODUCTS, interface: "SkuItf")
-  @join__type(graph: INVENTORY)
-  @join__type(graph: PRODUCTS) {
-  id: ID!
-  dimensions: ProductDimension
-  delivery(zip: String): DeliveryEstimates @join__field(graph: INVENTORY)
-  sku: String @join__field(graph: PRODUCTS)
-  package: String @join__field(graph: PRODUCTS)
-  variation: ProductVariation @join__field(graph: PRODUCTS)
-  createdBy: User @join__field(graph: PRODUCTS)
-}
-
-type ProductVariation @join__type(graph: PRODUCTS) {
-  id: ID!
+  price: Int
+    @join__field(graph: INVENTORY, external: true)
+    @join__field(graph: PRODUCTS)
+  inStock: Boolean @join__field(graph: INVENTORY)
+  shippingEstimate: Int @join__field(graph: INVENTORY, requires: "price weight")
+  name: String @join__field(graph: PRODUCTS)
+  reviews: [Review] @join__field(graph: REVIEWS)
+  reviewsForAuthor(authorID: ID!): [Review] @join__field(graph: REVIEWS)
 }
 
 type Query
+  @join__type(graph: ACCOUNTS)
   @join__type(graph: INVENTORY)
-  @join__type(graph: PANDAS)
   @join__type(graph: PRODUCTS)
-  @join__type(graph: USERS) {
-  allPandas: [Panda] @join__field(graph: PANDAS)
-  panda(name: ID!): Panda @join__field(graph: PANDAS)
-  allProducts: [ProductItf] @join__field(graph: PRODUCTS)
-  product(id: ID!): ProductItf @join__field(graph: PRODUCTS)
+  @join__type(graph: REVIEWS) {
+  me: User @join__field(graph: ACCOUNTS)
+  recommendedProducts: [Product] @join__field(graph: ACCOUNTS)
+  topProducts(first: Int = 5): [Product] @join__field(graph: PRODUCTS)
 }
 
-enum ShippingClass @join__type(graph: INVENTORY) @join__type(graph: PRODUCTS) {
-  STANDARD
-  EXPRESS
-  OVERNIGHT
-}
-
-interface SkuItf @join__type(graph: PRODUCTS) {
-  sku: String
+type Review @join__type(graph: REVIEWS, key: "id") {
+  id: ID!
+  body: String
+  author: User @join__field(graph: REVIEWS, provides: "username")
+  product: Product
 }
 
 type User
-  @join__type(graph: PRODUCTS, key: "email")
-  @join__type(graph: USERS, key: "email") {
-  email: ID!
-  totalProductsCreated: Int
-  name: String @join__field(graph: USERS)
+  @join__type(graph: ACCOUNTS, key: "id")
+  @join__type(graph: REVIEWS, key: "id") {
+  id: ID!
+  name: String @join__field(graph: ACCOUNTS)
+  username: String
+    @join__field(graph: ACCOUNTS)
+    @join__field(graph: REVIEWS, external: true)
+  reviews: [Review] @join__field(graph: REVIEWS)
 }

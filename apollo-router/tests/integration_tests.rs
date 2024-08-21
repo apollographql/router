@@ -1372,7 +1372,7 @@ Make sure it is accessible, and the configuration is working with the router."#,
 #[tracing_test::traced_test]
 async fn test_telemetry_doesnt_hang_with_invalid_schema() {
     create_test_service_factory_from_yaml(
-        include_str!("../src/testdata/invalid_supergraph.graphql"),
+        include_str!("../tests/fixtures/broken-supergraph.graphql"),
         r#"
     telemetry:
       exporters:

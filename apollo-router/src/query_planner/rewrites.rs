@@ -117,34 +117,87 @@ mod tests {
     // The schema is not used for the tests
     // but we need a valid one
     const SCHEMA: &str = r#"
-       schema
-         @core(feature: "https://specs.apollo.dev/core/v0.1"),
-         @core(feature: "https://specs.apollo.dev/join/v0.1")
-       {
-         query: Query
-       }
-       directive @core(feature: String!) repeatable on SCHEMA
-       directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+        schema
+          @link(url: "https://specs.apollo.dev/link/v1.0")
+          @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+        {
+          query: Query
+        }
 
-       enum join__Graph {
-           FAKE @join__graph(name:"fake" url: "http://localhost:4001/fake")
-       }
+        directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+        
+        directive @join__field(
+          graph: join__Graph
+          requires: join__FieldSet
+          provides: join__FieldSet
+          type: String
+          external: Boolean
+          override: String
+          usedOverridden: Boolean
+        ) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+        
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+        
+        directive @join__implements(
+          graph: join__Graph!
+          interface: String!
+        ) repeatable on OBJECT | INTERFACE
+        
+        directive @join__type(
+          graph: join__Graph!
+          key: join__FieldSet
+          extension: Boolean! = false
+          resolvable: Boolean! = true
+          isInterfaceObject: Boolean! = false
+        ) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+        
+        directive @join__unionMember(
+          graph: join__Graph!
+          member: String!
+        ) repeatable on UNION
+        
+        directive @link(
+          url: String
+          as: String
+          for: link__Purpose
+          import: [link__Import]
+        ) repeatable on SCHEMA
+        
+        scalar join__FieldSet
 
-       type Query {
-         i: [I]
-       }
+        enum join__Graph {
+            FAKE @join__graph(name:"fake" url: "http://localhost:4001/fake")
+        }
 
-       interface I {
-         x: Int
-       }
+        scalar link__Import
+        
+        enum link__Purpose {
+          """
+          `SECURITY` features provide metadata necessary to securely resolve fields.
+          """
+          SECURITY
+        
+          """
+          `EXECUTION` features provide metadata necessary for operation execution.
+          """
+          EXECUTION
+        }
 
-       type A implements I {
-         x: Int
-       }
+        type Query {
+          i: [I]
+        }
 
-       type B {
-         y: Int
-       }
+        interface I {
+          x: Int
+        }
+
+        type A implements I {
+          x: Int
+        }
+
+        type B {
+          y: Int
+        }
     "#;
 
     #[test]

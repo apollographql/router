@@ -543,7 +543,7 @@ mod tests {
     fn federation_version() {
         // @core directive
         let schema = Schema::parse(
-            include_str!("../testdata/minimal_supergraph.graphql"),
+            include_str!("../testdata/minimal_fed1_supergraph.graphql"),
             &Default::default(),
         )
         .unwrap();
@@ -551,7 +551,7 @@ mod tests {
 
         // @link directive
         let schema = Schema::parse(
-            include_str!("../testdata/minimal_fed2_supergraph.graphql"),
+            include_str!("../testdata/minimal_supergraph.graphql"),
             &Default::default(),
         )
         .unwrap();
@@ -567,7 +567,7 @@ mod tests {
 
             assert_eq!(
                 Schema::schema_id(&schema.raw_sdl),
-                "8e2021d131b23684671c3b85f82dfca836908c6a541bbd5c3772c66e7f8429d8".to_string()
+                "23bcf0ea13a4e0429c942bba59573ba70b8d6970d73ad00c5230d08788bb1ba2".to_string()
             );
         }
     }

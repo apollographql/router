@@ -1,40 +1,102 @@
-schema @core(feature: "https://specs.apollo.dev/core/v0.1") @core(feature: "https://specs.apollo.dev/join/v0.1") @core(feature: "https://specs.apollo.dev/tag/v0.1") @apollo_studio_metadata(launchId: "2396d4fb-a1e4-457d-8da4-347479b852f1", buildId: "2396d4fb-a1e4-457d-8da4-347479b852f1", checkId: null) @core(feature: "https://specs.apollo.dev/inaccessible/v0.1") {
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY)
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+  @apollo_studio_metadata(
+    launchId: "2396d4fb-a1e4-457d-8da4-347479b852f1"
+    buildId: "2396d4fb-a1e4-457d-8da4-347479b852f1"
+    checkId: null
+  ) {
   query: Query
   mutation: Mutation
 }
 
-directive @core(feature: String!) repeatable on SCHEMA
+directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
 
-directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet) on FIELD_DEFINITION
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
-directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
-
-directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
+directive @join__field(
+  graph: join__Graph
+  requires: join__FieldSet
+  provides: join__FieldSet
+  type: String
+  external: Boolean
+  override: String
+  usedOverridden: Boolean
+) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 
 directive @join__graph(name: String!, url: String!) on ENUM_VALUE
 
-directive @tag(name: String!) repeatable on FIELD_DEFINITION | INTERFACE | OBJECT | UNION
+directive @join__implements(
+  graph: join__Graph!
+  interface: String!
+) repeatable on OBJECT | INTERFACE
 
-directive @apollo_studio_metadata(launchId: String, buildId: String, checkId: String) on SCHEMA
+directive @join__type(
+  graph: join__Graph!
+  key: join__FieldSet
+  extension: Boolean! = false
+  resolvable: Boolean! = true
+  isInterfaceObject: Boolean! = false
+) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
 
-directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
+directive @join__unionMember(
+  graph: join__Graph!
+  member: String!
+) repeatable on UNION
+
+directive @link(
+  url: String
+  as: String
+  for: link__Purpose
+  import: [link__Import]
+) repeatable on SCHEMA
 
 scalar join__FieldSet
 
+directive @apollo_studio_metadata(
+  launchId: String
+  buildId: String
+  checkId: String
+) on SCHEMA
+
 enum join__Graph {
-  ACCOUNTS @join__graph(name: "accounts", url: "http://accounts.demo.starstuff.dev/graphql")
-  INVENTORY @join__graph(name: "inventory", url: "http://inventory.demo.starstuff.dev/graphql")
-  PRODUCTS @join__graph(name: "products", url: "http://products.demo.starstuff.dev/graphql")
-  REVIEWS @join__graph(name: "reviews", url: "http://reviews.demo.starstuff.dev/graphql")
+  ACCOUNTS
+    @join__graph(
+      name: "accounts"
+      url: "http://accounts.demo.starstuff.dev/graphql"
+    )
+  INVENTORY
+    @join__graph(
+      name: "inventory"
+      url: "http://inventory.demo.starstuff.dev/graphql"
+    )
+  PRODUCTS
+    @join__graph(
+      name: "products"
+      url: "http://products.demo.starstuff.dev/graphql"
+    )
+  REVIEWS
+    @join__graph(
+      name: "reviews"
+      url: "http://reviews.demo.starstuff.dev/graphql"
+    )
 }
 
 type Mutation {
   createProduct(name: String, upc: ID!): Product @join__field(graph: PRODUCTS)
-  createReview(body: String, id: ID!, upc: ID!): Review @join__field(graph: REVIEWS)
+  createReview(body: String, id: ID!, upc: ID!): Review
+    @join__field(graph: REVIEWS)
 }
 
-type Product @join__owner(graph: PRODUCTS) @join__type(graph: PRODUCTS, key: "upc") @join__type(graph: REVIEWS, key: "upc") @join__type(graph: INVENTORY, key: "upc") {
-  inStock: Boolean @join__field(graph: INVENTORY) @tag(name: "private") @inaccessible
+type Product
+  @join__type(graph: PRODUCTS, key: "upc")
+  @join__type(graph: REVIEWS, key: "upc")
+  @join__type(graph: INVENTORY, key: "upc") {
+  inStock: Boolean
+    @join__field(graph: INVENTORY)
+    @tag(name: "private")
+    @inaccessible
   name: String @join__field(graph: PRODUCTS)
   price: Int @join__field(graph: PRODUCTS)
   reviews: [Review] @join__field(graph: REVIEWS)
@@ -49,14 +111,16 @@ type Query {
   topProducts(first: Int = 5): [Product] @join__field(graph: PRODUCTS)
 }
 
-type Review @join__owner(graph: REVIEWS) @join__type(graph: REVIEWS, key: "id") {
+type Review @join__type(graph: REVIEWS, key: "id") {
   author: User @join__field(graph: REVIEWS, provides: "username")
   body: String @join__field(graph: REVIEWS)
   id: ID! @join__field(graph: REVIEWS)
   product: Product @join__field(graph: REVIEWS)
 }
 
-type User @join__owner(graph: ACCOUNTS) @join__type(graph: ACCOUNTS, key: "id") @join__type(graph: REVIEWS, key: "id") {
+type User
+  @join__type(graph: ACCOUNTS, key: "id")
+  @join__type(graph: REVIEWS, key: "id") {
   id: ID! @join__field(graph: ACCOUNTS)
   name: String @join__field(graph: ACCOUNTS)
   reviews: [Review] @join__field(graph: REVIEWS)

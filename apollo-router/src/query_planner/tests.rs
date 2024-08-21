@@ -576,18 +576,54 @@ async fn defer_if_condition() {
 #[tokio::test]
 async fn dependent_mutations() {
     let schema = r#"schema
-        @core(feature: "https://specs.apollo.dev/core/v0.1"),
-        @core(feature: "https://specs.apollo.dev/join/v0.1")
-      {
+        @link(url: "https://specs.apollo.dev/link/v1.0")
+        @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY)
+        @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
         query: Query
         mutation: Mutation
       }
-
-      directive @core(feature: String!) repeatable on SCHEMA
-      directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet) on FIELD_DEFINITION
-      directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
-      directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
+      
+      directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+      
+      directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+      
+      directive @join__field(
+        graph: join__Graph
+        requires: join__FieldSet
+        provides: join__FieldSet
+        type: String
+        external: Boolean
+        override: String
+        usedOverridden: Boolean
+      ) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+      
       directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+      
+      directive @join__implements(
+        graph: join__Graph!
+        interface: String!
+      ) repeatable on OBJECT | INTERFACE
+      
+      directive @join__type(
+        graph: join__Graph!
+        key: join__FieldSet
+        extension: Boolean! = false
+        resolvable: Boolean! = true
+        isInterfaceObject: Boolean! = false
+      ) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+      
+      directive @join__unionMember(
+        graph: join__Graph!
+        member: String!
+      ) repeatable on UNION
+      
+      directive @link(
+        url: String
+        as: String
+        for: link__Purpose
+        import: [link__Import]
+      ) repeatable on SCHEMA
+      
       scalar join__FieldSet
 
       enum join__Graph {
@@ -595,12 +631,26 @@ async fn dependent_mutations() {
         B @join__graph(name: "B" url: "http://localhost:4004")
       }
 
-      type Mutation {
+      scalar link__Import
+      
+      enum link__Purpose {
+        """
+        `SECURITY` features provide metadata necessary to securely resolve fields.
+        """
+        SECURITY
+      
+        """
+        `EXECUTION` features provide metadata necessary for operation execution.
+        """
+        EXECUTION
+      }
+
+      type Mutation @join__type(graph: A) @join__type(graph: B) {
           mutationA: Mutation @join__field(graph: A)
           mutationB: Boolean @join__field(graph: B)
       }
 
-      type Query {
+      type Query @join__type(graph: A) @join__type(graph: B) {
           query: Boolean @join__field(graph: A)
       }"#;
 

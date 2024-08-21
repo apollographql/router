@@ -23,10 +23,11 @@ use crate::integration::IntegrationTest;
 async fn query_planner_cache() -> Result<(), BoxError> {
     // If this test fails and the cache key format changed you'll need to update the key here.
     // 1. Force this test to run locally by removing the cfg() line at the top of this file.
-    // 2. run `docker compose up -d` and connect to the redis container by running `docker-compose exec redis /bin/bash`.
+    // 2. run `docker-compose up -d` and connect to the redis container by running `docker-compose exec redis /bin/bash`.
     // 3. Run the `redis-cli` command from the shell and start the redis `monitor` command.
     // 4. Run this test and yank the updated cache key from the redis logs.
-    let known_cache_key = "plan:0:v2.8.3:16385ebef77959fcdc520ad507eb1f7f7df28f1d54a0569e3adabcb4cd00d7ce:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:3106dfc3339d8c3f3020434024bff0f566a8be5995199954db5a7525a7d7e67a";
+    // If you have redis running locally, you can skip step 1 and 2, and proceed with steps 3-4.
+    let known_cache_key = "plan:0:v2.8.3:70f115ebba5991355c17f4f56ba25bb093c519c4db49a30f3b10de279a4e3fa4:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:4f9f0183101b2f249a364b98adadfda6e5e2001d1f2465c988428cf1ac0b545f";
 
     let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
     let client = RedisClient::new(config, None, None, None);
