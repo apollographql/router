@@ -151,7 +151,7 @@ fn make_uri(
 
 // URLTemplate expects a map with flat dot-delimited keys.
 fn flatten_keys(inputs: &IndexMap<String, Value>) -> Map<ByteString, Value> {
-    let mut flat = serde_json_bytes::Map::new();
+    let mut flat = serde_json_bytes::Map::with_capacity(inputs.len());
     for (key, value) in inputs {
         flatten_keys_recursive(value, &mut flat, key.clone());
     }
@@ -162,12 +162,7 @@ fn flatten_keys_recursive(inputs: &Value, flat: &mut Map<ByteString, Value>, pre
     match inputs {
         Value::Object(map) => {
             for (key, value) in map {
-                let new_prefix = format!(
-                    "{prefix}.{key}",
-                    prefix = prefix.as_str(),
-                    key = key.as_str()
-                );
-                flatten_keys_recursive(value, flat, new_prefix);
+                flatten_keys_recursive(value, flat, [prefix.as_str(), ".", key.as_str()].concat());
             }
         }
         _ => {

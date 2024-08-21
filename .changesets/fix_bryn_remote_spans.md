@@ -3,6 +3,7 @@
 The router now correctly propagates trace IDs when using the `propagation.request.header_name` configuration option.
 
 ```yaml
+telemetry:
   exporters:
     tracing:
       propagation:

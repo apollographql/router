@@ -46,6 +46,7 @@ use apollo_compiler::Node;
 
 use super::Containment;
 use super::ContainmentOptions;
+use super::DirectiveList;
 use super::Field;
 use super::FieldSelection;
 use super::Fragment;
@@ -54,7 +55,6 @@ use super::InlineFragmentSelection;
 use super::NamedFragments;
 use super::Operation;
 use super::Selection;
-use super::SelectionKey;
 use super::SelectionMapperReturn;
 use super::SelectionOrSet;
 use super::SelectionSet;
@@ -749,10 +749,10 @@ impl Fragment {
             return false;
         }
 
-        self.selection_set.selections.iter().any(|(selection_key, _)| {
+        self.selection_set.selections.iter().any(|(_, selection)| {
             matches!(
-                selection_key,
-                SelectionKey::FragmentSpread {fragment_name, directives: _} if fragment_name == other_fragment_name,
+                selection,
+                Selection::FragmentSpread(fragment) if fragment.spread.fragment_name == *other_fragment_name
             )
         })
     }
@@ -763,7 +763,7 @@ enum FullMatchingFragmentCondition<'a> {
     ForInlineFragmentSelection {
         // the type condition and directives on an inline fragment selection.
         type_condition_position: &'a CompositeTypeDefinitionPosition,
-        directives: &'a Arc<executable::DirectiveList>,
+        directives: &'a DirectiveList,
     },
 }
 
@@ -1652,7 +1652,7 @@ impl FragmentGenerator {
                 |condition| condition.to_string(),
             );
         let selections = frag.selection_set.selections.len();
-        let mut name = format!("_generated_on{type_condition}_{selections}");
+        let mut name = format!("_generated_on{type_condition}{selections}");
 
         let key = (type_condition, selections);
         let index = self
@@ -3206,8 +3206,8 @@ mod tests {
     ///
 
     #[test]
-    #[should_panic(expected = "directive cannot be used on FRAGMENT_DEFINITION")]
-    // TODO: Investigate this restriction on query document in Rust version.
+    #[should_panic(expected = "directive is not supported for FRAGMENT_DEFINITION")]
+    // XXX(@goto-bus-stop): this test does not make sense, we should remove this feature
     fn reuse_fragments_with_same_directive_on_the_fragment() {
         let schema_doc = r#"
                 type Query {
@@ -3506,6 +3506,7 @@ mod tests {
         use apollo_compiler::name;
 
         use super::*;
+        use crate::operation::SelectionKey;
 
         const TEST_SCHEMA_FOR_EMPTY_BRANCH_REMOVAL: &str = r#"
             type Query {
