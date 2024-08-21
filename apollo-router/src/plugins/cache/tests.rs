@@ -103,18 +103,18 @@ const SCHEMA: &str = r#"schema
    @join__type(graph: ORGA, key: "id")
    @join__type(graph: USER, key: "id"){
        id: ID!
-       name: String
-       activeOrganization: Organization
-       allOrganizations: [Organization]
+       name: String @join__field(graph: USER)
+       activeOrganization: Organization @join__field(graph: USER)
+       allOrganizations: [Organization] @join__field(graph: USER)
    }
    type Organization
    @join__type(graph: ORGA, key: "id")
    @join__type(graph: USER, key: "id") {
        id: ID
-       creatorUser: User
-       name: String
-       nonNullId: ID!
-       suborga: [Organization]
+       creatorUser: User @join__field(graph: ORGA)
+       name: String @join__field(graph: ORGA)
+       nonNullId: ID! @join__field(graph: ORGA)
+       suborga: [Organization] @join__field(graph: ORGA)
    }"#;
 
 #[derive(Debug)]

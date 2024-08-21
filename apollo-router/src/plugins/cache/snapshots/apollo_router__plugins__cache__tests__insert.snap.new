@@ -1,8 +1,0 @@
----
-source: apollo-router/src/plugins/cache/tests.rs
-assertion_line: 324
-expression: response.response.headers().get(CACHE_CONTROL)
----
-Some(
-    "no-store",
-)
