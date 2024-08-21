@@ -43,19 +43,19 @@ Follow this workflow to configure and tune demand control for your router:
 
 1. Measure the cost of your existing operations.
 2. Improve the cost estimation model.
-3. Adjust your `preview_demand_control` configuration and enforce cost limits.
+3. Adjust your `demand_control` configuration and enforce cost limits.
 
 ### Measure cost of existing operations
 
 Start by measuring the costs of the operations served by your router.
 
 1. In your `router.yaml`, configure demand control to `measure` mode and define telemetry to monitor the results. For example:
-    - Set `preview_demand_control.mode` to `measure`.
+    - Set `demand_control.mode` to `measure`.
     - Define a custom histogram of operation costs.
 
 ```yaml title="Example router.yaml to measure operation costs"
 # Demand control enabled in measure mode.
-preview_demand_control:
+demand_control:
   enabled: true
   # Use measure mode to monitor the costs of your operations without rejecting any.
   mode: measure
@@ -330,7 +330,7 @@ You can configure your APM to chart the histogram:
 The chart shows that the actual list sizes for the `allProducts` field are at most 100, so you should update your `static_estimated.list_size` to be 100:
 
 ```yaml title="router.yaml"
-preview_demand_control:
+demand_control:
   enabled: true
   mode: measure
   strategy:
@@ -382,7 +382,7 @@ After determining the cost estimation model of your operations, you should updat
 From the previous step, you can set the maximum cost to a value that allows all operations except `ExtractAll`:
 
 ```yaml title="router.yaml"
-preview_demand_control:
+demand_control:
   enabled: true
   mode: enforce               # Change mode from measure to enforce
   strategy:
@@ -520,10 +520,10 @@ After gathering enough data, you can then configure your router with maximum cos
 
 ## Configuring demand control
 
-To enable demand control in the router, configure the `preview_demand_control` option in `router.yaml`:
+To enable demand control in the router, configure the `demand_control` option in `router.yaml`:
 
 ```yaml title="router.yaml"
-preview_demand_control:
+demand_control:
   enabled: true
   mode: measure
   strategy:
@@ -532,9 +532,9 @@ preview_demand_control:
       max: 1000
 ```
 
-When `preview_demand_control` is enabled, the router measures the cost of each operation and can enforce operation cost limits, based on additional configuration.
+When `demand_control` is enabled, the router measures the cost of each operation and can enforce operation cost limits, based on additional configuration.
 
-Customize `preview_demand_control` with the following settings:
+Customize `demand_control` with the following settings:
 
 | Option              | Valid values            | Default value | Description                                                                                          |
 | ------------------- | ----------------------- | ------------- | ---------------------------------------------------------------------------------------------------- |

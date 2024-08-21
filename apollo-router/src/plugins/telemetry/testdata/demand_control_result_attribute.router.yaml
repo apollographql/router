@@ -1,5 +1,5 @@
 # Demand control enabled in measure mode.
-preview_demand_control:
+demand_control:
   enabled: true
   # Use measure mode to monitor the costs of your operations without rejecting any.
   mode: measure
