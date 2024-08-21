@@ -1,8 +1,5 @@
-use std::sync::Arc;
-
 use apollo_compiler::executable::Directive;
 use apollo_compiler::executable::Field;
-use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::schema::ExtendedType;
@@ -17,7 +14,7 @@ use crate::query_plan::FetchNode;
 use crate::query_plan::PlanNode;
 use crate::query_plan::QueryPlan;
 use crate::query_plan::TopLevelPlanNode;
-use crate::Supergraph;
+use crate::schema::ValidFederationSchema;
 
 // Questions that we may want to answer for correctness testing.
 // - Does a query plan produce the same response shape as the supergraph query?
@@ -51,7 +48,7 @@ pub struct SubgraphQueryElement {
 }
 
 struct SupergraphQueryVisitor<'a> {
-    supergraph: &'a Supergraph,
+    supergraph: &'a ValidFederationSchema,
     document: &'a Valid<ExecutableDocument>,
     paths: Vec<Vec<SupergraphQueryElement>>,
 }
@@ -71,7 +68,7 @@ impl SupergraphQueryVisitor<'_> {
         parent_type: &ExtendedType,
         field: &Field,
     ) -> Result<(), FederationError> {
-        let schema = self.supergraph.schema.schema();
+        let schema = self.supergraph.schema();
         let definition = schema
             .type_field(parent_type.name(), &field.name)
             .expect("invalid query");
@@ -140,7 +137,7 @@ impl SupergraphQueryVisitor<'_> {
         parent_type: &ExtendedType,
         selection_set: &SelectionSet,
     ) -> Result<(), FederationError> {
-        let schema = self.supergraph.schema.schema();
+        let schema = self.supergraph.schema();
         for selection in &selection_set.selections {
             match selection {
                 Selection::Field(field) => {
@@ -173,7 +170,7 @@ impl SupergraphQueryVisitor<'_> {
 }
 
 pub fn simulate_supergraph_query(
-    supergraph: &Supergraph,
+    supergraph: &ValidFederationSchema,
     operation_document: &Valid<ExecutableDocument>,
     operation_name: Option<&str>,
 ) -> Result<Vec<Vec<SupergraphQueryElement>>, FederationError> {
@@ -181,7 +178,7 @@ pub fn simulate_supergraph_query(
         return Err(FederationError::internal("operation name not found"));
     };
 
-    let schema = supergraph.schema.schema();
+    let schema = supergraph.schema();
     let Some(root_type) = schema.root_operation(operation.operation_type) else {
         return Err(FederationError::internal("root operation type not found"));
     };
@@ -220,7 +217,7 @@ pub fn simulate_supergraph_query(
 }
 
 struct QueryPlanVisitor<'a> {
-    supergraph: &'a Supergraph,
+    supergraph: &'a ValidFederationSchema,
     paths: Vec<Vec<SubgraphQueryElement>>,
 }
 
@@ -306,7 +303,7 @@ impl QueryPlanVisitor<'_> {
         document: &Valid<ExecutableDocument>,
         selection_set: &SelectionSet,
     ) -> Result<(), FederationError> {
-        let schema = self.supergraph.schema.schema();
+        let schema = self.supergraph.schema();
         for selection in &selection_set.selections {
             match selection {
                 Selection::Field(field) => {
@@ -393,7 +390,7 @@ impl QueryPlanVisitor<'_> {
             return Err(FederationError::internal("operation name not found"));
         };
 
-        let schema = self.supergraph.schema.schema();
+        let schema = self.supergraph.schema();
         let Some(root_type) = schema.root_operation(operation.operation_type) else {
             return Err(FederationError::internal("root operation type not found"));
         };
@@ -448,7 +445,7 @@ impl QueryPlanVisitor<'_> {
 }
 
 pub fn simulate_query_plan(
-    supergraph: &Supergraph,
+    supergraph: &ValidFederationSchema,
     plan: &QueryPlan,
 ) -> Result<Vec<Vec<SubgraphQueryElement>>, FederationError> {
     let mut visitor = QueryPlanVisitor {
