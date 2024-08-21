@@ -472,50 +472,50 @@ const SCHEMA: &str = r#"schema
     scalar link__Import
 
     enum link__Purpose {
-     """
-     `SECURITY` features provide metadata necessary to securely resolve fields.
-     """
-     SECURITY
+      """
+      `SECURITY` features provide metadata necessary to securely resolve fields.
+      """
+      SECURITY
   
-     """
-     `EXECUTION` features provide metadata necessary for operation execution.
-     """
-     EXECUTION
-   }
-   scalar join__FieldSet
+      """
+      `EXECUTION` features provide metadata necessary for operation execution.
+      """
+      EXECUTION
+    }
+    scalar join__FieldSet
 
-   enum join__Graph {
-       USER @join__graph(name: "user", url: "http://localhost:4001/graphql")
-       ORGA @join__graph(name: "orga", url: "http://localhost:4002/graphql")
-   }
+    enum join__Graph {
+        USER @join__graph(name: "user", url: "http://localhost:4001/graphql")
+        ORGA @join__graph(name: "orga", url: "http://localhost:4002/graphql")
+    }
 
-   type Query 
-   @join__type(graph: ORGA)
-   @join__type(graph: USER)
-   {
-       currentUser: User @join__field(graph: USER)
-   }
+    type Query 
+    @join__type(graph: ORGA)
+    @join__type(graph: USER)
+    {
+        currentUser: User @join__field(graph: USER)
+    }
 
-   type Subscription @join__type(graph: USER) {
-        userWasCreated: User
-   }
+    type Subscription @join__type(graph: USER) {
+         userWasCreated: User
+    }
 
-   type User
-   @join__type(graph: ORGA, key: "id")
-   @join__type(graph: USER, key: "id"){
-       id: ID!
-       name: String
-       activeOrganization: Organization
-   }
-   type Organization
-   @join__type(graph: ORGA, key: "id")
-   @join__type(graph: USER, key: "id") {
-       id: ID
-       creatorUser: User
-       name: String
-       nonNullId: ID!
-       suborga: [Organization]
-   }"#;
+    type User
+    @join__type(graph: ORGA, key: "id")
+    @join__type(graph: USER, key: "id"){
+        id: ID!
+        name: String
+        activeOrganization: Organization
+    }
+    type Organization
+    @join__type(graph: ORGA, key: "id")
+    @join__type(graph: USER, key: "id") {
+        id: ID
+        creatorUser: User
+        name: String
+        nonNullId: ID!
+        suborga: [Organization]
+    }"#;
 
 struct TestPlugin {
     started: Arc<AtomicBool>,

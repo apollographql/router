@@ -367,7 +367,7 @@ mod tests {
         assert_eq!(
             select!(
                 with_supergraph_boilerplate(
-                    "type Query { me: String } type Author { name: String } type Reviewer { name: String } \
+                    "type Query @join__type(graph: TEST) { me: String @join__field(graph: TEST) } type Author { name: String } type Reviewer { name: String } \
                     union User = Author | Reviewer"
                 ),
                 bjson!({"__typename": "Author", "id":2, "name":"Bob", "job":{"name":"astronaut"}}),
@@ -400,7 +400,7 @@ mod tests {
     #[test]
     fn test_array() {
         let schema = with_supergraph_boilerplate(
-            "type Query { me: String }
+            "type Query @join__type(graph: TEST){ me: String @join__field(graph: TEST) }
             type MainObject { mainObjectList: [SubObject] }
             type SubObject { key: String name: String }",
         );
@@ -471,7 +471,7 @@ mod tests {
     #[test]
     fn test_execute_selection_set_abstract_types() {
         let schema = with_supergraph_boilerplate(
-            "type Query { hello: String }
+            "type Query @join__type(graph: TEST){ hello: String @join__field(graph: TEST)}
             type Entity {
               id: Int!
               nestedUnion: NestedUnion
