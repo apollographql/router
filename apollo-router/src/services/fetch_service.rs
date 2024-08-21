@@ -17,13 +17,13 @@ use super::fetch::BoxService;
 use super::new_service::ServiceFactory;
 use super::ConnectRequest;
 use super::SubgraphRequest;
-use crate::error::FetchError;
 use crate::graphql::Request as GraphQLRequest;
 use crate::http_ext;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::query_planner::build_operation_with_aliasing;
 use crate::query_planner::fetch::FetchNode;
 use crate::query_planner::FETCH_SPAN_NAME;
+use crate::services::fetch::ErrorMapping;
 use crate::services::FetchRequest;
 use crate::services::FetchResponse;
 use crate::services::SubgraphServiceFactory;
@@ -126,26 +126,10 @@ impl FetchService {
                         .build(),
                 )
                 .await
-                .map_err(|e| match e.downcast::<FetchError>() {
-                    Ok(inner) => match *inner {
-                        FetchError::SubrequestHttpError { .. } => *inner,
-                        _ => FetchError::SubrequestHttpError {
-                            status_code: None,
-                            service: subgraph_name,
-                            reason: inner.to_string(),
-                        },
-                    },
-                    Err(e) => FetchError::SubrequestHttpError {
-                        status_code: None,
-                        service: subgraph_name,
-                        reason: e.to_string(),
-                    },
-                }) {
+                .map_to_graphql_error(subgraph_name, &current_dir.to_owned())
+            {
                 Err(e) => {
-                    return Ok((
-                        Value::default(),
-                        vec![e.to_graphql_error(Some(current_dir.to_owned()))],
-                    ));
+                    return Ok((Value::default(), vec![e]));
                 }
                 Ok(res) => res.response.into_parts(),
             };

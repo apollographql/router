@@ -17,7 +17,6 @@ use super::PlanNode;
 use super::QueryPlan;
 use crate::axum_factory::CanceledRequest;
 use crate::error::Error;
-use crate::error::FetchError;
 use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::json_ext::Object;
@@ -39,6 +38,7 @@ use crate::query_planner::FLATTEN_SPAN_NAME;
 use crate::query_planner::PARALLEL_SPAN_NAME;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
 use crate::query_planner::SUBSCRIBE_SPAN_NAME;
+use crate::services::fetch::ErrorMapping;
 use crate::services::fetch_service::FetchServiceFactory;
 use crate::services::new_service::ServiceFactory;
 use crate::services::FetchRequest;
@@ -256,18 +256,12 @@ impl PlanNode {
                                     .current_dir(current_dir.clone())
                                     .build();
                                 (value, errors) =
-                                    match service.oneshot(request).await.map_err(|e| {
-                                        FetchError::SubrequestHttpError {
-                                            status_code: None,
-                                            service: fetch_node.service_name.to_string(),
-                                            reason: e.to_string(),
-                                        }
-                                    }) {
+                                    match service.oneshot(request).await.map_to_graphql_error(
+                                        fetch_node.service_name.to_string(),
+                                        current_dir,
+                                    ) {
                                         Ok(r) => r,
-                                        Err(e) => (
-                                            Value::default(),
-                                            vec![e.to_graphql_error(Some(current_dir.to_owned()))],
-                                        ),
+                                        Err(e) => (Value::default(), vec![e]),
                                     };
                                 FetchNode::deferred_fetches(
                                     current_dir,

@@ -15,12 +15,12 @@ use super::execution::ExecutionParameters;
 use super::fetch::Variables;
 use super::rewrites;
 use super::OperationKind;
-use crate::error::FetchError;
 use crate::graphql::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::http_ext;
 use crate::json_ext::Path;
+use crate::services::fetch::ErrorMapping;
 use crate::services::subgraph::BoxGqlStream;
 use crate::services::SubgraphRequest;
 use crate::services::SubscriptionTaskParams;
@@ -161,16 +161,8 @@ impl SubscriptionNode {
                             .build()];
                     }
 
-                    match self
-                        .subgraph_call(parameters, current_dir, parent_value, tx_handle)
+                    self.subgraph_call(parameters, current_dir, parent_value, tx_handle)
                         .await
-                    {
-                        Ok(e) => e,
-                        Err(err) => {
-                            failfast_error!("subgraph call fetch error: {}", err);
-                            vec![err.to_graphql_error(Some(current_dir.to_owned()))]
-                        }
-                    }
                 }
                 None => {
                     vec![Error::builder()
@@ -191,7 +183,7 @@ impl SubscriptionNode {
         current_dir: &'a Path,
         data: &Value,
         tx_gql: mpsc::Sender<BoxGqlStream>,
-    ) -> Result<Vec<Error>, FetchError> {
+    ) -> Vec<Error> {
         let SubscriptionNode {
             operation,
             operation_name,
@@ -212,7 +204,7 @@ impl SubscriptionNode {
         ) {
             Some(variables) => variables,
             None => {
-                return Ok(Vec::new());
+                return Vec::new();
             }
         };
 
@@ -255,22 +247,17 @@ impl SubscriptionNode {
             .subgraph_service_for_subscriptions(service_name)
             .expect("we already checked that the service exists during planning; qed");
 
-        let (_parts, response) = service
+        match service
             .oneshot(subgraph_request)
             .instrument(tracing::trace_span!("subscription_call"))
             .await
-            // TODO this is a problem since it restores details about failed service
-            // when errors have been redacted in the include_subgraph_errors module.
-            // Unfortunately, not easy to fix here, because at this point we don't
-            // know if we should be redacting errors for this subgraph...
-            .map_err(|e| FetchError::SubrequestHttpError {
-                service: service_name.to_string(),
-                reason: e.to_string(),
-                status_code: None,
-            })?
-            .response
-            .into_parts();
-
-        Ok(response.errors)
+            .map_to_graphql_error(service_name.to_string(), current_dir)
+        {
+            Err(e) => {
+                failfast_error!("subgraph call fetch error: {}", e);
+                vec![e]
+            }
+            Ok(response) => response.response.into_parts().1.errors,
+        }
     }
 }

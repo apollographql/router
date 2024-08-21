@@ -6,6 +6,7 @@ use serde_json_bytes::Value;
 use tower::BoxError;
 
 use crate::error::Error;
+use crate::error::FetchError;
 use crate::graphql::Request as GraphQLRequest;
 use crate::json_ext::Path;
 use crate::query_planner::fetch::FetchNode;
@@ -45,5 +46,35 @@ impl Request {
             variables,
             current_dir,
         }
+    }
+}
+
+/// Map a fetch error result to a [GraphQL error](GraphQLError).
+pub(crate) trait ErrorMapping<T> {
+    fn map_to_graphql_error(self, service_name: String, current_dir: &Path) -> Result<T, Error>;
+}
+
+impl<T> ErrorMapping<T> for Result<T, BoxError> {
+    fn map_to_graphql_error(self, service_name: String, current_dir: &Path) -> Result<T, Error> {
+        // TODO this is a problem since it restores details about failed service
+        //  when errors have been redacted in the include_subgraph_errors module.
+        //  Unfortunately, not easy to fix here, because at this point we don't
+        //  know if we should be redacting errors for this subgraph...
+        self.map_err(|e| match e.downcast::<FetchError>() {
+            Ok(inner) => match *inner {
+                FetchError::SubrequestHttpError { .. } => *inner,
+                _ => FetchError::SubrequestHttpError {
+                    status_code: None,
+                    service: service_name,
+                    reason: inner.to_string(),
+                },
+            },
+            Err(e) => FetchError::SubrequestHttpError {
+                status_code: None,
+                service: service_name,
+                reason: e.to_string(),
+            },
+        })
+        .map_err(|e| e.to_graphql_error(Some(current_dir.to_owned())))
     }
 }
