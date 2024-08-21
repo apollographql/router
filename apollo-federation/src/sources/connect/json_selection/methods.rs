@@ -273,17 +273,12 @@ fn match_method(
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
     // Takes any number of pairs [key, value], and returns value for the first
-    // key that equals the data. If none of the pairs match, returns None. A
-    // single-element unconditional [value] may appear at the end.
+    // key that equals the data. If none of the pairs match, returns None.
+    // Typically, the final pair will use @ as its key to ensure some default
+    // value is returned.
     if let Some(MethodArgs(args)) = method_args {
         for pair in args {
             if let LitExpr::Array(pair) = pair {
-                if pair.len() == 1 {
-                    return pair[0]
-                        .apply_to_path(data, vars, input_path, errors)
-                        .and_then(|value| tail.apply_to_path(&value, vars, input_path, errors));
-                }
-
                 if pair.len() == 2 {
                     if let Some(candidate) = pair[0].apply_to_path(data, vars, input_path, errors) {
                         if candidate == *data {
@@ -1309,7 +1304,7 @@ mod tests {
                 __typename: kind->match(
                     ['dog', 'Canine'],
                     ['cat', 'Feline'],
-                    [@, 'Exotic']
+                    [@, 'Exotic'],
                 )
                 "#
             )
@@ -1333,31 +1328,7 @@ mod tests {
                 __typename: kind->match(
                     ['dog', 'Canine'],
                     ['cat', 'Feline'],
-                    ['Exotic']
-                )
-                "#
-            )
-            .apply_to(&json!({
-                "kind": "axlotl",
-                "name": "Gulpy",
-            })),
-            (
-                Some(json!({
-                    "__typename": "Exotic",
-                    "name": "Gulpy",
-                })),
-                vec![],
-            ),
-        );
-
-        assert_eq!(
-            selection!(
-                r#"
-                name
-                __typename: kind->match(
-                    ['dog', 'Canine'],
-                    ['cat', 'Feline'],
-                    ['Exotic']
+                    [@, 'Exotic'],
                 )
                 "#
             )
