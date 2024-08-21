@@ -74,9 +74,9 @@ impl Plugin for Connectors {
                             == Some(&HeaderValue::from_static("true"));
 
                     req.context.extensions().with_lock(|mut lock| {
-                        lock.insert::<Arc<RequestLimits>>(Arc::new(
-                            RequestLimits::new(max_requests)
-                        ));
+                        lock.insert::<Arc<RequestLimits>>(Arc::new(RequestLimits::new(
+                            max_requests,
+                        )));
                         if is_debug_enabled {
                             lock.insert::<Arc<Mutex<ConnectorContext>>>(Arc::new(Mutex::new(
                                 ConnectorContext::default(),
@@ -106,11 +106,12 @@ impl Plugin for Connectors {
                                     let (mut first, rest) = stream.into_future().await;
 
                                     if let Some(first) = &mut first {
-                                        if let Some(inner) = Arc::into_inner(debug) {
-                                            first.extensions.insert(
-                                                "apolloConnectorsDebugging",
-                                                json!({"version": "1", "data": inner.into_inner().serialize() }),
-                                            );
+                                        if let Some(json) = Arc::into_inner(debug)
+                                            .and_then(|d| d.into_inner().serialize())
+                                        {
+                                            first
+                                                .extensions
+                                                .insert("apolloConnectorsDebugging", json);
                                         }
                                     }
                                     res.response = http::Response::from_parts(
@@ -186,16 +187,22 @@ impl ConnectorContext {
         });
     }
 
-    fn serialize(self) -> serde_json_bytes::Value {
-        json!(self
-            .requests
-            .into_iter()
-            .zip(self.responses.into_iter())
-            .map(|(req, res)| json!({
-                "request": req,
-                "response": res,
-            }))
-            .collect::<Vec<_>>())
+    fn serialize(self) -> Option<serde_json_bytes::Value> {
+        if self.requests.is_empty() {
+            return None;
+        }
+        Some(json!({
+            "version": "1",
+            "data": self
+                .requests
+                .into_iter()
+                .zip(self.responses.into_iter())
+                .map(|(req, res)| json!({
+                    "request": req,
+                    "response": res,
+                }))
+                .collect::<Vec<_>>()
+        }))
     }
 }
 
