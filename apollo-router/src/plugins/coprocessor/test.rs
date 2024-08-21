@@ -279,12 +279,8 @@ mod tests {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
                 condition: Default::default(),
-                headers: false,
-                context: false,
                 body: true,
-                uri: false,
-                method: false,
-                service_name: false,
+                ..Default::default()
             },
             response: Default::default(),
         };
@@ -342,12 +338,8 @@ mod tests {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
                 condition: Default::default(),
-                headers: false,
-                context: false,
                 body: true,
-                uri: false,
-                method: false,
-                service_name: false,
+                ..Default::default()
             },
             response: Default::default(),
         };
@@ -480,12 +472,8 @@ mod tests {
                     SelectorOrValue::Value("value".to_string().into()),
                 ])
                 .into(),
-                headers: false,
-                context: false,
                 body: true,
-                uri: false,
-                method: false,
-                service_name: false,
+                ..Default::default()
             },
             response: Default::default(),
         };
@@ -554,12 +542,8 @@ mod tests {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
                 condition: Default::default(),
-                headers: false,
-                context: false,
                 body: true,
-                uri: false,
-                method: false,
-                service_name: false,
+                ..Default::default()
             },
             response: Default::default(),
         };
@@ -624,12 +608,8 @@ mod tests {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
                 condition: Default::default(),
-                headers: false,
-                context: false,
                 body: true,
-                uri: false,
-                method: false,
-                service_name: false,
+                ..Default::default()
             },
             response: Default::default(),
         };
@@ -689,11 +669,8 @@ mod tests {
             request: Default::default(),
             response: SubgraphResponseConf {
                 condition: Default::default(),
-                headers: false,
-                context: false,
                 body: true,
-                service_name: false,
-                status_code: false,
+                ..Default::default()
             },
         };
 
@@ -807,11 +784,8 @@ mod tests {
                     default: None,
                 })
                 .into(),
-                headers: false,
-                context: false,
                 body: true,
-                service_name: false,
-                status_code: false,
+                ..Default::default()
             },
         };
 

@@ -291,6 +291,8 @@ pub(super) struct SubgraphRequestConf {
     pub(super) method: bool,
     /// Send the service name
     pub(super) service_name: bool,
+    /// Send the subgraph request id
+    pub(super) subgraph_request_id: bool,
 }
 
 /// What information is passed to a subgraph request/response stage
@@ -310,6 +312,8 @@ pub(super) struct SubgraphResponseConf {
     pub(super) service_name: bool,
     /// Send the http status
     pub(super) status_code: bool,
+    /// Send the subgraph request id
+    pub(super) subgraph_request_id: bool,
 }
 
 /// Configures the externalization plugin
@@ -1012,6 +1016,9 @@ where
     let uri = request_config.uri.then(|| parts.uri.to_string());
     let subgraph_name = service_name.clone();
     let service_name = request_config.service_name.then_some(service_name);
+    let subgraph_request_id = request_config
+        .subgraph_request_id
+        .then_some(request.id.clone());
 
     let payload = Externalizable::subgraph_builder()
         .stage(PipelineStep::SubgraphRequest)
@@ -1023,6 +1030,7 @@ where
         .method(parts.method.to_string())
         .and_service_name(service_name)
         .and_uri(uri)
+        .and_subgraph_request_id(subgraph_request_id)
         .build();
 
     tracing::debug!(?payload, "externalized output");
