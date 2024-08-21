@@ -170,6 +170,7 @@ impl SupergraphQueryVisitor<'_> {
     }
 }
 
+/// Returns the paths executed by a supergraph query.
 pub fn simulate_supergraph_query(
     supergraph: &ValidFederationSchema,
     operation_document: &Valid<ExecutableDocument>,
@@ -445,6 +446,7 @@ impl QueryPlanVisitor<'_> {
     }
 }
 
+/// Determine the paths executed by a query plan.
 pub fn simulate_query_plan(
     supergraph: &ValidFederationSchema,
     plan: &QueryPlan,
@@ -471,18 +473,22 @@ pub fn simulate_query_plan(
     Ok(visitor.paths)
 }
 
+/// Compare that the supergraph execution paths are correctly fulfilled by the query plan execution
+/// paths.
 pub fn compare_paths(
     supergraph_paths: &[Vec<SupergraphQueryElement>],
     plan_paths: &[Vec<SubgraphQueryElement>],
 ) -> Result<(), FederationError> {
     for supergraph_path in supergraph_paths {
-        if let [single_item] = &supergraph_path[..] {
-            // If the path is just resolving __typename at the root of the operation,
-            // it's not passed on to subgraph fetches, but resolved in the router. So there will
-            // not be a path for it.
-            if single_item.path == FetchDataPathElement::Key(name!(__typename)) {
-                continue;
-            }
+        // If the path is just resolving __typename at the root of the operation, it's not
+        // passed on to subgraph fetches, but resolved in the router. So there will not be a
+        // path for it.
+        let is_root_typename = matches!(
+            &supergraph_path[..],
+            [single_item] if single_item.path == FetchDataPathElement::Key(name!(__typename)),
+        );
+        if is_root_typename {
+            continue;
         }
 
         let Some(plan_path) = plan_paths.iter().find(|path| {
