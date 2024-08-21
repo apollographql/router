@@ -90,17 +90,17 @@ type Query @join__type(graph: USER) @join__type(graph: ORGA) {
 
 type User @join__type(graph: ORGA, key: "id") @join__type(graph: USER, key: "id") {
    id: ID!
-   name: String
-   phone: String
-   activeOrganization: Organization
+   name: String  @join__field(graph: USER)
+   phone: String @join__field(graph: USER)
+   activeOrganization: Organization @join__field(graph: USER)
 }
 
 type Organization @join__type(graph: ORGA, key: "id") @join__type(graph: USER, key: "id") {
    id: ID
-   creatorUser: User
-   name: String
-   nonNullId: ID!
-   suborga: [Organization]
+   creatorUser: User @join__field(graph: ORGA)
+   name: String @join__field(graph: ORGA)
+   nonNullId: ID! @join__field(graph: ORGA)
+   suborga: [Organization] @join__field(graph: ORGA)
 }"#;
 
 #[tokio::test]
