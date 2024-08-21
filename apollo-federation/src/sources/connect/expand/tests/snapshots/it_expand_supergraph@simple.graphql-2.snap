@@ -218,7 +218,9 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
                         selections: [
                             Path(
                                 Alias {
-                                    name: "with_b",
+                                    name: Field(
+                                        "with_b",
+                                    ),
                                 },
                                 PathSelection {
                                     path: Var(

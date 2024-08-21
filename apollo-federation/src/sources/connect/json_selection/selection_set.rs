@@ -64,9 +64,7 @@ impl SubSelection {
         // the user defined a __typename mapping.
         if field_map.contains_key("__typename") {
             new_selections.push(NamedSelection::Path(
-                Alias {
-                    name: "__typename".to_string(),
-                },
+                Alias::new("__typename"),
                 PathSelection {
                     path: PathList::Var(
                         KnownVariable::Dollar,
@@ -95,9 +93,7 @@ impl SubSelection {
                             let alias = if field_response_key == name.as_str() {
                                 None
                             } else {
-                                Some(Alias {
-                                    name: field_response_key.to_string(),
-                                })
+                                Some(Alias::new(field_response_key))
                             };
                             new_selections.push(NamedSelection::Field(
                                 alias,
@@ -120,9 +116,7 @@ impl SubSelection {
                         }
                         for field in fields {
                             new_selections.push(NamedSelection::Path(
-                                Alias {
-                                    name: field.response_key().to_string(),
-                                },
+                                Alias::new(field.response_key().as_str()),
                                 path_selection.apply_selection_set(&field.selection_set),
                             ));
                         }
@@ -137,9 +131,7 @@ impl SubSelection {
                     if let Some(fields) = field_map.get_vec(key) {
                         for field in fields {
                             new_selections.push(NamedSelection::Group(
-                                Alias {
-                                    name: field.response_key().to_string(),
-                                },
+                                Alias::new(field.response_key().as_str()),
                                 sub.apply_selection_set(&field.selection_set),
                             ));
                         }
@@ -155,7 +147,7 @@ impl SubSelection {
             for (dropped, _) in dropped_fields {
                 let name = format!("__unused__{dropped}");
                 new_selections.push(NamedSelection::Field(
-                    Some(Alias { name }),
+                    Some(Alias::new(name.as_str())),
                     Key::field(dropped),
                     None,
                 ));

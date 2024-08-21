@@ -252,7 +252,9 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                         selections: [
                             Path(
                                 Alias {
-                                    name: "emailDomain",
+                                    name: Field(
+                                        "emailDomain",
+                                    ),
                                 },
                                 PathSelection {
                                     path: Var(

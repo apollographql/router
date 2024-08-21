@@ -473,7 +473,7 @@ impl ApplyToInternal for SubSelection {
                         star_output.insert(key.clone(), value.clone());
                     }
                 }
-                output.insert(alias.name.clone(), JSON::Object(star_output));
+                output.insert(alias.name(), JSON::Object(star_output));
             }
             // Aliased and subselected, e.g. "alias: * { hello }"
             Some(StarSelection(Some(alias), Some(selection))) => {
@@ -487,7 +487,7 @@ impl ApplyToInternal for SubSelection {
                         }
                     }
                 }
-                output.insert(alias.name.clone(), JSON::Object(star_output));
+                output.insert(alias.name(), JSON::Object(star_output));
             }
             // Not aliased but subselected, e.g. "parent { * { hello } }"
             Some(StarSelection(None, Some(selection))) => {
