@@ -103,7 +103,7 @@ pub(crate) struct Externalizable<T> {
     #[serde(skip_serializing_if = "Option::is_none")]
     query_plan: Option<Arc<QueryPlan>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    subgraph_request_id: Option<String>,
+    pub(crate) subgraph_request_id: Option<String>,
 }
 
 #[buildstructor::buildstructor]

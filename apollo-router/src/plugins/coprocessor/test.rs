@@ -377,6 +377,9 @@ mod tests {
                     req.subgraph_request.into_body().query.unwrap()
                 );
 
+                // this should be the same as the initial request id
+                assert_eq!(req.id, "5678");
+
                 Ok(subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
@@ -391,7 +394,10 @@ mod tests {
                 let deserialized_request: Externalizable<serde_json::Value> =
                     serde_json::from_slice(&hyper::body::to_bytes(req.into_body()).await.unwrap())
                         .unwrap();
-                    assert_eq!(deserialized_request.id.as_deref(), Some("5678"));
+                assert_eq!(
+                    deserialized_request.subgraph_request_id.as_deref(),
+                    Some("5678")
+                );
                 Ok(http::Response::builder()
                     .body(RouterBody::from(
                         r#"{
@@ -436,7 +442,8 @@ mod tests {
                                     }
                                   },
                                   "serviceName": "service name shouldn't change",
-                                  "uri": "http://thisurihaschanged"
+                                  "uri": "http://thisurihaschanged",
+                                  "subgraphRequestId": "9abc"
                             }"#,
                     ))
                     .unwrap())
@@ -453,19 +460,12 @@ mod tests {
         let mut request = subgraph::Request::fake_builder().build();
         request.id = "5678".to_string();
 
-        let response = service
-        .oneshot(request)
-        .await
-        .unwrap()
-        ;
+        let response = service.oneshot(request).await.unwrap();
 
         assert_eq!("5678", response.id);
         assert_eq!(
             serde_json_bytes::json!({ "test": 1234_u32 }),
-            response.response
-                .into_body()
-                .data
-                .unwrap()
+            response.response.into_body().data.unwrap()
         );
     }
 
