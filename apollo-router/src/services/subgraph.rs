@@ -62,6 +62,9 @@ pub struct Request {
     pub(crate) authorization: Arc<CacheKeyMetadata>,
 
     pub(crate) executable_document: Option<Arc<Valid<apollo_compiler::ExecutableDocument>>>,
+
+    /// unique id for this request
+    pub(crate) id: String,
 }
 
 #[buildstructor::buildstructor]
@@ -90,6 +93,10 @@ impl Request {
             query_hash: Default::default(),
             authorization: Default::default(),
             executable_document: None,
+            id:  uuid::Uuid::new_v4()
+            .as_hyphenated()
+            .encode_lower(&mut uuid::Uuid::encode_buffer())
+            .to_string()
         }
     }
 
@@ -154,6 +161,7 @@ impl Clone for Request {
             query_hash: self.query_hash.clone(),
             authorization: self.authorization.clone(),
             executable_document: self.executable_document.clone(),
+            id: self.id.clone(),
         }
     }
 }
