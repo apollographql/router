@@ -453,25 +453,46 @@ async fn test_compressed_request_response_body() {
 }
 
 const SCHEMA: &str = r#"schema
-        @core(feature: "https://specs.apollo.dev/core/v0.1")
-        @core(feature: "https://specs.apollo.dev/join/v0.1")
-        @core(feature: "https://specs.apollo.dev/inaccessible/v0.1")
-         {
-        query: Query
-        subscription: Subscription
+       @link(url: "https://specs.apollo.dev/link/v1.0")
+       @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+       @link(url: "https://specs.apollo.dev/inaccessible/v0.1")
+          {
+         query: Query
+         subscription: Subscription
+    }
+    directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+    directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+    directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+    directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+    directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+    directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+    directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+    directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
+
+    scalar link__Import
+
+    enum link__Purpose {
+     """
+     `SECURITY` features provide metadata necessary to securely resolve fields.
+     """
+     SECURITY
+  
+     """
+     `EXECUTION` features provide metadata necessary for operation execution.
+     """
+     EXECUTION
    }
-   directive @core(feature: String!) repeatable on SCHEMA
-   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet) on FIELD_DEFINITION
-   directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
-   directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
-   directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-   directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
    scalar join__FieldSet
+
    enum join__Graph {
        USER @join__graph(name: "user", url: "http://localhost:4001/graphql")
        ORGA @join__graph(name: "orga", url: "http://localhost:4002/graphql")
    }
-   type Query {
+
+   type Query 
+   @join__type(graph: ORGA)
+   @join__type(graph: USER)
+   {
        currentUser: User @join__field(graph: USER)
    }
 
@@ -480,7 +501,6 @@ const SCHEMA: &str = r#"schema
    }
 
    type User
-   @join__owner(graph: USER)
    @join__type(graph: ORGA, key: "id")
    @join__type(graph: USER, key: "id"){
        id: ID!
@@ -488,7 +508,6 @@ const SCHEMA: &str = r#"schema
        activeOrganization: Organization
    }
    type Organization
-   @join__owner(graph: ORGA)
    @join__type(graph: ORGA, key: "id")
    @join__type(graph: USER, key: "id") {
        id: ID
@@ -553,29 +572,48 @@ async fn test_http_plugin_is_loaded() {
 
 fn make_schema(path: &str) -> String {
     r#"schema
-        @core(feature: "https://specs.apollo.dev/core/v0.1")
-        @core(feature: "https://specs.apollo.dev/join/v0.1")
-        @core(feature: "https://specs.apollo.dev/inaccessible/v0.1")
+      @link(url: "https://specs.apollo.dev/link/v1.0")
+      @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+      @link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY)
          {
         query: Query
    }
-   directive @core(feature: String!) repeatable on SCHEMA
-   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet) on FIELD_DEFINITION
-   directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
-   directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
+   directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+   directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
    directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+   directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+   directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+   directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
    directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
+
+   scalar link__Import
+
+   enum link__Purpose {
+    """
+    `SECURITY` features provide metadata necessary to securely resolve fields.
+    """
+    SECURITY
+  
+    """
+    `EXECUTION` features provide metadata necessary for operation execution.
+    """
+    EXECUTION
+  }
+  
    scalar join__FieldSet
    enum join__Graph {
        USER @join__graph(name: "user", url: "unix://"#.to_string()+path+r#"")
        ORGA @join__graph(name: "orga", url: "http://localhost:4002/graphql")
    }
-   type Query {
+   type Query 
+   @join__type(graph: ORGA)
+   @join__type(graph: USER)
+   {
        currentUser: User @join__field(graph: USER)
    }
 
    type User
-   @join__owner(graph: USER)
    @join__type(graph: ORGA, key: "id")
    @join__type(graph: USER, key: "id"){
        id: ID!
