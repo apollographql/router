@@ -239,6 +239,7 @@ mod tests {
     use apollo_compiler::name;
     use apollo_compiler::Schema;
     use apollo_federation::sources::connect::ConnectId;
+    use apollo_federation::sources::connect::ConnectSpec;
     use apollo_federation::sources::connect::Connector;
     use apollo_federation::sources::connect::EntityResolver;
     use apollo_federation::sources::connect::HTTPMethod;
@@ -274,6 +275,7 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
+            spec: ConnectSpec::V0_1,
         };
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -369,6 +371,7 @@ mod tests {
             entity_resolver: Some(EntityResolver::Explicit),
             config: Default::default(),
             max_requests: None,
+            spec: ConnectSpec::V0_1,
         };
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -481,6 +484,7 @@ mod tests {
             entity_resolver: Some(EntityResolver::Implicit),
             config: Default::default(),
             max_requests: None,
+            spec: ConnectSpec::V0_1,
         };
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -595,6 +599,7 @@ mod tests {
             entity_resolver: Some(EntityResolver::Explicit),
             config: Default::default(),
             max_requests: None,
+            spec: ConnectSpec::V0_1,
         };
 
         let response1: http::Response<RouterBody> = http::Response::builder()

@@ -50,7 +50,7 @@ use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
 use crate::sources::connect::spec::schema::SOURCE_NAME_ARGUMENT_NAME;
-use crate::sources::connect::ConnectSpecDefinition;
+use crate::sources::connect::ConnectSpec;
 use crate::subgraph::spec::CONTEXT_DIRECTIVE_NAME;
 use crate::subgraph::spec::FROM_CONTEXT_DIRECTIVE_NAME;
 use crate::subgraph::spec::INTF_OBJECT_DIRECTIVE_NAME;
@@ -60,7 +60,7 @@ use crate::subgraph::spec::INTF_OBJECT_DIRECTIVE_NAME;
 /// This function attempts to collect as many validation errors as possible, so it does not bail
 /// out as soon as it encounters one.
 pub fn validate(schema: Schema) -> Vec<Message> {
-    let connect_identity = ConnectSpecDefinition::identity();
+    let connect_identity = ConnectSpec::identity();
     let Some((link, link_directive)) = Link::for_identity(&schema, &connect_identity) else {
         return Vec::new(); // There are no connectors-related directives to validate
     };
@@ -68,8 +68,8 @@ pub fn validate(schema: Schema) -> Vec<Message> {
     let mut messages = check_conflicting_directives(&schema);
 
     let source_map = &schema.sources;
-    let source_directive_name = ConnectSpecDefinition::source_directive_name(&link);
-    let connect_directive_name = ConnectSpecDefinition::connect_directive_name(&link);
+    let source_directive_name = ConnectSpec::source_directive_name(&link);
+    let connect_directive_name = ConnectSpec::connect_directive_name(&link);
     let source_directives: Vec<SourceDirective> = schema
         .schema_definition
         .directives

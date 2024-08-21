@@ -382,7 +382,7 @@ impl FetchNode {
             .oneshot(subgraph_request)
             .instrument(tracing::trace_span!("subfetch_stream"))
             .await
-            .map_to_graphql_error(self.service_name.to_string(), current_dir)
+            .map_to_graphql_error(self.service_name.clone(), current_dir)
         {
             Err(e) => {
                 return (Value::default(), vec![e]);

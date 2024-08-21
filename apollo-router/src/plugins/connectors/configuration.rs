@@ -60,7 +60,8 @@ pub(crate) fn apply_config(config: &Configuration, mut connectors: Connectors) -
     };
 
     for connector in Arc::make_mut(&mut connectors.by_service_name).values_mut() {
-        let Some(subgraph_config) = config.subgraphs.get(&connector.id.subgraph_name) else {
+        let Some(subgraph_config) = config.subgraphs.get(connector.id.subgraph_name.as_ref())
+        else {
             continue;
         };
         if let Some(source_config) = connector

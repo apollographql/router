@@ -97,7 +97,7 @@ impl FetchService {
             .instrument(tracing::info_span!(
                 FETCH_SPAN_NAME,
                 "otel.kind" = "INTERNAL",
-                "apollo.subgraph.name" = connector.id.subgraph_name,
+                "apollo.subgraph.name" = connector.id.subgraph_name.as_ref(),
                 "apollo_private.sent_time_offset" = fetch_time_offset
             ))
         } else {
@@ -119,7 +119,7 @@ impl FetchService {
     fn fetch_with_connector_service(
         schema: Arc<Schema>,
         connector_service_factory: Arc<ConnectorServiceFactory>,
-        subgraph_name: String,
+        subgraph_name: Arc<str>,
         request: FetchRequest,
     ) -> BoxFuture<'static, Result<FetchResponse, BoxError>> {
         let FetchRequest {
@@ -428,7 +428,7 @@ impl FetchService {
                         .oneshot(subgraph_request)
                         .instrument(tracing::trace_span!("subscription_call"))
                         .await
-                        .map_to_graphql_error(service_name.to_string(), &current_dir)
+                        .map_to_graphql_error(service_name, &current_dir)
                     {
                         Err(e) => {
                             failfast_error!("subgraph call fetch error: {}", e);

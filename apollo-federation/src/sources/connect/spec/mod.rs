@@ -42,12 +42,12 @@ use crate::schema::FederationSchema;
 
 /// The known versions of the connect spec
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum ConnectSpecDefinition {
+pub enum ConnectSpec {
     V0_1,
 }
 
-impl ConnectSpecDefinition {
-    pub const fn version_str(&self) -> &'static str {
+impl ConnectSpec {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::V0_1 => "0.1",
         }
@@ -151,7 +151,7 @@ impl ConnectSpecDefinition {
     }
 }
 
-impl TryFrom<&Version> for ConnectSpecDefinition {
+impl TryFrom<&Version> for ConnectSpec {
     type Error = SingleFederationError;
     fn try_from(version: &Version) -> Result<Self, Self::Error> {
         match (version.major, version.minor) {
@@ -163,10 +163,10 @@ impl TryFrom<&Version> for ConnectSpecDefinition {
     }
 }
 
-impl From<ConnectSpecDefinition> for Version {
-    fn from(spec: ConnectSpecDefinition) -> Self {
+impl From<ConnectSpec> for Version {
+    fn from(spec: ConnectSpec) -> Self {
         match spec {
-            ConnectSpecDefinition::V0_1 => Version { major: 0, minor: 1 },
+            ConnectSpec::V0_1 => Version { major: 0, minor: 1 },
         }
     }
 }

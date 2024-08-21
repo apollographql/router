@@ -23,6 +23,7 @@ use sha2::Sha256;
 use crate::error::ParseErrors;
 use crate::error::SchemaError;
 use crate::plugins::connectors::configuration::apply_config;
+use crate::plugins::connectors::tracing::record_connect_metrics;
 use crate::query_planner::OperationKind;
 use crate::Configuration;
 
@@ -58,11 +59,14 @@ impl Schema {
                 raw_sdl,
                 api_schema: api,
                 connectors,
-            } => (
-                Arc::new(raw_sdl),
-                Some(ValidFederationSchema::new(api).map_err(SchemaError::Connector)?),
-                Some(apply_config(config, connectors)),
-            ),
+            } => {
+                record_connect_metrics(&connectors);
+                (
+                    Arc::new(raw_sdl),
+                    Some(ValidFederationSchema::new(api).map_err(SchemaError::Connector)?),
+                    Some(apply_config(config, connectors)),
+                )
+            }
             ExpansionResult::Unchanged => (raw_sdl, None, None),
         };
 

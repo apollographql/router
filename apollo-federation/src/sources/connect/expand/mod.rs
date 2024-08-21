@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use apollo_compiler::validation::Valid;
@@ -10,7 +11,7 @@ use crate::error::FederationError;
 use crate::link::Link;
 use crate::merge::merge_subgraphs;
 use crate::schema::FederationSchema;
-use crate::sources::connect::ConnectSpecDefinition;
+use crate::sources::connect::ConnectSpec;
 use crate::sources::connect::Connector;
 use crate::subgraph::Subgraph;
 use crate::subgraph::ValidSubgraph;
@@ -25,7 +26,6 @@ use visitors::filter_directives;
 pub struct Connectors {
     pub by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
     pub labels_by_service_name: Arc<IndexMap<Arc<str>, String>>,
-    pub spec_versions: IndexMap<ConnectSpecDefinition, u64>,
 }
 
 /// The result of a supergraph expansion of connect-aware subgraphs
@@ -50,7 +50,7 @@ pub enum ExpansionResult {
 /// off of existing functionality in a reproducable way.
 pub fn expand_connectors(supergraph_str: &str) -> Result<ExpansionResult, FederationError> {
     // TODO: Don't rely on finding the URL manually to short out
-    let connect_url = ConnectSpecDefinition::identity();
+    let connect_url = ConnectSpec::identity();
     let connect_url = format!("{}/{}/v", connect_url.domain, connect_url.name);
     if !supergraph_str.contains(&connect_url) {
         return Ok(ExpansionResult::Unchanged);
@@ -66,24 +66,21 @@ pub fn expand_connectors(supergraph_str: &str) -> Result<ExpansionResult, Federa
     let (connect_subgraphs, graphql_subgraphs): (Vec<_>, Vec<_>) = supergraph
         .extract_subgraphs()?
         .into_iter()
-        .partition_map(|(_, sub)| {
-            match ConnectSpecDefinition::get_from_schema(sub.schema.schema()) {
+        .partition_map(
+            |(_, sub)| match ConnectSpec::get_from_schema(sub.schema.schema()) {
                 Some((spec, link)) if contains_connectors(&link, &sub) => {
                     either::Either::Left((spec, link, sub))
                 }
                 _ => either::Either::Right(ValidSubgraph::from(sub)),
-            }
-        });
+            },
+        );
 
     let mut expanded_subgraphs = Vec::new();
-    let mut spec_versions = IndexMap::new();
+    let mut spec_versions = HashSet::new();
 
     for (spec, link, sub) in connect_subgraphs {
-        expanded_subgraphs.extend(split_subgraph(&link, sub)?);
-        spec_versions
-            .entry(spec)
-            .and_modify(|v| *v += 1)
-            .or_insert(1);
+        expanded_subgraphs.extend(split_subgraph(&link, sub, spec)?);
+        spec_versions.insert(spec);
     }
 
     // Merge the subgraphs into one supergraph
@@ -99,7 +96,7 @@ pub fn expand_connectors(supergraph_str: &str) -> Result<ExpansionResult, Federa
     carryover_directives(
         &supergraph.schema,
         &mut new_supergraph,
-        spec_versions.keys().copied(),
+        spec_versions.into_iter(),
     )
     .map_err(|e| FederationError::internal(format!("could not carry over directives: {e:?}")))?;
 
@@ -119,14 +116,13 @@ pub fn expand_connectors(supergraph_str: &str) -> Result<ExpansionResult, Federa
         connectors: Connectors {
             by_service_name: Arc::new(connectors_by_service_name),
             labels_by_service_name: Arc::new(labels_by_service_name),
-            spec_versions,
         },
     })
 }
 
 fn contains_connectors(link: &Link, subgraph: &ValidFederationSubgraph) -> bool {
-    let connect_name = ConnectSpecDefinition::connect_directive_name(link);
-    let source_name = ConnectSpecDefinition::source_directive_name(link);
+    let connect_name = ConnectSpec::connect_directive_name(link);
+    let source_name = ConnectSpec::source_directive_name(link);
 
     subgraph
         .schema
@@ -142,8 +138,9 @@ fn contains_connectors(link: &Link, subgraph: &ValidFederationSubgraph) -> bool 
 fn split_subgraph(
     link: &Link,
     subgraph: ValidFederationSubgraph,
+    spec: ConnectSpec,
 ) -> Result<Vec<(Connector, ValidSubgraph)>, FederationError> {
-    let connector_map = Connector::from_valid_schema(&subgraph.schema, &subgraph.name)?;
+    let connector_map = Connector::from_valid_schema(&subgraph.schema, &subgraph.name, spec)?;
 
     let expander = helpers::Expander::new(link, &subgraph);
     connector_map
@@ -215,7 +212,7 @@ mod helpers {
     use crate::schema::ValidFederationSchema;
     use crate::sources::connect::json_selection::KnownVariable;
     use crate::sources::connect::url_template::Parameter;
-    use crate::sources::connect::ConnectSpecDefinition;
+    use crate::sources::connect::ConnectSpec;
     use crate::sources::connect::Connector;
     use crate::sources::connect::EntityResolver;
     use crate::sources::connect::JSONSelection;
@@ -246,8 +243,8 @@ mod helpers {
 
     impl<'a> Expander<'a> {
         pub(super) fn new(link: &Link, subgraph: &'a ValidFederationSubgraph) -> Expander<'a> {
-            let connect_name = ConnectSpecDefinition::connect_directive_name(link);
-            let source_name = ConnectSpecDefinition::source_directive_name(link);
+            let connect_name = ConnectSpec::connect_directive_name(link);
+            let source_name = ConnectSpec::source_directive_name(link);
 
             // When we go to expand all output types, we'll need to make sure that we don't carry over
             // any connect-related directives. The following directives are also special because they

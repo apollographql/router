@@ -100,11 +100,11 @@ impl SubscriptionRequest {
 
 /// Map a fetch error result to a [GraphQL error](GraphQLError).
 pub(crate) trait ErrorMapping<T> {
-    fn map_to_graphql_error(self, service_name: String, current_dir: &Path) -> Result<T, Error>;
+    fn map_to_graphql_error(self, service_name: Arc<str>, current_dir: &Path) -> Result<T, Error>;
 }
 
 impl<T> ErrorMapping<T> for Result<T, BoxError> {
-    fn map_to_graphql_error(self, service_name: String, current_dir: &Path) -> Result<T, Error> {
+    fn map_to_graphql_error(self, service_name: Arc<str>, current_dir: &Path) -> Result<T, Error> {
         // TODO this is a problem since it restores details about failed service
         //  when errors have been redacted in the include_subgraph_errors module.
         //  Unfortunately, not easy to fix here, because at this point we don't
@@ -114,13 +114,13 @@ impl<T> ErrorMapping<T> for Result<T, BoxError> {
                 FetchError::SubrequestHttpError { .. } => *inner,
                 _ => FetchError::SubrequestHttpError {
                     status_code: None,
-                    service: service_name,
+                    service: service_name.to_string(),
                     reason: inner.to_string(),
                 },
             },
             Err(e) => FetchError::SubrequestHttpError {
                 status_code: None,
-                service: service_name,
+                service: service_name.to_string(),
                 reason: e.to_string(),
             },
         })

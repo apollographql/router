@@ -460,6 +460,7 @@ mod tests {
     use apollo_compiler::ExecutableDocument;
     use apollo_compiler::Schema;
     use apollo_federation::sources::connect::ConnectId;
+    use apollo_federation::sources::connect::ConnectSpec;
     use apollo_federation::sources::connect::Connector;
     use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HttpJsonTransport;
@@ -520,6 +521,7 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
+            spec: ConnectSpec::V0_1,
         };
 
         assert_debug_snapshot!(super::root_fields(&connector, &req), @r###"
@@ -630,6 +632,7 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
+            spec: ConnectSpec::V0_1,
         };
 
         assert_debug_snapshot!(super::root_fields(&connector, &req), @r###"
@@ -762,6 +765,7 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
+            spec: ConnectSpec::V0_1,
         };
 
         assert_debug_snapshot!(super::root_fields(&connector, &req), @r###"
@@ -938,6 +942,7 @@ mod tests {
             entity_resolver: Some(super::EntityResolver::Explicit),
             config: Default::default(),
             max_requests: None,
+            spec: ConnectSpec::V0_1,
         };
 
         assert_debug_snapshot!(super::entities_from_request(&connector, &req).unwrap(), @r###"
@@ -1140,6 +1145,7 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
+            spec: ConnectSpec::V0_1,
         };
 
         assert_debug_snapshot!(super::entities_from_request(&connector, &req).unwrap(), @r###"
@@ -1320,6 +1326,7 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
+            spec: ConnectSpec::V0_1,
         };
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(&connector, &req).unwrap(), @r###"
@@ -1556,6 +1563,7 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
+            spec: ConnectSpec::V0_1,
         };
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(&connector ,&req).unwrap(), @r###"
@@ -1675,6 +1683,7 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
+            spec: ConnectSpec::V0_1,
         };
 
         let requests = super::make_requests(req, &connector, &None).unwrap();

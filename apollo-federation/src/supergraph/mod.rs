@@ -81,7 +81,7 @@ use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 use crate::schema::type_and_directive_specification::UnionTypeSpecification;
 use crate::schema::FederationSchema;
-use crate::sources::connect::ConnectSpecDefinition;
+use crate::sources::connect::ConnectSpec;
 use crate::utils::FallibleIterator;
 
 /// Assumes the given schema has been validated.
@@ -2177,8 +2177,8 @@ fn extract_join_directives(
                     Component::new(link_directive.clone()),
                 )?;
 
-                if ConnectSpecDefinition::from_directive(&link_directive)?.is_some() {
-                    ConnectSpecDefinition::check_or_add(&mut subgraph.schema)?;
+                if ConnectSpec::from_directive(&link_directive)?.is_some() {
+                    ConnectSpec::check_or_add(&mut subgraph.schema)?;
                 }
             }
         }

@@ -21,7 +21,7 @@ use super::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
 use super::schema::SOURCE_HTTP_NAME_IN_SPEC;
 use super::schema::SOURCE_NAME_ARGUMENT_NAME;
 use super::schema::URL_PATH_TEMPLATE_SCALAR_NAME;
-use super::ConnectSpecDefinition;
+use super::ConnectSpec;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::Link;
@@ -207,7 +207,7 @@ pub(super) fn check_or_add(
                         let name = s
                             .metadata()
                             .ok_or_else(|| internal!("missing metadata"))?
-                            .for_identity(&ConnectSpecDefinition::identity())
+                            .for_identity(&ConnectSpec::identity())
                             .ok_or_else(|| internal!("missing connect spec"))?
                             .type_name_in_schema(&CONNECT_HTTP_NAME_IN_SPEC);
                         Ok(Type::Named(name))
@@ -223,7 +223,7 @@ pub(super) fn check_or_add(
                         let name = s
                             .metadata()
                             .ok_or_else(|| internal!("missing metadata"))?
-                            .for_identity(&ConnectSpecDefinition::identity())
+                            .for_identity(&ConnectSpec::identity())
                             .ok_or_else(|| internal!("missing connect spec"))?
                             .type_name_in_schema(&JSON_SELECTION_SCALAR_NAME);
                         Ok(Type::NonNullNamed(name))
@@ -313,7 +313,7 @@ pub(super) fn check_or_add(
                         let name = s
                             .metadata()
                             .ok_or_else(|| internal!("missing metadata"))?
-                            .for_identity(&ConnectSpecDefinition::identity())
+                            .for_identity(&ConnectSpec::identity())
                             .ok_or_else(|| internal!("missing connect spec"))?
                             .type_name_in_schema(&SOURCE_HTTP_NAME_IN_SPEC);
                         Ok(Type::Named(name))
@@ -352,7 +352,7 @@ mod tests {
 
     use super::check_or_add;
     use crate::schema::FederationSchema;
-    use crate::sources::connect::spec::ConnectSpecDefinition;
+    use crate::sources::connect::spec::ConnectSpec;
 
     #[test]
     fn test() {
@@ -370,7 +370,7 @@ mod tests {
         let link = federation_schema
             .metadata()
             .unwrap()
-            .for_identity(&ConnectSpecDefinition::identity())
+            .for_identity(&ConnectSpec::identity())
             .unwrap();
 
         check_or_add(&link, &mut federation_schema).unwrap();

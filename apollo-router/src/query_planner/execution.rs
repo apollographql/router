@@ -245,7 +245,7 @@ impl PlanNode {
                                 );
                                 (value, errors) =
                                     match service.oneshot(request).await.map_to_graphql_error(
-                                        subscription_node.service_name.to_string(),
+                                        subscription_node.service_name.clone(),
                                         current_dir,
                                     ) {
                                         Ok(r) => r,
@@ -293,7 +293,7 @@ impl PlanNode {
                                 );
                                 (value, errors) =
                                     match service.oneshot(request).await.map_to_graphql_error(
-                                        fetch_node.service_name.to_string(),
+                                        fetch_node.service_name.clone(),
                                         current_dir,
                                     ) {
                                         Ok(r) => r,
