@@ -105,6 +105,7 @@ expression: connectors.by_service_name
                                     var_path: "$args.id",
                                     batch_separator: None,
                                     required: true,
+                                    repeated: false,
                                 },
                             ),
                         ],

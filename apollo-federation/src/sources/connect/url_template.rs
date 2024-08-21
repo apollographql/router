@@ -15,6 +15,7 @@ use nom::sequence::pair;
 use nom::sequence::preceded;
 use nom::sequence::tuple;
 use nom::IResult;
+use nom::Parser;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
@@ -65,6 +66,8 @@ pub struct VariableExpression {
     // the query parameter list are optional by default, but can be made
     // mandatory by adding a trailing ! to the variable path.
     required: bool,
+
+    repeated: bool,
 }
 
 impl URLTemplate {
@@ -155,15 +158,30 @@ impl URLTemplate {
         &self,
         vars: &Map<ByteString, JSON>,
     ) -> Result<Vec<(&String, String)>, String> {
-        self.query
-            .iter()
-            .filter_map(|(key, param_value)| {
-                param_value
-                    .interpolate(vars)
-                    .transpose()
-                    .map(|value| value.map(|value| (key, value)))
-            })
-            .collect()
+        let mut query = vec![];
+        for (key, param_value) in &self.query {
+            if let Some(repeated) = param_value.repeated_variable_path() {
+                match vars.get(repeated.as_str()) {
+                    Some(JSON::Array(value)) => {
+                        for value in value {
+                            let vars = Map::from_iter([(repeated.clone().into(), value.clone())]);
+                            if let Some(pair) = param_value.interpolate(&vars)? {
+                                query.push((key, pair));
+                            }
+                        }
+                    }
+                    Some(_) => {
+                        if let Some(value) = param_value.interpolate(vars)? {
+                            query.push((key, value))
+                        }
+                    }
+                    None => {}
+                }
+            } else if let Some(value) = param_value.interpolate(vars)? {
+                query.push((key, value))
+            }
+        }
+        Ok(query)
     }
 }
 
@@ -479,6 +497,19 @@ impl ParameterValue {
 
         Ok(parameters)
     }
+
+    fn repeated_variable_path(&self) -> Option<String> {
+        self.parts.iter().find_map(|part| match part {
+            ValuePart::Text(_) => None,
+            ValuePart::Var(var) => {
+                if var.repeated {
+                    Some(var.var_path.clone())
+                } else {
+                    None
+                }
+            }
+        })
+    }
 }
 
 /// A parameter to fill
@@ -549,26 +580,32 @@ impl VariableExpression {
         tuple((
             nom_parse_identifier_path,
             opt(char('!')),
-            opt(pair(one_of(",;|+ "), tag("..."))),
+            opt(alt((
+                pair(one_of(",;|+ "), tag("...")),
+                char('*').map(|c| (c, "")),
+            ))),
         ))(input)
         .map_err(|err| format!("Error parsing variable expression {}: {}", input, err))
-        .and_then(
-            |(remaining, (var_path, exclamation_point, batch_separator))| {
-                if remaining.is_empty() {
-                    Ok(VariableExpression {
-                        var_path,
-                        required: exclamation_point.is_some() || required,
-                        batch_separator: batch_separator
-                            .map(|(separator, _)| separator.to_string()),
-                    })
-                } else {
-                    Err(format!(
-                        "Unexpected trailing characters {} in variable expression {}",
-                        remaining, input
-                    ))
-                }
-            },
-        )
+        .and_then(|(remaining, (var_path, exclamation_point, batch))| {
+            let (batch_separator, repeated) = match batch {
+                Some((separator, "...")) => (Some(separator.to_string()), false),
+                Some((_, _)) => (None, true),
+                None => (None, false),
+            };
+            if remaining.is_empty() {
+                Ok(VariableExpression {
+                    var_path,
+                    required: exclamation_point.is_some() || required,
+                    batch_separator,
+                    repeated,
+                })
+            } else {
+                Err(format!(
+                    "Unexpected trailing characters {} in variable expression {}",
+                    remaining, input
+                ))
+            }
+        })
     }
 
     fn interpolate(&self, vars: &Map<ByteString, JSON>) -> Result<Option<String>, String> {
@@ -1586,4 +1623,28 @@ fn test_display_trait() {
         ),
         "/position?xyz=({x},{y},{z})".to_string(),
     );
+}
+
+#[cfg(test)]
+mod interpolation {
+    use super::*;
+
+    #[test]
+    fn test_repeated() {
+        assert_eq!(
+            URLTemplate::from_str("/users?ids[]={$args.ids*}")
+                .unwrap()
+                .interpolate_query(
+                    serde_json_bytes::json!({ "$args.ids": [1,2,3] })
+                        .as_object()
+                        .unwrap()
+                )
+                .unwrap(),
+            vec![
+                (&"ids[]".to_string(), "1".to_string()),
+                (&"ids[]".to_string(), "2".to_string()),
+                (&"ids[]".to_string(), "3".to_string())
+            ],
+        );
+    }
 }
