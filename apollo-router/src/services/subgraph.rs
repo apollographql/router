@@ -93,10 +93,10 @@ impl Request {
             query_hash: Default::default(),
             authorization: Default::default(),
             executable_document: None,
-            id:  uuid::Uuid::new_v4()
-            .as_hyphenated()
-            .encode_lower(&mut uuid::Uuid::encode_buffer())
-            .to_string()
+            id: uuid::Uuid::new_v4()
+                .as_hyphenated()
+                .encode_lower(&mut uuid::Uuid::encode_buffer())
+                .to_string(),
         }
     }
 
@@ -175,6 +175,8 @@ pub struct Response {
     /// Name of the subgraph, it's an Option to not introduce breaking change
     pub(crate) subgraph_name: Option<String>,
     pub context: Context,
+    /// unique id matching the corresponding field in the request
+    pub(crate) id: String,
 }
 
 #[buildstructor::buildstructor]
@@ -187,11 +189,13 @@ impl Response {
         response: http::Response<graphql::Response>,
         context: Context,
         subgraph_name: String,
+        id: String,
     ) -> Response {
         Self {
             response,
             context,
             subgraph_name: Some(subgraph_name),
+            id,
         }
     }
 
@@ -210,6 +214,7 @@ impl Response {
         context: Context,
         headers: Option<http::HeaderMap<http::HeaderValue>>,
         subgraph_name: Option<String>,
+        id: Option<String>,
     ) -> Response {
         // Build a response
         let res = graphql::Response::builder()
@@ -228,10 +233,21 @@ impl Response {
 
         *response.headers_mut() = headers.unwrap_or_default();
 
+        // Warning: the id argument forthis builder is an Option to make that a non breaking change
+        // but this means that if a subgraph response is created explicitely without an id, it will
+        // be generated here and not match the id from the subgraph request
+        let id = id.unwrap_or_else(|| {
+            uuid::Uuid::new_v4()
+                .as_hyphenated()
+                .encode_lower(&mut uuid::Uuid::encode_buffer())
+                .to_string()
+        });
+
         Self {
             response,
             context,
             subgraph_name,
+            id,
         }
     }
 
@@ -252,6 +268,7 @@ impl Response {
         context: Option<Context>,
         headers: Option<http::HeaderMap<http::HeaderValue>>,
         subgraph_name: Option<String>,
+        id: Option<String>,
     ) -> Response {
         Response::new(
             label,
@@ -263,6 +280,7 @@ impl Response {
             context.unwrap_or_default(),
             headers,
             subgraph_name,
+            id,
         )
     }
 
@@ -284,6 +302,7 @@ impl Response {
         context: Option<Context>,
         headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         subgraph_name: Option<String>,
+        id: Option<String>,
     ) -> Result<Response, BoxError> {
         Ok(Response::new(
             label,
@@ -295,6 +314,7 @@ impl Response {
             context.unwrap_or_default(),
             Some(header_map(headers)?),
             subgraph_name,
+            id,
         ))
     }
 
@@ -307,6 +327,7 @@ impl Response {
         status_code: Option<StatusCode>,
         context: Context,
         subgraph_name: Option<String>,
+        id: Option<String>,
     ) -> Result<Response, BoxError> {
         Ok(Response::new(
             Default::default(),
@@ -318,6 +339,7 @@ impl Response {
             context,
             Default::default(),
             subgraph_name,
+            id,
         ))
     }
 }

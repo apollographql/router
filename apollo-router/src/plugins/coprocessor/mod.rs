@@ -1081,6 +1081,7 @@ where
                 response: http_response,
                 context: request.context,
                 subgraph_name: Some(subgraph_name),
+                id: request.id,
             };
 
             if let Some(context) = co_processor_output.context {
