@@ -5,7 +5,7 @@ use apollo_compiler::executable::Selection;
 use apollo_federation::sources::connect::Connector;
 use apollo_federation::sources::connect::CustomConfiguration;
 use apollo_federation::sources::connect::EntityResolver;
-use itertools::Itertools;
+use apollo_federation::sources::connect::JSONSelection;
 use parking_lot::Mutex;
 use serde_json_bytes::json;
 use serde_json_bytes::ByteString;
@@ -40,35 +40,35 @@ impl RequestInputs {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) enum ResponseKey {
     RootField {
         name: String,
         typename: ResponseTypeName,
-        selection_set: apollo_compiler::executable::SelectionSet,
+        selection: Arc<JSONSelection>,
         inputs: RequestInputs,
     },
     Entity {
         index: usize,
         typename: ResponseTypeName,
-        selection_set: apollo_compiler::executable::SelectionSet,
+        selection: Arc<JSONSelection>,
         inputs: RequestInputs,
     },
     EntityField {
         index: usize,
         field_name: String,
         typename: ResponseTypeName,
-        selection_set: apollo_compiler::executable::SelectionSet,
+        selection: Arc<JSONSelection>,
         inputs: RequestInputs,
     },
 }
 
 impl ResponseKey {
-    pub(crate) fn selection_set(&self) -> &apollo_compiler::executable::SelectionSet {
+    pub(crate) fn selection(&self) -> &JSONSelection {
         match self {
-            ResponseKey::RootField { selection_set, .. } => selection_set,
-            ResponseKey::Entity { selection_set, .. } => selection_set,
-            ResponseKey::EntityField { selection_set, .. } => selection_set,
+            ResponseKey::RootField { selection, .. } => selection,
+            ResponseKey::Entity { selection, .. } => selection,
+            ResponseKey::EntityField { selection, .. } => selection,
         }
     }
 
@@ -78,48 +78,6 @@ impl ResponseKey {
             ResponseKey::Entity { inputs, .. } => inputs,
             ResponseKey::EntityField { inputs, .. } => inputs,
         }
-    }
-}
-
-// Vec<Selection> debug isn't deterministic when run in parallel tests
-impl std::fmt::Debug for ResponseKey {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> std::fmt::Result {
-        let selection_set = self
-            .selection_set()
-            .selections
-            .iter()
-            .map(|s| format!("{}", s))
-            .join(" ");
-        match self {
-            ResponseKey::RootField { name, typename, .. } => {
-                let mut debug = f.debug_struct("RootField");
-                debug.field("name", name).field("typename", typename);
-                debug
-            }
-            ResponseKey::Entity {
-                index, typename, ..
-            } => {
-                let mut debug = f.debug_struct("Entity");
-                debug.field("index", index).field("typename", typename);
-                debug
-            }
-            ResponseKey::EntityField {
-                index,
-                field_name,
-                typename,
-                ..
-            } => {
-                let mut debug = f.debug_struct("EntityField");
-                debug
-                    .field("index", index)
-                    .field("field_name", field_name)
-                    .field("typename", typename);
-                debug
-            }
-        }
-        .field("selection_set", &selection_set)
-        .field("inputs", self.inputs())
-        .finish()
     }
 }
 
@@ -137,9 +95,9 @@ pub(crate) fn make_requests(
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
 ) -> Result<Vec<(http::Request<RouterBody>, ResponseKey)>, MakeRequestError> {
     let request_params = match connector.entity_resolver {
-        Some(EntityResolver::Explicit) => entities_from_request(&request),
-        Some(EntityResolver::Implicit) => entities_with_fields_from_request(&request),
-        None => root_fields(&request),
+        Some(EntityResolver::Explicit) => entities_from_request(connector, &request),
+        Some(EntityResolver::Implicit) => entities_with_fields_from_request(connector, &request),
+        None => root_fields(connector, &request),
     }?;
 
     request_params_to_requests(connector, request_params, &request, debug)
@@ -208,7 +166,10 @@ pub(crate) enum MakeRequestError {
 ///   b: foo(bar: "b") # another request
 /// }
 /// ```
-fn root_fields(request: &connect::Request) -> Result<Vec<ResponseKey>, MakeRequestError> {
+fn root_fields(
+    connector: &Connector,
+    request: &connect::Request,
+) -> Result<Vec<ResponseKey>, MakeRequestError> {
     use MakeRequestError::*;
 
     let op = request
@@ -243,7 +204,11 @@ fn root_fields(request: &connect::Request) -> Result<Vec<ResponseKey>, MakeReque
                     typename: ResponseTypeName::Concrete(
                         field.definition.ty.inner_named_type().to_string(),
                     ),
-                    selection_set: field.selection_set.clone(),
+                    selection: Arc::new(
+                        connector
+                            .selection
+                            .apply_selection_set(&field.selection_set),
+                    ),
                     inputs: request_inputs,
                 };
 
@@ -280,11 +245,14 @@ fn root_fields(request: &connect::Request) -> Result<Vec<ResponseKey>, MakeReque
 /// ```
 ///
 /// Returns a list of request inputs and the response key (index in the array).
-fn entities_from_request(request: &connect::Request) -> Result<Vec<ResponseKey>, MakeRequestError> {
+fn entities_from_request(
+    connector: &Connector,
+    request: &connect::Request,
+) -> Result<Vec<ResponseKey>, MakeRequestError> {
     use MakeRequestError::*;
 
     let Some(representations) = request.variables.variables.get(REPRESENTATIONS_VAR) else {
-        return root_fields(request);
+        return root_fields(connector, request);
     };
 
     let op = request
@@ -294,6 +262,12 @@ fn entities_from_request(request: &connect::Request) -> Result<Vec<ResponseKey>,
         .map_err(|_| InvalidOperation("no operation document".into()))?;
 
     let (entities_field, typename_requested) = graphql_utils::get_entity_fields(op)?;
+
+    let selection = Arc::new(
+        connector
+            .selection
+            .apply_selection_set(&entities_field.selection_set),
+    );
 
     representations
         .as_array()
@@ -337,7 +311,7 @@ fn entities_from_request(request: &connect::Request) -> Result<Vec<ResponseKey>,
             Ok(ResponseKey::Entity {
                 index: i,
                 typename,
-                selection_set: entities_field.selection_set.clone(),
+                selection: selection.clone(),
                 inputs: request_inputs,
             })
         })
@@ -363,6 +337,7 @@ fn entities_from_request(request: &connect::Request) -> Result<Vec<ResponseKey>,
 /// Return a list of request inputs with the response key (index in list and
 /// name/alias of field) for each.
 fn entities_with_fields_from_request(
+    connector: &Connector,
     request: &connect::Request,
 ) -> Result<Vec<ResponseKey>, MakeRequestError> {
     use MakeRequestError::*;
@@ -429,6 +404,12 @@ fn entities_with_fields_from_request(
         .into_iter()
         .flatten()
         .flat_map(|(typename, field)| {
+            let selection = Arc::new(
+                connector
+                    .selection
+                    .apply_selection_set(&field.selection_set),
+            );
+
             representations.iter().map(move |(i, representation)| {
                 let args = graphql_utils::field_arguments_map(field, &request.variables.variables)
                     .map_err(|_| {
@@ -463,7 +444,7 @@ fn entities_with_fields_from_request(
                     index: *i,
                     field_name: response_name.to_string(),
                     typename,
-                    selection_set: field.selection_set.clone(),
+                    selection: selection.clone(),
                     inputs: request_inputs,
                 })
             })
@@ -519,7 +500,29 @@ mod tests {
             ))
             .build();
 
-        assert_debug_snapshot!(super::root_fields(&req), @r###"
+        let connector = Connector {
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Query),
+                name!(a),
+                0,
+                "test label",
+            ),
+            transport: HttpJsonTransport {
+                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                connect_template: "/path".parse().unwrap(),
+                method: HTTPMethod::Get,
+                headers: Default::default(),
+                body: Default::default(),
+            },
+            selection: JSONSelection::parse("f").unwrap().1,
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+        };
+
+        assert_debug_snapshot!(super::root_fields(&connector, &req), @r###"
         Ok(
             [
                 RootField {
@@ -527,7 +530,18 @@ mod tests {
                     typename: Concrete(
                         "A",
                     ),
-                    selection_set: "f",
+                    selection: Named(
+                        SubSelection {
+                            selections: [
+                                Field(
+                                    None,
+                                    "f",
+                                    None,
+                                ),
+                            ],
+                            star: None,
+                        },
+                    ),
                     inputs: RequestInputs {
                         args: {},
                         this: {},
@@ -538,7 +552,22 @@ mod tests {
                     typename: Concrete(
                         "A",
                     ),
-                    selection_set: "f2: f",
+                    selection: Named(
+                        SubSelection {
+                            selections: [
+                                Field(
+                                    Some(
+                                        Alias {
+                                            name: "f2",
+                                        },
+                                    ),
+                                    "f",
+                                    None,
+                                ),
+                            ],
+                            star: None,
+                        },
+                    ),
                     inputs: RequestInputs {
                         args: {},
                         this: {},
@@ -581,7 +610,29 @@ mod tests {
             ))
             .build();
 
-        assert_debug_snapshot!(super::root_fields(&req), @r###"
+        let connector = Connector {
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Query),
+                name!(b),
+                0,
+                "test label",
+            ),
+            transport: HttpJsonTransport {
+                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                connect_template: "/path".parse().unwrap(),
+                method: HTTPMethod::Get,
+                headers: Default::default(),
+                body: Default::default(),
+            },
+            selection: JSONSelection::parse("$").unwrap().1,
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+        };
+
+        assert_debug_snapshot!(super::root_fields(&connector, &req), @r###"
         Ok(
             [
                 RootField {
@@ -589,7 +640,12 @@ mod tests {
                     typename: Concrete(
                         "String",
                     ),
-                    selection_set: "",
+                    selection: Path(
+                        Var(
+                            "$",
+                            Empty,
+                        ),
+                    ),
                     inputs: RequestInputs {
                         args: {
                             "var": String(
@@ -604,7 +660,12 @@ mod tests {
                     typename: Concrete(
                         "String",
                     ),
-                    selection_set: "",
+                    selection: Path(
+                        Var(
+                            "$",
+                            Empty,
+                        ),
+                    ),
                     inputs: RequestInputs {
                         args: {
                             "var": String(
@@ -677,7 +738,29 @@ mod tests {
             ))
             .build();
 
-        assert_debug_snapshot!(super::root_fields(&req), @r###"
+        let connector = Connector {
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Query),
+                name!(c),
+                0,
+                "test label",
+            ),
+            transport: HttpJsonTransport {
+                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                connect_template: "/path".parse().unwrap(),
+                method: HTTPMethod::Get,
+                headers: Default::default(),
+                body: Default::default(),
+            },
+            selection: JSONSelection::parse(".data").unwrap().1,
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+        };
+
+        assert_debug_snapshot!(super::root_fields(&connector, &req), @r###"
         Ok(
             [
                 RootField {
@@ -685,7 +768,14 @@ mod tests {
                     typename: Concrete(
                         "String",
                     ),
-                    selection_set: "",
+                    selection: Path(
+                        Key(
+                            Field(
+                                "data",
+                            ),
+                            Empty,
+                        ),
+                    ),
                     inputs: RequestInputs {
                         args: {
                             "var1": Number(1),
@@ -714,7 +804,14 @@ mod tests {
                     typename: Concrete(
                         "String",
                     ),
-                    selection_set: "",
+                    selection: Path(
+                        Key(
+                            Field(
+                                "data",
+                            ),
+                            Empty,
+                        ),
+                    ),
                     inputs: RequestInputs {
                         args: {
                             "var1": Number(1),
@@ -813,14 +910,70 @@ mod tests {
             ))
             .build();
 
-        assert_debug_snapshot!(super::entities_from_request(&req).unwrap(), @r###"
+        let connector = Connector {
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Query),
+                name!(entity),
+                0,
+                "test label",
+            ),
+            transport: HttpJsonTransport {
+                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                connect_template: "/path".parse().unwrap(),
+                method: HTTPMethod::Get,
+                headers: Default::default(),
+                body: Default::default(),
+            },
+            selection: JSONSelection::parse("field").unwrap().1,
+            entity_resolver: Some(super::EntityResolver::Explicit),
+            config: Default::default(),
+            max_requests: None,
+        };
+
+        assert_debug_snapshot!(super::entities_from_request(&connector, &req).unwrap(), @r###"
         [
             Entity {
                 index: 0,
                 typename: Concrete(
                     "Entity",
                 ),
-                selection_set: "__typename ... on Entity {\n  field\n  alias: field\n}",
+                selection: Named(
+                    SubSelection {
+                        selections: [
+                            Path(
+                                Alias {
+                                    name: "__typename",
+                                },
+                                Var(
+                                    "$typenames",
+                                    Key(
+                                        Field(
+                                            "_Entity",
+                                        ),
+                                        Empty,
+                                    ),
+                                ),
+                            ),
+                            Field(
+                                None,
+                                "field",
+                                None,
+                            ),
+                            Field(
+                                Some(
+                                    Alias {
+                                        name: "alias",
+                                    },
+                                ),
+                                "field",
+                                None,
+                            ),
+                        ],
+                        star: None,
+                    },
+                ),
                 inputs: RequestInputs {
                     args: {
                         "__typename": String(
@@ -838,7 +991,41 @@ mod tests {
                 typename: Concrete(
                     "Entity",
                 ),
-                selection_set: "__typename ... on Entity {\n  field\n  alias: field\n}",
+                selection: Named(
+                    SubSelection {
+                        selections: [
+                            Path(
+                                Alias {
+                                    name: "__typename",
+                                },
+                                Var(
+                                    "$typenames",
+                                    Key(
+                                        Field(
+                                            "_Entity",
+                                        ),
+                                        Empty,
+                                    ),
+                                ),
+                            ),
+                            Field(
+                                None,
+                                "field",
+                                None,
+                            ),
+                            Field(
+                                Some(
+                                    Alias {
+                                        name: "alias",
+                                    },
+                                ),
+                                "field",
+                                None,
+                            ),
+                        ],
+                        star: None,
+                    },
+                ),
                 inputs: RequestInputs {
                     args: {
                         "__typename": String(
@@ -907,14 +1094,58 @@ mod tests {
             ))
             .build();
 
-        assert_debug_snapshot!(super::entities_from_request(&req).unwrap(), @r###"
+        let connector = Connector {
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Query),
+                name!(entity),
+                0,
+                "test label",
+            ),
+            transport: HttpJsonTransport {
+                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                connect_template: "/path".parse().unwrap(),
+                method: HTTPMethod::Get,
+                headers: Default::default(),
+                body: Default::default(),
+            },
+            selection: JSONSelection::parse("field { field }").unwrap().1,
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+        };
+
+        assert_debug_snapshot!(super::entities_from_request(&connector, &req).unwrap(), @r###"
         [
             RootField {
                 name: "a",
                 typename: Concrete(
                     "Entity",
                 ),
-                selection_set: "field {\n  field\n}",
+                selection: Named(
+                    SubSelection {
+                        selections: [
+                            Field(
+                                None,
+                                "field",
+                                Some(
+                                    SubSelection {
+                                        selections: [
+                                            Field(
+                                                None,
+                                                "field",
+                                                None,
+                                            ),
+                                        ],
+                                        star: None,
+                                    },
+                                ),
+                            ),
+                        ],
+                        star: None,
+                    },
+                ),
                 inputs: RequestInputs {
                     args: {
                         "id": String(
@@ -929,7 +1160,33 @@ mod tests {
                 typename: Concrete(
                     "Entity",
                 ),
-                selection_set: "field {\n  alias: field\n}",
+                selection: Named(
+                    SubSelection {
+                        selections: [
+                            Field(
+                                None,
+                                "field",
+                                Some(
+                                    SubSelection {
+                                        selections: [
+                                            Field(
+                                                Some(
+                                                    Alias {
+                                                        name: "alias",
+                                                    },
+                                                ),
+                                                "field",
+                                                None,
+                                            ),
+                                        ],
+                                        star: None,
+                                    },
+                                ),
+                            ),
+                        ],
+                        star: None,
+                    },
+                ),
                 inputs: RequestInputs {
                     args: {
                         "id": String(
@@ -1017,7 +1274,29 @@ mod tests {
             ))
             .build();
 
-        assert_debug_snapshot!(super::entities_with_fields_from_request(&req).unwrap(), @r###"
+        let connector = Connector {
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Entity),
+                name!(field),
+                0,
+                "test label",
+            ),
+            transport: HttpJsonTransport {
+                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                connect_template: "/path".parse().unwrap(),
+                method: HTTPMethod::Get,
+                headers: Default::default(),
+                body: Default::default(),
+            },
+            selection: JSONSelection::parse("selected").unwrap().1,
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+        };
+
+        assert_debug_snapshot!(super::entities_with_fields_from_request(&connector, &req).unwrap(), @r###"
         [
             EntityField {
                 index: 0,
@@ -1025,7 +1304,18 @@ mod tests {
                 typename: Concrete(
                     "Entity",
                 ),
-                selection_set: "selected",
+                selection: Named(
+                    SubSelection {
+                        selections: [
+                            Field(
+                                None,
+                                "selected",
+                                None,
+                            ),
+                        ],
+                        star: None,
+                    },
+                ),
                 inputs: RequestInputs {
                     args: {
                         "foo": String(
@@ -1048,7 +1338,18 @@ mod tests {
                 typename: Concrete(
                     "Entity",
                 ),
-                selection_set: "selected",
+                selection: Named(
+                    SubSelection {
+                        selections: [
+                            Field(
+                                None,
+                                "selected",
+                                None,
+                            ),
+                        ],
+                        star: None,
+                    },
+                ),
                 inputs: RequestInputs {
                     args: {
                         "foo": String(
@@ -1071,7 +1372,18 @@ mod tests {
                 typename: Concrete(
                     "Entity",
                 ),
-                selection_set: "selected",
+                selection: Named(
+                    SubSelection {
+                        selections: [
+                            Field(
+                                None,
+                                "selected",
+                                None,
+                            ),
+                        ],
+                        star: None,
+                    },
+                ),
                 inputs: RequestInputs {
                     args: {
                         "foo": String(
@@ -1094,7 +1406,18 @@ mod tests {
                 typename: Concrete(
                     "Entity",
                 ),
-                selection_set: "selected",
+                selection: Named(
+                    SubSelection {
+                        selections: [
+                            Field(
+                                None,
+                                "selected",
+                                None,
+                            ),
+                        ],
+                        star: None,
+                    },
+                ),
                 inputs: RequestInputs {
                     args: {
                         "foo": String(
@@ -1187,13 +1510,46 @@ mod tests {
             ))
             .build();
 
-        assert_debug_snapshot!(super::entities_with_fields_from_request(&req).unwrap(), @r###"
+        let connector = Connector {
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Entity),
+                name!(field),
+                0,
+                "test label",
+            ),
+            transport: HttpJsonTransport {
+                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                connect_template: "/path".parse().unwrap(),
+                method: HTTPMethod::Get,
+                headers: Default::default(),
+                body: Default::default(),
+            },
+            selection: JSONSelection::parse("selected").unwrap().1,
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+        };
+
+        assert_debug_snapshot!(super::entities_with_fields_from_request(&connector ,&req).unwrap(), @r###"
         [
             EntityField {
                 index: 0,
                 field_name: "field",
                 typename: Omitted,
-                selection_set: "selected",
+                selection: Named(
+                    SubSelection {
+                        selections: [
+                            Field(
+                                None,
+                                "selected",
+                                None,
+                            ),
+                        ],
+                        star: None,
+                    },
+                ),
                 inputs: RequestInputs {
                     args: {
                         "foo": String(
@@ -1214,7 +1570,18 @@ mod tests {
                 index: 1,
                 field_name: "field",
                 typename: Omitted,
-                selection_set: "selected",
+                selection: Named(
+                    SubSelection {
+                        selections: [
+                            Field(
+                                None,
+                                "selected",
+                                None,
+                            ),
+                        ],
+                        star: None,
+                    },
+                ),
                 inputs: RequestInputs {
                     args: {
                         "foo": String(
@@ -1305,7 +1672,14 @@ mod tests {
                     typename: Concrete(
                         "String",
                     ),
-                    selection_set: "",
+                    selection: Path(
+                        Key(
+                            Field(
+                                "data",
+                            ),
+                            Empty,
+                        ),
+                    ),
                     inputs: RequestInputs {
                         args: {},
                         this: {},
