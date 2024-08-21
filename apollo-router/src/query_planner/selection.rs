@@ -806,10 +806,6 @@ mod tests {
           """
           EXECUTION
         }
-        
-        type Query @join__type(graph: TEST) {
-          me: String @join__field(graph: test)
-        }
         "#,
             content
         )

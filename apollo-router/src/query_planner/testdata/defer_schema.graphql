@@ -3,7 +3,6 @@ schema
   @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY)
   @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
   query: Query
-  mutation: Mutation
 }
 
 directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
@@ -72,7 +71,7 @@ enum link__Purpose {
   EXECUTION
 }
 
-type Query @join__type(graph: X) @join__Type(graph: Y) {
+type Query @join__type(graph: X) @join__type(graph: Y) {
   t: T @join__field(graph: X)
 }
 

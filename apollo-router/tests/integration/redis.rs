@@ -27,7 +27,7 @@ async fn query_planner_cache() -> Result<(), BoxError> {
     // 3. Run the `redis-cli` command from the shell and start the redis `monitor` command.
     // 4. Run this test and yank the updated cache key from the redis logs.
     // If you have redis running locally, you can skip step 1 and 2, and proceed with steps 3-4.
-    let known_cache_key = "plan:0:v2.8.3:70f115ebba5991355c17f4f56ba25bb093c519c4db49a30f3b10de279a4e3fa4:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:4f9f0183101b2f249a364b98adadfda6e5e2001d1f2465c988428cf1ac0b545f";
+    let known_cache_key = "plan:0:v2.8.3:70f115ebba5991355c17f4f56ba25bb093c519c4db49a30f3b10de279a4e3fa4:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:adb64b5139d6a15f187056ef4e7f53152892520d8a06cfaf49d1547f6330dede";
 
     let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
     let client = RedisClient::new(config, None, None, None);
