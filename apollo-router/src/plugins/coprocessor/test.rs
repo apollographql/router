@@ -339,6 +339,7 @@ mod tests {
             request: SubgraphRequestConf {
                 condition: Default::default(),
                 body: true,
+                subgraph_request_id: true,
                 ..Default::default()
             },
             response: Default::default(),
@@ -381,11 +382,16 @@ mod tests {
                     .errors(Vec::new())
                     .extensions(crate::json_ext::Object::new())
                     .context(req.context)
+                    .id(req.id)
                     .build())
             });
 
-        let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
+        let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
+                let deserialized_request: Externalizable<serde_json::Value> =
+                    serde_json::from_slice(&hyper::body::to_bytes(req.into_body()).await.unwrap())
+                        .unwrap();
+                    assert_eq!(deserialized_request.id.as_deref(), Some("5678"));
                 Ok(http::Response::builder()
                     .body(RouterBody::from(
                         r#"{
@@ -444,15 +450,19 @@ mod tests {
             "my_subgraph_service_name".to_string(),
         );
 
-        let request = subgraph::Request::fake_builder().build();
+        let mut request = subgraph::Request::fake_builder().build();
+        request.id = "5678".to_string();
 
+        let response = service
+        .oneshot(request)
+        .await
+        .unwrap()
+        ;
+
+        assert_eq!("5678", response.id);
         assert_eq!(
             serde_json_bytes::json!({ "test": 1234_u32 }),
-            service
-                .oneshot(request)
-                .await
-                .unwrap()
-                .response
+            response.response
                 .into_body()
                 .data
                 .unwrap()
