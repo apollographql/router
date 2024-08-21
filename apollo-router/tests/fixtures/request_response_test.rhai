@@ -90,6 +90,10 @@ fn process_subgraph_request(request) {
     process_common_request(true, request);
     // subgraph doesn't have a context member
     process_common_request(false, request.subgraph);
+
+    if request.subgraph_request_id = () {
+        throw(`subgraph request must have a subgraph request id`);
+    }
 }
 
 fn test_response_is_primary(response) {
@@ -185,6 +189,9 @@ fn process_subgraph_response(response) {
     process_common_response(response);
     test_response_body(response);
     test_response_status_code(response);
+     if response.subgraph_request_id = () {
+        throw(`subgraph response must have a subgraph request id`);
+    }
 }
 
 fn process_subgraph_response_om_forbidden(response) {
