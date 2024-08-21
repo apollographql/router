@@ -226,7 +226,6 @@ pub(crate) enum QueryPlannerMode {
     /// (such as using legacy Apollo Federation 1)
     New,
     /// Use the old JavaScript-based implementation.
-    #[default]
     Legacy,
     /// Use primarily the Javascript-based implementation,
     /// but also schedule background jobs to run the Rust implementation and compare results,
@@ -243,6 +242,7 @@ pub(crate) enum QueryPlannerMode {
     /// Falls back to `legacy` with a warning
     /// if the the new planner does not support the schema
     /// (such as using legacy Apollo Federation 1)
+    #[default]
     BothBestEffort,
 }
 
