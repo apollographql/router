@@ -11,11 +11,13 @@ minVersion: 1.48.0
 
 Demand control provides a way to secure your supergraph from overly complex operations, based on the [IBM GraphQL Cost Directive specification](https://ibm.github.io/graphql-specs/cost-spec.html).
 
-Application clients may overload your supergraph infrastructure by sending overly costly operations. These operations may be costly due to their complexity, or they may be simple operations run against a particularly expensive resolver. In either case, demand control can help you protect your infrastructure from these expensive operations. When your router receives a request, it calculates a cost for that operation. If the cost is greater than your configured maximum, the operation is rejected.
+Application clients can send overly costly operations that overload your supergraph infrastructure. These operations may be costly due to their complexity and/or their need for expensive resolvers. In either case, demand control can help you protect your infrastructure from these expensive operations. When your router receives a request, it calculates a cost for that operation. If the cost is greater than your configured maximum, the operation is rejected.
 
 ## Calculating cost
 
-When calculating the cost of an operation, your router will sum the costs of the sub-requests that it plans to send to your subgraphs. For each operation, the cost is the sum of its base cost plus the costs of its fields. For each field, the cost is defined recursively as its own base cost plus that of its selections. In the IBM specification, this is called [field cost](https://ibm.github.io/graphql-specs/cost-spec.html#sec-Field-Cost).
+When calculating the cost of an operation, the router sums the costs of the sub-requests that it plans to send to your subgraphs. 
+* For each operation, the cost is the sum of its base cost plus the costs of its fields. 
+* For each field, the cost is defined recursively as its own base cost plus the cost of its selections. In the IBM specification, this is called [field cost](https://ibm.github.io/graphql-specs/cost-spec.html#sec-Field-Cost).
 
 The cost of each operation type:
 
@@ -66,11 +68,11 @@ Since version 1.53.0, the router supports customizing the cost calculation with 
 
 <Note>
 
-The Apollo Federation [@cost directive](/federation/federated-schemas/federated-directives/#cost) differs the IBM specification in that the `weight` argument is of type `Int!` instead of `String!`.
+The Apollo Federation [`@cost` directive](/federation/federated-schemas/federated-directives/#cost) differs from the IBM specification in that the `weight` argument is of type `Int!` instead of `String!`.
 
 </Note>
 
-Annotating your schema with this directive alters how the router scores operations. Say the `Address` resolver for our example query is particularly expensive. We can annotate the schema with the following directive.
+Annotating your schema with the `@cost` directive customizes how the router scores operations. For example, imagine that the `Address` resolver for an example query is particularly expensive. We can annotate the schema with the `@cost` directive with a larger weight:
 
 ```graphql
 type Query {
@@ -110,7 +112,7 @@ This increases the cost of `BookQuery` from 4 to 8.
 
 ### Handling list fields
 
-During the static analysis phase, the router does not know the size of the list fields in a given query. The closer the estimated list size is to the actual list size for a field, the closer the estimated cost will be to the actual cost.
+During the static analysis phase of demand control, the router doesn't know the size of the list fields in a given query. It must use estimates for list sizes. The closer the estimated list size is to the actual list size for a field, the closer the estimated cost will be to the actual cost.
 
 <Note>
 
@@ -118,11 +120,14 @@ The difference between estimated and actual operation cost calculations is due o
 
 </Note>
 
-There are two ways to indicate the expected list sizes to the router. The first is to set the global maximum in your router configuration file (see [Configuring demand control](#configuring-demand-control)).
+There are two ways to indicate the expected list sizes to the router:
+* Set the global maximum in your router configuration file (see [Configuring demand control](#configuring-demand-control)).
 
-The second is to use the Apollo Federation [@listSize directive](/federation/federated-schemas/federated-directives/#listsize). This directive supports field-level granularity in setting list size. By using the `assumedSize` argument, you can set a statically-defined list size for a field. If you are using paging parameters which control the size of the list, use the `slicingArguments` argument.
+* Use the Apollo Federation [@listSize directive](/federation/federated-schemas/federated-directives/#listsize). 
 
-Continuing with our example above, let's add two queryable fields. First, we will add a field which returns the top five best selling books
+The `@listSize` directive supports field-level granularity in setting list size. By using its `assumedSize` argument, you can set a statically defined list size for a field. If you are using paging parameters which control the size of the list, use the `slicingArguments` argument.
+
+Continuing with our example above, let's add two queryable fields. First, we will add a field which returns the top five best selling books:
 
 ```graphql
 type Query {
@@ -158,7 +163,7 @@ query BestsellersQuery {
 
 </ExpansionPanel>
 
-The second field we will add is a paginated resolver. It returns the latest additions to the inventory.
+The second field we will add is a paginated resolver. It returns the latest additions to the inventory:
 
 ```graphql
 type Query {
@@ -323,7 +328,9 @@ telemetry:
 
 #### Filtering by cost result
 
-Record the estimated cost when `cost.result` is `COST_ESTIMATED_TOO_EXPENSIVE`.
+In router telemetry, you can customize instruments that filter their output based on cost results.
+
+For example, you can record the estimated cost when `cost.result` is `COST_ESTIMATED_TOO_EXPENSIVE`:
 
 ```yaml title="router.yaml"
 telemetry:
