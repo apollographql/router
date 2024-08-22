@@ -21,6 +21,8 @@ pub type QueryPlanCost = f64;
 #[derive(Debug, Default, PartialEq, Serialize)]
 pub struct QueryPlan {
     pub node: Option<TopLevelPlanNode>,
+    /// `cost` can be NaN, if the cost is not computed or irrelevant.
+    pub cost: QueryPlanCost,
     pub statistics: QueryPlanningStatistics,
 }
 
@@ -251,9 +253,14 @@ pub enum QueryPathElement {
 }
 
 impl QueryPlan {
-    fn new(node: impl Into<TopLevelPlanNode>, statistics: QueryPlanningStatistics) -> Self {
+    fn new(
+        node: impl Into<TopLevelPlanNode>,
+        cost: QueryPlanCost,
+        statistics: QueryPlanningStatistics,
+    ) -> Self {
         Self {
             node: Some(node.into()),
+            cost,
             statistics,
         }
     }

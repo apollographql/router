@@ -33,6 +33,7 @@ use crate::query_plan::query_planning_traversal::QueryPlanningTraversal;
 use crate::query_plan::FetchNode;
 use crate::query_plan::PlanNode;
 use crate::query_plan::QueryPlan;
+use crate::query_plan::QueryPlanCost;
 use crate::query_plan::SequenceNode;
 use crate::query_plan::TopLevelPlanNode;
 use crate::schema::position::AbstractTypeDefinitionPosition;
@@ -369,8 +370,8 @@ impl QueryPlanner {
                     output_rewrites: Default::default(),
                     context_rewrites: Default::default(),
                 };
-
-                return Ok(QueryPlan::new(node, statistics));
+                // No cost computation necessary. Return NaN for cost.
+                return Ok(QueryPlan::new(node, f64::NAN, statistics));
             }
         }
 
@@ -477,7 +478,7 @@ impl QueryPlanner {
             // PORT_NOTE: JS provides `override_conditions` here: see port note in `QueryPlanner::new`.
         };
 
-        let root_node = match defer_conditions {
+        let (root_node, cost) = match defer_conditions {
             Some(defer_conditions) if !defer_conditions.is_empty() => {
                 compute_plan_for_defer_conditionals(&mut parameters, defer_conditions)?
             }
@@ -527,6 +528,7 @@ impl QueryPlanner {
 
         let plan = QueryPlan {
             node: root_node,
+            cost,
             statistics,
         };
 
@@ -761,7 +763,7 @@ pub(crate) fn compute_root_fetch_groups(
 fn compute_root_parallel_dependency_graph(
     parameters: &QueryPlanningParameters,
     has_defers: bool,
-) -> Result<FetchDependencyGraph, FederationError> {
+) -> Result<(FetchDependencyGraph, QueryPlanCost), FederationError> {
     snapshot!(
         "FetchDependencyGraph",
         "Empty",
@@ -773,7 +775,7 @@ fn compute_root_parallel_dependency_graph(
         best_plan.fetch_dependency_graph,
         "Plan returned from compute_root_parallel_best_plan"
     );
-    Ok(best_plan.fetch_dependency_graph)
+    Ok((best_plan.fetch_dependency_graph, best_plan.cost))
 }
 
 fn compute_root_parallel_best_plan(
@@ -800,10 +802,12 @@ fn compute_plan_internal(
     parameters: &mut QueryPlanningParameters,
     processor: &mut FetchDependencyGraphToQueryPlanProcessor,
     has_defers: bool,
-) -> Result<Option<PlanNode>, FederationError> {
+) -> Result<(Option<PlanNode>, QueryPlanCost), FederationError> {
     let root_kind = parameters.operation.root_kind;
 
-    let (main, deferred, primary_selection) = if root_kind == SchemaRootDefinitionKind::Mutation {
+    let (main, deferred, primary_selection, cost) = if root_kind
+        == SchemaRootDefinitionKind::Mutation
+    {
         let dependency_graphs = compute_root_serial_dependency_graph(parameters, has_defers)?;
         let mut main = None;
         let mut deferred = vec![];
@@ -826,9 +830,11 @@ fn compute_plan_internal(
                 None => primary_selection = new_selection,
             }
         }
-        (main, deferred, primary_selection)
+        // No cost computation necessary. Return NaN for cost.
+        (main, deferred, primary_selection, f64::NAN)
     } else {
-        let mut dependency_graph = compute_root_parallel_dependency_graph(parameters, has_defers)?;
+        let (mut dependency_graph, cost) =
+            compute_root_parallel_dependency_graph(parameters, has_defers)?;
 
         let (main, deferred) = dependency_graph.process(&mut *processor, root_kind)?;
         snapshot!(
@@ -838,16 +844,17 @@ fn compute_plan_internal(
         // XXX(@goto-bus-stop) Maybe `.defer_tracking` should be on the return value of `process()`..?
         let primary_selection = dependency_graph.defer_tracking.primary_selection;
 
-        (main, deferred, primary_selection)
+        (main, deferred, primary_selection, cost)
     };
 
     if deferred.is_empty() {
-        Ok(main)
+        Ok((main, cost))
     } else {
         let Some(primary_selection) = primary_selection else {
             unreachable!("Should have had a primary selection created");
         };
-        processor.reduce_defer(main, &primary_selection, deferred)
+        let reduced_main = processor.reduce_defer(main, &primary_selection, deferred)?;
+        Ok((reduced_main, cost))
     }
 }
 
@@ -855,7 +862,7 @@ fn compute_plan_internal(
 fn compute_plan_for_defer_conditionals(
     _parameters: &mut QueryPlanningParameters,
     _defer_conditions: IndexMap<String, IndexSet<String>>,
-) -> Result<Option<PlanNode>, FederationError> {
+) -> Result<(Option<PlanNode>, QueryPlanCost), FederationError> {
     Err(SingleFederationError::UnsupportedFeature {
         message: String::from("@defer is currently not supported"),
         kind: crate::error::UnsupportedFeatureKind::Defer,
