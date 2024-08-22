@@ -411,7 +411,6 @@ where
             }
             // Get custom dynamic attributes
             {
-                #[allow(clippy::into_iter_on_ref)]
                 let custom_attributes = ext.get::<LogAttributes>().map(|attrs| attrs.attributes());
                 if let Some(custom_attributes) = custom_attributes {
                     #[cfg(test)]
@@ -421,6 +420,7 @@ where
                         my_custom_attributes.sort_by_key(|kv| &kv.key);
                         my_custom_attributes
                     };
+                    #[allow(clippy::into_iter_on_ref)]
                     attributes.extend(
                         custom_attributes
                             .into_iter()
