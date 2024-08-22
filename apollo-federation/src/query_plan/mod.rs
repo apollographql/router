@@ -1,12 +1,11 @@
 use std::sync::Arc;
+use std::cell::Cell;
 
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 use apollo_compiler::executable;
 use serde::Deserialize;
 use serde::Serialize;
-
-use crate::query_plan::query_planner::QueryPlanningStatistics;
 
 pub(crate) mod conditions;
 pub(crate) mod display;
@@ -23,6 +22,8 @@ pub type QueryPlanCost = f64;
 #[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct QueryPlan {
     pub node: Option<TopLevelPlanNode>,
+    /// `cost` can be NaN, if the cost is not computed or irrelevant.
+    pub cost: QueryPlanCost,
     pub statistics: QueryPlanningStatistics,
 }
 
@@ -37,6 +38,7 @@ pub enum TopLevelPlanNode {
     Defer(DeferNode),
     #[from(ConditionNode, Box<ConditionNode>)]
     Condition(Box<ConditionNode>),
+    Statistics(QueryPlanningStatistics),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -56,6 +58,7 @@ pub enum PlanNode {
     Defer(DeferNode),
     #[from(ConditionNode, Box<ConditionNode>)]
     Condition(Box<ConditionNode>),
+    Statistics(QueryPlanningStatistics),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -185,6 +188,11 @@ pub struct ConditionNode {
     pub else_clause: Option<Box<PlanNode>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StatisticsNode {
+    pub statistics: QueryPlanningStatistics,
+}
+
 /// The type of rewrites currently supported on the input/output data of fetches.
 ///
 /// A rewrite usually identifies some sub-part of the data and some action to perform on that
@@ -248,6 +256,12 @@ pub enum QueryPathElement {
     InlineFragment { type_condition: Name },
 }
 
+#[derive(Debug, PartialEq, Default, Serialize, Deserialize, Clone)]
+pub struct QueryPlanningStatistics {
+    pub evaluated_plan_count: Cell<usize>,
+    pub evaluated_plan_paths: Cell<usize>,
+}
+
 impl PlanNode {
     /// Returns the kind of plan node this is as a human-readable string. Exact output not guaranteed.
     fn node_kind(&self) -> &'static str {
@@ -258,6 +272,7 @@ impl PlanNode {
             Self::Flatten(_) => "Flatten",
             Self::Defer(_) => "Defer",
             Self::Condition(_) => "Condition",
+            Self::Statistics(_) => "Statistics",
         }
     }
 }

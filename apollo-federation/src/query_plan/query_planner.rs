@@ -1,4 +1,3 @@
-use std::cell::Cell;
 use std::num::NonZeroU32;
 use std::ops::ControlFlow;
 use std::ops::Deref;
@@ -10,7 +9,6 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::validation::Valid;
 use itertools::Itertools;
-use serde::Deserialize;
 use serde::Serialize;
 use tracing::trace;
 
@@ -45,6 +43,8 @@ use crate::query_plan::query_planning_traversal::QueryPlanningParameters;
 use crate::query_plan::query_planning_traversal::QueryPlanningTraversal;
 use crate::query_plan::query_planning_traversal::convert_type_from_subgraph;
 use crate::query_plan::query_planning_traversal::non_local_selections_estimation;
+use crate::query_plan::QueryPlanningStatistics;
+use crate::query_plan::QueryPlanCost;
 use crate::schema::ValidFederationSchema;
 use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
@@ -164,13 +164,6 @@ impl Default for QueryPlannerDebugConfig {
             paths_limit: None,
         }
     }
-}
-
-// PORT_NOTE: renamed from PlanningStatistics in the JS codebase.
-#[derive(Debug, PartialEq, Default, Serialize, Deserialize)]
-pub struct QueryPlanningStatistics {
-    pub evaluated_plan_count: Cell<usize>,
-    pub evaluated_plan_paths: Cell<usize>,
 }
 
 #[derive(Clone)]
@@ -482,7 +475,7 @@ impl QueryPlanner {
         let mut non_local_selection_state = options
             .non_local_selections_limit_enabled
             .then(non_local_selections_estimation::State::default);
-        let root_node = if !defer_conditions.is_empty() {
+        let (root_node, cost) = if !defer_conditions.is_empty() {
             compute_plan_for_defer_conditionals(
                 &mut parameters,
                 &mut processor,
@@ -498,7 +491,9 @@ impl QueryPlanner {
             )
         }?;
 
+
         let root_node = match root_node {
+            Some(PlanNode::Statistics(stats)) => Some(TopLevelPlanNode::Statistics(stats)),
             // If this is a subscription, we want to make sure that we return a SubscriptionNode rather than a PlanNode
             // We potentially will need to separate "primary" from "rest"
             // Note that if it is a subscription, we are guaranteed that nothing is deferred.
@@ -543,6 +538,7 @@ impl QueryPlanner {
 
         let plan = QueryPlan {
             node: root_node,
+            cost,
             statistics,
         };
 
@@ -740,7 +736,7 @@ fn compute_root_parallel_dependency_graph(
     parameters: &QueryPlanningParameters,
     has_defers: bool,
     non_local_selection_state: &mut Option<non_local_selections_estimation::State>,
-) -> Result<FetchDependencyGraph, FederationError> {
+) -> Result<(FetchDependencyGraph, QueryPlanCost), FederationError> {
     trace!("Starting process to construct a parallel fetch dependency graph");
     let selection_set = parameters.operation.selection_set.clone();
     let best_plan = compute_root_parallel_best_plan(
@@ -754,7 +750,7 @@ fn compute_root_parallel_dependency_graph(
         best_plan.fetch_dependency_graph.to_dot(),
         "Fetch dependency graph returned from compute_root_parallel_best_plan"
     );
-    Ok(best_plan.fetch_dependency_graph)
+    Ok((best_plan.fetch_dependency_graph, best_plan.cost))
 }
 
 fn compute_root_parallel_best_plan(
@@ -784,10 +780,10 @@ fn compute_plan_internal(
     processor: &mut FetchDependencyGraphToQueryPlanProcessor,
     has_defers: bool,
     non_local_selection_state: &mut Option<non_local_selections_estimation::State>,
-) -> Result<Option<PlanNode>, FederationError> {
+) -> Result<(Option<PlanNode>, QueryPlanCost), FederationError> {
     let root_kind = parameters.operation.root_kind;
 
-    let (main, deferred, primary_selection) = if root_kind == SchemaRootDefinitionKind::Mutation {
+    let (main, deferred, primary_selection, cost) = if root_kind == SchemaRootDefinitionKind::Mutation {
         let dependency_graphs = compute_root_serial_dependency_graph(
             parameters,
             has_defers,
@@ -814,9 +810,10 @@ fn compute_plan_internal(
                 None => primary_selection = new_selection,
             }
         }
-        (main, deferred, primary_selection)
+        // No cost computation necessary. Return NaN for cost.
+        (main, deferred, primary_selection, f64::NAN)
     } else {
-        let mut dependency_graph = compute_root_parallel_dependency_graph(
+        let (mut dependency_graph, cost) = compute_root_parallel_dependency_graph(
             parameters,
             has_defers,
             non_local_selection_state,
@@ -831,16 +828,17 @@ fn compute_plan_internal(
         // XXX(@goto-bus-stop) Maybe `.defer_tracking` should be on the return value of `process()`..?
         let primary_selection = dependency_graph.defer_tracking.primary_selection;
 
-        (main, deferred, primary_selection)
+        (main, deferred, primary_selection, cost)
     };
 
     if deferred.is_empty() {
-        Ok(main)
+        Ok((main, cost))
     } else {
         let Some(primary_selection) = primary_selection else {
             unreachable!("Should have had a primary selection created");
         };
-        processor.reduce_defer(main, &primary_selection, deferred)
+        let reduced_main = processor.reduce_defer(main, &primary_selection, deferred)?;
+        Ok((reduced_main, cost))
     }
 }
 
@@ -849,10 +847,10 @@ fn compute_plan_for_defer_conditionals(
     processor: &mut FetchDependencyGraphToQueryPlanProcessor,
     defer_conditions: IndexMap<Name, IndexSet<String>>,
     non_local_selection_state: &mut Option<non_local_selections_estimation::State>,
-) -> Result<Option<PlanNode>, FederationError> {
+) -> Result<(Option<PlanNode>, QueryPlanCost), FederationError> {
     generate_condition_nodes(
         parameters.operation.clone(),
-        defer_conditions.iter(),
+        defer_conditions.iter().map(|(k, v)| (k, v)),
         &mut |op| {
             parameters.operation = op;
             compute_plan_internal(parameters, processor, true, non_local_selection_state)
@@ -863,25 +861,21 @@ fn compute_plan_for_defer_conditionals(
 fn generate_condition_nodes<'a>(
     op: Arc<Operation>,
     mut conditions: impl Clone + Iterator<Item = (&'a Name, &'a IndexSet<String>)>,
-    on_final_operation: &mut impl FnMut(Arc<Operation>) -> Result<Option<PlanNode>, FederationError>,
-) -> Result<Option<PlanNode>, FederationError> {
+    on_final_operation: &mut impl FnMut(Arc<Operation>) -> Result<(Option<PlanNode>, f64), FederationError>,
+) -> Result<(Option<PlanNode>, f64), FederationError> {
     match conditions.next() {
         None => on_final_operation(op),
         Some((cond, labels)) => {
             let else_op = Arc::unwrap_or_clone(op.clone()).reduce_defer(labels)?;
             let if_op = op;
+            let (if_node, if_cost) = generate_condition_nodes(if_op, conditions.clone(), on_final_operation)?;
+            let (else_node, else_cost) = generate_condition_nodes(Arc::new(else_op), conditions.clone(), on_final_operation)?;
             let node = ConditionNode {
                 condition_variable: cond.clone(),
-                if_clause: generate_condition_nodes(if_op, conditions.clone(), on_final_operation)?
-                    .map(Box::new),
-                else_clause: generate_condition_nodes(
-                    Arc::new(else_op),
-                    conditions.clone(),
-                    on_final_operation,
-                )?
-                .map(Box::new),
+                if_clause: if_node.map(Box::new),
+                else_clause: else_node.map(Box::new),
             };
-            Ok(Some(PlanNode::Condition(Box::new(node))))
+            Ok((Some(PlanNode::Condition(Box::new(node))), if_cost + else_cost))
         }
     }
 }
@@ -1359,4 +1353,27 @@ type User
         }
         "###);
     }
+}
+
+fn generate_plan_with_defer(
+    mut parameters: QueryPlanningParameters,
+    defer_conditions: Vec<(Name, IndexSet<String>)>,
+    non_local_selection_state: &mut Option<non_local_selections_estimation::State>,
+) -> Result<(Option<PlanNode>, f64), FederationError> {
+    let mut processor = FetchDependencyGraphToQueryPlanProcessor::new(
+        parameters.operation.variables.clone(),
+        parameters.operation.directives.clone(),
+        SubgraphOperationCompression::Disabled,
+        parameters.operation.name.clone(),
+        Default::default(),
+    );
+    let (plan, cost) = generate_condition_nodes(
+        parameters.operation.clone(),
+        defer_conditions.iter().map(|(k, v)| (k, v)),
+        &mut |op| {
+            parameters.operation = op;
+            compute_plan_internal(&mut parameters, &mut processor, true, non_local_selection_state)
+        },
+    )?;
+    Ok((plan, cost))
 }
