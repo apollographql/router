@@ -916,6 +916,46 @@ fn test_merging_fetches_do_not_create_cycle_in_fetch_dependency_graph() {
 }
 
 #[test]
+fn redundant_typename_for_inline_fragments_without_type_condition() {
+    let planner = planner!(
+        Subgraph1: r#"
+          type Query {
+            products: [Product]
+          }
+          interface Product {
+            name: String
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            products {
+              ... @skip(if: false) {
+                name
+              }
+            }
+          }
+        "#,
+        @r###"
+        QueryPlan {
+          Fetch(service: "Subgraph1") {
+            {
+              products {
+                __typename
+                ... @skip(if: false) {
+                  name
+                }
+              }
+            }
+          },
+        }
+        "###
+    );
+}
+
+#[test]
 fn test_merging_fetches_reset_cached_costs() {
     // This is a test for ROUTER-553.
     let planner = planner!(
