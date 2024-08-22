@@ -94,6 +94,14 @@ pub(crate) struct Instrumentation {
     pub(crate) instruments: config_new::instruments::InstrumentsConfig,
 }
 
+impl Instrumentation {
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        self.events.validate()?;
+        self.instruments.validate()?;
+        self.spans.validate()
+    }
+}
+
 /// Metrics configuration
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
