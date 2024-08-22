@@ -2,25 +2,29 @@
 
 use std::sync::Arc;
 
-use apollo_federation::query_plan::SubscriptionNode;
 use serde_json_bytes::Value;
+use tokio::sync::mpsc;
 use tower::BoxError;
 
 use crate::error::Error;
 use crate::error::FetchError;
 use crate::graphql::Request as GraphQLRequest;
 use crate::json_ext::Path;
+use crate::plugins::subscription::SubscriptionConfig;
 use crate::query_planner::fetch::FetchNode;
 use crate::query_planner::fetch::Variables;
+use crate::query_planner::subscription::SubscriptionHandle;
+use crate::query_planner::subscription::SubscriptionNode;
 use crate::Context;
 
 pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 
 pub(crate) enum Request {
     Fetch(FetchRequest),
-    #[allow(dead_code)]
     Subscription(SubscriptionRequest),
 }
+
+pub(crate) type Response = (Value, Vec<Error>);
 
 #[non_exhaustive]
 pub(crate) struct FetchRequest {
@@ -31,20 +35,9 @@ pub(crate) struct FetchRequest {
     pub(crate) current_dir: Path,
 }
 
-#[allow(dead_code)]
-pub(crate) struct SubscriptionRequest {
-    pub(crate) context: Context,
-    pub(crate) subscription_node: SubscriptionNode,
-    pub(crate) supergraph_request: Arc<http::Request<GraphQLRequest>>,
-    pub(crate) variables: Variables,
-    pub(crate) current_dir: Path,
-}
-
-pub(crate) type Response = (Value, Vec<Error>);
-
 #[buildstructor::buildstructor]
 impl FetchRequest {
-    /// This is the constructor (or builder) to use when constructing a real Request.
+    /// This is the constructor (or builder) to use when constructing a fetch Request.
     ///
     /// Required parameters are required in non-testing code to create a Request.
     #[builder(visibility = "pub")]
@@ -61,6 +54,46 @@ impl FetchRequest {
             supergraph_request,
             variables,
             current_dir,
+        }
+    }
+}
+
+pub(crate) struct SubscriptionRequest {
+    pub(crate) context: Context,
+    pub(crate) subscription_node: SubscriptionNode,
+    pub(crate) supergraph_request: Arc<http::Request<GraphQLRequest>>,
+    pub(crate) variables: Variables,
+    pub(crate) current_dir: Path,
+    pub(crate) sender: mpsc::Sender<crate::graphql::Response>,
+    pub(crate) subscription_handle: Option<SubscriptionHandle>,
+    pub(crate) subscription_config: Option<SubscriptionConfig>,
+}
+
+#[buildstructor::buildstructor]
+impl SubscriptionRequest {
+    /// This is the constructor (or builder) to use when constructing a subscription Request.
+    ///
+    /// Required parameters are required in non-testing code to create a Request.
+    #[builder(visibility = "pub")]
+    fn new(
+        context: Context,
+        subscription_node: SubscriptionNode,
+        supergraph_request: Arc<http::Request<GraphQLRequest>>,
+        variables: Variables,
+        current_dir: Path,
+        sender: mpsc::Sender<crate::graphql::Response>,
+        subscription_handle: Option<SubscriptionHandle>,
+        subscription_config: Option<SubscriptionConfig>,
+    ) -> Self {
+        Self {
+            context,
+            subscription_node,
+            supergraph_request,
+            variables,
+            current_dir,
+            sender,
+            subscription_handle,
+            subscription_config,
         }
     }
 }
