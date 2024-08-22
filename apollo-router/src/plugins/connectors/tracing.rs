@@ -21,7 +21,7 @@ pub(crate) fn record_connect_metrics(connectors: &Connectors) {
 
             u64_counter!(
                 "apollo.router.connectors",
-                "Number of connectors in the for a specific spec version",
+                "Number of connectors in supergraph the for a specific spec version",
                 all_connectors,
                 "spec.version" = spec.as_str(),
                 "spec.subgraphs" = unique_subgraphs.len() as i64
