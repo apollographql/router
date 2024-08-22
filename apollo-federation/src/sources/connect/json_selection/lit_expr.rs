@@ -4,10 +4,7 @@
 // capture both field and argument values and sub-paths, in addition to constant
 // JSON structures and values.
 
-use std::hash::Hash;
-
 use apollo_compiler::collections::IndexMap;
-use apollo_compiler::collections::IndexSet;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::char;
@@ -168,8 +165,8 @@ impl LitExpr {
 }
 
 impl CollectVarPaths for LitExpr {
-    fn collect_var_paths(&self) -> IndexSet<&PathSelection> {
-        let mut paths = IndexSet::default();
+    fn collect_var_paths(&self) -> Vec<&PathSelection> {
+        let mut paths = vec![];
         match self {
             Self::String(_) | Self::Number(_) | Self::Bool(_) | Self::Null => {}
             Self::Object(map) => {
@@ -187,30 +184,6 @@ impl CollectVarPaths for LitExpr {
             }
         }
         paths
-    }
-}
-
-impl Hash for LitExpr {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        match self {
-            Self::String(s) => s.hash(state),
-            Self::Number(n) => n.to_string().hash(state),
-            Self::Bool(b) => b.hash(state),
-            Self::Null => "null".hash(state),
-            Self::Object(map) => {
-                // This hashing strategy makes key ordering significant, which
-                // is fine because we don't have an object-order-insensitive
-                // equality check for LitExpr. In other words, LitExpr::Object
-                // behaves like a list of key-value pairs, preserving the order
-                // of the source syntax. Once this LitExpr becomes a JSON value,
-                // we can use the order-insensivity of JSON objects.
-                map.iter().for_each(|key_value| {
-                    key_value.hash(state);
-                });
-            }
-            Self::Array(vec) => vec.hash(state),
-            Self::Path(path) => path.hash(state),
-        }
     }
 }
 
