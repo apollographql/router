@@ -1,15 +1,16 @@
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
-  @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY)
+  @link(url: "https://specs.apollo.dev/tag/v0.3")
+  @link(url: "https://specs.apollo.dev/inaccessible/v0.2")
   @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
   query: Query
   mutation: Mutation
 }
 
 directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
-
-directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
-
+directive @tag(
+  name: String!
+) repeatable on FIELD_DEFINITION | INTERFACE | OBJECT | UNION
 directive @join__field(
   graph: join__Graph
   requires: join__FieldSet
@@ -35,11 +36,6 @@ directive @join__type(
   isInterfaceObject: Boolean! = false
 ) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
 
-directive @join__unionMember(
-  graph: join__Graph!
-  member: String!
-) repeatable on UNION
-
 directive @link(
   url: String
   as: String
@@ -48,6 +44,7 @@ directive @link(
 ) repeatable on SCHEMA
 
 scalar join__FieldSet
+scalar link__Import
 
 enum join__Graph {
   ACCOUNTS
@@ -63,23 +60,15 @@ enum join__Graph {
     @join__graph(name: "reviews", url: "https://reviews.demo.starstuff.dev/")
 }
 
-scalar link__Import
-
 enum link__Purpose {
-  """
-  `SECURITY` features provide metadata necessary to securely resolve fields.
-  """
   SECURITY
-
-  """
-  `EXECUTION` features provide metadata necessary for operation execution.
-  """
   EXECUTION
 }
 
 type Mutation @join__type(graph: PRODUCTS) @join__type(graph: REVIEWS) {
-  createProduct(upc: ID!, name: String): Product @join__field(graph: PRODUCTS)
-  createReview(upc: ID!, id: ID!, body: String): Review
+  updateMyAccount: User @join__field(graph: ACCOUNTS)
+  createProduct(name: String, upc: ID!): Product @join__field(graph: PRODUCTS)
+  createReview(body: String, id: ID!, upc: ID!): Review
     @join__field(graph: REVIEWS)
 }
 
@@ -88,18 +77,17 @@ type Product
   @join__type(graph: INVENTORY, key: "upc")
   @join__type(graph: PRODUCTS, key: "upc")
   @join__type(graph: REVIEWS, key: "upc") {
-  upc: String!
-  weight: Int
-    @join__field(graph: INVENTORY, external: true)
-    @join__field(graph: PRODUCTS)
-  price: Int
-    @join__field(graph: INVENTORY, external: true)
-    @join__field(graph: PRODUCTS)
-  inStock: Boolean @join__field(graph: INVENTORY) @inaccessible
-  shippingEstimate: Int @join__field(graph: INVENTORY, requires: "price weight")
+  inStock: Boolean
+    @join__field(graph: INVENTORY)
+    @tag(name: "private")
+    @inaccessible
   name: String @join__field(graph: PRODUCTS)
+  price: Int @join__field(graph: PRODUCTS)
   reviews: [Review] @join__field(graph: REVIEWS)
   reviewsForAuthor(authorID: ID!): [Review] @join__field(graph: REVIEWS)
+  shippingEstimate: Int @join__field(graph: INVENTORY, requires: "price weight")
+  upc: String!
+  weight: Int @join__field(graph: PRODUCTS)
 }
 
 type Query
@@ -108,15 +96,15 @@ type Query
   @join__type(graph: PRODUCTS)
   @join__type(graph: REVIEWS) {
   me: User @join__field(graph: ACCOUNTS)
-  recommendedProducts: [Product] @join__field(graph: ACCOUNTS)
   topProducts(first: Int = 5): [Product] @join__field(graph: PRODUCTS)
 }
 
 type Review @join__type(graph: REVIEWS, key: "id") {
   id: ID!
-  body: String
   author: User @join__field(graph: REVIEWS, provides: "username")
-  product: Product
+  body: String @join__field(graph: REVIEWS)
+  id: ID! @join__field(graph: REVIEWS)
+  product: Product @join__field(graph: REVIEWS)
 }
 
 type User
@@ -124,8 +112,6 @@ type User
   @join__type(graph: REVIEWS, key: "id") {
   id: ID!
   name: String @join__field(graph: ACCOUNTS)
-  username: String
-    @join__field(graph: ACCOUNTS)
-    @join__field(graph: REVIEWS, external: true)
-  reviews: [Review] @join__field(graph: REVIEWS)
+  username: String @join__field(graph: REVIEWS, external: true)
+  reviews: String @join__field(graph: ACCOUNTS)
 }

@@ -1,11 +1,16 @@
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
-  @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY)
+  @link(url: "https://specs.apollo.dev/tag/v0.3")
+  @link(url: "https://specs.apollo.dev/inaccessible/v0.2")
   @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
   query: Query
   mutation: Mutation
 }
 
+directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+directive @tag(
+  name: String!
+) repeatable on FIELD_DEFINITION | INTERFACE | OBJECT | UNION
 directive @join__field(
   graph: join__Graph
   requires: join__FieldSet
@@ -37,12 +42,9 @@ directive @link(
   for: link__Purpose
   import: [link__Import]
 ) repeatable on SCHEMA
-directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
-directive @tag(
-  name: String!
-) repeatable on FIELD_DEFINITION | INTERFACE | OBJECT | UNION
 
 scalar join__FieldSet
+scalar link__Import
 
 enum join__Graph {
   ACCOUNTS
@@ -57,8 +59,6 @@ enum join__Graph {
   REVIEWS
     @join__graph(name: "reviews", url: "https://reviews.demo.starstuff.dev/")
 }
-
-scalar link__Import
 
 enum link__Purpose {
   SECURITY
@@ -84,7 +84,6 @@ type Product
   reviews: [Review] @join__field(graph: REVIEWS)
   reviewsForAuthor(authorID: ID!): [Review] @join__field(graph: REVIEWS)
   shippingEstimate: Int @join__field(graph: INVENTORY, requires: "price weight")
-  upc: String! @join__field(graph: PRODUCTS)
   weight: Int @join__field(graph: PRODUCTS)
   upc: String!
 }
