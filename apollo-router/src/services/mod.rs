@@ -29,6 +29,7 @@ pub(crate) mod http;
 pub(crate) mod layers;
 pub(crate) mod new_service;
 pub(crate) mod query_planner;
+pub(crate) mod json;
 pub mod router;
 pub mod subgraph;
 pub(crate) mod subgraph_service;
