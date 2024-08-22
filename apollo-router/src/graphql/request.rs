@@ -193,7 +193,9 @@ impl Request {
         }
     }
 
-    fn process_batch_values(value: &serde_json::Value) -> Result<Vec<Request>, serde_json::Error> {
+    pub(crate) fn process_batch_values(
+        value: &serde_json::Value,
+    ) -> Result<Vec<Request>, serde_json::Error> {
         let mut result = Request::allocate_result_array(value);
 
         if value.is_array() {

@@ -18,6 +18,7 @@ use serde_json_bytes::Value;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
 
+use crate::graphql;
 use crate::http_ext::header_map;
 use crate::http_ext::TryIntoHeaderName;
 use crate::http_ext::TryIntoHeaderValue;
@@ -242,12 +243,14 @@ impl Response {
     /// This is useful for things such as authentication errors.
     #[builder(visibility = "pub")]
     fn error_new(
+        errors: Vec<graphql::Error>,
         status_code: Option<StatusCode>,
         headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         context: Context,
     ) -> Result<Self, BoxError> {
+        let res = graphql::Response::builder().errors(errors).build();
         Response::new(
-            Value::Null,
+            serde_json_bytes::to_value(res).expect("JSON serialization should not fail"),
             status_code,
             headers,
             context,
