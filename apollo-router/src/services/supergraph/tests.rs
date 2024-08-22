@@ -19,69 +19,60 @@ use crate::Notify;
 use crate::TestHarness;
 
 const SCHEMA: &str = r#"schema
-       @link(url: "https://specs.apollo.dev/link/v1.0")
-       @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
-       @link(url: "https://specs.apollo.dev/inaccessible/v0.1")
-          {
-         query: Query
-         subscription: Subscription
-    }
-    directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-    directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
-    directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
-    directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-    directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
-    directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-    directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
-    directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+{
+  query: Query
+  subscription: Subscription
+}
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
 
-    scalar link__Import
+scalar link__Import
 
-    enum link__Purpose {
-     """
-     `SECURITY` features provide metadata necessary to securely resolve fields.
-     """
-     SECURITY
-  
-     """
-     `EXECUTION` features provide metadata necessary for operation execution.
-     """
-     EXECUTION
-   }
-   scalar join__FieldSet
+enum link__Purpose {
+  SECURITY
+  EXECUTION
+}
+scalar join__FieldSet
 
-   enum join__Graph {
-       USER @join__graph(name: "user", url: "http://localhost:4001/graphql")
-       ORGA @join__graph(name: "orga", url: "http://localhost:4002/graphql")
-   }
+enum join__Graph {
+  USER @join__graph(name: "user", url: "http://localhost:4001/graphql")
+  ORGA @join__graph(name: "orga", url: "http://localhost:4002/graphql")
+}
 
-   type Query 
-   @join__type(graph: ORGA)
-   @join__type(graph: USER)
-   {
-       currentUser: User @join__field(graph: USER)
-   }
+type Query 
+  @join__type(graph: ORGA)
+  @join__type(graph: USER)
+{
+  currentUser: User @join__field(graph: USER)
+}
 
-   type Subscription @join__type(graph: USER) {
-        userWasCreated: User
-   }
+type Subscription @join__type(graph: USER) {
+  userWasCreated: User
+}
 
-   type User
-   @join__type(graph: ORGA, key: "id")
-   @join__type(graph: USER, key: "id"){
-       id: ID!
-       name: String
-       activeOrganization: Organization
-   }
-   type Organization
-   @join__type(graph: ORGA, key: "id")
-   @join__type(graph: USER, key: "id") {
-       id: ID
-       creatorUser: User
-       name: String
-       nonNullId: ID!
-       suborga: [Organization]
-   }"#;
+type User
+  @join__type(graph: ORGA, key: "id")
+  @join__type(graph: USER, key: "id")
+{
+  id: ID!
+  name: String
+  activeOrganization: Organization
+}
+type Organization
+  @join__type(graph: ORGA, key: "id")
+  @join__type(graph: USER, key: "id")
+{
+  id: ID
+  creatorUser: User
+  name: String
+  nonNullId: ID!
+  suborga: [Organization]
+}"#;
 
 #[tokio::test]
 async fn nullability_formatting() {
@@ -311,31 +302,20 @@ async fn root_selection_skipped_with_other_fields() {
     const SCHEMA: &str = r#"schema
        @link(url: "https://specs.apollo.dev/link/v1.0")
        @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
-       @link(url: "https://specs.apollo.dev/inaccessible/v0.1")
           {
          query: Query
          subscription: Subscription
     }
     directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-    directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
     directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
     directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-    directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
     directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-    directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
-    directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
+    directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
 
     scalar link__Import
 
     enum link__Purpose {
-     """
-     `SECURITY` features provide metadata necessary to securely resolve fields.
-     """
      SECURITY
-  
-     """
-     `EXECUTION` features provide metadata necessary for operation execution.
-     """
      EXECUTION
    }
    scalar join__FieldSet
@@ -2620,18 +2600,19 @@ async fn no_typename_on_interface() {
                 query: Query
               }
               directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-              directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
               directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
               directive @join__graph(name: String!, url: String!) on ENUM_VALUE
               directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
               directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-              directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
 
-              interface Animal {
+              interface Animal @join__type(graph: ANIMAL) {
                 id: String!
               }
 
-              type Dog implements Animal {
+              type Dog implements Animal
+                @join__implements(graph: ANIMAL, interface: "Animal")
+                @join__type(graph: ANIMAL)
+              {
                 id: String!
                 name: String!
               }
@@ -2644,14 +2625,7 @@ async fn no_typename_on_interface() {
               scalar link__Import
 
               enum link__Purpose {
-                """
-                `SECURITY` features provide metadata necessary to securely resolve fields.
-                """
                 SECURITY
- 
-                """
-                `EXECUTION` features provide metadata necessary for operation execution.
-                """
                 EXECUTION
               }
               scalar join__FieldSet
@@ -2796,7 +2770,6 @@ async fn aliased_typename_on_fragments() {
                 query: Query
               }
               directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-              directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
               directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
               directive @join__graph(name: String!, url: String!) on ENUM_VALUE
               directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
@@ -2806,30 +2779,31 @@ async fn aliased_typename_on_fragments() {
               scalar link__Import
 
                enum link__Purpose {
-                """
-                `SECURITY` features provide metadata necessary to securely resolve fields.
-                """
                 SECURITY
-  
-                """
-                `EXECUTION` features provide metadata necessary for operation execution.
-                """
                 EXECUTION
               }
               scalar join__FieldSet
 
-              interface Animal {
+              interface Animal 
+                @join__type(graph: ANIMAL)
+              {
                 id: String!
               }
 
-              type Dog implements Animal {
+              type Dog implements Animal
+                @join__implements(graph: ANIMAL, interface: "Animal")
+                @join__type(graph: ANIMAL)
+              {
                 id: String!
                 name: String!
                 nickname: String!
                 barkVolume: Int
               }
 
-              type Cat implements Animal {
+              type Cat implements Animal
+                @join__implements(graph: ANIMAL, interface: "Animal")
+                @join__type(graph: ANIMAL)
+              {
                 id: String!
                 name: String!
                 nickname: String!
@@ -2841,25 +2815,11 @@ async fn aliased_typename_on_fragments() {
                 dog: Dog! @join__field(graph: ANIMAL)
               }
 
-              enum core__Purpose {
-                """
-                `EXECUTION` features provide metadata necessary to for operation execution.
-                """
-                EXECUTION
-
-                """
-                `SECURITY` features provide metadata necessary to securely resolve fields.
-                """
-                SECURITY
-              }
-
               union CatOrDog
                 @join__type(graph: ANIMAL)
                 @join__unionMember(graph: ANIMAL, member: "Dog")
                 @join__unionMember(graph: ANIMAL, member: "Cat") =
                   Cat | Dog
-
-              scalar join__FieldSet
 
               enum join__Graph {
                 ANIMAL @join__graph(name: "animal" url: "http://localhost:8080/query")
@@ -3151,18 +3111,10 @@ async fn interface_object_typename() {
     query: Query
   }
 
-  directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
-
   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
-
   directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-
   directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
-
   directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-
-  directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
-
   directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
   directive @owner(
@@ -3180,14 +3132,7 @@ async fn interface_object_typename() {
   scalar link__Import
 
   enum link__Purpose {
-    """
-    `SECURITY` features provide metadata necessary to securely resolve fields.
-    """
     SECURITY
-
-    """
-    `EXECUTION` features provide metadata necessary for operation execution.
-    """
     EXECUTION
   }
 
@@ -3348,32 +3293,21 @@ async fn fragment_reuse() {
     const SCHEMA: &str = r#"schema
     @link(url: "https://specs.apollo.dev/link/v1.0")
     @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
-    @link(url: "https://specs.apollo.dev/inaccessible/v0.1")
-       {
-      query: Query
-      subscription: Subscription
+    {
+        query: Query
+        subscription: Subscription
     }
     directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-    directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
     directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
     directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-    directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
     directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-    directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
-    directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
+    directive @join__implements( graph: join__Graph!  interface: String!) repeatable on OBJECT | INTERFACE
 
     scalar link__Import
 
     enum link__Purpose {
-      """
-      `SECURITY` features provide metadata necessary to securely resolve fields.
-      """
-      SECURITY
-  
-      """
-      `EXECUTION` features provide metadata necessary for operation execution.
-      """
-      EXECUTION
+        SECURITY
+        EXECUTION
     }
     scalar join__FieldSet
 
@@ -3386,11 +3320,11 @@ async fn fragment_reuse() {
     @join__type(graph: ORGA)
     @join__type(graph: USER)
     {
-        currentUser: User @join__field(graph: USER)
+        me: User @join__field(graph: USER)
     }
 
     type Subscription @join__type(graph: USER) {
-         userWasCreated: User
+        userWasCreated: User
     }
 
     type User
@@ -3398,7 +3332,7 @@ async fn fragment_reuse() {
     @join__type(graph: USER, key: "id"){
         id: ID!
         name: String
-        activeOrganization: Organization
+        organization: Organization
     }
     type Organization
     @join__type(graph: ORGA, key: "id")
@@ -3420,11 +3354,11 @@ async fn fragment_reuse() {
             ).build()),
         ("orga", MockSubgraph::builder().with_json(
           serde_json::json!{{
-            "query":"query Query__orga__1($representations:[_Any!]!$a:Boolean!=true$b:Boolean!=true){_entities(representations:$representations){...F@include(if:$a)...F@include(if:$b)}}fragment F on User{organizations{id name}}",
+            "query":"query Query__orga__1($representations:[_Any!]!$a:Boolean!=true$b:Boolean!=true){_entities(representations:$representations){...F@include(if:$a)...F@include(if:$b)}}fragment F on User{organization{id name}}",
             "operationName": "Query__orga__1",
             "variables":{"representations":[{"__typename":"User","id":"1"}]}
           }},
-          serde_json::json!{{"data": {"_entities": [{ "organizations": [{"id": "2", "name": "Apollo"}] }]}}}
+          serde_json::json!{{"data": {"_entities": [{ "organization": [{"id": "2", "name": "Apollo"}] }]}}}
       ).build())
     ].into_iter().collect());
 
@@ -3447,7 +3381,7 @@ async fn fragment_reuse() {
             }
           }
           fragment F on User {
-            organizations {
+            organization {
               id
               name
             }
@@ -3475,18 +3409,11 @@ async fn abstract_types_in_requires() {
     query: Query
   }
 
-  directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
-
   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
-
   directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-
   directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
-
   directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-
   directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
-
   directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
   scalar join__FieldSet
@@ -3499,14 +3426,7 @@ async fn abstract_types_in_requires() {
   scalar link__Import
 
   enum link__Purpose {
-    """
-    `SECURITY` features provide metadata necessary to securely resolve fields.
-    """
     SECURITY
-
-    """
-    `EXECUTION` features provide metadata necessary for operation execution.
-    """
     EXECUTION
   }
 
@@ -3640,27 +3560,17 @@ const ENUM_SCHEMA: &str = r#"schema
     @link(url: "https://specs.apollo.dev/link/v1.0")
     @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
       query: Query
-      subscription: Subscription
    }
    directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-   directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
    directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
    directive @join__graph(name: String!, url: String!) on ENUM_VALUE
    directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
    directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-   directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
 
    scalar link__Import
 
    enum link__Purpose {
-     """
-     `SECURITY` features provide metadata necessary to securely resolve fields.
-     """
      SECURITY
-  
-     """
-     `EXECUTION` features provide metadata necessary for operation execution.
-     """
      EXECUTION
    }
 
@@ -3674,7 +3584,7 @@ const ENUM_SCHEMA: &str = r#"schema
       test(input: InputEnum): String @join__field(graph: USER)
    }
 
-   enum InputEnum {
+   enum InputEnum @join__type(graph: USER) @join__type(graph: ORGA) {
     A
     B
   }"#;
