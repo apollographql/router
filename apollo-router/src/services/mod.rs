@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 pub(crate) use self::execution::service::*;
+pub(crate) use self::json::service::*;
 pub(crate) use self::query_planner::*;
 pub(crate) use self::subgraph_service::*;
 pub(crate) use self::supergraph::service::*;
@@ -13,6 +14,8 @@ pub use crate::http_ext::TryIntoHeaderValue;
 pub use crate::query_planner::OperationKind;
 pub(crate) use crate::services::execution::Request as ExecutionRequest;
 pub(crate) use crate::services::execution::Response as ExecutionResponse;
+pub(crate) use crate::services::json::Request as JsonRequest;
+pub(crate) use crate::services::json::Response as JsonResponse;
 pub(crate) use crate::services::query_planner::Request as QueryPlannerRequest;
 pub(crate) use crate::services::query_planner::Response as QueryPlannerResponse;
 pub(crate) use crate::services::router::Request as RouterRequest;
@@ -26,10 +29,10 @@ pub(crate) use crate::services::supergraph::Response as SupergraphResponse;
 pub mod execution;
 pub(crate) mod external;
 pub(crate) mod http;
+pub(crate) mod json;
 pub(crate) mod layers;
 pub(crate) mod new_service;
 pub(crate) mod query_planner;
-pub(crate) mod json;
 pub mod router;
 pub mod subgraph;
 pub(crate) mod subgraph_service;
