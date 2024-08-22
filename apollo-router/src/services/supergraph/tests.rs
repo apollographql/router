@@ -60,18 +60,18 @@ type User
   @join__type(graph: USER, key: "id")
 {
   id: ID!
-  name: String
-  activeOrganization: Organization
+  name: String @join__field(graph: USER)
+  activeOrganization: Organization @join__field(graph: USER)
 }
 type Organization
   @join__type(graph: ORGA, key: "id")
   @join__type(graph: USER, key: "id")
 {
   id: ID
-  creatorUser: User
-  name: String
-  nonNullId: ID!
-  suborga: [Organization]
+  creatorUser: User @join__field(graph: ORGA)
+  name: String @join__field(graph: ORGA)
+  nonNullId: ID! @join__field(graph: ORGA)
+  suborga: [Organization] @join__field(graph: ORGA)
 }"#;
 
 #[tokio::test]
@@ -3291,11 +3291,10 @@ async fn interface_object_typename() {
 #[tokio::test]
 async fn fragment_reuse() {
     const SCHEMA: &str = r#"schema
-    @link(url: "https://specs.apollo.dev/link/v1.0")
-    @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+      @link(url: "https://specs.apollo.dev/link/v1.0")
+      @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
     {
-        query: Query
-        subscription: Subscription
+      query: Query
     }
     directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
     directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
@@ -3306,42 +3305,36 @@ async fn fragment_reuse() {
     scalar link__Import
 
     enum link__Purpose {
-        SECURITY
-        EXECUTION
+      SECURITY
+      EXECUTION
     }
     scalar join__FieldSet
 
     enum join__Graph {
-        USER @join__graph(name: "user", url: "http://localhost:4001/graphql")
-        ORGA @join__graph(name: "orga", url: "http://localhost:4002/graphql")
+      USER @join__graph(name: "user", url: "http://localhost:4001/graphql")
+      ORGA @join__graph(name: "orga", url: "http://localhost:4002/graphql")
     }
 
     type Query 
-    @join__type(graph: ORGA)
-    @join__type(graph: USER)
+      @join__type(graph: ORGA)
+      @join__type(graph: USER)
     {
-        me: User @join__field(graph: USER)
-    }
-
-    type Subscription @join__type(graph: USER) {
-        userWasCreated: User
+      me: User @join__field(graph: USER)
     }
 
     type User
-    @join__type(graph: ORGA, key: "id")
-    @join__type(graph: USER, key: "id"){
-        id: ID!
-        name: String
-        organization: Organization
+      @join__type(graph: ORGA, key: "id")
+      @join__type(graph: USER, key: "id")
+    {
+      id: ID!
+      name: String 
+      organizations: [Organization] @join__field(graph: ORGA)
     }
     type Organization
-    @join__type(graph: ORGA, key: "id")
-    @join__type(graph: USER, key: "id") {
-        id: ID
-        creatorUser: User
-        name: String
-        nonNullId: ID!
-        suborga: [Organization]
+      @join__type(graph: ORGA, key: "id")
+    {
+      id: ID
+      name: String @join__field(graph: ORGA)
    }"#;
 
     let subgraphs = MockedSubgraphs([
@@ -3354,11 +3347,11 @@ async fn fragment_reuse() {
             ).build()),
         ("orga", MockSubgraph::builder().with_json(
           serde_json::json!{{
-            "query":"query Query__orga__1($representations:[_Any!]!$a:Boolean!=true$b:Boolean!=true){_entities(representations:$representations){...F@include(if:$a)...F@include(if:$b)}}fragment F on User{organization{id name}}",
+            "query":"query Query__orga__1($representations:[_Any!]!$a:Boolean!=true$b:Boolean!=true){_entities(representations:$representations){...F@include(if:$a)...F@include(if:$b)}}fragment F on User{organizations{id name}}",
             "operationName": "Query__orga__1",
             "variables":{"representations":[{"__typename":"User","id":"1"}]}
           }},
-          serde_json::json!{{"data": {"_entities": [{ "organization": [{"id": "2", "name": "Apollo"}] }]}}}
+          serde_json::json!{{"data": {"_entities": [{ "organizations": [{"id": "2", "name": "Apollo"}] }]}}}
       ).build())
     ].into_iter().collect());
 
@@ -3381,7 +3374,7 @@ async fn fragment_reuse() {
             }
           }
           fragment F on User {
-            organization {
+            organizations {
               id
               name
             }
