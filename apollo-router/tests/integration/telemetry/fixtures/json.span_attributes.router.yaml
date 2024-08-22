@@ -1,26 +1,29 @@
 telemetry:
-  apollo:
-    client_name_header: name_header
-    client_version_header: version_header
+  instrumentation:
+    spans:
+      mode: spec_compliant
+      router:
+        attributes:
+          should_not_log:
+            static: hello
+          too_big:
+            static: true
+          another_one:
+            static: foo
+          graphql.operation.name:
+            operation_name: string
+      supergraph:
+        attributes:
+          graphql.document: true
+      subgraph:
+        attributes:
+          too_big:
+            static: "nope"
     events:
       router:
         # Standard events
-        request:
-          level: info
-          condition:
-            eq:
-            - request_header: x-log-request
-            - "log"
-        response:
-          level: info
-          condition:
-            any:
-            - eq:
-              - on_graphql_error: true
-              - true
-            - eq:
-              - response_header: x-log-response
-              - "log"
+        request: info
+        response: info
         error: info
 
         # Custom events
@@ -41,36 +44,18 @@ telemetry:
           on: request
           attributes:
             http.request.body.size: true
-          # Only log when the x-log-request header is `log` 
-          condition:
-            eq:
-              - "log"
-              - request_header: "x-log-request"
         my.response_event:
           message: "my response event message"
           level: info
           on: response
           attributes:
             http.response.body.size: true
-          # Only log when the x-log-request header is `log` 
-          condition:
-            eq:
-              - "log"
-              - response_header: "x-log-request"
+            static_one:
+              static: test
       supergraph:
         # Standard events
-        request:
-          level: info
-          condition:
-            eq:
-            - request_header: x-log-request
-            - "log"
-        response:
-          level: info
-          condition:
-            eq:
-            - on_graphql_error: true
-            - true
+        request: info
+        response: info
         error: info
 
         # Custom events
@@ -97,31 +82,13 @@ telemetry:
           level: warn
           on: response
           condition:
-            any:
-            - eq:
-              - on_graphql_error: true
-              - true
-            - eq:
-              - response_header: x-log-response
+            eq:
               - "log"
+              - response_header: "x-log-request"
       subgraph:
         # Standard events
-        request:
-          level: info
-          condition:
-            eq:
-            - subgraph_request_header: x-log-request
-            - "log"
-        response:
-          level: warn
-          condition:
-            all:
-            - eq:
-              - subgraph_response_header: x-log-response
-              - "log"
-            - eq:
-              - subgraph_name: true
-              - "subgraph"
+        request: info
+        response: warn
         error: error
 
         # Custom events
@@ -144,3 +111,26 @@ telemetry:
             "my.custom.attribute":
               subgraph_response_data: "$.*"
               default: "missing"
+  exporters:
+    tracing:
+      propagation:
+        trace_context: true
+      jaeger:
+        enabled: true
+        batch_processor:
+          scheduled_delay: 100ms
+        agent:
+          endpoint: default
+    logging:
+      experimental_when_header:
+        - name: content-type
+          value: "application/json"
+          body: true
+      stdout:
+        format:
+          json:
+            display_span_list: false
+            display_current_span: false
+            span_attributes:
+            - graphql.document
+            - too_big

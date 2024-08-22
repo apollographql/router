@@ -102,6 +102,40 @@ mod test {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn test_subgraph_service_specific_logger() {
+        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+            .config(include_str!("testdata/json_logger.router.yaml"))
+            .build()
+            .await;
+
+        async {
+            test_harness
+                .call_subgraph(
+                    subgraph::Request::fake_builder()
+                        .subgraph_name("subgraph")
+                        .subgraph_request(http::Request::new(
+                            graphql::Request::fake_builder()
+                                .query("query { foo }")
+                                .build(),
+                        ))
+                        .build(),
+                    |_r| {
+                        tracing::info!("response");
+                        subgraph::Response::fake2_builder()
+                            .header("custom-header", "val1")
+                            .data(serde_json::json!({"data": "res"}).to_string())
+                            .build()
+                            .expect("expecting valid response")
+                    },
+                )
+                .await
+                .expect("expecting successful response");
+        }
+        .with_subscriber(assert_snapshot_subscriber!())
+        .await
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_when_header() {
         let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
             .config(include_str!(
