@@ -1170,62 +1170,16 @@ mod tests {
              query: Query
            }
 
-           directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
-           
-           directive @join__field(
-             graph: join__Graph
-             requires: join__FieldSet
-             provides: join__FieldSet
-             type: String
-             external: Boolean
-             override: String
-             usedOverridden: Boolean
-           ) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
-           
            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-           
-           directive @join__implements(
-             graph: join__Graph!
-             interface: String!
-           ) repeatable on OBJECT | INTERFACE
-           
-           directive @join__type(
-             graph: join__Graph!
-             key: join__FieldSet
-             extension: Boolean! = false
-             resolvable: Boolean! = true
-             isInterfaceObject: Boolean! = false
-           ) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-           
-           directive @join__unionMember(
-             graph: join__Graph!
-             member: String!
-           ) repeatable on UNION
-           
-           directive @link(
-             url: String
-             as: String
-             for: link__Purpose
-             import: [link__Import]
-           ) repeatable on SCHEMA
-           
-           scalar join__FieldSet
+           directive @link( url: String as: String for: link__Purpose import: [link__Import]) repeatable on SCHEMA
+           scalar link__Import
 
            enum join__Graph {
-               FAKE @join__graph(name:"fake" url: "http://localhost:4001/fake")
+             FAKE @join__graph(name:"fake" url: "http://localhost:4001/fake")
            }
 
-           scalar link__Import
-           
            enum link__Purpose {
-             """
-             `SECURITY` features provide metadata necessary to securely resolve fields.
-             """
              SECURITY
-           
-             """
-             `EXECUTION` features provide metadata necessary for operation execution.
-             """
              EXECUTION
            }
 

@@ -26,95 +26,57 @@ use crate::TestHarness;
 const SCHEMA: &str = r#"schema
      @link(url: "https://specs.apollo.dev/link/v1.0")
      @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY)
-     @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
+     @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+   {
      query: Query
    }
    
    directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
-   
-   directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
-   
-   directive @join__field(
-     graph: join__Graph
-     requires: join__FieldSet
-     provides: join__FieldSet
-     type: String
-     external: Boolean
-     override: String
-     usedOverridden: Boolean
-   ) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
-   
+   directive @join__field( graph: join__Graph requires: join__FieldSet provides: join__FieldSet type: String external: Boolean override: String usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
    directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-   
-   directive @join__implements(
-     graph: join__Graph!
-     interface: String!
-   ) repeatable on OBJECT | INTERFACE
-   
-   directive @join__type(
-     graph: join__Graph!
-     key: join__FieldSet
-     extension: Boolean! = false
-     resolvable: Boolean! = true
-     isInterfaceObject: Boolean! = false
-   ) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-   
-   directive @join__unionMember(
-     graph: join__Graph!
-     member: String!
-   ) repeatable on UNION
-   
-   directive @link(
-     url: String
-     as: String
-     for: link__Purpose
-     import: [link__Import]
-   ) repeatable on SCHEMA
-   
+   directive @join__implements( graph: join__Graph!  interface: String!) repeatable on OBJECT | INTERFACE
+   directive @join__type( graph: join__Graph!  key: join__FieldSet extension: Boolean! = false resolvable: Boolean! = true isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+   directive @link( url: String as: String for: link__Purpose import: [link__Import]) repeatable on SCHEMA
    scalar join__FieldSet
+   scalar link__Import
+
    enum join__Graph {
-      USER @join__graph(name: "user", url: "http://localhost:4001/graphql")
-      ORGA @join__graph(name: "orga", url: "http://localhost:4002/graphql")
+     USER @join__graph(name: "user", url: "http://localhost:4001/graphql")
+     ORGA @join__graph(name: "orga", url: "http://localhost:4002/graphql")
    }
    
-   scalar link__Import
-   
    enum link__Purpose {
-     """
-     `SECURITY` features provide metadata necessary to securely resolve fields.
-     """
      SECURITY
-   
-     """
-     `EXECUTION` features provide metadata necessary for operation execution.
-     """
      EXECUTION
    }
    
    type Query @join__type(graph: USER) @join__type(graph: ORGA) {
-       currentUser: User @join__field(graph: USER)
+     currentUser: User @join__field(graph: USER)
    }
 
    type Subscription @join__type(graph: USER) {
-        userWasCreated: User
+     userWasCreated: User
    }
 
    type User
-   @join__type(graph: ORGA, key: "id")
-   @join__type(graph: USER, key: "id"){
-       id: ID!
-       name: String @join__field(graph: USER)
-       activeOrganization: Organization @join__field(graph: USER)
-       allOrganizations: [Organization] @join__field(graph: USER)
+     @join__type(graph: ORGA, key: "id")
+     @join__type(graph: USER, key: "id")
+   {
+     id: ID!
+     name: String @join__field(graph: USER)
+     activeOrganization: Organization @join__field(graph: USER)
+     allOrganizations: [Organization] @join__field(graph: USER)
    }
+
    type Organization
-   @join__type(graph: ORGA, key: "id")
-   @join__type(graph: USER, key: "id") {
-       id: ID
-       creatorUser: User @join__field(graph: ORGA)
-       name: String @join__field(graph: ORGA)
-       nonNullId: ID! @join__field(graph: ORGA)
-       suborga: [Organization] @join__field(graph: ORGA)
+     @join__type(graph: ORGA, key: "id")
+     @join__type(graph: USER, key: "id")
+   {
+     id: ID
+     creatorUser: User @join__field(graph: ORGA)
+     name: String @join__field(graph: ORGA)
+     nonNullId: ID! @join__field(graph: ORGA)
+     suborga: [Organization] @join__field(graph: ORGA)
    }"#;
 
 #[derive(Debug)]
