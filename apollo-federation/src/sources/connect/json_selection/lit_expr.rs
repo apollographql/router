@@ -1,8 +1,8 @@
-// A LitExpr (short for LiteralExpression) is similar to a JSON value (or
-// serde_json::Value), with the addition of PathSelection as a possible leaf
-// value, so literal expressions passed to -> methods (via MethodArgs) can
-// capture both field and argument values and sub-paths, in addition to constant
-// JSON structures and values.
+//! A LitExpr (short for LiteralExpression) is similar to a JSON value (or
+//! serde_json::Value), with the addition of PathSelection as a possible leaf
+//! value, so literal expressions passed to -> methods (via MethodArgs) can
+//! incorporate dynamic $variable values in addition to the usual input data and
+//! argument values.
 
 use apollo_compiler::collections::IndexMap;
 use nom::branch::alt;
