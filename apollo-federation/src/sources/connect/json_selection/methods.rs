@@ -17,19 +17,19 @@ use super::VarsWithPathsMap;
 
 type ArrowMethod = fn(
     // Method name
-    &str,
+    method_name: &str,
     // Arguments passed to this method
-    &Option<MethodArgs>,
+    method_args: &Option<MethodArgs>,
     // The JSON input value (data)
-    &JSON,
+    data: &JSON,
     // The variables
-    &VarsWithPathsMap,
+    vars: &VarsWithPathsMap,
     // The input_path (may contain integers)
-    &InputPath<JSON>,
+    input_path: &InputPath<JSON>,
     // The rest of the PathList
-    &PathList,
+    tail: &PathList,
     // Errors
-    &mut IndexSet<ApplyToError>,
+    errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON>;
 
 lazy_static! {
