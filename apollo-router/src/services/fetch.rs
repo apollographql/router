@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use apollo_federation::query_plan::SubscriptionNode;
 use serde_json_bytes::Value;
 use tower::BoxError;
 
@@ -15,10 +16,25 @@ use crate::Context;
 
 pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 
+pub(crate) enum Request {
+    Fetch(FetchRequest),
+    #[allow(dead_code)]
+    Subscription(SubscriptionRequest),
+}
+
 #[non_exhaustive]
-pub(crate) struct Request {
+pub(crate) struct FetchRequest {
     pub(crate) context: Context,
     pub(crate) fetch_node: FetchNode,
+    pub(crate) supergraph_request: Arc<http::Request<GraphQLRequest>>,
+    pub(crate) variables: Variables,
+    pub(crate) current_dir: Path,
+}
+
+#[allow(dead_code)]
+pub(crate) struct SubscriptionRequest {
+    pub(crate) context: Context,
+    pub(crate) subscription_node: SubscriptionNode,
     pub(crate) supergraph_request: Arc<http::Request<GraphQLRequest>>,
     pub(crate) variables: Variables,
     pub(crate) current_dir: Path,
@@ -27,7 +43,7 @@ pub(crate) struct Request {
 pub(crate) type Response = (Value, Vec<Error>);
 
 #[buildstructor::buildstructor]
-impl Request {
+impl FetchRequest {
     /// This is the constructor (or builder) to use when constructing a real Request.
     ///
     /// Required parameters are required in non-testing code to create a Request.

@@ -38,6 +38,7 @@ use crate::query_planner::FLATTEN_SPAN_NAME;
 use crate::query_planner::PARALLEL_SPAN_NAME;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
 use crate::query_planner::SUBSCRIBE_SPAN_NAME;
+use crate::services::fetch;
 use crate::services::fetch::ErrorMapping;
 use crate::services::fetch_service::FetchServiceFactory;
 use crate::services::new_service::ServiceFactory;
@@ -248,13 +249,15 @@ impl PlanNode {
                         ) {
                             Some(variables) => {
                                 let service = parameters.service_factory.create();
-                                let request = FetchRequest::builder()
-                                    .context(parameters.context.clone())
-                                    .fetch_node(fetch_node.clone())
-                                    .supergraph_request(parameters.supergraph_request.clone())
-                                    .variables(variables)
-                                    .current_dir(current_dir.clone())
-                                    .build();
+                                let request = fetch::Request::Fetch(
+                                    FetchRequest::builder()
+                                        .context(parameters.context.clone())
+                                        .fetch_node(fetch_node.clone())
+                                        .supergraph_request(parameters.supergraph_request.clone())
+                                        .variables(variables)
+                                        .current_dir(current_dir.clone())
+                                        .build(),
+                                );
                                 (value, errors) =
                                     match service.oneshot(request).await.map_to_graphql_error(
                                         fetch_node.service_name.to_string(),

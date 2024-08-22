@@ -14,8 +14,10 @@ use tracing::Instrument;
 
 use super::connector_service::ConnectorServiceFactory;
 use super::fetch::BoxService;
+use super::fetch::SubscriptionRequest;
 use super::new_service::ServiceFactory;
 use super::ConnectRequest;
+use super::FetchRequest;
 use super::SubgraphRequest;
 use crate::graphql::Request as GraphQLRequest;
 use crate::http_ext;
@@ -24,7 +26,7 @@ use crate::query_planner::build_operation_with_aliasing;
 use crate::query_planner::fetch::FetchNode;
 use crate::query_planner::FETCH_SPAN_NAME;
 use crate::services::fetch::ErrorMapping;
-use crate::services::FetchRequest;
+use crate::services::fetch::Request;
 use crate::services::FetchResponse;
 use crate::services::SubgraphServiceFactory;
 use crate::spec::Schema;
@@ -40,7 +42,7 @@ pub(crate) struct FetchService {
     pub(crate) connector_service_factory: Arc<ConnectorServiceFactory>,
 }
 
-impl tower::Service<FetchRequest> for FetchService {
+impl tower::Service<Request> for FetchService {
     type Response = FetchResponse;
     type Error = BoxError;
     type Future = Instrumented<BoxFuture<'static, Result<Self::Response, Self::Error>>>;
@@ -49,7 +51,19 @@ impl tower::Service<FetchRequest> for FetchService {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, request: FetchRequest) -> Self::Future {
+    fn call(&mut self, request: Request) -> Self::Future {
+        match request {
+            Request::Fetch(request) => self.handle_fetch(request),
+            Request::Subscription(request) => self.handle_subscription(request),
+        }
+    }
+}
+
+impl FetchService {
+    fn handle_fetch(
+        &mut self,
+        request: FetchRequest,
+    ) -> <FetchService as tower::Service<Request>>::Future {
         let FetchRequest {
             ref context,
             fetch_node: FetchNode {
@@ -92,9 +106,7 @@ impl tower::Service<FetchRequest> for FetchService {
             ))
         }
     }
-}
 
-impl FetchService {
     fn fetch_with_connector_service(
         schema: Arc<Schema>,
         connector_service_factory: Arc<ConnectorServiceFactory>,
@@ -238,6 +250,13 @@ impl FetchService {
                 .await)
         })
     }
+
+    fn handle_subscription(
+        &mut self,
+        _request: SubscriptionRequest,
+    ) -> <FetchService as tower::Service<Request>>::Future {
+        todo!()
+    }
 }
 
 #[derive(Clone)]
@@ -266,6 +285,7 @@ impl FetchServiceFactory {
         }
     }
 
+    // TODO: remove this!
     pub(crate) fn subgraph_service_for_subscriptions(
         &self,
         service_name: &str,
@@ -274,7 +294,7 @@ impl FetchServiceFactory {
     }
 }
 
-impl ServiceFactory<FetchRequest> for FetchServiceFactory {
+impl ServiceFactory<Request> for FetchServiceFactory {
     type Service = BoxService;
 
     fn create(&self) -> Self::Service {

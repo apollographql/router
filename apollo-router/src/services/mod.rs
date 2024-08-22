@@ -15,7 +15,7 @@ pub(crate) use crate::services::connect::Request as ConnectRequest;
 pub(crate) use crate::services::connect::Response as ConnectResponse;
 pub(crate) use crate::services::execution::Request as ExecutionRequest;
 pub(crate) use crate::services::execution::Response as ExecutionResponse;
-pub(crate) use crate::services::fetch::Request as FetchRequest;
+pub(crate) use crate::services::fetch::FetchRequest;
 pub(crate) use crate::services::fetch::Response as FetchResponse;
 pub(crate) use crate::services::query_planner::Request as QueryPlannerRequest;
 pub(crate) use crate::services::query_planner::Response as QueryPlannerResponse;
