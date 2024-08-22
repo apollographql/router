@@ -2051,7 +2051,7 @@ impl FetchDependencyGraph {
 
         if path.is_empty() {
             mutable_node
-                .selection_set
+                .selection_set_mut()
                 .add_selections(&merged.selection_set.selection_set)?;
         } else {
             // The merged nodes might have some @include/@skip at top-level that are already part of the path. If so,
@@ -2061,7 +2061,7 @@ impl FetchDependencyGraph {
                 &path.conditional_directives(),
             )?;
             mutable_node
-                .selection_set
+                .selection_set_mut()
                 .add_at_path(path, Some(&Arc::new(merged_selection_set)))?;
         }
 
@@ -2361,9 +2361,9 @@ impl FetchDependencyGraphNode {
     }
 
     fn remove_inputs_from_selection(&mut self) -> Result<(), FederationError> {
-        let fetch_selection_set = &mut self.selection_set;
         if let Some(inputs) = &mut self.inputs {
             self.cached_cost = None;
+            let fetch_selection_set = &mut self.selection_set;
             for (_, selection) in &inputs.selection_sets_per_parent_type {
                 fetch_selection_set.selection_set =
                     Arc::new(fetch_selection_set.selection_set.minus(selection)?);
