@@ -914,3 +914,128 @@ fn test_merging_fetches_do_not_create_cycle_in_fetch_dependency_graph() {
     "###
     );
 }
+
+#[test]
+fn test_merging_fetches_reset_cached_costs() {
+    // This is a test for ROUTER-553.
+    let planner = planner!(
+      A: r#"
+            type Query {
+                start: S @shareable
+            }
+
+            type S @key(fields: "id") {
+                id: ID!
+                u: U @shareable
+            }
+
+            type U @key(fields: "id") {
+                id: ID!
+            }
+        "#,
+      B: r#"
+            type Query {
+                start: S @shareable
+            }
+
+            type S @key(fields: "id") {
+                id: ID!
+            }
+        "#,
+      C: r#"
+            type S @key(fields: "id") {
+                id: ID!
+                x: X
+                a: String!
+            }
+
+            type X {
+                t: T
+            }
+
+            type T {
+                u: U @shareable
+            }
+
+            type U @key(fields: "id") {
+                id: ID!
+                b: String
+            }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"{
+            start {
+                u {
+                    b
+                }
+                a
+                x {
+                    t {
+                        u {
+                        id
+                        }
+                    }
+                }
+            }
+        }"#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "A") {
+          {
+            start {
+              __typename
+              u {
+                __typename
+                id
+              }
+              id
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "start") {
+            Fetch(service: "C") {
+              {
+                ... on S {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on S {
+                  a
+                  x {
+                    t {
+                      u {
+                        id
+                      }
+                    }
+                  }
+                }
+              }
+            },
+          },
+          Flatten(path: "start.u") {
+            Fetch(service: "C") {
+              {
+                ... on U {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on U {
+                  b
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "###
+    );
+}
