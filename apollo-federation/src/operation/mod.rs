@@ -895,7 +895,19 @@ impl Selection {
     }
 
     fn sub_selection_type_position(&self) -> Option<CompositeTypeDefinitionPosition> {
-        Some(self.selection_set()?.type_position.clone())
+        match self {
+            Selection::Field(field_selection) => field_selection
+                .selection_set
+                .as_ref()
+                .map(|s| s.type_position.clone()),
+            Selection::FragmentSpread(fragment_selection) => {
+                Some(fragment_selection.spread.type_condition_position.clone())
+            }
+            Selection::InlineFragment(inline_fragment_selection) => inline_fragment_selection
+                .inline_fragment
+                .type_condition_position
+                .clone(),
+        }
     }
 
     pub(crate) fn conditions(&self) -> Result<Conditions, FederationError> {
