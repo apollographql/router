@@ -32,6 +32,7 @@ use serde_json_bytes::Value;
 use thiserror::Error;
 use url::Url;
 
+use super::form_encoding::encode_json_as_form;
 use crate::plugins::connectors::plugin::ConnectorContext;
 use crate::plugins::connectors::plugin::SelectionData;
 use crate::services::connect;
@@ -77,43 +78,72 @@ pub(crate) fn make_request(
         &flat_inputs,
     )?;
 
-    let (json_body, body, apply_to_errors) = if let Some(ref selection) = transport.body {
-        let (json_body, apply_to_errors) = selection.apply_with_vars(&json!({}), &inputs);
-        let body = if let Some(json_body) = json_body.as_ref() {
-            hyper::Body::from(serde_json::to_vec(json_body)?)
-        } else {
-            hyper::Body::empty()
-        };
-        (json_body, body, apply_to_errors)
-    } else {
-        (None, hyper::Body::empty(), vec![])
-    };
-
-    let mut request = http::Request::builder()
+    let request = http::Request::builder()
         .method(transport.method.as_str())
-        .uri(uri.as_str())
-        .header("content-type", "application/json")
-        .body(body.into())
-        .map_err(HttpJsonTransportError::InvalidNewRequest)?;
+        .uri(uri.as_str());
 
-    add_headers(
-        &mut request,
+    // add the headers and if content-type is specified, we'll check that when constructing the body
+    let (mut request, content_type) = add_headers(
+        request,
         original_request.supergraph_request.headers(),
         &transport.headers,
         &flat_inputs,
     );
 
+    let is_form_urlencoded = content_type
+        .as_ref()
+        .map(|v| v.to_str().unwrap_or_default())
+        == Some("application/x-www-form-urlencoded");
+
+    let (json_body, form_body, body, apply_to_errors) = if let Some(ref selection) = transport.body
+    {
+        let (json_body, apply_to_errors) = selection.apply_with_vars(&json!({}), &inputs);
+        let mut form_body = None;
+        let body = if let Some(json_body) = json_body.as_ref() {
+            if is_form_urlencoded {
+                let encoded = encode_json_as_form(json_body.as_object().unwrap());
+                form_body = Some(encoded.clone());
+                hyper::Body::from(encoded)
+            } else {
+                request = request.header(CONTENT_TYPE, "application/json");
+                hyper::Body::from(serde_json::to_vec(json_body)?)
+            }
+        } else {
+            hyper::Body::empty()
+        };
+        (json_body, form_body, body, apply_to_errors)
+    } else {
+        (None, None, hyper::Body::empty(), vec![])
+    };
+
+    let request = request
+        .body(body.into())
+        .map_err(HttpJsonTransportError::InvalidNewRequest)?;
+
     if let Some(debug) = debug {
-        debug.lock().push_request(
-            &request,
-            json_body.as_ref(),
-            transport.body.as_ref().map(|body| SelectionData {
-                source: body.to_string(),
-                transformed: body.to_string(),
-                result: json_body.clone(),
-                errors: apply_to_errors,
-            }),
-        );
+        if is_form_urlencoded {
+            debug.lock().push_form_urlencoded_request(
+                &request,
+                form_body.as_ref(),
+                transport.body.as_ref().map(|body| SelectionData {
+                    source: body.to_string(),
+                    transformed: body.to_string(), // no transformation so this is the same
+                    result: json_body,
+                    errors: apply_to_errors,
+                }),
+            );
+        } else {
+            debug.lock().push_request(
+                &request,
+                json_body.as_ref(),
+                transport.body.as_ref().map(|body| SelectionData {
+                    source: body.to_string(),
+                    transformed: body.to_string(), // no transformation so this is the same
+                    result: json_body.clone(),
+                    errors: apply_to_errors,
+                }),
+            );
+        }
     }
 
     Ok(request)
@@ -172,13 +202,14 @@ fn flatten_keys_recursive(inputs: &Value, flat: &mut Map<ByteString, Value>, pre
 }
 
 #[allow(clippy::mutable_key_type)] // HeaderName is internally mutable, but safe to use in maps
-fn add_headers<T>(
-    request: &mut http::Request<T>,
+fn add_headers(
+    mut request: http::request::Builder,
     incoming_supergraph_headers: &HeaderMap<HeaderValue>,
     config: &IndexMap<HeaderName, HeaderSource>,
     inputs: &Map<ByteString, Value>,
-) {
-    let headers = request.headers_mut();
+) -> (http::request::Builder, Option<HeaderValue>) {
+    let mut content_type = None;
+
     for (header_name, header_source) in config {
         match header_source {
             HeaderSource::From(from) => {
@@ -191,8 +222,12 @@ fn add_headers<T>(
                     let values = incoming_supergraph_headers.get_all(from);
                     let mut propagated = false;
                     for value in values {
-                        headers.append(header_name.clone(), value.clone());
+                        request = request.header(header_name.clone(), value.clone());
                         propagated = true;
+
+                        if header_name == CONTENT_TYPE {
+                            content_type = Some(value.clone());
+                        }
                     }
                     if !propagated {
                         tracing::warn!("Header '{}' not found in incoming request", header_name);
@@ -202,7 +237,11 @@ fn add_headers<T>(
             HeaderSource::Value(value) => match value.interpolate(inputs) {
                 Ok(value) => match HeaderValue::from_str(value.as_str()) {
                     Ok(value) => {
-                        headers.append(header_name, value);
+                        request = request.header(header_name, value.clone());
+
+                        if header_name == CONTENT_TYPE {
+                            content_type = Some(value);
+                        }
                     }
                     Err(err) => {
                         tracing::error!("Invalid header value '{:?}': {:?}", value, err);
@@ -214,6 +253,8 @@ fn add_headers<T>(
             },
         }
     }
+
+    (request, content_type)
 }
 
 #[derive(Error, Display, Debug)]
@@ -728,13 +769,14 @@ mod tests {
         .into_iter()
         .collect();
 
-        let mut request = http::Request::builder().body(hyper::Body::empty()).unwrap();
-        add_headers(
-            &mut request,
+        let request = http::Request::builder();
+        let (request, _) = add_headers(
+            request,
             &incoming_supergraph_headers,
             &IndexMap::with_hasher(Default::default()),
             &Map::default(),
         );
+        let request = request.body(hyper::Body::empty()).unwrap();
         assert!(request.headers().is_empty());
     }
 
@@ -760,13 +802,14 @@ mod tests {
             HeaderSource::Value("inserted".parse().unwrap()),
         );
 
-        let mut request = http::Request::builder().body(hyper::Body::empty()).unwrap();
-        add_headers(
-            &mut request,
+        let request = http::Request::builder();
+        let (request, _) = add_headers(
+            request,
             &incoming_supergraph_headers,
             &config,
             &Map::default(),
         );
+        let request = request.body(hyper::Body::empty()).unwrap();
         let result = request.headers();
         assert_eq!(result.len(), 3);
         assert_eq!(result.get("x-new-name"), Some(&"renamed".parse().unwrap()));

@@ -1,0 +1,116 @@
+# rover supergraph compose --config apollo-router/src/plugins/connectors/testdata/form-encoding.yaml > apollo-router/src/plugins/connectors/testdata/form-encoding.graphql
+federation_version: =2.10.0-alpha.0
+subgraphs:
+  connectors:
+    routing_url: none
+    schema:
+      sdl: |
+        extend schema
+          @link(
+            url: "https://specs.apollo.dev/federation/v2.10"
+            import: ["@key", "@external", "@requires", "@shareable"]
+          )
+          @link(
+            url: "https://specs.apollo.dev/connect/v0.1"
+            import: ["@connect", "@source"]
+          )
+          @source(
+            name: "json"
+            http: {
+              baseURL: "http://localhost"
+              headers: [
+                { name: "Content-Type" value: "application/x-www-form-urlencoded" }
+              ]
+            }
+          )
+
+        type Query {
+          hello: String @connect(http: { GET: "http://localhost/hello" }, selection: "$")
+        }
+
+        type Mutation {
+          post(input: PostInput!): Post
+            @connect(
+              source: "json"
+              http: {
+                POST: "/posts"
+                body: """
+                $$args.input {
+                  int
+                  str
+                  bool
+                  enum
+                  id
+
+                  intArr
+                  strArr
+                  boolArr
+                  # enumArr
+                  idArr
+
+                  obj {
+                    a
+                    b
+                    c
+                    nested {
+                      d
+                      e
+                      f
+                    }
+                  }
+                  objArr {
+                    a
+                    b
+                    c
+                    nested {
+                      d
+                      e
+                      f
+                    }
+                  }
+                }
+                """
+              }
+              selection: "id"
+            )
+        }
+
+        input PostInput {
+          int: Int
+          str: String
+          bool: Boolean
+          # enum: PostEnum
+          id: ID
+
+          intArr: [Int]
+          strArr: [String]
+          boolArr: [Boolean]
+          # enumArr: [PostEnum]
+          idArr: [ID]
+
+          obj: PostChildInput
+          objArr: [PostChildInput]
+        }
+
+        input PostChildInput {
+          a: Int
+          b: String
+          c: Boolean
+          nested: PostNestedInput
+        }
+
+        input PostNestedInput {
+          d: Int
+          e: String
+          f: Boolean
+        }
+
+        # enum PostEnum {
+        #   A
+        #   B
+        #   C
+        # }
+
+        type Post {
+          id: ID
+        }
