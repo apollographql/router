@@ -199,7 +199,7 @@ reqwest.workspace = true
 
 # note: this dependency should _always_ be pinned, prefix the version with an `=`
 #router-bridge = "=0.5.30+v2.8.3"
-router-bridge = { git = "https://github.com/apollographql/federation-rs", branch = "geal/plan-count" }
+router-bridge = { git = "https://github.com/apollographql/federation-rs", branch = "geal/plan-count", version = "=0.5.30+v2.8.3" }
 
 rust-embed = { version = "8.4.0", features = ["include-exclude"] }
 rustls = "0.21.12"
