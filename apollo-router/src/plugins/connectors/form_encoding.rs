@@ -1,67 +1,49 @@
-use itertools::Itertools;
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 
-pub(super) fn encode_json_as_form(value: &Map<ByteString, Value>) -> String {
+pub(super) fn encode_json_as_form(value: &Value) -> Result<String, &'static str> {
+    if value.as_object().is_none() {
+        return Err("Expected URL-encoded forms to be objects");
+    }
+
     let mut encoded: form_urlencoded::Serializer<String> =
         form_urlencoded::Serializer::new(String::new());
 
-    fn print_json_value_literal(value: &Value) -> String {
+    fn encode(encoded: &mut form_urlencoded::Serializer<String>, value: &Value, prefix: &str) {
         match value {
-            Value::Null => "".to_string(),
-            Value::Bool(b) => format!("{}", b),
-            Value::Number(n) => format!("{}", n),
-            Value::String(s) => s.as_str().to_string(),
-            Value::Array(ls) => ls.iter().map(print_json_value_literal).join(","),
-            Value::Object(_) => "".to_string(), // won't happen
+            Value::Null => {
+                encoded.append_pair(prefix, "");
+            }
+            Value::String(s) => {
+                encoded.append_pair(prefix, s.as_str());
+            }
+            Value::Bool(b) => {
+                encoded.append_pair(prefix, if *b { "true" } else { "false" });
+            }
+            Value::Number(n) => {
+                encoded.append_pair(prefix, &n.to_string());
+            }
+            Value::Array(array) => {
+                for (i, value) in array.iter().enumerate() {
+                    let prefix = format!("{prefix}[{i}]");
+                    encode(encoded, value, &prefix);
+                }
+            }
+            Value::Object(obj) => {
+                for (key, value) in obj {
+                    if prefix.is_empty() {
+                        encode(encoded, value, key.as_str())
+                    } else {
+                        let prefix = format!("{prefix}[{key}]", key = key.as_str());
+                        encode(encoded, value, &prefix);
+                    };
+                }
+            }
         }
     }
 
-    fn add_key(previous: &str, key: &str) -> String {
-        if previous.is_empty() {
-            key.to_string()
-        } else {
-            format!("{}[{}]", previous, key)
-        }
-    }
+    encode(&mut encoded, value, "");
 
-    fn recurse(
-        encoded: &mut form_urlencoded::Serializer<String>,
-        obj: &Map<ByteString, Value>,
-        prefix: &str,
-    ) {
-        for (key, value) in obj {
-            let prefix = add_key(prefix, key.as_str());
-            match value {
-                Value::Array(array) => {
-                    for (i, value) in array.iter().enumerate() {
-                        match value {
-                            Value::Object(map) => {
-                                recurse(encoded, map, &format!("{}[{}]", prefix, i));
-                            }
-                            _ => {
-                                encoded.append_pair(
-                                    &format!("{}[{}]", prefix, i),
-                                    &print_json_value_literal(value),
-                                );
-                            }
-                        }
-                    }
-                }
-                Value::Object(map) => {
-                    recurse(encoded, map, &prefix);
-                }
-                _ => {
-                    encoded.append_pair(&prefix, &print_json_value_literal(value));
-                }
-            };
-        }
-    }
-
-    recurse(&mut encoded, value, "");
-
-    encoded.finish()
+    Ok(encoded.finish())
 }
 
 #[cfg(test)]
@@ -90,9 +72,8 @@ mod tests {
                 }
             }
         });
-        let data = data.as_object().unwrap();
 
-        let encoded = encode_json_as_form(data);
+        let encoded = encode_json_as_form(&data).expect("test case is valid for transformation");
         assert_eq!(encoded, "a=1&b=2&c%5Bd%5D=3&c%5Be%5D=4&c%5Bf%5D%5Bg%5D=5&c%5Bf%5D%5Bh%5D=6&c%5Bf%5D%5Bi%5D%5B0%5D=7&c%5Bf%5D%5Bi%5D%5B1%5D=8&c%5Bf%5D%5Bi%5D%5B2%5D=9&c%5Bf%5D%5Bj%5D%5B0%5D%5Bk%5D=10&c%5Bf%5D%5Bj%5D%5B1%5D%5Bl%5D=11&c%5Bf%5D%5Bj%5D%5B2%5D%5Bm%5D=12");
     }
 
@@ -148,8 +129,8 @@ mod tests {
     // #[case(r#"{ "a": [, "2", , , "1"] }"#, "a%5B1%5D=2&a%5B4%5D=1")] // json doesn't do sparse arrays
 
     fn stringifies_a_querystring_object(#[case] json: &str, #[case] expected: &str) {
-        let json = serde_json::from_slice::<serde_json_bytes::Value>(json.as_bytes()).unwrap();
-        let encoded = encode_json_as_form(json.as_object().unwrap());
+        let json = serde_json::from_slice::<Value>(json.as_bytes()).unwrap();
+        let encoded = encode_json_as_form(&json).expect("test cases are valid for transformation");
         assert_eq!(encoded, expected);
     }
 }
