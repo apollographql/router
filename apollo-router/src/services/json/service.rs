@@ -3,6 +3,8 @@ use std::future::ready;
 use std::sync::Arc;
 use std::task::Poll;
 
+use axum::body;
+use axum::response;
 use futures::future::join_all;
 use futures::future::BoxFuture;
 use futures::stream::once;
@@ -173,7 +175,13 @@ impl JsonServerService {
                 .next()
                 .expect("we should have at least one response");
             let (parts, body) = first.response.into_parts();
-            let bodies = body.collect().await;
+            let mut bodies: Vec<Value> = body.collect().await;
+            for response in results_it {
+                let (_, mut body) = response.response.into_parts();
+                while let Some(v) = body.next().await {
+                    bodies.push(v);
+                }
+            }
             let body = Value::Array(bodies);
 
             let context = first.context;
