@@ -44,18 +44,6 @@ supergraph:
         limit: 512 # This is the default value.
 ```
 
-On schema reloads, the cache will be reset, and queries will need to go through query planning again. To avoid latencies right after the reload, you can configure the router to pregenerate query plans for the most used queries before switching to the new schema:
-
-```yaml title="router.yaml"
-supergraph:
-  query_planning:
-    # Pre-plan the 100 most used operations when the supergraph changes.  (Default is "0", disabled.)
-    warmed_up_queries: 100
-    cache:
-      in_memory:
-        limit: 512
-```
-
 ### Cache warm-up
 
 When loading a new schema, a query plan might change for some queries, so cached query plans cannot be reused. 
