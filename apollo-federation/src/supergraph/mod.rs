@@ -81,7 +81,6 @@ use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 use crate::schema::type_and_directive_specification::UnionTypeSpecification;
 use crate::schema::FederationSchema;
-use crate::schema::ValidFederationSchema;
 use crate::utils::FallibleIterator;
 
 /// Assumes the given schema has been validated.
