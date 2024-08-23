@@ -560,7 +560,7 @@ impl JsonServerService {
                     if !response.errors.is_empty() {
                         Self::count_errors(&response.errors);
                     }
-                    let response = if !response.subscribed.unwrap_or(false) {
+                    let response = if response.subscribed.unwrap_or(false) {
                         let resp = SubscriptionPayload {
                             errors: response.errors.drain(..).collect(),
                             payload: match response.data {

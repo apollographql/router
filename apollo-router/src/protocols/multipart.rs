@@ -107,11 +107,13 @@ impl Stream for Multipart {
                 Some(MessageKind::Message(response)) => {
                     let is_still_open = response
                         .as_object()
-                        .and_then(|o| o.get("has_next").and_then(|v| v.as_bool()))
+                        .and_then(|o| o.get("hasNext").and_then(|v| v.as_bool()))
                         .unwrap_or(false)
                         || response
                             .as_object()
-                            .and_then(|o| o.get("subscribed").and_then(|v| v.as_bool()))
+                            .and_then(|o| o.get("payload"))
+                            .and_then(|v| v.as_object())
+                            .map(|o| !o.is_empty())
                             .unwrap_or(false);
                     let mut buf = if self.is_first_chunk {
                         self.is_first_chunk = false;
@@ -127,6 +129,7 @@ impl Stream for Multipart {
                                 && response
                                     .as_object()
                                     .and_then(|o| o.get("payload"))
+                                    .and_then(|v| v.as_object())
                                     .is_none()
                                 && response
                                     .as_object()
@@ -219,7 +222,16 @@ mod tests {
                 .build(),
             graphql::Response::builder().build(),
         ];
-        let gql_responses = stream::iter(responses).map(|r| serde_json_bytes::to_value(r).unwrap());
+        let gql_responses = stream::iter(responses).map(|mut response| {
+            let r = SubscriptionPayload {
+                errors: response.errors.drain(..).collect(),
+                payload: match response.data {
+                    None | Some(Value::Null) if response.extensions.is_empty() => None,
+                    _ => response.into(),
+                },
+            };
+            serde_json_bytes::to_value(r).unwrap()
+        });
 
         let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription);
         let heartbeat =
