@@ -3955,7 +3955,7 @@ impl TryFrom<Operation> for Valid<executable::ExecutableDocument> {
         document.fragments = fragments;
         document.operations.insert(operation);
         coerce_executable_values(value.schema.schema(), &mut document);
-        Ok(document.validate(value.schema.schema())?)
+        Ok(Valid::assume_valid(document))
     }
 }
 

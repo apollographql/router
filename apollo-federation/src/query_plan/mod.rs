@@ -6,6 +6,7 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 use serde::Serialize;
 
+use crate::error::FederationError;
 use crate::query_plan::query_planner::QueryPlanningStatistics;
 
 pub(crate) mod conditions;
@@ -255,6 +256,124 @@ impl QueryPlan {
         Self {
             node: Some(node.into()),
             statistics,
+        }
+    }
+}
+
+mod plan_node_visitors {
+    use super::*;
+
+    pub(super) fn fetch(
+        fetch: &FetchNode,
+        callback: &mut impl FnMut(&FetchNode) -> Result<(), FederationError>,
+    ) -> Result<(), FederationError> {
+        callback(fetch)
+    }
+
+    pub(super) fn flatten(
+        flatten: &FlattenNode,
+        callback: &mut impl FnMut(&FetchNode) -> Result<(), FederationError>,
+    ) -> Result<(), FederationError> {
+        flatten.node.visit_fetch_nodes(callback)
+    }
+
+    pub(super) fn sequence(
+        sequence: &SequenceNode,
+        callback: &mut impl FnMut(&FetchNode) -> Result<(), FederationError>,
+    ) -> Result<(), FederationError> {
+        sequence
+            .nodes
+            .iter()
+            .try_for_each(|node| node.visit_fetch_nodes(callback))
+    }
+
+    pub(super) fn parallel(
+        parallel: &ParallelNode,
+        callback: &mut impl FnMut(&FetchNode) -> Result<(), FederationError>,
+    ) -> Result<(), FederationError> {
+        parallel
+            .nodes
+            .iter()
+            .try_for_each(|node| node.visit_fetch_nodes(callback))
+    }
+
+    pub(super) fn condition(
+        condition: &ConditionNode,
+        callback: &mut impl FnMut(&FetchNode) -> Result<(), FederationError>,
+    ) -> Result<(), FederationError> {
+        let ConditionNode {
+            if_clause,
+            else_clause,
+            ..
+        } = condition;
+        if_clause
+            .iter()
+            .try_for_each(|node| node.visit_fetch_nodes(callback))?;
+        else_clause
+            .iter()
+            .try_for_each(|node| node.visit_fetch_nodes(callback))?;
+        Ok(())
+    }
+
+    pub(super) fn subscription(
+        subscription: &SubscriptionNode,
+        callback: &mut impl FnMut(&FetchNode) -> Result<(), FederationError>,
+    ) -> Result<(), FederationError> {
+        let SubscriptionNode { primary, rest } = subscription;
+        callback(primary)?;
+        rest.iter()
+            .try_for_each(|node| node.visit_fetch_nodes(callback))?;
+        Ok(())
+    }
+
+    pub(super) fn defer(
+        defer: &DeferNode,
+        callback: &mut impl FnMut(&FetchNode) -> Result<(), FederationError>,
+    ) -> Result<(), FederationError> {
+        let DeferNode { primary, deferred } = defer;
+        primary
+            .node
+            .iter()
+            .try_for_each(|node| node.visit_fetch_nodes(callback))?;
+        deferred
+            .iter()
+            .flat_map(|block| &block.node)
+            .try_for_each(|node| node.visit_fetch_nodes(callback))?;
+        Ok(())
+    }
+}
+
+impl PlanNode {
+    pub(crate) fn visit_fetch_nodes(
+        &self,
+        callback: &mut impl FnMut(&FetchNode) -> Result<(), FederationError>,
+    ) -> Result<(), FederationError> {
+        match self {
+            Self::Fetch(fetch) => plan_node_visitors::fetch(fetch, callback),
+            Self::Sequence(sequence) => plan_node_visitors::sequence(sequence, callback),
+            Self::Parallel(parallel) => plan_node_visitors::parallel(parallel, callback),
+            Self::Flatten(flatten) => plan_node_visitors::flatten(flatten, callback),
+            Self::Condition(condition) => plan_node_visitors::condition(condition, callback),
+            Self::Defer(defer) => plan_node_visitors::defer(defer, callback),
+        }
+    }
+}
+
+impl TopLevelPlanNode {
+    pub(crate) fn visit_fetch_nodes(
+        &self,
+        callback: &mut impl FnMut(&FetchNode) -> Result<(), FederationError>,
+    ) -> Result<(), FederationError> {
+        match self {
+            Self::Fetch(fetch) => plan_node_visitors::fetch(fetch, callback),
+            Self::Sequence(sequence) => plan_node_visitors::sequence(sequence, callback),
+            Self::Parallel(parallel) => plan_node_visitors::parallel(parallel, callback),
+            Self::Flatten(flatten) => plan_node_visitors::flatten(flatten, callback),
+            Self::Condition(condition) => plan_node_visitors::condition(condition, callback),
+            Self::Defer(defer) => plan_node_visitors::defer(defer, callback),
+            Self::Subscription(subscription) => {
+                plan_node_visitors::subscription(subscription, callback)
+            }
         }
     }
 }

@@ -525,6 +525,22 @@ impl QueryPlanner {
             None => None,
         };
 
+        if self.config.subgraph_graphql_validation {
+            root_node.iter().try_for_each(|root_node| {
+                root_node.visit_fetch_nodes(&mut |node| {
+                    self.validate_fetch_node(node).map_err(|err| {
+                        let op_name = node
+                            .operation_name
+                            .as_ref()
+                            .map_or_else(|| "(anonymous)".to_string(), |name| name.to_string());
+                        FederationError::internal(format!(
+                            "Invalid fetch node operation: {op_name}\n{node}\n{err}",
+                        ))
+                    })
+                })
+            })?;
+        }
+
         let plan = QueryPlan {
             node: root_node,
             statistics,
@@ -538,6 +554,22 @@ impl QueryPlanner {
     /// Get Query Planner's API Schema.
     pub fn api_schema(&self) -> &ValidFederationSchema {
         &self.api_schema
+    }
+
+    fn validate_fetch_node(&self, node: &FetchNode) -> Result<(), FederationError> {
+        let subgraph_schema = self
+            .subgraph_schemas()
+            .get(&node.subgraph_name)
+            .ok_or_else(|| {
+                FederationError::internal(format!(
+                    "subgraph schema not found: {}",
+                    node.subgraph_name
+                ))
+            })?;
+        // TODO: avoid cloning the operation document here
+        let document = node.operation_document.clone().into_inner();
+        document.validate(subgraph_schema.schema())?;
+        Ok(())
     }
 
     fn check_unsupported_features(supergraph: &Supergraph) -> Result<(), FederationError> {
