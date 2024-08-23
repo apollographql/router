@@ -488,7 +488,7 @@ impl Process {
             .status()?;
 
         //Step 15
-        //FIXME: replace this step with an askama template
+        //FIXME: replace this step with a rinja template
         let perl = which::which("perl")?;
         let output = std::process::Command::new(&perl)
             .args([
@@ -754,7 +754,7 @@ impl Process {
         println!("{}", style("Updating release notes").bold().bright());
 
         // step 15
-        //FIXME: replace this step with an askama template
+        //FIXME: replace this step with a rinja template
         let perl = which::which("perl")?;
         let output = std::process::Command::new(&perl)
             .args([

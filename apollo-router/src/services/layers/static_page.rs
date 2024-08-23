@@ -5,7 +5,6 @@
 
 use std::ops::ControlFlow;
 
-use askama::Template;
 use bytes::Bytes;
 use http::header::CONTENT_TYPE;
 use http::HeaderMap;
@@ -15,6 +14,7 @@ use mediatype::names::HTML;
 use mediatype::names::TEXT;
 use mediatype::MediaType;
 use mediatype::MediaTypeList;
+use rinja::Template;
 use tower::BoxError;
 use tower::Layer;
 use tower::Service;

@@ -64,7 +64,6 @@ ci = []
 features = ["docs_rs"]
 
 [dependencies]
-askama = "0.12.1"
 access-json = "0.1.0"
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
@@ -138,6 +137,7 @@ notify = { version = "6.1.1", default-features = false, features = [
 nu-ansi-term = "0.49"
 num-traits = "0.2.19"
 once_cell = "1.19.0"
+rinja = "0.3.1"
 
 # Pin rowan to a version pre-MSRV bump. Remove if we update our rust-toolchain.
 rowan = "= 0.15.15"
