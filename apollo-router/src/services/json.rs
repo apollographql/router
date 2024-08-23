@@ -13,8 +13,6 @@ use http::Uri;
 use mime::APPLICATION_JSON;
 use multimap::MultiMap;
 use serde_json_bytes::json;
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Map as JsonMap;
 use serde_json_bytes::Value;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
@@ -29,9 +27,9 @@ pub(crate) mod service;
 #[cfg(test)]
 mod tests;
 
-pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
-pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
-pub type ServiceResult = Result<Response, BoxError>;
+pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError>;
+pub(crate) type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
+pub(crate) type ServiceResult = Result<Response, BoxError>;
 
 assert_impl_all!(Request: Send);
 /// Represents the router processing step of the processing pipeline.
@@ -69,7 +67,7 @@ impl Request {
     ///
     /// Required parameters are required in non-testing code to create a Request.
     #[allow(clippy::too_many_arguments)]
-    #[builder(visibility = "pub")]
+    #[builder(visibility = "pub(crate)")]
     fn new(
         body: Value,
         context: Context,
@@ -92,7 +90,7 @@ impl Request {
     /// difficult to construct and not required for the purposes of the test.
     ///
     /// In addition, fake requests are expected to be valid, and will panic if given invalid values.
-    #[builder(visibility = "pub")]
+    #[builder(visibility = "pub(crate)")]
     fn fake_new(
         body: Option<Value>,
         context: Option<Context>,
@@ -115,7 +113,7 @@ impl Request {
     }
 
     /// Create a request with an example query, for tests
-    #[builder(visibility = "pub")]
+    #[builder(visibility = "pub(crate)")]
     fn canned_new(
         body: Option<Value>,
         context: Option<Context>,
@@ -196,7 +194,7 @@ impl Response {
     ///
     /// In addition, fake responses are expected to be valid, and will panic if given invalid values.
     #[allow(clippy::too_many_arguments)]
-    #[builder(visibility = "pub")]
+    #[builder(visibility = "pub(crate)")]
     fn fake_new(
         body: Option<Value>,
         status_code: Option<StatusCode>,
@@ -218,7 +216,7 @@ impl Response {
     /// difficult to construct and not required for the purposes of the test.
     ///
     /// In addition, fake responses are expected to be valid, and will panic if given invalid values.
-    #[builder(visibility = "pub")]
+    #[builder(visibility = "pub(crate)")]
     fn fake_stream_new(
         responses: Vec<Value>,
         status_code: Option<StatusCode>,
@@ -257,36 +255,10 @@ impl Response {
             context,
         )
     }
-
-    /// This is the constructor (or builder) to use when constructing a real Response..
-    ///
-    /// Required parameters are required in non-testing code to create a Response..
-    #[allow(clippy::too_many_arguments)]
-    #[builder(visibility = "pub(crate)")]
-    fn infallible_new(
-        body: Value,
-        // Skip the `Object` type alias in order to use buildstructor’s map special-casing
-        extensions: JsonMap<ByteString, Value>,
-        status_code: Option<StatusCode>,
-        headers: MultiMap<HeaderName, HeaderValue>,
-        context: Context,
-    ) -> Self {
-        // Build an http Response
-        let mut builder = http::Response::builder().status(status_code.unwrap_or(StatusCode::OK));
-        for (header_name, values) in headers {
-            for header_value in values {
-                builder = builder.header(header_name.clone(), header_value);
-            }
-        }
-
-        let response = builder.body(once(ready(body)).boxed()).expect("can't fail");
-
-        Self { response, context }
-    }
 }
 
 impl Response {
-    pub async fn next_response(&mut self) -> Option<Value> {
+    pub(crate) async fn next_response(&mut self) -> Option<Value> {
         self.response.body_mut().next().await
     }
 

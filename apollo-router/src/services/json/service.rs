@@ -3,8 +3,6 @@ use std::future::ready;
 use std::sync::Arc;
 use std::task::Poll;
 
-use axum::body;
-use axum::response;
 use futures::future::join_all;
 use futures::future::BoxFuture;
 use futures::stream::once;
