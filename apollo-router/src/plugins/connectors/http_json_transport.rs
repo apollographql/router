@@ -101,7 +101,8 @@ pub(crate) fn make_request(
         let mut form_body = None;
         let body = if let Some(json_body) = json_body.as_ref() {
             if is_form_urlencoded {
-                let encoded = encode_json_as_form(json_body.as_object().unwrap());
+                let encoded = encode_json_as_form(json_body)
+                    .map_err(HttpJsonTransportError::FormBodySerialization)?;
                 form_body = Some(encoded.clone());
                 hyper::Body::from(encoded)
             } else {
@@ -264,7 +265,9 @@ pub(crate) enum HttpJsonTransportError {
     /// Could not generate HTTP request: {0}
     InvalidNewRequest(#[source] http::Error),
     /// Could not serialize body: {0}
-    BodySerialization(#[from] serde_json::Error),
+    JsonBodySerialization(#[from] serde_json::Error),
+    /// Could not serialize body: {0}
+    FormBodySerialization(&'static str),
     /// Error building URI: {0:?}
     InvalidUrl(url::ParseError),
     /// Could not generate path from inputs: {0}
