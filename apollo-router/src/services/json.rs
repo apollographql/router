@@ -1,4 +1,5 @@
 #![allow(unreachable_pub)] //TODO: remove
+#![allow(dead_code)] //TODO: remove
 use std::pin::Pin;
 
 use futures::future::ready;
@@ -115,7 +116,6 @@ impl Request {
     /// Create a request with an example query, for tests
     #[builder(visibility = "pub(crate)")]
     fn canned_new(
-        body: Option<Value>,
         context: Option<Context>,
         headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
     ) -> Result<Request, BoxError> {
