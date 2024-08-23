@@ -1,0 +1,1 @@
+### chore(deps): bump rustls from 0.21.6 to 0.21.12 in /xtask (PR #5874)[https://github.com/apollographql/router/pull/5874]
