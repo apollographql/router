@@ -330,15 +330,11 @@ impl QueryPlanner {
         document: &Valid<ExecutableDocument>,
         operation_name: Option<Name>,
     ) -> Result<QueryPlan, FederationError> {
-        let operation = document
-            .operations
-            .get(operation_name.as_ref().map(|name| name.as_str()))
-            // TODO(@goto-bus-stop) this is not an internal error, but a user error
-            .map_err(|_| FederationError::internal("requested operation does not exist"))?;
+        let operation = document.operations.get(operation_name.as_ref().map(|name| name.as_str()))?;
 
-        if operation.selection_set.selections.is_empty() {
+        if operation.selection_set.is_empty() {
             // This should never happen because `operation` comes from a known-valid document.
-            // TODO(@goto-bus-stop) it's probably fair to panic here :)
+            // We could panic here but we are returning a `Result` already anyways, so shrug!
             return Err(FederationError::internal(
                 "Invalid operation: empty selection set",
             ));
@@ -413,7 +409,7 @@ impl QueryPlanner {
         };
         */
 
-        if normalized_operation.selection_set.selections.is_empty() {
+        if normalized_operation.selection_set.is_empty() {
             return Ok(QueryPlan::default());
         }
 
