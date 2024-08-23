@@ -31,16 +31,16 @@ pub(crate) enum ProtocolMode {
 }
 
 #[derive(Clone, Debug, Serialize)]
-struct SubscriptionPayload {
-    payload: Option<graphql::Response>,
+pub(crate) struct SubscriptionPayload {
+    pub(crate) payload: Option<graphql::Response>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    errors: Vec<graphql::Error>,
+    pub(crate) errors: Vec<graphql::Error>,
 }
 
 #[derive(Debug)]
 enum MessageKind {
     Heartbeat,
-    Message(graphql::Response),
+    Message(Value),
     Eof,
 }
 
@@ -54,7 +54,7 @@ pub(crate) struct Multipart {
 impl Multipart {
     pub(crate) fn new<S>(stream: S, mode: ProtocolMode) -> Self
     where
-        S: Stream<Item = graphql::Response> + Send + 'static,
+        S: Stream<Item = Value> + Send + 'static,
     {
         let stream = match mode {
             ProtocolMode::Subscription => select(
@@ -104,9 +104,15 @@ impl Stream for Multipart {
 
                     Poll::Ready(Some(Ok(buf)))
                 }
-                Some(MessageKind::Message(mut response)) => {
-                    let is_still_open =
-                        response.has_next.unwrap_or(false) || response.subscribed.unwrap_or(false);
+                Some(MessageKind::Message(response)) => {
+                    let is_still_open = response
+                        .as_object()
+                        .and_then(|o| o.get("has_next").and_then(|v| v.as_bool()))
+                        .unwrap_or(false)
+                        || response
+                            .as_object()
+                            .and_then(|o| o.get("subscribed").and_then(|v| v.as_bool()))
+                            .unwrap_or(false);
                     let mut buf = if self.is_first_chunk {
                         self.is_first_chunk = false;
                         Vec::from(&b"\r\n--graphql\r\ncontent-type: application/json\r\n\r\n"[..])
@@ -116,26 +122,23 @@ impl Stream for Multipart {
 
                     match self.mode {
                         ProtocolMode::Subscription => {
-                            let resp = SubscriptionPayload {
-                                errors: if is_still_open {
-                                    Vec::new()
-                                } else {
-                                    response.errors.drain(..).collect()
-                                },
-                                payload: match response.data {
-                                    None | Some(Value::Null) if response.extensions.is_empty() => {
-                                        None
-                                    }
-                                    _ => response.into(),
-                                },
-                            };
-
                             // Gracefully closed at the server side
-                            if !is_still_open && resp.payload.is_none() && resp.errors.is_empty() {
+                            if !is_still_open
+                                && response
+                                    .as_object()
+                                    .and_then(|o| o.get("payload"))
+                                    .is_none()
+                                && response
+                                    .as_object()
+                                    .and_then(|o| o.get("errors"))
+                                    .and_then(|v| v.as_array())
+                                    .map(|v| v.is_empty())
+                                    .unwrap_or(true)
+                            {
                                 self.is_terminated = true;
                                 return Poll::Ready(Some(Ok(Bytes::from_static(&b"--\r\n"[..]))));
                             } else {
-                                serde_json::to_writer(&mut buf, &resp)?;
+                                serde_json::to_writer(&mut buf, &response)?;
                             }
                         }
                         ProtocolMode::Defer => {
@@ -216,7 +219,7 @@ mod tests {
                 .build(),
             graphql::Response::builder().build(),
         ];
-        let gql_responses = stream::iter(responses);
+        let gql_responses = stream::iter(responses).map(|r| serde_json_bytes::to_value(r).unwrap());
 
         let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription);
         let heartbeat =

@@ -28,6 +28,7 @@ use crate::configuration::BatchingMode;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::graphql;
 use crate::http_ext;
+use crate::protocols::multipart::SubscriptionPayload;
 use crate::services::layers::apq::APQLayer;
 use crate::services::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
@@ -80,64 +81,13 @@ impl Service<JsonRequest> for JsonServerService {
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: JsonRequest) -> Self::Future {
-        let JsonRequest { request, context } = req;
-
-        /*match serde_json_bytes::<graphql::Request>::from_value(body) {
-            Ok(request) => {
-                let response = self.supergraph_creator.create().oneshot(request).await.map_err(|e| {
-                    todo!()
-                })?;
-                Ok(JsonResponse::new_from_graphql_response(response, context))
-            }, Err(e) => {
-                Ok(JsonResponse::error_builder()
-                    .error(e)
-                    .status_code(StatusCode::BAD_REQUEST)
-                    .build())
-            }
-
-        }*/
-        todo!()
-
-        /*// Consume our cloned services and allow ownership to be transferred to the async block.
-        let clone = self.query_planner_service.clone();
-
-        let planning = std::mem::replace(&mut self.query_planner_service, clone);
-
-        let schema = self.schema.clone();
-
-        let context_cloned = req.context.clone();
-        let fut = service_call(
-            planning,
-            self.execution_service_factory.clone(),
-            schema,
-            req,
-            self.notify.clone(),
-        )
-        .or_else(|error: BoxError| async move {
-            let errors = vec![crate::error::Error {
-                message: error.to_string(),
-                extensions: serde_json_bytes::json!({
-                    "code": "INTERNAL_SERVER_ERROR",
-                })
-                .as_object()
-                .unwrap()
-                .to_owned(),
-                ..Default::default()
-            }];
-
-            Ok(SupergraphResponse::infallible_builder()
-                .errors(errors)
-                .status_code(StatusCode::INTERNAL_SERVER_ERROR)
-                .context(context_cloned)
-                .build())
-        });
-
-        Box::pin(fut)*/
+    fn call(&mut self, request: JsonRequest) -> Self::Future {
+        let service = self.clone();
+        Box::pin(async move { service.call_inner(request).await })
     }
 }
 
@@ -572,7 +522,7 @@ impl JsonServerService {
                     .context(context)
                     .build()?)
             }
-            Some(response) => {
+            Some(mut response) => {
                 if !response.has_next.unwrap_or(false)
                     && !response.subscribed.unwrap_or(false)
                     && (accepts_json || accepts_wildcard)
@@ -585,7 +535,20 @@ impl JsonServerService {
                         .headers
                         .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
                     tracing::trace_span!("serialize_response").in_scope(|| {
-                        let body = serde_json_bytes::to_value(&response)?;
+                        let body = if !response.subscribed.unwrap_or(false) {
+                            let resp = SubscriptionPayload {
+                                errors: response.errors.drain(..).collect(),
+                                payload: match response.data {
+                                    None | Some(Value::Null) if response.extensions.is_empty() => {
+                                        None
+                                    }
+                                    _ => response.into(),
+                                },
+                            };
+                            serde_json_bytes::to_value(&resp)?
+                        } else {
+                            serde_json_bytes::to_value(&response)?
+                        };
                         Ok(JsonResponse {
                             response: http::Response::from_parts(
                                 parts,
