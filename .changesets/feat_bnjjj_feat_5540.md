@@ -1,10 +1,11 @@
-### Telemetry: add configurability of span attributes in logs ([Issue #5540](https://github.com/apollographql/router/issues/5540))
+### Add configurability of span attributes in logs ([Issue #5540](https://github.com/apollographql/router/issues/5540))
 
-The `telemetry.exporters.logging.stdout.format.json.span_attributes` option is useful if you don't want to display all spans attributes but only some of them. It takes an array of attribute name to include as a root logging attribute.
-This will search for the first attribute in the list of span attributes from the root span to the current one and attach it to the outmost json object for the log event.
-If you set the same attribute on different spans at different level, then the identical attribute from child spans will take precedence over the one found previously in parent spans.
+The router supports a new  `telemetry.exporters.logging.stdout.format.json.span_attributes` option that enables you to choose a subset of all span attributes to display in your logs.
 
-For example, if you have spans that contains `graphql.document` attribute and you only want to display this span attribute:
+When `span_attributes` is specified, the router searches for the first attribute in its input list of span attributes from the root span to the current span and attaches it to the outermost JSON object for the log event. If you set the same attribute name for different spans at different levels, the router chooses the attributes of child spans before the attributes of parent spans.
+
+
+For example, if you have spans that contains `span_attr_1` attribute and you only want to display this span attribute:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -34,4 +35,5 @@ Example output with a list of spans:
 }
 ```
 
+To learn more, go to [`span_attributes`](https://www.apollographql.com/docs/router/configuration/telemetry/exporters/logging/stdout#span_attributes) docs.
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5867

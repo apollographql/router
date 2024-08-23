@@ -337,11 +337,13 @@ Example output with a list of spans:
 
 #### `span_attributes`
 
-The `telemetry.exporters.logging.stdout.format.json.span_attributes` option is useful if you don't want to display all spans attributes but only some of them. It takes an array of attribute name to include as a root logging attribute.
-This will search for the first attribute in the list of span attributes from the root span to the current one and attach it to the outmost json object for the log event.
-If you set the same attribute on different spans at different level, then the identical attribute from child spans will take precedence over the one found previously in parent spans.
+The `telemetry.exporters.logging.stdout.format.json.span_attributes` option allows you to display a subset of all span attributes. It takes as input an array of span attribute names to log.
 
-For example, if you have spans that contains `graphql.document` attribute and you only want to display this span attribute:
+When `span_attributes` is specified, the router searches for the first attribute in the list of span attributes from the root span to the current span and attaches it to the outermost JSON object for the log event.
+
+If you set the same attribute name for different spans at different levels, the router chooses the attributes of child spans before the attributes of parent spans.
+
+For example, you can display just the `span_attr_1` span attribute:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -411,6 +413,6 @@ telemetry:
 | `display_resource`    | `true`\|`false`   | `true`  | `resource`    | The resource as configured in tracing common.                                          |
 | `display_trace_id`    | `true`\|`false`   | `true`  | `trace_id`    | The trace id of the span in which the event was raised.                                |
 | `display_span_id`     | `true`\|`false`   | `true`  | `span_id`     | The span id of the span in which the event was raised.                                 |
-| `span_attributes`     | `[string]`        | `[]`    | `*`           | List of span attributes to attach to the json log object.                              |
+| `span_attributes`     | `[string]`        | `[]`    | `*`           | List of span attributes to attach to the JSON log object.                              |
 
 
