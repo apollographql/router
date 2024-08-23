@@ -330,7 +330,9 @@ impl QueryPlanner {
         document: &Valid<ExecutableDocument>,
         operation_name: Option<Name>,
     ) -> Result<QueryPlan, FederationError> {
-        let operation = document.operations.get(operation_name.as_ref().map(|name| name.as_str()))?;
+        let operation = document
+            .operations
+            .get(operation_name.as_ref().map(|name| name.as_str()))?;
 
         if operation.selection_set.is_empty() {
             // This should never happen because `operation` comes from a known-valid document.
