@@ -3934,7 +3934,7 @@ impl From<&FragmentSpreadSelection> for executable::FragmentSpread {
     }
 }
 
-impl TryFrom<Operation> for Valid<executable::ExecutableDocument> {
+impl TryFrom<Operation> for executable::ExecutableDocument {
     type Error = FederationError;
 
     fn try_from(value: Operation) -> Result<Self, Self::Error> {
@@ -3955,7 +3955,17 @@ impl TryFrom<Operation> for Valid<executable::ExecutableDocument> {
         document.fragments = fragments;
         document.operations.insert(operation);
         coerce_executable_values(value.schema.schema(), &mut document);
-        Ok(Valid::assume_valid(document))
+        Ok(document)
+    }
+}
+
+impl TryFrom<Operation> for Valid<executable::ExecutableDocument> {
+    type Error = FederationError;
+
+    fn try_from(value: Operation) -> Result<Self, Self::Error> {
+        let schema = value.schema.clone();
+        let document: executable::ExecutableDocument = value.try_into()?;
+        Ok(document.validate(schema.schema())?)
     }
 }
 
