@@ -315,6 +315,8 @@ impl PlannerMode {
                         query_plan: QueryPlan {
                             node: root_node.map(Arc::new),
                         },
+                        evaluated_plan_count: plan.statistics.evaluated_plan_count.into_inner()
+                            as u64,
                     },
                 })
             }
@@ -554,12 +556,19 @@ impl BridgeQueryPlanner {
                     QueryPlanResult {
                         query_plan: QueryPlan { node: Some(node) },
                         formatted_query_plan,
+                        evaluated_plan_count,
                     },
                 mut usage_reporting,
             } => {
                 if let Some(sig) = operation_signature {
                     usage_reporting.stats_report_key = sig;
                 }
+
+                u64_histogram!(
+                    "apollo.router.query_planning.evaluated_plans",
+                    "Number of query plans evaluated for a query before choosing the best one",
+                    evaluated_plan_count
+                );
 
                 if matches!(
                     self.configuration
@@ -949,6 +958,7 @@ impl BridgeQueryPlanner {
 pub struct QueryPlanResult {
     pub(super) formatted_query_plan: Option<Arc<String>>,
     pub(super) query_plan: QueryPlan,
+    pub(super) evaluated_plan_count: u64,
 }
 
 impl QueryPlanResult {
