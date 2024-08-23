@@ -175,17 +175,6 @@ impl Request {
         Request::process_query_values(&value)
     }
 
-    /// Convert Bytes into a GraphQL [`Request`].
-    ///
-    /// An error will be produced in the event that the bytes array cannot be
-    /// turned into a valid GraphQL `Request`.
-    pub(crate) fn batch_from_bytes(bytes: &[u8]) -> Result<Vec<Request>, serde_json::Error> {
-        let value: serde_json::Value =
-            serde_json::from_slice(bytes).map_err(serde_json::Error::custom)?;
-
-        Request::process_batch_values(&value)
-    }
-
     fn allocate_result_array(value: &serde_json::Value) -> Vec<Request> {
         match value.as_array() {
             Some(array) => Vec::with_capacity(array.len()),

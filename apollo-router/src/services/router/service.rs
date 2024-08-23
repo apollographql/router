@@ -12,13 +12,17 @@ use futures::stream::once;
 use futures::stream::StreamExt;
 use http::header::CONTENT_TYPE;
 use http::header::VARY;
+use http::request::Parts;
 use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
+use http::Method;
 use http::StatusCode;
 use http_body::Body as _;
 use mime::APPLICATION_JSON;
 use multimap::MultiMap;
+use serde::de::Error;
+use serde_json_bytes::Value;
 use tower::BoxError;
 use tower::Layer;
 use tower::ServiceBuilder;
@@ -260,6 +264,13 @@ impl RouterService {
         } = req;
 
         let (parts, body) = router_request.into_parts();
+        if parts.method == Method::GET {
+            let value = self.translate_query_request(&parts).await?;
+            return Ok(JsonRequest {
+                request: http::Request::from_parts(parts, value),
+                context,
+            });
+        }
 
         // FIXME: use a try block when available: https://github.com/rust-lang/rust/issues/31436
         let content_length = (|| {
@@ -302,16 +313,56 @@ impl RouterService {
                     }
                 })?;
 
-            let value = serde_json_bytes::Value::from_bytes(bytes).map_err(|e| TranslateError {
-                status: StatusCode::BAD_REQUEST,
-                error: "failed to deserialize the request body into JSON",
-                extension_code: "INVALID_GRAPHQL_REQUEST",
-                extension_details: format!("failed to deserialize the request body into JSON: {e}"),
+            println!(
+                "translate_json_request[{}]: data: {:?}",
+                line!(),
+                std::str::from_utf8(&bytes).unwrap()
+            );
+
+            let value = serde_json_bytes::Value::from_bytes(bytes).map_err(|e| {
+                println!("translate_json_request[{}]", line!());
+
+                TranslateError {
+                    status: StatusCode::BAD_REQUEST,
+                    error: "failed to deserialize the request body into JSON",
+                    extension_code: "INVALID_GRAPHQL_REQUEST",
+                    extension_details: format!(
+                        "failed to deserialize the request body into JSON: {e}"
+                    ),
+                }
             })?;
+
+            println!("translate_json_request[{}]", line!());
 
             let request = http::Request::from_parts(parts, value);
             Ok(JsonRequest { request, context })
         }
+    }
+
+    async fn translate_query_request(&self, parts: &Parts) -> Result<Value, TranslateError> {
+        parts.uri.query().map(|q| {
+
+            serde_urlencoded::from_str(q)
+            .map_err(serde_json::Error::custom).map_err(|e| {
+
+                TranslateError {
+                    status: StatusCode::BAD_REQUEST,
+                    error: "failed to deserialize the request body into JSON",
+                    extension_code: "INVALID_GRAPHQL_REQUEST",
+                    extension_details: format!(
+                        "failed to deserialize the request body into JSON: {e}"
+                    ),
+                }
+             })
+        }).unwrap_or_else(|| {
+
+            Err(TranslateError {
+                status: StatusCode::BAD_REQUEST,
+                error: "There was no GraphQL operation to execute. Use the `query` parameter to send an operation, using either GET or POST.",
+                extension_code: "INVALID_GRAPHQL_REQUEST",
+                extension_details: "There was no GraphQL operation to execute. Use the `query` parameter to send an operation, using either GET or POST.".to_string()
+            })
+        })
     }
 
     async fn process_json_request(
