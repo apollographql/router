@@ -1,3 +1,4 @@
+#![allow(unreachable_pub)] //TODO: remove
 use std::pin::Pin;
 
 use futures::future::ready;

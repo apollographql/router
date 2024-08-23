@@ -535,20 +535,7 @@ impl JsonServerService {
                         .headers
                         .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
                     tracing::trace_span!("serialize_response").in_scope(|| {
-                        let body = if !response.subscribed.unwrap_or(false) {
-                            let resp = SubscriptionPayload {
-                                errors: response.errors.drain(..).collect(),
-                                payload: match response.data {
-                                    None | Some(Value::Null) if response.extensions.is_empty() => {
-                                        None
-                                    }
-                                    _ => response.into(),
-                                },
-                            };
-                            serde_json_bytes::to_value(&resp)?
-                        } else {
-                            serde_json_bytes::to_value(&response)?
-                        };
+                        let body = serde_json_bytes::to_value(&response)?;
                         Ok(JsonResponse {
                             response: http::Response::from_parts(
                                 parts,
@@ -573,7 +560,18 @@ impl JsonServerService {
                     if !response.errors.is_empty() {
                         Self::count_errors(&response.errors);
                     }
-                    let response = serde_json_bytes::to_value(&response)?;
+                    let response = if !response.subscribed.unwrap_or(false) {
+                        let resp = SubscriptionPayload {
+                            errors: response.errors.drain(..).collect(),
+                            payload: match response.data {
+                                None | Some(Value::Null) if response.extensions.is_empty() => None,
+                                _ => response.into(),
+                            },
+                        };
+                        serde_json_bytes::to_value(&resp)?
+                    } else {
+                        serde_json_bytes::to_value(&response)?
+                    };
 
                     let stream = Box::pin(once(ready(response)).chain(body.map(|response| {
                         if !response.errors.is_empty() {
