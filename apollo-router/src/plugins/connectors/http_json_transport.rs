@@ -90,10 +90,7 @@ pub(crate) fn make_request(
         &flat_inputs,
     );
 
-    let is_form_urlencoded = content_type
-        .as_ref()
-        .map(|v| v.to_str().unwrap_or_default())
-        == Some("application/x-www-form-urlencoded");
+    let is_form_urlencoded = content_type.as_ref() == Some(&mime::APPLICATION_WWW_FORM_URLENCODED);
 
     let (json_body, form_body, body, apply_to_errors) = if let Some(ref selection) = transport.body
     {
@@ -106,7 +103,7 @@ pub(crate) fn make_request(
                 form_body = Some(encoded.clone());
                 hyper::Body::from(encoded)
             } else {
-                request = request.header(CONTENT_TYPE, "application/json");
+                request = request.header(CONTENT_TYPE, mime::APPLICATION_JSON.essence_str());
                 hyper::Body::from(serde_json::to_vec(json_body)?)
             }
         } else {
@@ -123,9 +120,12 @@ pub(crate) fn make_request(
 
     if let Some(debug) = debug {
         if is_form_urlencoded {
-            debug.lock().push_form_urlencoded_request(
+            debug.lock().push_request(
                 &request,
-                form_body.as_ref(),
+                "form-urlencoded".to_string(),
+                form_body
+                    .map(|s| serde_json_bytes::Value::String(s.clone().into()))
+                    .as_ref(),
                 transport.body.as_ref().map(|body| SelectionData {
                     source: body.to_string(),
                     transformed: body.to_string(), // no transformation so this is the same
@@ -136,6 +136,7 @@ pub(crate) fn make_request(
         } else {
             debug.lock().push_request(
                 &request,
+                "json".to_string(),
                 json_body.as_ref(),
                 transport.body.as_ref().map(|body| SelectionData {
                     source: body.to_string(),
@@ -208,7 +209,7 @@ fn add_headers(
     incoming_supergraph_headers: &HeaderMap<HeaderValue>,
     config: &IndexMap<HeaderName, HeaderSource>,
     inputs: &Map<ByteString, Value>,
-) -> (http::request::Builder, Option<HeaderValue>) {
+) -> (http::request::Builder, Option<mime::Mime>) {
     let mut content_type = None;
 
     for (header_name, header_source) in config {
@@ -241,7 +242,7 @@ fn add_headers(
                         request = request.header(header_name, value.clone());
 
                         if header_name == CONTENT_TYPE {
-                            content_type = Some(value);
+                            content_type = Some(value.clone());
                         }
                     }
                     Err(err) => {
@@ -255,7 +256,10 @@ fn add_headers(
         }
     }
 
-    (request, content_type)
+    (
+        request,
+        content_type.and_then(|v| v.to_str().unwrap_or_default().parse().ok()),
+    )
 }
 
 #[derive(Error, Display, Debug)]

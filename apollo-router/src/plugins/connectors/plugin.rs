@@ -148,21 +148,12 @@ impl ConnectorContext {
     pub(crate) fn push_request(
         &mut self,
         req: &http::Request<RouterBody>,
+        kind: String,
         json_body: Option<&serde_json_bytes::Value>,
         selection_data: Option<SelectionData>,
     ) {
         self.requests
-            .push(serialize_request(req, json_body, selection_data));
-    }
-
-    pub(crate) fn push_form_urlencoded_request(
-        &mut self,
-        req: &http::Request<RouterBody>,
-        body: Option<&String>,
-        selection_data: Option<SelectionData>,
-    ) {
-        self.requests
-            .push(serialize_form_urlencoded_request(req, body, selection_data));
+            .push(serialize_request(req, kind, json_body, selection_data));
     }
 
     pub(crate) fn push_response(
@@ -241,6 +232,7 @@ struct ConnectorDebugSelection {
 
 fn serialize_request(
     req: &http::Request<RouterBody>,
+    kind: String,
     json_body: Option<&serde_json_bytes::Value>,
     selection_data: Option<SelectionData>,
 ) -> ConnectorDebugHttpRequest {
@@ -258,41 +250,8 @@ fn serialize_request(
             })
             .collect(),
         body: json_body.map(|body| ConnectorDebugBody {
-            kind: "json".to_string(),
+            kind,
             content: body.clone(),
-            selection: selection_data.map(|selection| ConnectorDebugSelection {
-                source: selection.source,
-                transformed: selection.transformed,
-                result: selection.result,
-                errors: aggregate_apply_to_errors(&selection.errors),
-            }),
-        }),
-    }
-}
-
-fn serialize_form_urlencoded_request(
-    req: &http::Request<RouterBody>,
-    body: Option<&String>,
-    selection_data: Option<SelectionData>,
-) -> ConnectorDebugHttpRequest {
-    ConnectorDebugHttpRequest {
-        url: req.uri().to_string(),
-        method: req.method().to_string(),
-        headers: req
-            .headers()
-            .iter()
-            .map(|(name, value)| {
-                (
-                    name.as_str().to_string(),
-                    value.to_str().unwrap().to_string(),
-                )
-            })
-            .collect(),
-        body: Some(ConnectorDebugBody {
-            kind: "form-urlencoded".to_string(),
-            content: body
-                .map(|s| serde_json_bytes::Value::String(s.clone().into()))
-                .unwrap_or_default(),
             selection: selection_data.map(|selection| ConnectorDebugSelection {
                 source: selection.source,
                 transformed: selection.transformed,
