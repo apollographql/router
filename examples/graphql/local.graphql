@@ -2,6 +2,7 @@ schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
   query: Query
+  subscription: Subscription
   mutation: Mutation
 }
 
@@ -45,6 +46,7 @@ directive @link(
 ) repeatable on SCHEMA
 
 scalar join__FieldSet
+scalar link__Import
 
 enum join__Graph {
   ACCOUNTS @join__graph(name: "accounts", url: "http://localhost:4001/graphql")
@@ -54,18 +56,14 @@ enum join__Graph {
   REVIEWS @join__graph(name: "reviews", url: "http://localhost:4004/graphql")
 }
 
-scalar link__Import
-
 enum link__Purpose {
-  """
-  `SECURITY` features provide metadata necessary to securely resolve fields.
-  """
   SECURITY
-
-  """
-  `EXECUTION` features provide metadata necessary for operation execution.
-  """
   EXECUTION
+}
+
+type Subscription @join__type(graph: ACCOUNTS) {
+  userWasCreated(intervalMs: Int, nbEvents: Int): User
+    @join__field(graph: ACCOUNTS)
 }
 
 type Mutation @join__type(graph: PRODUCTS) @join__type(graph: REVIEWS) {
@@ -99,15 +97,14 @@ type Query
   @join__type(graph: PRODUCTS)
   @join__type(graph: REVIEWS) {
   me: User @join__field(graph: ACCOUNTS)
-  recommendedProducts: [Product] @join__field(graph: ACCOUNTS)
   topProducts(first: Int = 5): [Product] @join__field(graph: PRODUCTS)
 }
 
 type Review @join__type(graph: REVIEWS, key: "id") {
   id: ID!
-  body: String
   author: User @join__field(graph: REVIEWS, provides: "username")
-  product: Product
+  body: String @join__field(graph: REVIEWS)
+  product: Product @join__field(graph: REVIEWS)
 }
 
 type User
@@ -115,6 +112,7 @@ type User
   @join__type(graph: REVIEWS, key: "id") {
   id: ID!
   name: String @join__field(graph: ACCOUNTS)
+  createdAt: String @join__field(graph: ACCOUNTS)
   username: String
     @join__field(graph: ACCOUNTS)
     @join__field(graph: REVIEWS, external: true)

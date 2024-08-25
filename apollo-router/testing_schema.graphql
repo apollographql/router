@@ -46,6 +46,7 @@ directive @link(
 ) repeatable on SCHEMA
 
 scalar join__FieldSet
+scalar link__Import
 
 enum join__Graph {
   ACCOUNTS @join__graph(name: "accounts", url: "http://localhost:4001")
@@ -54,17 +55,8 @@ enum join__Graph {
   REVIEWS @join__graph(name: "reviews", url: "http://localhost:4002")
 }
 
-scalar link__Import
-
 enum link__Purpose {
-  """
-  `SECURITY` features provide metadata necessary to securely resolve fields.
-  """
   SECURITY
-
-  """
-  `EXECUTION` features provide metadata necessary for operation execution.
-  """
   EXECUTION
 }
 
@@ -109,9 +101,9 @@ type Query
 
 type Review @join__type(graph: REVIEWS, key: "id") {
   id: ID!
-  body: String
+  body: String @join__field(graph: REVIEWS)
+  product: Product @join__field(graph: REVIEWS)
   author: User @join__field(graph: REVIEWS, provides: "username")
-  product: Product
 }
 
 type User

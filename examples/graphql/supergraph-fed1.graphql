@@ -72,14 +72,7 @@ type User
 }
 
 enum core__Purpose {
-  """
-  `EXECUTION` features provide metadata necessary to for operation execution.
-  """
   EXECUTION
-
-  """
-  `SECURITY` features provide metadata necessary to securely resolve fields.
-  """
   SECURITY
 }
 

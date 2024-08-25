@@ -103,7 +103,6 @@ type Review @join__type(graph: REVIEWS, key: "id") {
   id: ID!
   author: User @join__field(graph: REVIEWS, provides: "username")
   body: String @join__field(graph: REVIEWS)
-  id: ID! @join__field(graph: REVIEWS)
   product: Product @join__field(graph: REVIEWS)
 }
 
