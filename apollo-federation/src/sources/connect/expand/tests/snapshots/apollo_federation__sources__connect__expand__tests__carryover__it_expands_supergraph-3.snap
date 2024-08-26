@@ -2,7 +2,7 @@
 source: apollo-federation/src/sources/connect/expand/tests/mod.rs
 expression: raw_sdl
 ---
-schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY) @join__directive(graphs: [], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1"}) @link(url: "https://specs.apollo.dev/tag/v0.3") {
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY) @join__directive(graphs: [], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1"}) @link(url: "https://specs.apollo.dev/tag/v0.3", import: ["@tag"]) @link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY, import: ["@authenticated"]) @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", for: SECURITY, import: ["@requiresScopes"]) @link(url: "https://specs.apollo.dev/policy/v0.1", for: SECURITY, import: ["@policy"]) @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom"]) {
   query: Query
 }
 
@@ -25,6 +25,14 @@ directive @join__directive(graphs: [join__Graph!], name: String!, args: join__Di
 directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
 
 directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
+
+directive @authenticated on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
+
+directive @requiresScopes(scopes: [[requiresScopes__Scope!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
+
+directive @policy(policies: [[policy__Policy!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
+
+directive @custom on OBJECT | FIELD_DEFINITION
 
 enum link__Purpose {
   """
@@ -49,9 +57,13 @@ enum join__Graph {
 }
 
 type T @join__type(graph: ONE_QUERY_T_0, key: "id") @join__type(graph: ONE_QUERY_TS_0) @join__type(graph: ONE_T_R_0, key: "id") @join__type(graph: TWO, key: "id") {
+  authenticated: String @join__field(graph: ONE_QUERY_T_0) @join__field(graph: ONE_QUERY_TS_0) @authenticated
+  custom: String @join__field(graph: ONE_QUERY_T_0) @join__field(graph: ONE_QUERY_TS_0) @custom
   hidden: String @join__field(graph: ONE_QUERY_T_0) @join__field(graph: ONE_QUERY_TS_0) @inaccessible
   id: ID! @join__field(graph: ONE_QUERY_T_0) @join__field(graph: ONE_QUERY_TS_0) @join__field(graph: ONE_T_R_0) @join__field(graph: TWO)
   overridden: String @join__field(graph: ONE_QUERY_T_0, override: "two", overrideLabel: "label") @join__field(graph: ONE_QUERY_TS_0, override: "two", overrideLabel: "label") @join__field(graph: TWO)
+  policy: String @join__field(graph: ONE_QUERY_T_0) @join__field(graph: ONE_QUERY_TS_0) @policy(policies: [["admin"]])
+  requiresScopes: String @join__field(graph: ONE_QUERY_T_0) @join__field(graph: ONE_QUERY_TS_0) @requiresScopes(scopes: ["scope"])
   tagged: String @join__field(graph: ONE_QUERY_T_0) @join__field(graph: ONE_QUERY_TS_0) @tag(name: "tag")
   r: R @join__field(graph: ONE_T_R_0)
 }
@@ -65,3 +77,7 @@ type Query @join__type(graph: ONE_QUERY_T_0) @join__type(graph: ONE_QUERY_TS_0) 
 type R @join__type(graph: ONE_T_R_0) {
   id: ID! @join__field(graph: ONE_T_R_0)
 }
+
+scalar requiresScopes__Scope
+
+scalar policy__Policy
