@@ -101,12 +101,14 @@ pub(crate) fn extract_subgraphs_from_supergraph(
     let filtered_types: Vec<_> = supergraph_schema
         .get_types()
         .fallible_filter(|type_definition_position| {
-            Ok(!join_spec_definition
-                .is_spec_type_name(supergraph_schema, type_definition_position.type_name())?)
+            join_spec_definition
+                .is_spec_type_name(supergraph_schema, type_definition_position.type_name())
+                .map(Not::not)
         })
         .and_then_filter(|type_definition_position| {
-            Ok(!link_spec_definition
-                .is_spec_type_name(supergraph_schema, type_definition_position.type_name())?)
+            link_spec_definition
+                .is_spec_type_name(supergraph_schema, type_definition_position.type_name())
+                .map(Not::not)
         })
         .try_collect()?;
     if is_fed_1 {
