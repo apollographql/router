@@ -226,10 +226,6 @@ fn add_headers(
                     for value in values {
                         request = request.header(header_name.clone(), value.clone());
                         propagated = true;
-
-                        if header_name == CONTENT_TYPE {
-                            content_type = Some(value.clone());
-                        }
                     }
                     if !propagated {
                         tracing::warn!("Header '{}' not found in incoming request", header_name);
