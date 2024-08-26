@@ -2327,14 +2327,12 @@ impl SelectionSet {
             return Ok(Conditions::Boolean(false));
         };
         let conditions = first_selection.conditions()?;
-        if selections
-            .map(|selection| selection.conditions())
-            .ok_and_any(|cond| cond != conditions)?
-        {
-            Ok(Conditions::Boolean(true))
-        } else {
-            Ok(conditions)
+        for selection in selections {
+            if selection.conditions()? != conditions {
+                return Ok(Conditions::Boolean(true));
+            }
         }
+        Ok(conditions)
     }
 
     /// Build a selection by merging all items in the given selections (slice).

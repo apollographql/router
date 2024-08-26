@@ -2,4 +2,4 @@
 
 mod fallible_iterator;
 pub mod logging;
-pub use fallible_iterator::*;
+pub(crate) use fallible_iterator::*;

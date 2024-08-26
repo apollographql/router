@@ -6,7 +6,7 @@ use itertools::Itertools;
 /// extends the standard library's `Extend` trait to work for containers that can be extended with
 /// `T`s to also be extendable with `Result<T, E>`. If an `Err` is encountered, that `Err` is
 /// returned. Notably, this means the container will contain all prior `Ok` values.
-pub trait FallibleExtend<A>: Extend<A> {
+pub(crate) trait FallibleExtend<A>: Extend<A> {
     fn fallible_extend<I, E>(&mut self, iter: I) -> Result<(), E>
     where
         I: IntoIterator<Item = Result<A, E>>,
@@ -30,7 +30,7 @@ impl<T, A> FallibleExtend<A> for T where T: Extend<A> {}
 /// will use the following naming scheme in order to keep these ideas consistent:
 ///  - If the iterator yeilds an arbitary `T` and the operation that you wish to apply is of the
 /// form `T -> Result`, then it will named `fallible_*`.
-///  - If the iterator yeilds `Result<T>` and the operation is of the form `T -> U` (for arbitary
+///  - If the iterator yields `Result<T>` and the operation is of the form `T -> U` (for arbitary
 ///  `U`), then it will named `*_ok`.
 ///  - If both iterator and operation yield `Result`, then it will named `and_then_*` (more on that
 ///  fewer down).
@@ -45,7 +45,7 @@ impl<T, A> FallibleExtend<A> for T where T: Extend<A> {}
 ///
 /// The third category is the hardest to pin down. There are a ton of ways that you can combine two
 /// results (just look at the docs page for `Result`), but, in general, the most common use case
-/// that needs to be captured is the use of the try operator. For example, if you have a check that
+/// that needs to be captured is the use of the `?` operator. For example, if you have a check that
 /// is fallible, you likely will write that code like so:
 /// ```no_test
 /// for val in things {
@@ -70,7 +70,7 @@ impl<T, A> FallibleExtend<A> for T where T: Extend<A> {}
 // bools and `FlowControl`. When initially writting this, I, @TylerBloom, didn't take the time to
 // write equalivalent folding methods. Should they be implemented in the future, we should rework
 // existing methods to use them.
-pub trait FallibleIterator: Sized + Itertools {
+pub(crate) trait FallibleIterator: Sized + Itertools {
     /// The method transforms the existing iterator, which yields `T`s, into an iterator that
     /// yields `Result<T, E>`. The predicate that is provided is fallible. If the predicate yields
     /// `Ok(false)`, the item is skipped. If the predicate yields `Err`, that `T` is discard and
