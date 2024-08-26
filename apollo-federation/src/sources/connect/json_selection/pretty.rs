@@ -415,7 +415,7 @@ mod tests {
             // Var
             "$.one.two.three",
             "$this.a.b",
-            "$id.first {\n  username\n}",
+            "$this.id.first {\n  username\n}",
             // Key
             ".first",
             "a.b.c.d.e",

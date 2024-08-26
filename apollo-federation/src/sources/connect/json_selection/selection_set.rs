@@ -25,6 +25,7 @@ use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::Node;
 use multimap::MultiMap;
 
+use super::known_var::KnownVariable;
 use super::lit_expr::LitExpr;
 use super::parser::MethodArgs;
 use super::parser::PathList;
@@ -68,7 +69,7 @@ impl SubSelection {
                 },
                 PathSelection {
                     path: PathList::Var(
-                        "$".to_string(),
+                        KnownVariable::Dollar,
                         Box::new(PathList::Method(
                             "echo".to_string(),
                             Some(MethodArgs(vec![LitExpr::String(

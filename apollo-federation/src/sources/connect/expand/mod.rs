@@ -206,6 +206,7 @@ mod helpers {
     use crate::schema::position::TypeDefinitionPosition;
     use crate::schema::FederationSchema;
     use crate::schema::ValidFederationSchema;
+    use crate::sources::connect::json_selection::KnownVariable;
     use crate::sources::connect::url_template::Parameter;
     use crate::sources::connect::ConnectSpecDefinition;
     use crate::sources::connect::Connector;
@@ -806,7 +807,7 @@ mod helpers {
 
             for var_path in var_paths {
                 match var_path.var_name_and_nested_keys() {
-                    Some(("$args", keys)) => {
+                    Some((KnownVariable::Args, keys)) => {
                         let mut keys_iter = keys.into_iter();
                         let first_key = keys_iter.next().ok_or(FederationError::internal(
                             "expected at least one key in $args",
@@ -816,7 +817,7 @@ mod helpers {
                             paths: keys_iter.collect(),
                         });
                     }
-                    Some(("$this", keys)) => {
+                    Some((KnownVariable::This, keys)) => {
                         let mut keys_iter = keys.into_iter();
                         let first_key = keys_iter.next().ok_or(FederationError::internal(
                             "expected at least one key in $this",
@@ -826,16 +827,34 @@ mod helpers {
                             paths: keys_iter.collect(),
                         });
                     }
-                    Some((other, _)) => {
-                        return Err(FederationError::internal(format!(
-                            "got unsupported parameter: {other}"
-                        )))
+                    Some((KnownVariable::Context, keys)) => {
+                        let mut keys_iter = keys.into_iter();
+                        let first_key = keys_iter.next().ok_or(FederationError::internal(
+                            "expected at least one key in $context",
+                        ))?;
+                        results.insert(Parameter::Context {
+                            item: first_key,
+                            paths: keys_iter.collect(),
+                        });
                     }
-                    _ => {
+                    // To get the safety benefits of the KnownVariable enum, we
+                    // need to enumerate all the cases explicitly, without
+                    // wildcard matches. However, body.external_var_paths() only
+                    // returns free (externally-provided) variables like $this,
+                    // $args, and $context. The $ and @ variables, by contrast,
+                    // are always bound to something within the input data.
+                    Some((kv @ KnownVariable::Dollar, _))
+                    | Some((kv @ KnownVariable::AtSign, _)) => {
                         return Err(FederationError::internal(format!(
-                            "could not extract parameter from path: {:?}",
+                            "got unexpected non-external variable: {:?}",
+                            kv,
+                        )));
+                    }
+                    None => {
+                        return Err(FederationError::internal(format!(
+                            "could not extract variable from path: {:?}",
                             var_path,
-                        )))
+                        )));
                     }
                 };
             }

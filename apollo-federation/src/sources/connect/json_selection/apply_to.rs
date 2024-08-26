@@ -12,11 +12,12 @@ use serde_json_bytes::Value as JSON;
 
 use super::helpers::json_type_name;
 use super::immutable::InputPath;
+use super::known_var::KnownVariable;
 use super::lit_expr::LitExpr;
 use super::methods::lookup_arrow_method;
 use super::parser::*;
 
-pub(super) type VarsWithPathsMap<'a> = IndexMap<String, (&'a JSON, InputPath<JSON>)>;
+pub(super) type VarsWithPathsMap<'a> = IndexMap<KnownVariable, (&'a JSON, InputPath<JSON>)>;
 
 impl JSONSelection {
     // Applying a selection to a JSON value produces a new JSON value, along
@@ -33,20 +34,30 @@ impl JSONSelection {
         data: &JSON,
         vars: &IndexMap<String, JSON>,
     ) -> (Option<JSON>, Vec<ApplyToError>) {
+        // Using IndexSet over HashSet to preserve the order of the errors.
+        let mut errors = IndexSet::default();
+
         let mut vars_with_paths: VarsWithPathsMap = IndexMap::default();
         for (var_name, var_data) in vars {
-            vars_with_paths.insert(
-                var_name.to_string(),
-                (var_data, InputPath::empty().append(json!(var_name))),
-            );
+            if let Some(known_var) = KnownVariable::from_str(var_name.as_str()) {
+                vars_with_paths.insert(
+                    known_var,
+                    (var_data, InputPath::empty().append(json!(var_name))),
+                );
+            } else {
+                errors.insert(ApplyToError::new(
+                    format!("Unknown variable {}", var_name),
+                    vec![json!(var_name)],
+                ));
+            }
         }
         // The $ variable initially refers to the root data value, but is
         // rebound by nested selection sets to refer to the root value the
         // selection set was applied to.
-        vars_with_paths.insert("$".to_string(), (data, InputPath::empty()));
-        // Using IndexSet over HashSet to preserve the order of the errors.
-        let mut errors = IndexSet::default();
+        vars_with_paths.insert(KnownVariable::Dollar, (data, InputPath::empty()));
+
         let value = self.apply_to_path(data, &vars_with_paths, &InputPath::empty(), &mut errors);
+
         (value, errors.into_iter().collect())
     }
 }
@@ -257,7 +268,7 @@ impl ApplyToInternal for PathSelection {
             // supports method chaining like obj->has('a')->and(obj->has('b')),
             // where both obj references are interpreted as $.obj.
             PathList::Key(key, tail) => {
-                if let Some((dollar_data, dollar_path)) = vars.get("$") {
+                if let Some((dollar_data, dollar_path)) = vars.get(&KnownVariable::Dollar) {
                     let input_path_with_key = dollar_path.append(key.to_json());
                     if let Some(child) = dollar_data.get(key.as_str()) {
                         tail.apply_to_path(child, vars, &input_path_with_key, errors)
@@ -292,7 +303,7 @@ impl ApplyToInternal for PathList {
     ) -> Option<JSON> {
         match self {
             Self::Var(var_name, tail) => {
-                if var_name == "@" {
+                if var_name == &KnownVariable::AtSign {
                     // We represent @ as a variable name in PathList::Var, but
                     // it is never stored in the vars map, because it is always
                     // shorthand for the current data value.
@@ -305,7 +316,7 @@ impl ApplyToInternal for PathList {
                     tail.apply_to_path(var_data, vars, var_path, errors)
                 } else {
                     errors.insert(ApplyToError::new(
-                        format!("Variable {} not found", var_name),
+                        format!("Variable {} not found", var_name.as_str()),
                         input_path.to_vec(),
                     ));
                     None
@@ -425,7 +436,7 @@ impl ApplyToInternal for SubSelection {
 
         let vars: VarsWithPathsMap = {
             let mut vars = vars.clone();
-            vars.insert("$".to_string(), (data, input_path.clone()));
+            vars.insert(KnownVariable::Dollar, (data, input_path.clone()));
             vars
         };
 

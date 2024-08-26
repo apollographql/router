@@ -189,6 +189,7 @@ impl CollectVarPaths for LitExpr {
 
 #[cfg(test)]
 mod tests {
+    use super::super::known_var::KnownVariable;
     use super::*;
     use crate::sources::connect::json_selection::PathList;
 
@@ -438,7 +439,7 @@ mod tests {
                     "a".to_string(),
                     LitExpr::Path(PathSelection {
                         path: PathList::Var(
-                            "$args".to_string(),
+                            KnownVariable::Args,
                             Box::new(PathList::Key(
                                 Key::Field("a".to_string()),
                                 Box::new(PathList::Empty),
@@ -450,7 +451,7 @@ mod tests {
                     "b".to_string(),
                     LitExpr::Path(PathSelection {
                         path: PathList::Var(
-                            "$this".to_string(),
+                            KnownVariable::This,
                             Box::new(PathList::Key(
                                 Key::Field("b".to_string()),
                                 Box::new(PathList::Empty),

@@ -17,6 +17,7 @@ use nom::IResult;
 use serde_json_bytes::Value as JSON;
 
 use super::helpers::spaces_or_comments;
+use super::known_var::KnownVariable;
 use super::lit_expr::LitExpr;
 
 pub(crate) trait CollectVarPaths {
@@ -265,7 +266,7 @@ impl CollectVarPaths for PathSelection {
                 // The $ and @ variables refer to parts of the current JSON
                 // data, so they do not need to be surfaced as external variable
                 // references.
-                if var_name != "$" && var_name != "@" {
+                if var_name != &KnownVariable::Dollar && var_name != &KnownVariable::AtSign {
                     paths.push(self);
                 }
                 paths.extend(tail.collect_var_paths());
@@ -302,7 +303,7 @@ pub(super) enum PathList {
     // both VarPath and AtPath from the grammar. The String variable name must
     // always contain the $ character. The PathList::Var variant may only appear
     // at the beginning of a PathSelection's PathList, not in the middle.
-    Var(String, Box<PathList>),
+    Var(KnownVariable, Box<PathList>),
 
     // A PathSelection that starts with a PathList::Key is a KeyPath, but a
     // PathList::Key also counts as PathStep item, so it may also appear in the
@@ -350,8 +351,17 @@ impl PathList {
             {
                 let (input, rest) = Self::parse_with_depth(suffix, depth + 1)?;
                 // Note the $ prefix is included in the variable name.
-                let dollar_var = format!("${}", opt_var.unwrap_or("".to_string()));
-                return Ok((input, Self::Var(dollar_var, Box::new(rest))));
+                let var_name = format!("${}", opt_var.unwrap_or("".to_string()));
+                return if let Some(known_var) = KnownVariable::from_str(&var_name) {
+                    Ok((input, Self::Var(known_var, Box::new(rest))))
+                } else {
+                    // Reject unknown variables at parse time.
+                    // TODO Improve these parse error messages.
+                    Err(nom::Err::Error(nom::error::Error::new(
+                        input,
+                        nom::error::ErrorKind::IsNot,
+                    )))
+                };
             }
 
             if let Ok((suffix, _)) =
@@ -363,7 +373,7 @@ impl PathList {
                 // special variables, such as @ for the current value. In fact,
                 // as long as we can parse the token(s) as a PathList::Var, the
                 // name of a variable could technically be any string we like.
-                return Ok((input, Self::Var("@".to_string(), Box::new(rest))));
+                return Ok((input, Self::Var(KnownVariable::AtSign, Box::new(rest))));
             }
 
             if let Ok((suffix, key)) = Key::parse(input) {
@@ -1417,19 +1427,19 @@ mod tests {
     #[test]
     fn test_path_selection_vars() {
         check_path_selection(
-            "$var",
-            PathList::Var("$var".to_string(), Box::new(PathList::Empty)).into(),
+            "$this",
+            PathList::Var(KnownVariable::This, Box::new(PathList::Empty)).into(),
         );
 
         check_path_selection(
             "$",
-            PathList::Var("$".to_string(), Box::new(PathList::Empty)).into(),
+            PathList::Var(KnownVariable::Dollar, Box::new(PathList::Empty)).into(),
         );
 
         check_path_selection(
-            "$var { hello }",
+            "$this { hello }",
             PathList::Var(
-                "$var".to_string(),
+                KnownVariable::This,
                 Box::new(PathList::Selection(SubSelection {
                     selections: vec![NamedSelection::Field(None, "hello".to_string(), None)],
                     star: None,
@@ -1441,7 +1451,7 @@ mod tests {
         check_path_selection(
             "$ { hello }",
             PathList::Var(
-                "$".to_string(),
+                KnownVariable::Dollar,
                 Box::new(PathList::Selection(SubSelection {
                     selections: vec![NamedSelection::Field(None, "hello".to_string(), None)],
                     star: None,
@@ -1451,9 +1461,9 @@ mod tests {
         );
 
         check_path_selection(
-            "$var { before alias: $args.arg after }",
+            "$this { before alias: $args.arg after }",
             PathList::Var(
-                "$var".to_string(),
+                KnownVariable::This,
                 Box::new(PathList::Selection(SubSelection {
                     selections: vec![
                         NamedSelection::Field(None, "before".to_string(), None),
@@ -1462,7 +1472,7 @@ mod tests {
                                 name: "alias".to_string(),
                             },
                             PathList::Var(
-                                "$args".to_string(),
+                                KnownVariable::Args,
                                 Box::new(PathList::Key(
                                     Key::Field("arg".to_string()),
                                     Box::new(PathList::Empty),
@@ -1481,7 +1491,7 @@ mod tests {
         check_path_selection(
             "$.nested { key injected: $args.arg }",
             PathList::Var(
-                "$".to_string(),
+                KnownVariable::Dollar,
                 Box::new(PathList::Key(
                     Key::Field("nested".to_string()),
                     Box::new(PathList::Selection(SubSelection {
@@ -1492,7 +1502,7 @@ mod tests {
                                     name: "injected".to_string(),
                                 },
                                 PathList::Var(
-                                    "$args".to_string(),
+                                    KnownVariable::Args,
                                     Box::new(PathList::Key(
                                         Key::Field("arg".to_string()),
                                         Box::new(PathList::Empty),
@@ -1509,9 +1519,9 @@ mod tests {
         );
 
         check_path_selection(
-            "$root.a.b.c",
+            "$args.a.b.c",
             PathList::Var(
-                "$root".to_string(),
+                KnownVariable::Args,
                 Box::new(PathList::from_slice(
                     &[
                         Key::Field("a".to_string()),
@@ -1553,7 +1563,7 @@ mod tests {
         check_path_selection(
             "$.data",
             PathList::Var(
-                "$".to_string(),
+                KnownVariable::Dollar,
                 Box::new(PathList::Key(
                     Key::Field("data".to_string()),
                     Box::new(PathList::Empty),
@@ -1565,7 +1575,7 @@ mod tests {
         check_path_selection(
             "$.data.'quoted property'.nested",
             PathList::Var(
-                "$".to_string(),
+                KnownVariable::Dollar,
                 Box::new(PathList::Key(
                     Key::Field("data".to_string()),
                     Box::new(PathList::Key(
@@ -1606,13 +1616,15 @@ mod tests {
 
         assert_eq!(
             selection!("$"),
-            JSONSelection::Path(PathList::Var("$".to_string(), Box::new(PathList::Empty)).into()),
+            JSONSelection::Path(
+                PathList::Var(KnownVariable::Dollar, Box::new(PathList::Empty)).into()
+            ),
         );
 
         assert_eq!(
             selection!("$this"),
             JSONSelection::Path(
-                PathList::Var("$this".to_string(), Box::new(PathList::Empty)).into()
+                PathList::Var(KnownVariable::This, Box::new(PathList::Empty)).into()
             ),
         );
 
@@ -1623,7 +1635,7 @@ mod tests {
                     NamedSelection::Path(
                         Alias::new("value"),
                         PathSelection {
-                            path: PathList::Var("$".to_string(), Box::new(PathList::Empty)),
+                            path: PathList::Var(KnownVariable::Dollar, Box::new(PathList::Empty)),
                         },
                     ),
                     NamedSelection::Field(
@@ -1642,13 +1654,13 @@ mod tests {
             }),
         );
         assert_eq!(
-            selection!("value: $a { b c }"),
+            selection!("value: $this { b c }"),
             JSONSelection::Named(SubSelection {
                 selections: vec![NamedSelection::Path(
                     Alias::new("value"),
                     PathSelection {
                         path: PathList::Var(
-                            "$a".to_string(),
+                            KnownVariable::This,
                             Box::new(PathList::Selection(SubSelection {
                                 selections: vec![
                                     NamedSelection::Field(None, "b".to_string(), None),
@@ -1669,7 +1681,7 @@ mod tests {
         check_path_selection(
             "@",
             PathSelection {
-                path: PathList::Var("@".to_string(), Box::new(PathList::Empty)),
+                path: PathList::Var(KnownVariable::AtSign, Box::new(PathList::Empty)),
             },
         );
 
@@ -1677,7 +1689,7 @@ mod tests {
             "@.a.b.c",
             PathSelection {
                 path: PathList::Var(
-                    "@".to_string(),
+                    KnownVariable::AtSign,
                     Box::new(PathList::from_slice(
                         &[
                             Key::Field("a".to_string()),
@@ -1694,7 +1706,7 @@ mod tests {
             "@.items->first",
             PathSelection {
                 path: PathList::Var(
-                    "@".to_string(),
+                    KnownVariable::AtSign,
                     Box::new(PathList::Key(
                         Key::Field("items".to_string()),
                         Box::new(PathList::Method(
@@ -1802,7 +1814,7 @@ mod tests {
                         Some(MethodArgs(vec![LitExpr::Array(vec![
                             LitExpr::Path(PathSelection {
                                 path: PathList::Var(
-                                    "$".to_string(),
+                                    KnownVariable::Dollar,
                                     Box::new(PathList::Selection(SubSelection {
                                         selections: vec![NamedSelection::Path(
                                             Alias::new("x2"),
@@ -1827,7 +1839,7 @@ mod tests {
                             }),
                             LitExpr::Path(PathSelection {
                                 path: PathList::Var(
-                                    "$".to_string(),
+                                    KnownVariable::Dollar,
                                     Box::new(PathList::Selection(SubSelection {
                                         selections: vec![NamedSelection::Path(
                                             Alias::new("y2"),
@@ -2119,14 +2131,14 @@ mod tests {
         {
             let sel = selection!(
                 r#"
-                data.results->slice($start, $end) {
+                data.results->slice($args.start, $args.end) {
                     id
                     __typename: $args.type
                 }
             "#
             );
-            let start_path = PathSelection::parse("$start").unwrap().1;
-            let end_path = PathSelection::parse("$end").unwrap().1;
+            let start_path = PathSelection::parse("$args.start").unwrap().1;
+            let end_path = PathSelection::parse("$args.end").unwrap().1;
             let args_type_path = PathSelection::parse("$args.type").unwrap().1;
             assert_eq!(
                 sel.collect_var_paths(),

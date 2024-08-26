@@ -80,7 +80,7 @@ expression: connectors.by_service_name
         selection: Path(
             PathSelection {
                 path: Var(
-                    "$",
+                    $,
                     Empty,
                 ),
             },
