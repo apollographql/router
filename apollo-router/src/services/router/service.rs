@@ -348,39 +348,33 @@ impl RouterService {
         })?;
 
         if let Some(extensions) = value.as_object_mut().unwrap().get_mut("extensions") {
-            match extensions.as_str() {
-                Some(s) => {
-                    let v: Value = serde_json::from_str(s)
-                        .map_err(serde_json::Error::custom)
-                        .map_err(|e| TranslateError {
-                            status: StatusCode::BAD_REQUEST,
-                            error: "failed to deserialize the request body into JSON",
-                            extension_code: "INVALID_GRAPHQL_REQUEST",
-                            extension_details: format!(
-                                "failed to deserialize the request body into JSON: {e}"
-                            ),
-                        })?;
-                    *extensions = v;
-                }
-                None => {}
+            if let Some(s) = extensions.as_str() {
+                let v: Value = serde_json::from_str(s)
+                    .map_err(serde_json::Error::custom)
+                    .map_err(|e| TranslateError {
+                        status: StatusCode::BAD_REQUEST,
+                        error: "failed to deserialize the request body into JSON",
+                        extension_code: "INVALID_GRAPHQL_REQUEST",
+                        extension_details: format!(
+                            "failed to deserialize the request body into JSON: {e}"
+                        ),
+                    })?;
+                *extensions = v;
             }
         }
         if let Some(variables) = value.as_object_mut().unwrap().get_mut("variables") {
-            match variables.as_str() {
-                Some(s) => {
-                    let v: Value = serde_json::from_str(s)
-                        .map_err(serde_json::Error::custom)
-                        .map_err(|e| TranslateError {
-                            status: StatusCode::BAD_REQUEST,
-                            error: "failed to deserialize the request body into JSON",
-                            extension_code: "INVALID_GRAPHQL_REQUEST",
-                            extension_details: format!(
-                                "failed to deserialize the request body into JSON: {e}"
-                            ),
-                        })?;
-                    *variables = v;
-                }
-                None => {}
+            if let Some(s) = variables.as_str() {
+                let v: Value = serde_json::from_str(s)
+                    .map_err(serde_json::Error::custom)
+                    .map_err(|e| TranslateError {
+                        status: StatusCode::BAD_REQUEST,
+                        error: "failed to deserialize the request body into JSON",
+                        extension_code: "INVALID_GRAPHQL_REQUEST",
+                        extension_details: format!(
+                            "failed to deserialize the request body into JSON: {e}"
+                        ),
+                    })?;
+                *variables = v;
             }
         }
 
