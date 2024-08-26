@@ -572,10 +572,12 @@ mod tests {
     use super::*;
     use crate::query_planner::BridgeQueryPlanner;
     use crate::services::layers::query_analysis::ParsedDocument;
-    use crate::services::{QueryPlannerContent, QueryPlannerRequest};
+    use crate::services::QueryPlannerContent;
+    use crate::services::QueryPlannerRequest;
+    use crate::spec;
     use crate::spec::Query;
     use crate::Configuration;
-    use crate::{spec, Context};
+    use crate::Context;
 
     impl StaticCostCalculator {
         fn rust_planned(
