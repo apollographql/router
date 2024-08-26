@@ -20,8 +20,8 @@ use super::helpers::spaces_or_comments;
 use super::known_var::KnownVariable;
 use super::lit_expr::LitExpr;
 
-pub(crate) trait CollectVarPaths {
-    fn collect_var_paths(&self) -> Vec<&PathSelection>;
+pub(crate) trait ExternalVarPaths {
+    fn external_var_paths(&self) -> Vec<&PathSelection>;
 }
 
 // JSONSelection     ::= NakedSubSelection | PathSelection
@@ -75,11 +75,11 @@ impl JSONSelection {
     }
 }
 
-impl CollectVarPaths for JSONSelection {
-    fn collect_var_paths(&self) -> Vec<&PathSelection> {
+impl ExternalVarPaths for JSONSelection {
+    fn external_var_paths(&self) -> Vec<&PathSelection> {
         match self {
-            JSONSelection::Named(subselect) => subselect.collect_var_paths(),
-            JSONSelection::Path(path) => path.collect_var_paths(),
+            JSONSelection::Named(subselect) => subselect.external_var_paths(),
+            JSONSelection::Path(path) => path.external_var_paths(),
         }
     }
 }
@@ -192,13 +192,13 @@ impl NamedSelection {
     }
 }
 
-impl CollectVarPaths for NamedSelection {
-    fn collect_var_paths(&self) -> Vec<&PathSelection> {
+impl ExternalVarPaths for NamedSelection {
+    fn external_var_paths(&self) -> Vec<&PathSelection> {
         match self {
             NamedSelection::Field(_, _, Some(sub))
             | NamedSelection::Quoted(_, _, Some(sub))
-            | NamedSelection::Group(_, sub) => sub.collect_var_paths(),
-            NamedSelection::Path(_, path) => path.collect_var_paths(),
+            | NamedSelection::Group(_, sub) => sub.external_var_paths(),
+            NamedSelection::Path(_, path) => path.external_var_paths(),
             _ => vec![],
         }
     }
@@ -221,20 +221,9 @@ impl PathSelection {
         Ok((input, Self { path }))
     }
 
-    pub(crate) fn var_name_and_nested_keys(&self) -> Option<(&str, Vec<&str>)> {
-        fn keys_of_path_list(path: &PathList) -> Vec<&str> {
-            match path {
-                PathList::Key(key, tail) => {
-                    let mut keys = vec![key.as_str()];
-                    keys.extend(keys_of_path_list(tail));
-                    keys
-                }
-                _ => vec![],
-            }
-        }
-
+    pub(crate) fn var_name_and_nested_keys(&self) -> Option<(&KnownVariable, Vec<&str>)> {
         match &self.path {
-            PathList::Var(var_name, tail) => Some((var_name.as_str(), keys_of_path_list(tail))),
+            PathList::Var(var_name, tail) => Some((var_name, tail.prefix_of_keys())),
             _ => None,
         }
     }
@@ -258,8 +247,8 @@ impl PathSelection {
     }
 }
 
-impl CollectVarPaths for PathSelection {
-    fn collect_var_paths(&self) -> Vec<&PathSelection> {
+impl ExternalVarPaths for PathSelection {
+    fn external_var_paths(&self) -> Vec<&PathSelection> {
         let mut paths = vec![];
         match &self.path {
             PathList::Var(var_name, tail) => {
@@ -269,20 +258,20 @@ impl CollectVarPaths for PathSelection {
                 if var_name != &KnownVariable::Dollar && var_name != &KnownVariable::AtSign {
                     paths.push(self);
                 }
-                paths.extend(tail.collect_var_paths());
+                paths.extend(tail.external_var_paths());
             }
             PathList::Key(_, tail) => {
-                paths.extend(tail.collect_var_paths());
+                paths.extend(tail.external_var_paths());
             }
             PathList::Method(_, opt_args, tail) => {
                 if let Some(args) = opt_args {
                     for lit_arg in &args.0 {
-                        paths.extend(lit_arg.collect_var_paths());
+                        paths.extend(lit_arg.external_var_paths());
                     }
                 }
-                paths.extend(tail.collect_var_paths());
+                paths.extend(tail.external_var_paths());
             }
-            PathList::Selection(sub) => paths.extend(sub.collect_var_paths()),
+            PathList::Selection(sub) => paths.extend(sub.external_var_paths()),
             PathList::Empty => {}
         };
         paths
@@ -438,6 +427,17 @@ impl PathList {
         }
     }
 
+    fn prefix_of_keys(&self) -> Vec<&str> {
+        match self {
+            Self::Key(key, rest) => {
+                let mut keys = vec![key.as_str()];
+                keys.extend(rest.prefix_of_keys());
+                keys
+            }
+            _ => vec![],
+        }
+    }
+
     pub(super) fn from_slice(properties: &[Key], selection: Option<SubSelection>) -> Self {
         match properties {
             [] => selection.map_or(Self::Empty, Self::Selection),
@@ -470,8 +470,8 @@ impl PathList {
     }
 }
 
-impl CollectVarPaths for PathList {
-    fn collect_var_paths(&self) -> Vec<&PathSelection> {
+impl ExternalVarPaths for PathList {
+    fn external_var_paths(&self) -> Vec<&PathSelection> {
         let mut paths = vec![];
         match self {
             // PathSelection::collect_var_paths is responsible for adding all
@@ -481,17 +481,17 @@ impl CollectVarPaths for PathList {
             // recursively because the tail of the list could contain other full
             // PathSelection variable references.
             PathList::Var(_, rest) | PathList::Key(_, rest) => {
-                paths.extend(rest.collect_var_paths());
+                paths.extend(rest.external_var_paths());
             }
             PathList::Method(_, opt_args, rest) => {
                 if let Some(args) = opt_args {
                     for lit_arg in &args.0 {
-                        paths.extend(lit_arg.collect_var_paths());
+                        paths.extend(lit_arg.external_var_paths());
                     }
                 }
-                paths.extend(rest.collect_var_paths());
+                paths.extend(rest.external_var_paths());
             }
-            PathList::Selection(sub) => paths.extend(sub.collect_var_paths()),
+            PathList::Selection(sub) => paths.extend(sub.external_var_paths()),
             PathList::Empty => {}
         }
         paths
@@ -580,11 +580,11 @@ pub struct NamedSelectionIndex {
     pos: usize,
 }
 
-impl CollectVarPaths for SubSelection {
-    fn collect_var_paths(&self) -> Vec<&PathSelection> {
+impl ExternalVarPaths for SubSelection {
+    fn external_var_paths(&self) -> Vec<&PathSelection> {
         let mut paths = vec![];
         for selection in &self.selections {
-            paths.extend(selection.collect_var_paths());
+            paths.extend(selection.external_var_paths());
         }
         paths
     }
@@ -2101,7 +2101,7 @@ mod tests {
             let args_arg1_path = PathSelection::parse("$args.arg1").unwrap().1;
             let args_arg2_path = PathSelection::parse("$args.arg2").unwrap().1;
             assert_eq!(
-                sel.collect_var_paths(),
+                sel.external_var_paths(),
                 vec![&args_arg1_path, &args_arg2_path,]
             );
         }
@@ -2124,7 +2124,7 @@ mod tests {
             let this_b_path = PathSelection::parse("$this.b").unwrap().1;
             let this_c_path = PathSelection::parse("$this.c").unwrap().1;
             assert_eq!(
-                sel.collect_var_paths(),
+                sel.external_var_paths(),
                 vec![this_kind_path, &this_a_path, &this_b_path, &this_c_path,]
             );
         }
@@ -2141,7 +2141,7 @@ mod tests {
             let end_path = PathSelection::parse("$args.end").unwrap().1;
             let args_type_path = PathSelection::parse("$args.type").unwrap().1;
             assert_eq!(
-                sel.collect_var_paths(),
+                sel.external_var_paths(),
                 vec![&start_path, &end_path, &args_type_path]
             );
         }

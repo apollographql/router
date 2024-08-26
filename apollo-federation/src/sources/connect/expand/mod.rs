@@ -799,8 +799,8 @@ mod helpers {
         connector: &Connector,
     ) -> Result<HashSet<Parameter>, FederationError> {
         if let Some(body) = &connector.transport.body {
-            use crate::sources::connect::json_selection::CollectVarPaths;
-            let var_paths = body.collect_var_paths();
+            use crate::sources::connect::json_selection::ExternalVarPaths;
+            let var_paths = body.external_var_paths();
 
             let mut results =
                 HashSet::with_capacity_and_hasher(var_paths.len(), Default::default());

@@ -24,7 +24,7 @@ use super::helpers::spaces_or_comments;
 use super::parser::parse_string_literal;
 use super::parser::Key;
 use super::parser::PathSelection;
-use super::CollectVarPaths;
+use super::ExternalVarPaths;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum LitExpr {
@@ -164,23 +164,23 @@ impl LitExpr {
     }
 }
 
-impl CollectVarPaths for LitExpr {
-    fn collect_var_paths(&self) -> Vec<&PathSelection> {
+impl ExternalVarPaths for LitExpr {
+    fn external_var_paths(&self) -> Vec<&PathSelection> {
         let mut paths = vec![];
         match self {
             Self::String(_) | Self::Number(_) | Self::Bool(_) | Self::Null => {}
             Self::Object(map) => {
                 for value in map.values() {
-                    paths.extend(value.collect_var_paths());
+                    paths.extend(value.external_var_paths());
                 }
             }
             Self::Array(vec) => {
                 for value in vec {
-                    paths.extend(value.collect_var_paths());
+                    paths.extend(value.external_var_paths());
                 }
             }
             Self::Path(path) => {
-                paths.extend(path.collect_var_paths());
+                paths.extend(path.external_var_paths());
             }
         }
         paths
