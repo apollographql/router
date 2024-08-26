@@ -503,6 +503,14 @@ pub enum Parameter<'a> {
         /// Any optional nexted selection on the field
         paths: Vec<&'a str>,
     },
+
+    Context {
+        /// The name of the context variable
+        item: &'a str,
+
+        /// Any optional nested selections on the $context variable
+        paths: Vec<&'a str>,
+    },
 }
 
 impl Display for ParameterValue {

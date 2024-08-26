@@ -513,6 +513,10 @@ mod helpers {
                         }
                     }
 
+                    Parameter::Context { item: _, paths: _ } => {
+                        // TODO Implement $context handling
+                    }
+
                     // All sibling fields marked by $this in a transport must be carried over to the output type
                     // regardless of its use in the output selection.
                     Parameter::Sibling { field, paths } => {
