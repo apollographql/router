@@ -903,10 +903,10 @@ impl QueryGraph {
             .possible_runtime_types(interface_field_definition_position.parent().into())?
             .into_iter()
             .map(|object_type_definition_position| {
-                object_type_definition_position
-                    .field(interface_field_definition_position.field_name.clone())
+                let field_pos = object_type_definition_position
+                    .field(interface_field_definition_position.field_name.clone());
+                field_pos.get(schema.schema())
             })
-            .map(|field_pos| field_pos.get(schema.schema()))
             .ok_and_any(|field| field.directives.has(&provides_directive_definition.name))
             .map_err(Into::into)
     }
