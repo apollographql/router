@@ -8151,6 +8151,15 @@ expression: "&schema"
                 "display_trace_id": {
                   "$ref": "#/definitions/DisplayTraceIdFormat",
                   "description": "#/definitions/DisplayTraceIdFormat"
+                },
+                "span_attributes": {
+                  "default": [],
+                  "description": "List of span attributes to attach to the json log object",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array",
+                  "uniqueItems": true
                 }
               },
               "type": "object"
