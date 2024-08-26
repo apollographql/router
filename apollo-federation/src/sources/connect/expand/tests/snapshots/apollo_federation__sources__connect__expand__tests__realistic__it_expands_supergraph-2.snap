@@ -3,6 +3,167 @@ source: apollo-federation/src/sources/connect/expand/tests/mod.rs
 expression: connectors.by_service_name
 ---
 {
+    "connectors_Mutation_createUser_0": Connector {
+        id: ConnectId {
+            label: "connectors.example http: POST /create/user",
+            subgraph_name: "connectors",
+            source_name: Some(
+                "example",
+            ),
+            directive: ObjectOrInterfaceFieldDirectivePosition {
+                field: Object(Mutation.createUser),
+                directive_name: "connect",
+                directive_index: 0,
+            },
+        },
+        transport: HttpJsonTransport {
+            source_url: Some(
+                Url {
+                    scheme: "http",
+                    cannot_be_a_base: false,
+                    username: "",
+                    password: None,
+                    host: Some(
+                        Domain(
+                            "example",
+                        ),
+                    ),
+                    port: None,
+                    path: "/",
+                    query: None,
+                    fragment: None,
+                },
+            ),
+            connect_template: URLTemplate {
+                base: None,
+                path: [
+                    ParameterValue {
+                        parts: [
+                            Text(
+                                "create",
+                            ),
+                        ],
+                    },
+                    ParameterValue {
+                        parts: [
+                            Text(
+                                "user",
+                            ),
+                        ],
+                    },
+                ],
+                query: {},
+            },
+            method: Post,
+            headers: {},
+            body: Some(
+                Path(
+                    Var(
+                        "$args",
+                        Key(
+                            Field(
+                                "input",
+                            ),
+                            Selection(
+                                SubSelection {
+                                    selections: [
+                                        Field(
+                                            None,
+                                            "name",
+                                            None,
+                                        ),
+                                        Field(
+                                            None,
+                                            "username",
+                                            None,
+                                        ),
+                                        Field(
+                                            None,
+                                            "email",
+                                            None,
+                                        ),
+                                        Field(
+                                            None,
+                                            "status",
+                                            None,
+                                        ),
+                                        Field(
+                                            None,
+                                            "address",
+                                            Some(
+                                                SubSelection {
+                                                    selections: [
+                                                        Field(
+                                                            None,
+                                                            "street",
+                                                            None,
+                                                        ),
+                                                        Field(
+                                                            None,
+                                                            "suite",
+                                                            None,
+                                                        ),
+                                                        Field(
+                                                            None,
+                                                            "city",
+                                                            None,
+                                                        ),
+                                                        Field(
+                                                            None,
+                                                            "zipcode",
+                                                            None,
+                                                        ),
+                                                        Field(
+                                                            None,
+                                                            "geo",
+                                                            Some(
+                                                                SubSelection {
+                                                                    selections: [
+                                                                        Field(
+                                                                            None,
+                                                                            "lat",
+                                                                            None,
+                                                                        ),
+                                                                        Field(
+                                                                            None,
+                                                                            "lng",
+                                                                            None,
+                                                                        ),
+                                                                    ],
+                                                                    star: None,
+                                                                },
+                                                            ),
+                                                        ),
+                                                    ],
+                                                    star: None,
+                                                },
+                                            ),
+                                        ),
+                                    ],
+                                    star: None,
+                                },
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        },
+        selection: Named(
+            SubSelection {
+                selections: [
+                    Field(
+                        None,
+                        "id",
+                        None,
+                    ),
+                ],
+                star: None,
+            },
+        ),
+        config: None,
+        max_requests: None,
+        entity_resolver: None,
+    },
     "connectors_Query_filterUsersByEmailDomain_0": Connector {
         id: ConnectId {
             label: "connectors.example http: GET /filter/users",

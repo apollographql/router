@@ -2,7 +2,7 @@
 source: apollo-federation/src/sources/connect/expand/tests/mod.rs
 expression: raw_sdl
 ---
-schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) @join__directive(graphs: [], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1"}) {
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY) @join__directive(graphs: [], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1"}) {
   query: Query
 }
 
@@ -22,6 +22,8 @@ directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
 directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments!) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
 
+directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
 enum link__Purpose {
   """
   SECURITY features provide metadata necessary to securely resolve fields.
@@ -38,15 +40,42 @@ scalar join__FieldSet
 scalar join__DirectiveArguments
 
 enum join__Graph {
+  CONNECTORS_MUTATION_CREATEUSER_0 @join__graph(name: "connectors_Mutation_createUser_0", url: "none")
   CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0 @join__graph(name: "connectors_Query_filterUsersByEmailDomain_0", url: "none")
   CONNECTORS_QUERY_USER_0 @join__graph(name: "connectors_Query_user_0", url: "none")
   CONNECTORS_QUERY_USERSBYCOMPANY_0 @join__graph(name: "connectors_Query_usersByCompany_0", url: "none")
 }
 
-scalar EmailAddress @join__type(graph: CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0) @join__type(graph: CONNECTORS_QUERY_USER_0)
+scalar EmailAddress @join__type(graph: CONNECTORS_MUTATION_CREATEUSER_0) @join__type(graph: CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0) @join__type(graph: CONNECTORS_QUERY_USER_0)
 
-type User @join__type(graph: CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0) @join__type(graph: CONNECTORS_QUERY_USER_0, key: "id") @join__type(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0) {
-  id: ID! @join__field(graph: CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0) @join__field(graph: CONNECTORS_QUERY_USER_0) @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0)
+enum Status @join__type(graph: CONNECTORS_MUTATION_CREATEUSER_0) {
+  ACTIVE @join__enumValue(graph: CONNECTORS_MUTATION_CREATEUSER_0)
+  INACTIVE @join__enumValue(graph: CONNECTORS_MUTATION_CREATEUSER_0)
+}
+
+input AddressGeoInput @join__type(graph: CONNECTORS_MUTATION_CREATEUSER_0) {
+  lat: Float
+  lng: Float
+}
+
+input AddressInput @join__type(graph: CONNECTORS_MUTATION_CREATEUSER_0) {
+  street: String
+  suite: String
+  city: String
+  zipcode: String
+  geo: AddressGeoInput
+}
+
+input CreateUserInput @join__type(graph: CONNECTORS_MUTATION_CREATEUSER_0) {
+  name: String!
+  username: String!
+  email: EmailAddress
+  status: Status
+  address: AddressInput
+}
+
+type User @join__type(graph: CONNECTORS_MUTATION_CREATEUSER_0) @join__type(graph: CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0) @join__type(graph: CONNECTORS_QUERY_USER_0, key: "id") @join__type(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0) {
+  id: ID! @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0) @join__field(graph: CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0) @join__field(graph: CONNECTORS_QUERY_USER_0) @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0)
   name: String @join__field(graph: CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0) @join__field(graph: CONNECTORS_QUERY_USER_0) @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0)
   address: Address @join__field(graph: CONNECTORS_QUERY_USER_0)
   company: CompanyInfo @join__field(graph: CONNECTORS_QUERY_USER_0) @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0)
@@ -56,7 +85,12 @@ type User @join__type(graph: CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0) @join_
   website: String @join__field(graph: CONNECTORS_QUERY_USER_0)
 }
 
-type Query @join__type(graph: CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0) @join__type(graph: CONNECTORS_QUERY_USER_0) @join__type(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0) {
+type Mutation @join__type(graph: CONNECTORS_MUTATION_CREATEUSER_0) {
+  createUser(input: CreateUserInput!): User @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0)
+}
+
+type Query @join__type(graph: CONNECTORS_MUTATION_CREATEUSER_0) @join__type(graph: CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0) @join__type(graph: CONNECTORS_QUERY_USER_0) @join__type(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0) {
+  _: ID @inaccessible @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0)
   filterUsersByEmailDomain(email: EmailAddress!): [User] @join__field(graph: CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0)
   user(id: ID!): User @join__field(graph: CONNECTORS_QUERY_USER_0)
   usersByCompany(company: CompanyInput!): [User] @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0)

@@ -1,4 +1,6 @@
-federation_version: =2.9.0-connectors.0
+# rover supergraph compose --config apollo-federation/src/sources/connect/expand/tests/schemas/realistic.yaml > apollo-federation/src/sources/connect/expand/tests/schemas/realistic.graphql
+# this is currently manually edited to add Status enum and EmailAddress scalars to the input type
+federation_version: =2.10.0-alpha.0
 subgraphs:
   connectors:
     routing_url: none
@@ -6,7 +8,7 @@ subgraphs:
       sdl: |
         extend schema
           @link(
-            url: "https://specs.apollo.dev/federation/v2.7"
+            url: "https://specs.apollo.dev/federation/v2.10"
             import: ["@key"]
           )
           @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"])
@@ -64,6 +66,7 @@ subgraphs:
           phone: String
           website: String
           company: CompanyInfo
+          status: String # Status
         }
 
         type Address {
@@ -83,7 +86,7 @@ subgraphs:
           name: String
           catchPhrase: String
           bs: String
-          email: EmailAddress
+          email: String # EmailAddress
         }
 
         input CompanyInput {
@@ -92,3 +95,34 @@ subgraphs:
         }
 
         scalar EmailAddress
+
+        enum Status {
+          ACTIVE
+          INACTIVE
+        }
+
+        type Mutation {
+          createUser(input: CreateUserInput!): User
+            @connect(source: "example", http: { POST: "/create/user", body: "$$args.input { name username email status address { street suite city zipcode geo { lat lng } } }" }, selection: "id")
+        }
+
+        input CreateUserInput {
+          name: String!
+          username: String!
+          email: String # EmailAddress!
+          status: String # Status!
+          address: AddressInput
+        }
+
+        input AddressInput {
+          street: String
+          suite: String
+          city: String
+          zipcode: String
+          geo: AddressGeoInput
+        }
+
+        input AddressGeoInput {
+          lat: Float
+          lng: Float
+        }

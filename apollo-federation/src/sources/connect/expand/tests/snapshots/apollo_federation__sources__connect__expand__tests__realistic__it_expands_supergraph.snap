@@ -17,6 +17,19 @@ type AddressGeo {
   lng: Float
 }
 
+input AddressGeoInput {
+  lat: Float
+  lng: Float
+}
+
+input AddressInput {
+  street: String
+  suite: String
+  city: String
+  zipcode: String
+  geo: AddressGeoInput
+}
+
 type CompanyInfo {
   name: String
   catchPhrase: String
@@ -29,12 +42,29 @@ input CompanyInput {
   catchPhrase: String
 }
 
+input CreateUserInput {
+  name: String!
+  username: String!
+  email: EmailAddress
+  status: Status
+  address: AddressInput
+}
+
 scalar EmailAddress
+
+type Mutation {
+  createUser(input: CreateUserInput!): User
+}
 
 type Query {
   filterUsersByEmailDomain(email: EmailAddress!): [User]
   usersByCompany(company: CompanyInput!): [User]
   user(id: ID!): User
+}
+
+enum Status {
+  ACTIVE
+  INACTIVE
 }
 
 type User {
@@ -46,4 +76,5 @@ type User {
   phone: String
   website: String
   company: CompanyInfo
+  status: Status
 }
