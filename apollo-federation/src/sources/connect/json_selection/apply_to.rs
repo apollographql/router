@@ -18,17 +18,17 @@ use super::parser::*;
 
 pub(super) type VarsWithPathsMap<'a> = IndexMap<String, (&'a JSON, InputPath<JSON>)>;
 
-pub trait ApplyTo {
+impl JSONSelection {
     // Applying a selection to a JSON value produces a new JSON value, along
     // with any/all errors encountered in the process. The value is represented
     // as an Option to allow for undefined/missing values (which JSON does not
     // explicitly support), which are distinct from null values (which it does
     // support).
-    fn apply_to(&self, data: &JSON) -> (Option<JSON>, Vec<ApplyToError>) {
+    pub fn apply_to(&self, data: &JSON) -> (Option<JSON>, Vec<ApplyToError>) {
         self.apply_with_vars(data, &IndexMap::default())
     }
 
-    fn apply_with_vars(
+    pub fn apply_with_vars(
         &self,
         data: &JSON,
         vars: &IndexMap<String, JSON>,
@@ -49,7 +49,9 @@ pub trait ApplyTo {
         let value = self.apply_to_path(data, &vars_with_paths, &InputPath::empty(), &mut errors);
         (value, errors.into_iter().collect())
     }
+}
 
+pub(super) trait ApplyToInternal {
     // This is the trait method that should be implemented and called
     // recursively by the various JSONSelection types.
     fn apply_to_path(
@@ -146,7 +148,7 @@ impl ApplyToError {
     }
 }
 
-impl ApplyTo for JSONSelection {
+impl ApplyToInternal for JSONSelection {
     fn apply_to_path(
         &self,
         data: &JSON,
@@ -171,7 +173,7 @@ impl ApplyTo for JSONSelection {
     }
 }
 
-impl ApplyTo for NamedSelection {
+impl ApplyToInternal for NamedSelection {
     fn apply_to_path(
         &self,
         data: &JSON,
@@ -240,7 +242,7 @@ impl ApplyTo for NamedSelection {
     }
 }
 
-impl ApplyTo for PathSelection {
+impl ApplyToInternal for PathSelection {
     fn apply_to_path(
         &self,
         data: &JSON,
@@ -280,7 +282,7 @@ impl ApplyTo for PathSelection {
     }
 }
 
-impl ApplyTo for PathList {
+impl ApplyToInternal for PathList {
     fn apply_to_path(
         &self,
         data: &JSON,
@@ -371,7 +373,7 @@ impl ApplyTo for PathList {
     }
 }
 
-impl ApplyTo for LitExpr {
+impl ApplyToInternal for LitExpr {
     fn apply_to_path(
         &self,
         data: &JSON,
@@ -409,7 +411,7 @@ impl ApplyTo for LitExpr {
     }
 }
 
-impl ApplyTo for SubSelection {
+impl ApplyToInternal for SubSelection {
     fn apply_to_path(
         &self,
         data: &JSON,

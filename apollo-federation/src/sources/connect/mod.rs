@@ -13,7 +13,6 @@ mod url_template;
 pub mod validation;
 
 use apollo_compiler::name;
-pub use json_selection::ApplyTo;
 pub use json_selection::ApplyToError;
 pub use json_selection::JSONSelection;
 pub use json_selection::Key;

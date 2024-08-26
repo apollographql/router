@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
-use apollo_federation::sources::connect::ApplyTo;
 use apollo_federation::sources::connect::Connector;
 use http_body::Body as HttpBody;
 use parking_lot::Mutex;

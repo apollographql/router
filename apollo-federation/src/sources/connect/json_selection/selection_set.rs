@@ -257,8 +257,6 @@ mod tests {
     use apollo_compiler::Schema;
     use pretty_assertions::assert_eq;
 
-    use crate::sources::connect::ApplyTo;
-
     fn selection_set(schema: &Valid<Schema>, s: &str) -> SelectionSet {
         apollo_compiler::ExecutableDocument::parse_and_validate(schema, s, "./")
             .unwrap()

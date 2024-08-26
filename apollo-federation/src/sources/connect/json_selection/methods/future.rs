@@ -9,11 +9,11 @@ use serde_json_bytes::Value as JSON;
 use crate::sources::connect::json_selection::helpers::json_type_name;
 use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::lit_expr::LitExpr;
+use crate::sources::connect::json_selection::ApplyToError;
+use crate::sources::connect::json_selection::ApplyToInternal;
 use crate::sources::connect::json_selection::MethodArgs;
 use crate::sources::connect::json_selection::PathList;
 use crate::sources::connect::json_selection::VarsWithPathsMap;
-use crate::sources::connect::ApplyTo;
-use crate::sources::connect::ApplyToError;
 
 pub(super) fn typeof_method(
     method_name: &str,

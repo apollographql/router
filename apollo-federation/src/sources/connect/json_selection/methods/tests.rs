@@ -1,6 +1,5 @@
 use serde_json_bytes::json;
 
-use super::super::ApplyTo;
 use super::*;
 use crate::selection;
 
