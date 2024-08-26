@@ -145,13 +145,13 @@ Whenever your router rejects a request because it exceeds an operation limit, th
 
 If you run your router in [`warn_only` mode](#warn_only-mode), the router logs the limit violation but executes the operation as normal, returning a 200 status code with the expected response.
 
-## Measuring for appropriate values with telemetry
+## Using telemetry to set operation limits
 
-It may be difficult to decide what values to set for operation limits if you have a large number of existing operations. A good option to help make this decision is to measure incoming operations for a set period of time and then use the resulting data as a baseline for your configuration.
+Router telemetry can help you set operation limits, especially when you have a large number of existing operations. You can measure incoming operations over a fixed duration, then use the captured data as a baseline configuration.
 
 ### Logging values
 
-You can configure the Router with a [custom event](https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/events#custom-events) to log the values of aliases, depth, height, and root_fields on each operation with the following configuration:
+To log limit information about every operation, you can configure the router with a [custom event](/router/configuration/telemetry/instrumentation/events#custom-events) to log the values of aliases, depth, height, and root_fields for each operation:
 
 ```
 telemetry:
@@ -174,11 +174,15 @@ telemetry:
               query: root_fields
 ```
 
-This may not be a good model for a large amount of traffic so it may be preferred to instead collect metrics and export them to your APM.
+<Note>
+
+For a large amount of traffic, you may prefer to collect and export metrics to your APM instead.
+
+</Note>
 
 ### Collecting metrics
 
-You can configure the Router to collect [custom metrics](/router/configuration/telemetry/instrumentation/instruments#custom-instruments) on the values of aliases, depth, height, and root_fields on each operation with the following configuration:
+To capture and view metrics to help set your operation limits, you can configure the router to collect [custom metrics](/router/configuration/telemetry/instrumentation/instruments#custom-instruments) on the values of aliases, depth, height, and root_fields for each operation:
 
 ```
 telemetry:
@@ -228,4 +232,4 @@ telemetry:
           description: "Root fields for an operation"
 ```
 
-You should also configure the Router to [export metrics](/router/configuration/telemetry/exporters/metrics/overview) to your APM tool.
+You should also configure the router to [export metrics](/router/configuration/telemetry/exporters/metrics/overview) to your APM tool.
