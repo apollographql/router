@@ -3339,6 +3339,18 @@ impl InlineFragmentSelection {
         parent_type_position: CompositeTypeDefinitionPosition,
         fragment_spread_selection: &Arc<FragmentSpreadSelection>,
     ) -> Result<InlineFragmentSelection, FederationError> {
+        let schema = fragment_spread_selection.spread.schema.schema();
+        for directive in fragment_spread_selection.spread.directives.iter() {
+            let Some(definition) = schema.directive_definitions.get(&directive.name) else {
+                return Err(FederationError::internal(format!("Undefined directive {}", directive.name)));
+            };
+            if !definition.locations.contains(&apollo_compiler::schema::DirectiveLocation::InlineFragment) {
+                return Err(SingleFederationError::UnsupportedSpreadDirective {
+                    name: directive.name.clone(),
+                }.into());
+            }
+        }
+
         // Note: We assume that fragment_spread_selection.spread.type_condition_position is the same as
         //       fragment_spread_selection.selection_set.type_position.
         Ok(InlineFragmentSelection::new(
