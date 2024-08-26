@@ -1,6 +1,9 @@
-### Add warnings for invalid configuration on custom telemetry ([PR #5759](https://github.com/apollographql/router/issues/5759))
+### Add warnings for invalid configuration of custom telemetry ([PR #5759](https://github.com/apollographql/router/issues/5759))
 
-For example sometimes if you have configuration like this:
+The router now logs warnings when running with telemetry that may have invalid custom configurations.
+ 
+
+For example, you may customize telemetry using invalid conditions or inaccessible statuses:
 
 ```yaml
 telemetry:
@@ -20,7 +23,6 @@ telemetry:
             - product
 ```
 
-This configuration is syntaxically correct but wouldn't probably do what you would like to. I put comments to highlight 2 mistakes in this example.
-Before it was silently computed, now you'll get warning when starting the router.
+Although the configuration is syntactically correct, its customization is invalid, and the router now outputs warnings for such invalid configurations.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5759

@@ -1,6 +1,6 @@
-### Improve support of conditions at the request level, especially for events ([Issue #5702](https://github.com/apollographql/router/issues/5702))
+### Fix `exists` condition for custom telemetry events ([Issue #5702](https://github.com/apollographql/router/issues/5702))
 
-`exists` condition is now properly handled with events, this configuration will now work:
+The router now properly handles the `exists` condition for events. The following configuration now works as intended:
 
 ```yaml
 telemetry:

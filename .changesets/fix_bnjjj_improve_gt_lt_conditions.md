@@ -1,6 +1,8 @@
-### Add the ability for `gt`/`lt` conditions to parse the string selector to number ([PR #5758](https://github.com/apollographql/router/pull/5758))
+### Support `gt`/`lt` conditions for parsing string selectors to numbers ([PR #5758](https://github.com/apollographql/router/pull/5758))
 
-This will enable the ability to have gt/lt conditions on header selectors for example, if you want to put a specific attribute on a span if the `content-length` header is greater than 100:
+The router now supports greater than (`gt`) and less than (`lt`) conditions for header selectors.
+ 
+The following example applies an attribute on a span if the `content-length` header is greater than 100:
 
 ```yaml
 telemetry:

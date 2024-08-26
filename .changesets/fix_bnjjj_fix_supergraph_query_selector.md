@@ -1,6 +1,8 @@
-### Execute supergraph query selector also on events ([PR #5764](https://github.com/apollographql/router/pull/5764))
+### Support supergraph query selector for events ([PR #5764](https://github.com/apollographql/router/pull/5764))
 
-The `query: root_fields` selector works on `response` stage for events right now but it should also work on `event_response`. This configuration is now working:
+The router now supports the `query: root_fields` selector for `event_response`. Previously the selector worked for `response` stage events but didn't work for `event_response`. 
+
+The following configuration for a `query: root_fields` on an `event_response` now works:
 
 ```yaml
 telemetry:

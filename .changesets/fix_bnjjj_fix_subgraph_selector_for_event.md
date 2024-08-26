@@ -1,6 +1,9 @@
 ### Evaluate selectors in response stage when possible ([PR #5725](https://github.com/apollographql/router/pull/5725))
 
-As `events` are triggered at a specific event (`request`|`response`|`error`) we can only have condition for the related event, but sometimes selectors that can be applied at several events (like `subgraph_name` to get the subgraph name). Adds support for various supergraph selectors on response events.
+
+The router now supports having various supergraph selectors on response events.
+
+Because `events` are triggered at a specific event (`request`|`response`|`error`), you usually have only one condition for a related event. You can however have selectors that can be applied to several events, like `subgraph_name` to get the subgraph name). 
 
 Example of an event to log the raw subgraph response only on a subgraph named `products`, this was not working before.
 
