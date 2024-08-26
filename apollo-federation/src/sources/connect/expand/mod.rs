@@ -802,71 +802,69 @@ mod helpers {
     fn extract_params_from_body(
         connector: &Connector,
     ) -> Result<HashSet<Parameter>, FederationError> {
-        if let Some(body) = &connector.transport.body {
-            use crate::sources::connect::json_selection::ExternalVarPaths;
-            let var_paths = body.external_var_paths();
+        let Some(body) = &connector.transport.body else {
+            return Ok(HashSet::default());
+        };
 
-            let mut results =
-                HashSet::with_capacity_and_hasher(var_paths.len(), Default::default());
+        use crate::sources::connect::json_selection::ExternalVarPaths;
+        let var_paths = body.external_var_paths();
 
-            for var_path in var_paths {
-                match var_path.var_name_and_nested_keys() {
-                    Some((KnownVariable::Args, keys)) => {
-                        let mut keys_iter = keys.into_iter();
-                        let first_key = keys_iter.next().ok_or(FederationError::internal(
-                            "expected at least one key in $args",
-                        ))?;
-                        results.insert(Parameter::Argument {
-                            argument: first_key,
-                            paths: keys_iter.collect(),
-                        });
-                    }
-                    Some((KnownVariable::This, keys)) => {
-                        let mut keys_iter = keys.into_iter();
-                        let first_key = keys_iter.next().ok_or(FederationError::internal(
-                            "expected at least one key in $this",
-                        ))?;
-                        results.insert(Parameter::Sibling {
-                            field: first_key,
-                            paths: keys_iter.collect(),
-                        });
-                    }
-                    Some((KnownVariable::Context, keys)) => {
-                        let mut keys_iter = keys.into_iter();
-                        let first_key = keys_iter.next().ok_or(FederationError::internal(
-                            "expected at least one key in $context",
-                        ))?;
-                        results.insert(Parameter::Context {
-                            item: first_key,
-                            paths: keys_iter.collect(),
-                        });
-                    }
-                    // To get the safety benefits of the KnownVariable enum, we
-                    // need to enumerate all the cases explicitly, without
-                    // wildcard matches. However, body.external_var_paths() only
-                    // returns free (externally-provided) variables like $this,
-                    // $args, and $context. The $ and @ variables, by contrast,
-                    // are always bound to something within the input data.
-                    Some((kv @ KnownVariable::Dollar, _))
-                    | Some((kv @ KnownVariable::AtSign, _)) => {
-                        return Err(FederationError::internal(format!(
-                            "got unexpected non-external variable: {:?}",
-                            kv,
-                        )));
-                    }
-                    None => {
-                        return Err(FederationError::internal(format!(
-                            "could not extract variable from path: {:?}",
-                            var_path,
-                        )));
-                    }
-                };
-            }
+        let mut results = HashSet::with_capacity_and_hasher(var_paths.len(), Default::default());
 
-            Ok(results)
-        } else {
-            Ok(HashSet::default())
+        for var_path in var_paths {
+            match var_path.var_name_and_nested_keys() {
+                Some((KnownVariable::Args, keys)) => {
+                    let mut keys_iter = keys.into_iter();
+                    let first_key = keys_iter.next().ok_or(FederationError::internal(
+                        "expected at least one key in $args",
+                    ))?;
+                    results.insert(Parameter::Argument {
+                        argument: first_key,
+                        paths: keys_iter.collect(),
+                    });
+                }
+                Some((KnownVariable::This, keys)) => {
+                    let mut keys_iter = keys.into_iter();
+                    let first_key = keys_iter.next().ok_or(FederationError::internal(
+                        "expected at least one key in $this",
+                    ))?;
+                    results.insert(Parameter::Sibling {
+                        field: first_key,
+                        paths: keys_iter.collect(),
+                    });
+                }
+                Some((KnownVariable::Context, keys)) => {
+                    let mut keys_iter = keys.into_iter();
+                    let first_key = keys_iter.next().ok_or(FederationError::internal(
+                        "expected at least one key in $context",
+                    ))?;
+                    results.insert(Parameter::Context {
+                        item: first_key,
+                        paths: keys_iter.collect(),
+                    });
+                }
+                // To get the safety benefits of the KnownVariable enum, we
+                // need to enumerate all the cases explicitly, without
+                // wildcard matches. However, body.external_var_paths() only
+                // returns free (externally-provided) variables like $this,
+                // $args, and $context. The $ and @ variables, by contrast,
+                // are always bound to something within the input data.
+                Some((kv @ KnownVariable::Dollar, _)) | Some((kv @ KnownVariable::AtSign, _)) => {
+                    return Err(FederationError::internal(format!(
+                        "got unexpected non-external variable: {:?}",
+                        kv,
+                    )));
+                }
+                None => {
+                    return Err(FederationError::internal(format!(
+                        "could not extract variable from path: {:?}",
+                        var_path,
+                    )));
+                }
+            };
         }
+
+        Ok(results)
     }
 }
 
