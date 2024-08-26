@@ -173,25 +173,24 @@ impl Request {
     ) -> Result<Vec<Request>, serde_json::Error> {
         let mut result = Request::allocate_result_array(&value);
 
-        if value.is_array() {
-            tracing::info!(
-                histogram.apollo.router.operations.batching.size = result.len() as f64,
-                mode = %BatchingMode::BatchHttpLink // Only supported mode right now
-            );
+        match value {
+            serde_json_bytes::Value::Array(array) => {
+                tracing::info!(
+                    histogram.apollo.router.operations.batching.size = result.len() as f64,
+                    mode = %BatchingMode::BatchHttpLink // Only supported mode right now
+                );
 
-            tracing::info!(
-                monotonic_counter.apollo.router.operations.batching = 1u64,
-                mode = %BatchingMode::BatchHttpLink // Only supported mode right now
-            );
-            for entry in value
-                .as_array()
-                .expect("We already checked that it was an array")
-                .drain(..)
-            {
-                result.push(serde_json_bytes::from_value::<Request>(entry)?);
+                tracing::info!(
+                    monotonic_counter.apollo.router.operations.batching = 1u64,
+                    mode = %BatchingMode::BatchHttpLink // Only supported mode right now
+                );
+                for entry in array.drain(..) {
+                    result.push(serde_json_bytes::from_value::<Request>(entry)?);
+                }
             }
-        } else {
-            result.push(serde_json_bytes::from_value::<Request>(value)?);
+            v => {
+                result.push(serde_json_bytes::from_value::<Request>(value)?);
+            }
         }
         Ok(result)
     }
