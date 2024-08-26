@@ -313,26 +313,12 @@ impl RouterService {
                     }
                 })?;
 
-            println!(
-                "translate_json_request[{}]: data: {:?}",
-                line!(),
-                std::str::from_utf8(&bytes).unwrap()
-            );
-
-            let value = serde_json_bytes::Value::from_bytes(bytes).map_err(|e| {
-                println!("translate_json_request[{}]", line!());
-
-                TranslateError {
-                    status: StatusCode::BAD_REQUEST,
-                    error: "failed to deserialize the request body into JSON",
-                    extension_code: "INVALID_GRAPHQL_REQUEST",
-                    extension_details: format!(
-                        "failed to deserialize the request body into JSON: {e}"
-                    ),
-                }
+            let value = serde_json_bytes::Value::from_bytes(bytes).map_err(|e| TranslateError {
+                status: StatusCode::BAD_REQUEST,
+                error: "failed to deserialize the request body into JSON",
+                extension_code: "INVALID_GRAPHQL_REQUEST",
+                extension_details: format!("failed to deserialize the request body into JSON: {e}"),
             })?;
-
-            println!("translate_json_request[{}]", line!());
 
             let request = http::Request::from_parts(parts, value);
             Ok(JsonRequest { request, context })
