@@ -65,7 +65,10 @@ enum link__Purpose {
   EXECUTION
 }
 
-type Mutation @join__type(graph: PRODUCTS) @join__type(graph: REVIEWS) {
+type Mutation
+  @join__type(graph: PRODUCTS)
+  @join__type(graph: REVIEWS)
+  @join__type(graph: ACCOUNTS) {
   updateMyAccount: User @join__field(graph: ACCOUNTS)
   invalidateProductReview: Int @join__field(graph: REVIEWS)
 }

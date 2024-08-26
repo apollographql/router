@@ -1412,6 +1412,7 @@ mod tests {
     """
     EXECUTION
   }
+
   
    scalar join__FieldSet
    enum join__Graph {

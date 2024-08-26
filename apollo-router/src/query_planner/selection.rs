@@ -796,14 +796,7 @@ mod tests {
         scalar link__Import
         
         enum link__Purpose {
-          """
-          `SECURITY` features provide metadata necessary to securely resolve fields.
-          """
           SECURITY
-        
-          """
-          `EXECUTION` features provide metadata necessary for operation execution.
-          """
           EXECUTION
         }
         "#,

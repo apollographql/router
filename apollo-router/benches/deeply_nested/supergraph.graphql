@@ -44,22 +44,14 @@ directive @link(
 ) repeatable on SCHEMA
 
 scalar join__FieldSet
+scalar link__Import
 
 enum join__Graph {
   SUBGRAPH_1 @join__graph(name: "subgraph_1", url: "http://127.0.0.1:44168/")
 }
 
-scalar link__Import
-
 enum link__Purpose {
-  """
-  `SECURITY` features provide metadata necessary to securely resolve fields.
-  """
   SECURITY
-
-  """
-  `EXECUTION` features provide metadata necessary for operation execution.
-  """
   EXECUTION
 }
 

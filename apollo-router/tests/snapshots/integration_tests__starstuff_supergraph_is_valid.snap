@@ -2,7 +2,6 @@
 source: apollo-router/tests/integration_tests.rs
 expression: "include_str!(\"../../examples/graphql/supergraph.graphql\")"
 ---
-
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
@@ -68,14 +67,7 @@ enum join__Graph {
 scalar link__Import
 
 enum link__Purpose {
-  """
-  `SECURITY` features provide metadata necessary to securely resolve fields.
-  """
   SECURITY
-
-  """
-  `EXECUTION` features provide metadata necessary for operation execution.
-  """
   EXECUTION
 }
 

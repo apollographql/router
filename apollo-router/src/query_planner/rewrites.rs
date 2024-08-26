@@ -116,43 +116,7 @@ mod tests {
 
     // The schema is not used for the tests
     // but we need a valid one
-    const SCHEMA: &str = r#"
-        schema
-          @link(url: "https://specs.apollo.dev/link/v1.0")
-          @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
-        {
-          query: Query
-        }
-        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-        directive @link( url: String as: String for: link__Purpose import: [link__Import]) repeatable on SCHEMA
-        scalar join__FieldSet
-        scalar link__Import
-
-        enum join__Graph {
-            FAKE @join__graph(name:"fake" url: "http://localhost:4001/fake")
-        }
-        
-        enum link__Purpose {
-          SECURITY
-          EXECUTION
-        }
-
-        type Query {
-          i: [I]
-        }
-
-        interface I {
-          x: Int
-        }
-
-        type A implements I {
-          x: Int
-        }
-
-        type B {
-          y: Int
-        }
-    "#;
+    const SCHEMA: &str = include_str!("../testdata/minimal_supergraph.graphql");
 
     #[test]
     fn test_key_renamer_object() {

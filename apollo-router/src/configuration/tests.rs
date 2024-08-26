@@ -35,33 +35,7 @@ fn schema_generation() {
 
 #[test]
 fn routing_url_in_schema() {
-    let schema = r#"
-        schema
-          @link(url: "https://specs.apollo.dev/link/v1.0")
-          @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
-          query: Query
-        }
-        
-        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-        directive @link( url: String as: String for: link__Purpose import: [link__Import]) repeatable on SCHEMA
-        scalar link__Import
-        
-        enum join__Graph {
-          ACCOUNTS @join__graph(name: "accounts", url: "http://localhost:4001/graphql")
-          INVENTORY @join__graph(name: "inventory", url: "http://localhost:4002/graphql")
-          PRODUCTS @join__graph(name: "products", url: "http://localhost:4003/graphql")
-          REVIEWS @join__graph(name: "reviews", url: "http://localhost:4004/graphql")
-        }
-        
-        enum link__Purpose {
-          SECURITY
-          EXECUTION
-        }
-
-        type Query {
-          me: String
-        }
-        "#;
+    let schema = include_str!("../testdata/minimal_local_inventory_supergraph.graphql");
     let schema = crate::spec::Schema::parse(schema, &Default::default()).unwrap();
 
     let subgraphs: HashMap<&str, &Uri> = schema.subgraphs().map(|(k, v)| (k.as_str(), v)).collect();
@@ -92,33 +66,8 @@ fn routing_url_in_schema() {
 
 #[test]
 fn missing_subgraph_url() {
-    let schema_error = r#"
-        schema
-          @link(url: "https://specs.apollo.dev/link/v1.0")
-          @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
-          query: Query
-        }
-        
-        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-        directive @link( url: String as: String for: link__Purpose import: [link__Import]) repeatable on SCHEMA
-        scalar link__Import
-        
-        enum join__Graph {
-          ACCOUNTS @join__graph(name: "accounts", url: "http://localhost:4001/graphql")
-          INVENTORY @join__graph(name: "inventory", url: "http://localhost:4002/graphql")
-          PRODUCTS @join__graph(name: "products", url: "http://localhost:4003/graphql")
-          REVIEWS @join__graph(name: "reviews", url: "")
-        }
-
-        enum link__Purpose {
-          SECURITY
-          EXECUTION
-        }
-
-        type Query {
-          me: String
-        }
-        "#;
+    let schema_error =
+        include_str!("../testdata/invalid_minimal_supergraph_missing_subgraph_url.graphql");
     let schema_error = crate::spec::Schema::parse(schema_error, &Default::default())
         .expect_err("Must have an error because we have one missing subgraph routing url");
 
