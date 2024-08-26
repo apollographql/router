@@ -215,19 +215,8 @@ impl JsonServerService {
             }
         } else if value.is_array() {
             if self.batching.enabled && matches!(self.batching.mode, BatchingMode::BatchHttpLink) {
-                //FIXME: batching works on serde_json::Value, not on serde_json_bytes::Value
-                let v = serde_json_bytes::from_value::<serde_json::Value>(value).map_err(|e| {
-                    TranslateError {
-                        status: StatusCode::BAD_REQUEST,
-                        error: "failed to deserialize the request body into JSON",
-                        extension_code: "INVALID_GRAPHQL_REQUEST",
-                        extension_details: format!(
-                            "failed to deserialize the request body into JSON: {e}"
-                        ),
-                    }
-                })?;
                 result =
-                    graphql::Request::process_batch_values(&v).map_err(|e| TranslateError {
+                    graphql::Request::process_batch_values(value).map_err(|e| TranslateError {
                         status: StatusCode::BAD_REQUEST,
                         error: "failed to deserialize the request body into JSON",
                         extension_code: "INVALID_GRAPHQL_REQUEST",

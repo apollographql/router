@@ -161,7 +161,7 @@ impl Request {
         seed.deserialize(&mut de)
     }
 
-    fn allocate_result_array(value: &serde_json::Value) -> Vec<Request> {
+    fn allocate_result_array(value: &serde_json_bytes::Value) -> Vec<Request> {
         match value.as_array() {
             Some(array) => Vec::with_capacity(array.len()),
             None => Vec::with_capacity(1),
@@ -169,9 +169,9 @@ impl Request {
     }
 
     pub(crate) fn process_batch_values(
-        value: &serde_json::Value,
+        value: serde_json_bytes::Value,
     ) -> Result<Vec<Request>, serde_json::Error> {
-        let mut result = Request::allocate_result_array(value);
+        let mut result = Request::allocate_result_array(&value);
 
         if value.is_array() {
             tracing::info!(
@@ -186,13 +186,12 @@ impl Request {
             for entry in value
                 .as_array()
                 .expect("We already checked that it was an array")
+                .drain(..)
             {
-                let bytes = serde_json::to_vec(entry)?;
-                result.push(Request::deserialize_from_bytes(&bytes.into())?);
+                result.push(serde_json_bytes::from_value::<Request>(entry)?);
             }
         } else {
-            let bytes = serde_json::to_vec(value)?;
-            result.push(Request::deserialize_from_bytes(&bytes.into())?);
+            result.push(serde_json_bytes::from_value::<Request>(value)?);
         }
         Ok(result)
     }
