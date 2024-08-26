@@ -174,7 +174,7 @@ impl Request {
         let mut result = Request::allocate_result_array(&value);
 
         match value {
-            serde_json_bytes::Value::Array(array) => {
+            serde_json_bytes::Value::Array(mut array) => {
                 tracing::info!(
                     histogram.apollo.router.operations.batching.size = result.len() as f64,
                     mode = %BatchingMode::BatchHttpLink // Only supported mode right now
@@ -188,7 +188,7 @@ impl Request {
                     result.push(serde_json_bytes::from_value::<Request>(entry)?);
                 }
             }
-            v => {
+            value => {
                 result.push(serde_json_bytes::from_value::<Request>(value)?);
             }
         }
