@@ -278,6 +278,7 @@ bytesize = { version = "1.3.0", features = ["serde"] }
 ahash = "0.8.11"
 itoa = "1.0.9"
 ryu = "1.0.15"
+form_urlencoded = "1.2.1"
 
 [target.'cfg(macos)'.dependencies]
 uname = "0.1.1"
@@ -350,6 +351,7 @@ tracing-test = "0.2.5"
 walkdir = "2.5.0"
 wiremock = "0.5.22"
 libtest-mimic = "0.7.3"
+rstest = "0.22.0"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 rstack = { version = "0.3.3", features = ["dw"], default-features = false }

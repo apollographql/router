@@ -148,11 +148,12 @@ impl ConnectorContext {
     pub(crate) fn push_request(
         &mut self,
         req: &http::Request<RouterBody>,
+        kind: String,
         json_body: Option<&serde_json_bytes::Value>,
         selection_data: Option<SelectionData>,
     ) {
         self.requests
-            .push(serialize_request(req, json_body, selection_data));
+            .push(serialize_request(req, kind, json_body, selection_data));
     }
 
     pub(crate) fn push_response(
@@ -231,6 +232,7 @@ struct ConnectorDebugSelection {
 
 fn serialize_request(
     req: &http::Request<RouterBody>,
+    kind: String,
     json_body: Option<&serde_json_bytes::Value>,
     selection_data: Option<SelectionData>,
 ) -> ConnectorDebugHttpRequest {
@@ -248,7 +250,7 @@ fn serialize_request(
             })
             .collect(),
         body: json_body.map(|body| ConnectorDebugBody {
-            kind: "json".to_string(),
+            kind,
             content: body.clone(),
             selection: selection_data.map(|selection| ConnectorDebugSelection {
                 source: selection.source,

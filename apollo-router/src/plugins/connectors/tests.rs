@@ -875,6 +875,94 @@ async fn test_nullability() {
 }
 
 #[tokio::test]
+async fn test_form_encoding() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/posts"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "id": 1 })))
+        .mount(&mock_server)
+        .await;
+    let uri = mock_server.uri();
+
+    let response = execute(
+        include_str!("./testdata/form-encoding.graphql"),
+        &uri,
+        "mutation {
+          post(
+            input: {
+              int: 1
+              str: \"s\"
+              bool: true
+              id: \"id\"
+
+              intArr: [1, 2]
+              strArr: [\"a\", \"b\"]
+              boolArr: [true, false]
+              idArr: [\"id1\", \"id2\"]
+
+              obj: {
+                a: 1
+                b: \"b\"
+                c: true
+                nested: {
+                    d: 1
+                    e: \"e\"
+                    f: true
+                  }
+              }
+              objArr: [
+                {
+                  a: 1
+                  b: \"b\"
+                  c: true
+                  nested: {
+                    d: 1
+                    e: \"e\"
+                    f: true
+                  }
+                },
+                {
+                  a: 2
+                  b: \"bb\"
+                  c: false
+                  nested: {
+                    d: 1
+                    e: \"e\"
+                    f: true
+                  }
+                }
+              ]
+            }
+          )
+          { id }
+        }",
+        Default::default(),
+        None,
+        |_| {},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "post": {
+          "id": 1
+        }
+      }
+    }
+    "###);
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![Matcher::new().method("POST").path("/posts").build()],
+    );
+
+    let reqs = mock_server.received_requests().await.unwrap();
+    let body = String::from_utf8_lossy(&reqs[0].body).to_string();
+    assert_eq!(body, "int=1&str=s&bool=true&id=id&intArr%5B0%5D=1&intArr%5B1%5D=2&strArr%5B0%5D=a&strArr%5B1%5D=b&boolArr%5B0%5D=true&boolArr%5B1%5D=false&idArr%5B0%5D=id1&idArr%5B1%5D=id2&obj%5Ba%5D=1&obj%5Bb%5D=b&obj%5Bc%5D=true&obj%5Bnested%5D%5Bd%5D=1&obj%5Bnested%5D%5Be%5D=e&obj%5Bnested%5D%5Bf%5D=true&objArr%5B0%5D%5Ba%5D=1&objArr%5B0%5D%5Bb%5D=b&objArr%5B0%5D%5Bc%5D=true&objArr%5B0%5D%5Bnested%5D%5Bd%5D=1&objArr%5B0%5D%5Bnested%5D%5Be%5D=e&objArr%5B0%5D%5Bnested%5D%5Bf%5D=true&objArr%5B1%5D%5Ba%5D=2&objArr%5B1%5D%5Bb%5D=bb&objArr%5B1%5D%5Bc%5D=false&objArr%5B1%5D%5Bnested%5D%5Bd%5D=1&objArr%5B1%5D%5Bnested%5D%5Be%5D=e&objArr%5B1%5D%5Bnested%5D%5Bf%5D=true");
+}
+
+#[tokio::test]
 async fn test_no_source() {
     let mock_server = MockServer::start().await;
     mock_api::user_1().mount(&mock_server).await;
