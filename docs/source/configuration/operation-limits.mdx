@@ -28,6 +28,7 @@ limits:
 Each limit takes an integer value. You can define any combination of [supported limits](#supported-limits).
 
 ## Supported limits
+
 ### `max_depth`
 
 Limits the deepest nesting of selection sets in an operation, including fields in fragments.
@@ -143,3 +144,88 @@ Whenever your router rejects a request because it exceeds an operation limit, th
 ```
 
 If you run your router in [`warn_only` mode](#warn_only-mode), the router logs the limit violation but executes the operation as normal, returning a 200 status code with the expected response.
+
+## Measuring for appropriate values with telemetry
+
+It may be difficult to decide what values to set for operation limits if you have a large number of existing operations. A good option to help make this decision is to measure incoming operations for a set period of time and then use the resulting data as a baseline for your configuration.
+
+### Logging values
+
+You can configure the Router with a [custom event](https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/events#custom-events) to log the values of aliases, depth, height, and root_fields on each operation with the following configuration:
+
+```
+telemetry:
+  instrumentation:
+    events:
+      supergraph:
+        OPERATION_LIMIT_INFO:
+          message: operation limit info
+          on: response
+          level: info
+          attributes:
+            graphql.operation.name: true
+            query.aliases:
+              query: aliases
+            query.depth:
+              query: depth
+            query.height:
+              query: height
+            query.root_fields:
+              query: root_fields
+```
+
+This may not be a good model for a large amount of traffic so it may be preferred to instead collect metrics and export them to your APM.
+
+### Collecting metrics
+
+You can configure the Router to collect [custom metrics](/router/configuration/telemetry/instrumentation/instruments#custom-instruments) on the values of aliases, depth, height, and root_fields on each operation with the following configuration:
+
+```
+telemetry:
+  exporters:
+    metrics:
+      common:
+        views:
+          # Define a custom view because operation limits are different than the default latency-oriented view of OpenTelemetry
+          - name: oplimits.*
+            aggregation:
+              histogram:
+                buckets:
+                  - 0
+                  - 5
+                  - 10
+                  - 25
+                  - 50
+                  - 100
+                  - 500
+                  - 1000
+  instrumentation:
+    instruments:
+      supergraph:
+        oplimits.aliases:
+          value:
+            query: aliases
+          type: histogram
+          unit: number
+          description: "Aliases for an operation"
+        oplimits.depth:
+          value:
+            query: depth
+          type: histogram
+          unit: number
+          description: "Depth for an operation"
+        oplimits.height:
+          value:
+            query: height
+          type: histogram
+          unit: number
+          description: "Height for an operation"
+        oplimits.root_fields:
+          value:
+            query: root_fields
+          type: histogram
+          unit: number
+          description: "Root fields for an operation"
+```
+
+You should also configure the Router to [export metrics](/router/configuration/telemetry/exporters/metrics/overview) to your APM tool.
