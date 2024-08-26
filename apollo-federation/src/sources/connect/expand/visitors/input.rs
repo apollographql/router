@@ -126,7 +126,6 @@ impl GroupVisitor<InputObjectTypeDefinitionPosition, InputObjectFieldDefinitionP
             "tried to exit a group not yet visited",
         ))?;
 
-        // dbg!(&definition, &r#type);
 
         // Now actually consolidate the object into our schema
         try_insert!(self.to_schema, definition, Node::new(r#type))
