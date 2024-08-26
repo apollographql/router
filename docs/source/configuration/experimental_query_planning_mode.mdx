@@ -1,0 +1,38 @@
+---
+title: Experimental Query Planning Mode 
+subtitle: Switch between legacy and native query planning
+noIndex: true
+---
+
+Apollo Router is in the early stages of transitioning to a native query planner,
+replacing the existing, legacy, planner.
+
+As part of the efforts to ensure correctness and stability of the new planner,
+v1.53.0 of the router enables both planners to run in parallel in order
+compare them. The native planner's result is discarded after the comparison and
+only the legacy planner is used to execute requests.
+
+The native planner uses a single thread in the cold path of the router and has a
+bounded queue of 10. If the queue is full, the router simply does not run the
+comparison. This is done to avoid excessive resource consumption.
+
+You may want to turn off this mode if you see a significant spike in CPU
+utilization. This can happen, if, for example, an erroneous operation fails to
+complete planning in the native planner's background thread, increasing this
+thread's CPU utilization. You can swithc to just `legacy` planning in router.yaml:
+
+```yaml title="router.yaml
+experimental_query_planner_mode: legacy
+```
+
+The other variants for this feature flag are:
+* `new`. Enables only the native query planner.
+* `both_best_effort` - default. Enables comparison between legacy and new native
+   query planners. The legacy query planner is used for execution. If any
+   unsupported features are detected, the router falls back to legacy with an
+   `info` log.
+* `legacy`. Enables only the legacy query planner.
+* `both`. Enables comparison between legacy and new native query planners.
+   query planners. The legacy query planner is used for execution. If any
+   unsupported features are detected, the router emits an error and reverts to
+   previous configuration. 
