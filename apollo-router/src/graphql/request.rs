@@ -161,20 +161,6 @@ impl Request {
         seed.deserialize(&mut de)
     }
 
-    /// Convert encoded URL query string parameters (also known as "search
-    /// params") into a GraphQL [`Request`].
-    ///
-    /// An error will be produced in the event that the query string parameters
-    /// cannot be turned into a valid GraphQL `Request`.
-    pub(crate) fn batch_from_urlencoded_query(
-        url_encoded_query: String,
-    ) -> Result<Vec<Request>, serde_json::Error> {
-        let value: serde_json::Value = serde_urlencoded::from_bytes(url_encoded_query.as_bytes())
-            .map_err(serde_json::Error::custom)?;
-
-        Request::process_query_values(&value)
-    }
-
     fn allocate_result_array(value: &serde_json::Value) -> Vec<Request> {
         match value.as_array() {
             Some(array) => Vec::with_capacity(array.len()),
@@ -207,31 +193,6 @@ impl Request {
         } else {
             let bytes = serde_json::to_vec(value)?;
             result.push(Request::deserialize_from_bytes(&bytes.into())?);
-        }
-        Ok(result)
-    }
-
-    fn process_query_values(value: &serde_json::Value) -> Result<Vec<Request>, serde_json::Error> {
-        let mut result = Request::allocate_result_array(value);
-
-        if value.is_array() {
-            tracing::info!(
-                histogram.apollo.router.operations.batching.size = result.len() as f64,
-                mode = "batch_http_link" // Only supported mode right now
-            );
-
-            tracing::info!(
-                monotonic_counter.apollo.router.operations.batching = 1u64,
-                mode = "batch_http_link" // Only supported mode right now
-            );
-            for entry in value
-                .as_array()
-                .expect("We already checked that it was an array")
-            {
-                result.push(Request::process_value(entry)?);
-            }
-        } else {
-            result.push(Request::process_value(value)?)
         }
         Ok(result)
     }

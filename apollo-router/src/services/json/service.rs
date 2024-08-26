@@ -8,8 +8,6 @@ use futures::future::BoxFuture;
 use futures::stream::once;
 use futures::StreamExt;
 use http::header::CONTENT_TYPE;
-use http::request::Parts;
-use http::Method;
 use http::StatusCode;
 use mime::APPLICATION_JSON;
 use serde_json_bytes::Value;
@@ -192,78 +190,6 @@ impl JsonServerService {
         }
     }
 
-    async fn translate_query_request(
-        &self,
-        parts: &Parts,
-    ) -> Result<(Vec<graphql::Request>, bool), TranslateError> {
-        let mut is_batch = false;
-        parts.uri.query().map(|q| {
-            let mut result = vec![];
-
-            match graphql::Request::from_urlencoded_query(q.to_string()) {
-                Ok(request) => {
-                    result.push(request);
-                }
-                Err(err) => {
-                    // It may be a batch of requests, so try that (if config allows) before
-                    // erroring out
-                    if self.batching.enabled
-                        && matches!(self.batching.mode, BatchingMode::BatchHttpLink)
-                    {
-                        result = graphql::Request::batch_from_urlencoded_query(q.to_string())
-                            .map_err(|e| TranslateError {
-                                status: StatusCode::BAD_REQUEST,
-                                error: "failed to decode a valid GraphQL request from path",
-                                extension_code: "INVALID_GRAPHQL_REQUEST",
-                                extension_details: format!(
-                                    "failed to decode a valid GraphQL request from path {e}"
-                                ),
-                            })?;
-                        if result.is_empty() {
-                            return Err(TranslateError {
-                                status: StatusCode::BAD_REQUEST,
-                                error: "failed to decode a valid GraphQL request from path",
-                                extension_code: "INVALID_GRAPHQL_REQUEST",
-                                extension_details: "failed to decode a valid GraphQL request from path: empty array ".to_string()
-                            });
-                        }
-                        is_batch = true;
-                    } else if !q.is_empty() && q.as_bytes()[0] == b'[' {
-                        let extension_details = if self.batching.enabled
-                            && !matches!(self.batching.mode, BatchingMode::BatchHttpLink) {
-                            format!("batching not supported for mode `{}`", self.batching.mode)
-                        } else {
-                            "batching not enabled".to_string()
-                        };
-                        return Err(TranslateError {
-                            status: StatusCode::BAD_REQUEST,
-                            error: "batching not enabled",
-                            extension_code: "BATCHING_NOT_ENABLED",
-                            extension_details,
-                        });
-                    } else {
-                        return Err(TranslateError {
-                            status: StatusCode::BAD_REQUEST,
-                            error: "failed to decode a valid GraphQL request from path",
-                            extension_code: "INVALID_GRAPHQL_REQUEST",
-                            extension_details: format!(
-                                "failed to decode a valid GraphQL request from path {err}"
-                            ),
-                        });
-                    }
-                }
-            };
-            Ok((result, is_batch))
-        }).unwrap_or_else(|| {
-            Err(TranslateError {
-                status: StatusCode::BAD_REQUEST,
-                error: "There was no GraphQL operation to execute. Use the `query` parameter to send an operation, using either GET or POST.",
-                extension_code: "INVALID_GRAPHQL_REQUEST",
-                extension_details: "There was no GraphQL operation to execute. Use the `query` parameter to send an operation, using either GET or POST.".to_string()
-            })
-        })
-    }
-
     fn translate_body_request(
         &self,
         value: Value,
@@ -271,61 +197,12 @@ impl JsonServerService {
         let mut result = vec![];
         let mut is_batch = false;
 
-        match serde_json_bytes::from_value::<graphql::Request>(value.clone()) {
-            Ok(request) => {
-                result.push(request);
-            }
-            Err(err) => {
-                if self.batching.enabled
-                    && matches!(self.batching.mode, BatchingMode::BatchHttpLink)
-                {
-                    //FIXME: batching works on serde_json::Value, not on serde_json_bytes::Value
-                    let v =
-                        serde_json_bytes::from_value::<serde_json::Value>(value).map_err(|e| {
-                            TranslateError {
-                                status: StatusCode::BAD_REQUEST,
-                                error: "failed to deserialize the request body into JSON",
-                                extension_code: "INVALID_GRAPHQL_REQUEST",
-                                extension_details: format!(
-                                    "failed to deserialize the request body into JSON: {e}"
-                                ),
-                            }
-                        })?;
-                    result =
-                        graphql::Request::process_batch_values(&v).map_err(|e| TranslateError {
-                            status: StatusCode::BAD_REQUEST,
-                            error: "failed to deserialize the request body into JSON",
-                            extension_code: "INVALID_GRAPHQL_REQUEST",
-                            extension_details: format!(
-                                "failed to deserialize the request body into JSON: {e}"
-                            ),
-                        })?;
-                    if result.is_empty() {
-                        return Err(TranslateError {
-                            status: StatusCode::BAD_REQUEST,
-                            error: "failed to decode a valid GraphQL request from path",
-                            extension_code: "INVALID_GRAPHQL_REQUEST",
-                            extension_details:
-                                "failed to decode a valid GraphQL request from path: empty array "
-                                    .to_string(),
-                        });
-                    }
-                    is_batch = true;
-                } else if value.is_array() {
-                    let extension_details = if self.batching.enabled
-                        && !matches!(self.batching.mode, BatchingMode::BatchHttpLink)
-                    {
-                        format!("batching not supported for mode `{}`", self.batching.mode)
-                    } else {
-                        "batching not enabled".to_string()
-                    };
-                    return Err(TranslateError {
-                        status: StatusCode::BAD_REQUEST,
-                        error: "batching not enabled",
-                        extension_code: "BATCHING_NOT_ENABLED",
-                        extension_details,
-                    });
-                } else {
+        if value.is_object() {
+            match serde_json_bytes::from_value::<graphql::Request>(value) {
+                Ok(request) => {
+                    result.push(request);
+                }
+                Err(err) => {
                     return Err(TranslateError {
                         status: StatusCode::BAD_REQUEST,
                         error: "failed to deserialize the request body into JSON",
@@ -336,7 +213,58 @@ impl JsonServerService {
                     });
                 }
             }
-        };
+        } else if value.is_array() {
+            if self.batching.enabled && matches!(self.batching.mode, BatchingMode::BatchHttpLink) {
+                //FIXME: batching works on serde_json::Value, not on serde_json_bytes::Value
+                let v = serde_json_bytes::from_value::<serde_json::Value>(value).map_err(|e| {
+                    TranslateError {
+                        status: StatusCode::BAD_REQUEST,
+                        error: "failed to deserialize the request body into JSON",
+                        extension_code: "INVALID_GRAPHQL_REQUEST",
+                        extension_details: format!(
+                            "failed to deserialize the request body into JSON: {e}"
+                        ),
+                    }
+                })?;
+                result =
+                    graphql::Request::process_batch_values(&v).map_err(|e| TranslateError {
+                        status: StatusCode::BAD_REQUEST,
+                        error: "failed to deserialize the request body into JSON",
+                        extension_code: "INVALID_GRAPHQL_REQUEST",
+                        extension_details: format!(
+                            "failed to deserialize the request body into JSON: {e}"
+                        ),
+                    })?;
+                if result.is_empty() {
+                    return Err(TranslateError {
+                        status: StatusCode::BAD_REQUEST,
+                        error: "failed to decode a valid GraphQL request from path",
+                        extension_code: "INVALID_GRAPHQL_REQUEST",
+                        extension_details:
+                            "failed to decode a valid GraphQL request from path: empty array"
+                                .to_string(),
+                    });
+                }
+                is_batch = true;
+            } else {
+                return Err(TranslateError {
+                    status: StatusCode::BAD_REQUEST,
+                    error: "failed to deserialize the request body into JSON",
+                    extension_code: "BATCHING_NOT_ENABLED",
+                    extension_details: "batching not enabled".to_string(),
+                });
+            }
+        } else {
+            return Err(TranslateError {
+                status: StatusCode::BAD_REQUEST,
+                error: "failed to deserialize the request body into JSON",
+                extension_code: "INVALID_GRAPHQL_REQUEST",
+                extension_details:
+                    "failed to deserialize the request body into JSON: invalid JSON type"
+                        .to_string(),
+            });
+        }
+
         Ok((result, is_batch))
     }
 
@@ -349,11 +277,7 @@ impl JsonServerService {
         let (parts, body) = request.into_parts();
 
         let graphql_requests: Result<(Vec<graphql::Request>, bool), TranslateError> =
-            if parts.method == Method::GET {
-                self.translate_query_request(&parts).await
-            } else {
-                self.translate_body_request(body)
-            };
+            self.translate_body_request(body);
 
         let (ok_results, is_batch) = graphql_requests?;
         let mut results = Vec::with_capacity(ok_results.len());

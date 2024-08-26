@@ -327,7 +327,6 @@ impl RouterService {
 
     async fn translate_query_request(&self, parts: &Parts) -> Result<Value, TranslateError> {
         parts.uri.query().map(|q| {
-
             serde_urlencoded::from_str(q)
             .map_err(serde_json::Error::custom).map_err(|e| {
 
