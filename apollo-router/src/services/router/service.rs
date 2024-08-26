@@ -326,10 +326,9 @@ impl RouterService {
     }
 
     async fn translate_query_request(&self, parts: &Parts) -> Result<Value, TranslateError> {
-        parts.uri.query().map(|q| {
+        let mut value: Value = parts.uri.query().map(|q| {
             serde_urlencoded::from_str(q)
             .map_err(serde_json::Error::custom).map_err(|e| {
-
                 TranslateError {
                     status: StatusCode::BAD_REQUEST,
                     error: "failed to deserialize the request body into JSON",
@@ -340,14 +339,52 @@ impl RouterService {
                 }
              })
         }).unwrap_or_else(|| {
-
             Err(TranslateError {
                 status: StatusCode::BAD_REQUEST,
                 error: "There was no GraphQL operation to execute. Use the `query` parameter to send an operation, using either GET or POST.",
                 extension_code: "INVALID_GRAPHQL_REQUEST",
                 extension_details: "There was no GraphQL operation to execute. Use the `query` parameter to send an operation, using either GET or POST.".to_string()
             })
-        })
+        })?;
+
+        if let Some(extensions) = value.as_object_mut().unwrap().get_mut("extensions") {
+            match extensions.as_str() {
+                Some(s) => {
+                    let v: Value = serde_json::from_str(s)
+                        .map_err(serde_json::Error::custom)
+                        .map_err(|e| TranslateError {
+                            status: StatusCode::BAD_REQUEST,
+                            error: "failed to deserialize the request body into JSON",
+                            extension_code: "INVALID_GRAPHQL_REQUEST",
+                            extension_details: format!(
+                                "failed to deserialize the request body into JSON: {e}"
+                            ),
+                        })?;
+                    *extensions = v;
+                }
+                None => {}
+            }
+        }
+        if let Some(variables) = value.as_object_mut().unwrap().get_mut("variables") {
+            match variables.as_str() {
+                Some(s) => {
+                    let v: Value = serde_json::from_str(s)
+                        .map_err(serde_json::Error::custom)
+                        .map_err(|e| TranslateError {
+                            status: StatusCode::BAD_REQUEST,
+                            error: "failed to deserialize the request body into JSON",
+                            extension_code: "INVALID_GRAPHQL_REQUEST",
+                            extension_details: format!(
+                                "failed to deserialize the request body into JSON: {e}"
+                            ),
+                        })?;
+                    *variables = v;
+                }
+                None => {}
+            }
+        }
+
+        Ok(value)
     }
 
     async fn process_json_request(
