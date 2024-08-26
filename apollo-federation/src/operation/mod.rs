@@ -3342,12 +3342,19 @@ impl InlineFragmentSelection {
         let schema = fragment_spread_selection.spread.schema.schema();
         for directive in fragment_spread_selection.spread.directives.iter() {
             let Some(definition) = schema.directive_definitions.get(&directive.name) else {
-                return Err(FederationError::internal(format!("Undefined directive {}", directive.name)));
+                return Err(FederationError::internal(format!(
+                    "Undefined directive {}",
+                    directive.name
+                )));
             };
-            if !definition.locations.contains(&apollo_compiler::schema::DirectiveLocation::InlineFragment) {
+            if !definition
+                .locations
+                .contains(&apollo_compiler::schema::DirectiveLocation::InlineFragment)
+            {
                 return Err(SingleFederationError::UnsupportedSpreadDirective {
                     name: directive.name.clone(),
-                }.into());
+                }
+                .into());
             }
         }
 

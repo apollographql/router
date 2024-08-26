@@ -4,11 +4,11 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Write;
 
-use apollo_compiler::Name;
 use apollo_compiler::executable::GetOperationError;
 use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::validation::WithErrors;
 use apollo_compiler::InvalidNameError;
+use apollo_compiler::Name;
 use lazy_static::lazy_static;
 
 use crate::subgraph::spec::FederationSpecError;
