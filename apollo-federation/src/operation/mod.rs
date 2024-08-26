@@ -894,10 +894,6 @@ impl Selection {
         }
     }
 
-    fn sub_selection_type_position(&self) -> Option<CompositeTypeDefinitionPosition> {
-        Some(self.selection_set()?.type_position.clone())
-    }
-
     pub(crate) fn conditions(&self) -> Result<Conditions, FederationError> {
         let self_conditions = Conditions::from_directives(self.directives())?;
         if let Conditions::Boolean(false) = self_conditions {
@@ -2504,14 +2500,22 @@ impl SelectionSet {
         })
     }
 
+    /// Adds __typename field for selection sets on abstract types.
+    ///
+    /// __typename is added to the sub selection set of a given selection in following conditions
+    /// * if a given selection is a field, we add a __typename sub selection if its selection set type
+    /// position is an abstract type
+    /// * if a given selection is a fragment, we only add __typename sub selection if fragment specifies
+    /// type condition and that type condition is an abstract type.
     pub(crate) fn add_typename_field_for_abstract_types(
         &self,
         parent_type_if_abstract: Option<AbstractTypeDefinitionPosition>,
     ) -> Result<SelectionSet, FederationError> {
         let mut selection_map = SelectionMap::new();
         if let Some(parent) = parent_type_if_abstract {
-            // XXX(@goto-bus-stop): if the selection set has an *alias* named __typename for some
-            // other field, this doesn't work right. is that allowed?
+            // We don't handle aliased __typename fields. This means we may end up with additional
+            // __typename sub selection. This should be fine though as aliased __typenames should
+            // be rare occurrence.
             if !self.has_top_level_typename_field() {
                 let typename_selection = Selection::from_field(
                     Field::new_introspection_typename(&self.schema, &parent.into(), None),
@@ -2522,11 +2526,24 @@ impl SelectionSet {
         }
         for selection in self.selections.values() {
             selection_map.insert(if let Some(selection_set) = selection.selection_set() {
-                let type_if_abstract = selection
-                    .sub_selection_type_position()
-                    .and_then(|ty| ty.try_into().ok());
+                let abstract_type = match selection {
+                    Selection::Field(field_selection) => field_selection
+                        .selection_set
+                        .as_ref()
+                        .map(|s| s.type_position.clone()),
+                    Selection::FragmentSpread(fragment_selection) => {
+                        Some(fragment_selection.spread.type_condition_position.clone())
+                    }
+                    Selection::InlineFragment(inline_fragment_selection) => {
+                        inline_fragment_selection
+                            .inline_fragment
+                            .type_condition_position
+                            .clone()
+                    }
+                }
+                .and_then(|ty| ty.try_into().ok());
                 let updated_selection_set =
-                    selection_set.add_typename_field_for_abstract_types(type_if_abstract)?;
+                    selection_set.add_typename_field_for_abstract_types(abstract_type)?;
 
                 if updated_selection_set == *selection_set {
                     selection.clone()
