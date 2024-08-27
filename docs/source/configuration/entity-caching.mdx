@@ -112,7 +112,7 @@ preview_entity_cache:
 ### Configure time to live (TTL)
 
 Besides configuring a global TTL for all the entries in Redis, the GraphOS Router also honors the [`Cache-Control` header](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control) returned with the subgraph response. It generates a `Cache-Control` header for the client response by aggregating the TTL information from all response parts.
-A TTL has to be configured for all subgraphs using entity caching, either defined in the per subgraph configuration or inherited from the global configuration.
+A TTL has to be configured for all subgraphs using entity caching, either defined in the per subgraph configuration or inherited from the global configuration, in case the subgraph returns a `Cache-Control` header without a `max-age`.
 
 ### Customize Redis cache key
 
@@ -128,8 +128,156 @@ This entry contains an object with the `all` field to affect all subgraph reques
       "data": "key2"
     }
 }
+```
+
+### Invalidation
+
+Entity caching provides multiple ways to invalidate data:
+- an invalidation endpoint exposed by the router, that can receive invalidation requests from any authorized service out of band. This can be used by the subgraph to asynchronously trigger invalidation events, or by the platform operator to maintain the caching levels
+- invalidation requests can be sent through subgraph response extensions, allowing the subgraph to invalidate cached data right after a mutation
+
+Invalidation requests can be used to invalidate a large number of cached entries at once, matching either:
+- all cached entries for a specific subgraph
+- all cached entries for a specific type in a specific subgraph
+- all cached entries for a specific entity in a specific subgraph
+
+An invalidation request is processed first by sending a `SCAN` command to Redis to find all the keys that match the invalidation request. Upon iterating over the scan cursor, the router will send a `DEL` command to Redis to remove the matching keys.
+
+#### Configuration
+
+Invalidation can be configured both globally, and overriden per subgraph.
+
+```yaml title="router.yaml"
+preview_entity_cache:
+  enabled: true
+  redis:
+    urls: ["redis://..."]
+
+  subgraph:
+    all:
+      enabled: true
+      # global invalidation configuration
+      invalidation:
+        # address of the invalidation endpoint
+        # this should only be exposed to internal networks
+        listen: "127.0.0.1:3000"
+        path: "/invalidation"
+        # base64 string that will be provided in the `Authorization: Basic` header value
+        shared_key: "agm3ipv7egb78dmxzv0gr5q0t5l6qs37"
+    subgraphs:
+      products:
+        # per subgraph invalidation configuration
+        invalidation:
+          # whether invalidation is enabled for this subgraph
+          enabled: true
+          # override the shared key for this particular subgraph. If another key is provided, the invalidation requests for this subgraph's entities will not be executed
+          shared_key: "czn5qvjylm231m90hu00hgsuayhyhgjv"
+```
+
+#### Invalidation request format
+
+Invalidation requests are sent as JSON objects with the following format:
+
+- Subgraph invalidation request:
+
+```json
+{
+  "kind": "subgraph",
+  "subgraph": "accounts"
+}
+```
+
+- Subgraph type invalidation request:
+
+```json
+{
+  "kind": "subgraph",
+  "subgraph": "accounts",
+  "type": "User"
+}
+```
+
+- Subgraph entity invalidation request:
+
+```json
+{
+  "kind": "subgraph",
+  "subgraph": "accounts",
+  "type": "User",
+  "key": {
+    "id": "1"
+  }
+}
+```
+
+This is the same key format used by the router in the `representations` field for `_entities` queries.
+
+#### Invalidation HTTP endpoint
+
+The invalidation endpoint exposed by the router can receive multiple invalidation requests at once and will process them in sequence. A shared key can be provided in the request as authorization. As an example, with the precedent configuration, we could send the following request:
 
 ```
+POST http://127.0.0.1:3000/invalidation
+Authorization: agm3ipv7egb78dmxzv0gr5q0t5l6qs37
+Content-Length:96
+Content-Type:application/json
+Accept: application/json
+
+[{
+    "kind": "type",
+    "subgraph": "invalidation-subgraph-type-accounts",
+    "type": "Query"
+}]
+```
+
+We would expect the following response:
+
+```
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "count": 300
+}
+```
+
+The `count` field indicates the number of keys that were removed from Redis.
+
+#### Invalidation through subgraph response extensions
+
+A subgraph can return an `invalidation` array with invalidation requests in its response's `extensions` field.
+
+```json
+{
+  "data": { "invalidateProductReview": 1 },
+  "extensions": {
+      "invalidation": [{
+          "kind": "entity",
+          "subgraph": "invalidation-entity-key-reviews",
+          "type": "Product",
+          "key": {
+              "upc": "1"
+          }
+      }]
+  }
+}
+```
+
+#### Observability
+
+Invalidation requests are instrumented with the following metrics:
+- `apollo.router.operations.entity.invalidation.event`, counter triggered when a batch of invalidation requests is received. It has a label `origin` that can be either `endpoint` or `extensions`
+- `apollo.router.operations.entity.invalidation.entry`, counter measuring how many entries are removed per `DEL` call. It has a label `origin` that can be either `endpoint` or `extensions`, and a label `subgraph.name` with the name of the subgraph that the request is for
+- `apollo.router.cache.invalidation.keys`, histogram measuring the number of keys that were removed from Redis per invalidation request
+- `apollo.router.cache.invalidation.duration`, histogram measuring the time spent handling one invalidation requestt
+
+It is also reported under the following spans:
+- `cache.invalidation.batch`, span covering the processing of a list of invalidation requests. It has a label `origin` that can be either `endpoint` or `extensions`
+- `cache.invalidation.request`, span covering the processing of a single invalidation request
+
+### Failure cases
+
+Entity caching will greatly reduce traffic to subgraphs, resulting in smaller infrastructure needed to serve more client traffic. In the rare cases where Redis is unavailable, the router should be configured with rate limiting for subgraph requests, to avoid overwhelming the subgraphs. It can also be paired with subgraph query deduplication to further reduce traffic.
 
 ## Implementation notes
 
@@ -148,7 +296,3 @@ When used alongside the router's [authorization directives](./authorization), ca
 ### Schema updates and entity caching
 
 On schema updates, the router ensures that queries unaffected by the changes keep their cache entries. Queries with affected fields need to be cached again to ensure the router doesn't serve invalid data from before the update.
-
-### Entity cache invalidation not supported
-
-Cache invalidation is not yet supported and is planned for a future release.
