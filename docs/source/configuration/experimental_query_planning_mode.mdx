@@ -16,8 +16,10 @@ The native planner uses a single thread in the cold path of the router. It has a
 bounded queue of 10 queries. If the queue is full, the router simply does not run the
 comparison to avoid excessive resource consumption.
 
-You can disable the native query planner by configuring your `router.yaml` to use just `legacy` planning. You may want to disable it to avoid spikes in CPU utilization, for example if an erroneous operation fails to complete planning in the native planner's background thread.
-thread's CPU utilization. You can swithc to just `legacy` planning in router.yaml:
+You can disable the native query planner by configuring your `router.yaml` to use just
+`legacy` planning. You may want to disable it to avoid spikes in CPU utilization, for
+example if an erroneous operation fails to complete planning in the native planner's
+background thread.
 
 ```yaml title="router.yaml
 experimental_query_planner_mode: legacy
