@@ -26,8 +26,7 @@ async fn query_planner_cache() -> Result<(), BoxError> {
     // 2. run `docker compose up -d` and connect to the redis container by running `docker-compose exec redis /bin/bash`.
     // 3. Run the `redis-cli` command from the shell and start the redis `monitor` command.
     // 4. Run this test and yank the updated cache key from the redis logs.
-    let known_cache_key = "plan:cache:1:federation:v2.8.3:schema:5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76:query:ff7e3b6ae2b7bd28b00641b22ff94aab8d18b6201a2d4598811d56d23a472460:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:383ebaca21536f16f63ba5ba2602e593382178ad1e539617af4487a2f9497947";
-
+    let known_cache_key = "plan:cache:1:federation:v2.8.3:schema:5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76:query:ff7e3b6ae2b7bd28b00641b22ff94aab8d18b6201a2d4598811d56d23a472460:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:58a9ebbc752cb56c9111dbb7b81570c6abb7526837480cd205788a85c4de263f";
     let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
     let client = RedisClient::new(config, None, None, None);
     let connection_task = client.connect();
@@ -963,7 +962,7 @@ async fn connection_failure_blocks_startup() {
 async fn query_planner_redis_update_query_fragments() {
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_query_fragments.router.yaml"),
-        "plan:cache:1:federation:v2.8.3:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:ca955be743f0dedae36910f6173d8f3e1076441b20a8e9d3466c320d39d83062:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:1ef4ca9553c8d72dc3308163027fbab0c26e8ff73daa07b1139e49fed01fc5c5",
+        "plan:cache:1:federation:v2.8.3:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:ca955be743f0dedae36910f6173d8f3e1076441b20a8e9d3466c320d39d83062:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:56fcacc8de2e085d1f46a0dfcdf3b1e8c0a2549975388c8d2b8ecb64d522c14f"
     )
     .await;
 }
@@ -982,8 +981,7 @@ async fn query_planner_redis_update_planner_mode() {
 async fn query_planner_redis_update_introspection() {
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_introspection.router.yaml"),
-        "plan:cache:1:federation:v2.8.3:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:ca955be743f0dedae36910f6173d8f3e1076441b20a8e9d3466c320d39d83062:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:783c95a060a2a43f14f0241915247b148c542b9ff0e9238f16bae2cc172ac427",
-    )
+        "plan:cache:1:federation:v2.8.3:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:ca955be743f0dedae36910f6173d8f3e1076441b20a8e9d3466c320d39d83062:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:214819cece87efcdd3ae25c19de048154c403b0a98a2f09047e3416a1aefca36"    )
     .await;
 }
 
@@ -991,9 +989,7 @@ async fn query_planner_redis_update_introspection() {
 async fn query_planner_redis_update_defer() {
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_defer.router.yaml"),
-        "plan:cache:1:federation:v2.8.3:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:ca955be743f0dedae36910f6173d8f3e1076441b20a8e9d3466c320d39d83062:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:c632e2e80594b3b8b8e7bf13ee5f2d3e3e1f6cb050d41a8d751b2c2de3e60906",
-
-    )
+        "plan:cache:1:federation:v2.8.3:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:ca955be743f0dedae36910f6173d8f3e1076441b20a8e9d3466c320d39d83062:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:58a9ebbc752cb56c9111dbb7b81570c6abb7526837480cd205788a85c4de263f"    )
     .await;
 }
 
@@ -1003,8 +999,7 @@ async fn query_planner_redis_update_type_conditional_fetching() {
         include_str!(
             "fixtures/query_planner_redis_config_update_type_conditional_fetching.router.yaml"
         ),
-        "plan:cache:1:federation:v2.8.3:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:ca955be743f0dedae36910f6173d8f3e1076441b20a8e9d3466c320d39d83062:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:25dbfa37dc81a68cb3d2302ed470a0dcd5596b23cacd20f4b1e295b98f45239c",
-
+        "plan:cache:1:federation:v2.8.3:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:ca955be743f0dedae36910f6173d8f3e1076441b20a8e9d3466c320d39d83062:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:334396bce746bff275068c97e126891f7b867edb88bf32d707169016ae0bf220"
     )
     .await;
 }
@@ -1015,8 +1010,7 @@ async fn query_planner_redis_update_reuse_query_fragments() {
         include_str!(
             "fixtures/query_planner_redis_config_update_reuse_query_fragments.router.yaml"
         ),
-        "plan:cache:1:federation:v2.8.3:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:ca955be743f0dedae36910f6173d8f3e1076441b20a8e9d3466c320d39d83062:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:8e23b92bb8eb456dd7596dda44f26de31b8b06349549a157bfb7c2d1b492ecc4",
-
+        "plan:cache:1:federation:v2.8.3:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:ca955be743f0dedae36910f6173d8f3e1076441b20a8e9d3466c320d39d83062:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:f92d99f543f3911c0bae7edcccd4d5bf76de37ac1f2f6c0b4deb44cb62ed9e35"
     )
     .await;
 }
@@ -1039,8 +1033,7 @@ async fn test_redis_query_plan_config_update(updated_config: &str, new_cache_key
     router.assert_started().await;
     router.clear_redis_cache().await;
 
-    let starting_key = "plan:cache:1:federation:v2.8.3:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:ca955be743f0dedae36910f6173d8f3e1076441b20a8e9d3466c320d39d83062:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:664d923109135eee5e1f316e19f73a3db1a3fafadc7019cb9b8a9b13d70ac2a3";
-
+    let starting_key = "plan:cache:1:federation:v2.8.3:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:ca955be743f0dedae36910f6173d8f3e1076441b20a8e9d3466c320d39d83062:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:58a9ebbc752cb56c9111dbb7b81570c6abb7526837480cd205788a85c4de263f";
     router.execute_default_query().await;
     router.assert_redis_cache_contains(starting_key, None).await;
     router.update_config(updated_config).await;
