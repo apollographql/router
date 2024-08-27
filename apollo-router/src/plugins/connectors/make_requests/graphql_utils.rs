@@ -36,14 +36,17 @@ pub(super) fn field_arguments_map(
 
     for argument_def in field.definition.arguments.iter() {
         if let Some(value) = argument_def.default_value.as_ref() {
-            arguments
-                .entry(argument_def.name.as_str())
-                .or_insert_with(|| {
-                    argument_value_to_json(value).unwrap_or_else(|err| {
-                        tracing::warn!("failed to convert default value to json: {}", err);
-                        JSONValue::Null
-                    })
-                });
+            if !arguments.contains_key(argument_def.name.as_str()) {
+                arguments.insert(
+                    argument_def.name.as_str(),
+                    argument_value_to_json(value).map_err(|err| {
+                        format!(
+                            "failed to convert default value on {}({}:) to json: {}",
+                            field.definition.name, argument_def.name, err
+                        )
+                    })?,
+                );
+            }
         }
     }
 
