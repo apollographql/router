@@ -224,7 +224,12 @@ impl From<&SupergraphValue> for InstrumentValue<SupergraphSelector> {
     fn from(value: &SupergraphValue) -> Self {
         match value {
             SupergraphValue::Standard(s) => InstrumentValue::Standard(s.clone()),
-            SupergraphValue::Custom(selector) => InstrumentValue::Custom(selector.clone()),
+            SupergraphValue::Custom(selector) => match selector {
+                SupergraphSelector::Cost { .. } => {
+                    InstrumentValue::Chunked(Event::Custom(selector.clone()))
+                }
+                _ => InstrumentValue::Custom(selector.clone()),
+            },
             SupergraphValue::Event(e) => InstrumentValue::Chunked(e.clone()),
         }
     }
@@ -800,6 +805,55 @@ impl Selector for RouterSelector {
             _ => None,
         }
     }
+
+    fn is_active(&self, stage: super::Stage) -> bool {
+        match stage {
+            super::Stage::Request => {
+                matches!(
+                    self,
+                    RouterSelector::RequestHeader { .. }
+                        | RouterSelector::RequestMethod { .. }
+                        | RouterSelector::TraceId { .. }
+                        | RouterSelector::StudioOperationId { .. }
+                        | RouterSelector::Baggage { .. }
+                        | RouterSelector::Static(_)
+                        | RouterSelector::Env { .. }
+                        | RouterSelector::StaticField { .. }
+                )
+            }
+            super::Stage::Response | super::Stage::ResponseEvent => matches!(
+                self,
+                RouterSelector::TraceId { .. }
+                    | RouterSelector::StudioOperationId { .. }
+                    | RouterSelector::OperationName { .. }
+                    | RouterSelector::Baggage { .. }
+                    | RouterSelector::Static(_)
+                    | RouterSelector::Env { .. }
+                    | RouterSelector::StaticField { .. }
+                    | RouterSelector::ResponseHeader { .. }
+                    | RouterSelector::ResponseContext { .. }
+                    | RouterSelector::ResponseStatus { .. }
+                    | RouterSelector::OnGraphQLError { .. }
+            ),
+            super::Stage::ResponseField => false,
+            super::Stage::Error => matches!(
+                self,
+                RouterSelector::TraceId { .. }
+                    | RouterSelector::StudioOperationId { .. }
+                    | RouterSelector::OperationName { .. }
+                    | RouterSelector::Baggage { .. }
+                    | RouterSelector::Static(_)
+                    | RouterSelector::Env { .. }
+                    | RouterSelector::StaticField { .. }
+                    | RouterSelector::ResponseContext { .. }
+                    | RouterSelector::Error { .. }
+            ),
+            super::Stage::Drop => matches!(
+                self,
+                RouterSelector::Static(_) | RouterSelector::StaticField { .. }
+            ),
+        }
+    }
 }
 
 impl Selector for SupergraphSelector {
@@ -833,7 +887,11 @@ impl Selector for SupergraphSelector {
                 .flatten()
                 .map(opentelemetry::Value::from),
 
-            SupergraphSelector::Query { default, .. } => request
+            SupergraphSelector::Query {
+                default,
+                query: Query::String,
+                ..
+            } => request
                 .supergraph_request
                 .body()
                 .query
@@ -990,6 +1048,25 @@ impl Selector for SupergraphSelector {
         ctx: &Context,
     ) -> Option<opentelemetry::Value> {
         match self {
+            SupergraphSelector::Query { query, .. } => {
+                let limits_opt = ctx
+                    .extensions()
+                    .with_lock(|lock| lock.get::<OperationLimits<u32>>().cloned());
+                match query {
+                    Query::Aliases => {
+                        limits_opt.map(|limits| opentelemetry::Value::I64(limits.aliases as i64))
+                    }
+                    Query::Depth => {
+                        limits_opt.map(|limits| opentelemetry::Value::I64(limits.depth as i64))
+                    }
+                    Query::Height => {
+                        limits_opt.map(|limits| opentelemetry::Value::I64(limits.height as i64))
+                    }
+                    Query::RootFields => limits_opt
+                        .map(|limits| opentelemetry::Value::I64(limits.root_fields as i64)),
+                    Query::String => None,
+                }
+            }
             SupergraphSelector::ResponseData {
                 response_data,
                 default,
@@ -1143,6 +1220,66 @@ impl Selector for SupergraphSelector {
             SupergraphSelector::Static(val) => Some(val.clone().into()),
             SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             _ => None,
+        }
+    }
+
+    fn is_active(&self, stage: super::Stage) -> bool {
+        match stage {
+            super::Stage::Request => matches!(
+                self,
+                SupergraphSelector::OperationName { .. }
+                    | SupergraphSelector::OperationKind { .. }
+                    | SupergraphSelector::Query { .. }
+                    | SupergraphSelector::RequestHeader { .. }
+                    | SupergraphSelector::QueryVariable { .. }
+                    | SupergraphSelector::RequestContext { .. }
+                    | SupergraphSelector::Baggage { .. }
+                    | SupergraphSelector::Env { .. }
+                    | SupergraphSelector::Static(_)
+                    | SupergraphSelector::StaticField { .. }
+            ),
+            super::Stage::Response => matches!(
+                self,
+                SupergraphSelector::Query { .. }
+                    | SupergraphSelector::ResponseHeader { .. }
+                    | SupergraphSelector::ResponseStatus { .. }
+                    | SupergraphSelector::ResponseContext { .. }
+                    | SupergraphSelector::OnGraphQLError { .. }
+                    | SupergraphSelector::OperationName { .. }
+                    | SupergraphSelector::OperationKind { .. }
+                    | SupergraphSelector::IsPrimaryResponse { .. }
+                    | SupergraphSelector::Static(_)
+                    | SupergraphSelector::StaticField { .. }
+            ),
+            super::Stage::ResponseEvent => matches!(
+                self,
+                SupergraphSelector::ResponseData { .. }
+                    | SupergraphSelector::ResponseErrors { .. }
+                    | SupergraphSelector::Cost { .. }
+                    | SupergraphSelector::OnGraphQLError { .. }
+                    | SupergraphSelector::OperationName { .. }
+                    | SupergraphSelector::OperationKind { .. }
+                    | SupergraphSelector::IsPrimaryResponse { .. }
+                    | SupergraphSelector::ResponseContext { .. }
+                    | SupergraphSelector::Static(_)
+                    | SupergraphSelector::StaticField { .. }
+            ),
+            super::Stage::ResponseField => false,
+            super::Stage::Error => matches!(
+                self,
+                SupergraphSelector::OperationName { .. }
+                    | SupergraphSelector::OperationKind { .. }
+                    | SupergraphSelector::Query { .. }
+                    | SupergraphSelector::Error { .. }
+                    | SupergraphSelector::Static(_)
+                    | SupergraphSelector::StaticField { .. }
+                    | SupergraphSelector::ResponseContext { .. }
+                    | SupergraphSelector::IsPrimaryResponse { .. }
+            ),
+            super::Stage::Drop => matches!(
+                self,
+                SupergraphSelector::Static(_) | SupergraphSelector::StaticField { .. }
+            ),
         }
     }
 }
@@ -1518,6 +1655,63 @@ impl Selector for SubgraphSelector {
             SubgraphSelector::Static(val) => Some(val.clone().into()),
             SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             _ => None,
+        }
+    }
+
+    fn is_active(&self, stage: super::Stage) -> bool {
+        match stage {
+            super::Stage::Request => matches!(
+                self,
+                SubgraphSelector::SubgraphOperationName { .. }
+                    | SubgraphSelector::SupergraphOperationName { .. }
+                    | SubgraphSelector::SubgraphName { .. }
+                    | SubgraphSelector::SubgraphOperationKind { .. }
+                    | SubgraphSelector::SupergraphOperationKind { .. }
+                    | SubgraphSelector::SupergraphQuery { .. }
+                    | SubgraphSelector::SubgraphQuery { .. }
+                    | SubgraphSelector::SubgraphQueryVariable { .. }
+                    | SubgraphSelector::SupergraphQueryVariable { .. }
+                    | SubgraphSelector::SubgraphRequestHeader { .. }
+                    | SubgraphSelector::SupergraphRequestHeader { .. }
+                    | SubgraphSelector::RequestContext { .. }
+                    | SubgraphSelector::Baggage { .. }
+                    | SubgraphSelector::Env { .. }
+                    | SubgraphSelector::Static(_)
+                    | SubgraphSelector::StaticField { .. }
+            ),
+            super::Stage::Response => matches!(
+                self,
+                SubgraphSelector::SubgraphResponseHeader { .. }
+                    | SubgraphSelector::SubgraphResponseStatus { .. }
+                    | SubgraphSelector::SubgraphOperationKind { .. }
+                    | SubgraphSelector::SupergraphOperationKind { .. }
+                    | SubgraphSelector::SupergraphOperationName { .. }
+                    | SubgraphSelector::SubgraphName { .. }
+                    | SubgraphSelector::SubgraphResponseBody { .. }
+                    | SubgraphSelector::SubgraphResponseData { .. }
+                    | SubgraphSelector::SubgraphResponseErrors { .. }
+                    | SubgraphSelector::ResponseContext { .. }
+                    | SubgraphSelector::OnGraphQLError { .. }
+                    | SubgraphSelector::Static(_)
+                    | SubgraphSelector::StaticField { .. }
+                    | SubgraphSelector::Cache { .. }
+            ),
+            super::Stage::ResponseEvent => false,
+            super::Stage::ResponseField => false,
+            super::Stage::Error => matches!(
+                self,
+                SubgraphSelector::SubgraphOperationKind { .. }
+                    | SubgraphSelector::SupergraphOperationKind { .. }
+                    | SubgraphSelector::SupergraphOperationName { .. }
+                    | SubgraphSelector::Error { .. }
+                    | SubgraphSelector::Static(_)
+                    | SubgraphSelector::StaticField { .. }
+                    | SubgraphSelector::ResponseContext { .. }
+            ),
+            super::Stage::Drop => matches!(
+                self,
+                SubgraphSelector::Static(_) | SubgraphSelector::StaticField { .. }
+            ),
         }
     }
 }
@@ -3010,10 +3204,16 @@ mod test {
             selector
                 .on_response(
                     &crate::services::SupergraphResponse::fake_builder()
-                        .context(context)
+                        .context(context.clone())
                         .build()
                         .unwrap()
                 )
+                .unwrap(),
+            4.into()
+        );
+        assert_eq!(
+            selector
+                .on_response_event(&crate::graphql::Response::builder().build(), &context)
                 .unwrap(),
             4.into()
         );

@@ -8,6 +8,7 @@ mod docs;
 mod file_upload;
 mod lifecycle;
 mod operation_limits;
+mod query_planner;
 mod subgraph_response;
 mod traffic_shaping;
 

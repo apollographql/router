@@ -10,6 +10,7 @@ use apollo_compiler::ast;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_federation::error::FederationError;
+use apollo_federation::error::SingleFederationError;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use futures::future::BoxFuture;
 use opentelemetry_api::metrics::MeterProvider as _;
@@ -64,6 +65,10 @@ use crate::Configuration;
 
 pub(crate) const RUST_QP_MODE: &str = "rust";
 const JS_QP_MODE: &str = "js";
+const UNSUPPORTED_CONTEXT: &str = "context";
+const UNSUPPORTED_OVERRIDES: &str = "overrides";
+const UNSUPPORTED_FED1: &str = "fed1";
+const INTERNAL_INIT_ERROR: &str = "internal";
 
 #[derive(Clone)]
 /// A query planner that calls out to the nodejs router-bridge query planner.
@@ -162,10 +167,7 @@ impl PlannerMode {
             QueryPlannerMode::BothBestEffort => match Self::rust(schema, configuration) {
                 Ok(planner) => Ok(Some(planner)),
                 Err(error) => {
-                    tracing::warn!(
-                        "Failed to initialize the new query planner, \
-                         falling back to legacy: {error}"
-                    );
+                    tracing::info!("Falling back to the legacy query planner: {error}");
                     Ok(None)
                 }
             },
@@ -176,11 +178,47 @@ impl PlannerMode {
         schema: &Schema,
         configuration: &Configuration,
     ) -> Result<Arc<QueryPlanner>, ServiceBuildError> {
-        let config = configuration.rust_query_planner_config();
-        Ok(Arc::new(QueryPlanner::new(
-            schema.federation_supergraph(),
-            config,
-        )?))
+        let config = apollo_federation::query_plan::query_planner::QueryPlannerConfig {
+            reuse_query_fragments: configuration
+                .supergraph
+                .reuse_query_fragments
+                .unwrap_or(true),
+            subgraph_graphql_validation: false,
+            generate_query_fragments: configuration.supergraph.generate_query_fragments,
+            incremental_delivery:
+                apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig {
+                    enable_defer: configuration.supergraph.defer_support,
+                },
+            debug: Default::default(),
+        };
+        let result = QueryPlanner::new(schema.federation_supergraph(), config);
+
+        match &result {
+            Err(FederationError::SingleFederationError {
+                inner: error,
+                trace: _,
+            }) => match error {
+                SingleFederationError::UnsupportedFederationVersion { .. } => {
+                    metric_rust_qp_init(Some(UNSUPPORTED_FED1));
+                }
+                SingleFederationError::UnsupportedFeature { message: _, kind } => match kind {
+                    apollo_federation::error::UnsupportedFeatureKind::ProgressiveOverrides => {
+                        metric_rust_qp_init(Some(UNSUPPORTED_OVERRIDES))
+                    }
+                    apollo_federation::error::UnsupportedFeatureKind::Context => {
+                        metric_rust_qp_init(Some(UNSUPPORTED_CONTEXT))
+                    }
+                    _ => metric_rust_qp_init(Some(INTERNAL_INIT_ERROR)),
+                },
+                _ => {
+                    metric_rust_qp_init(Some(INTERNAL_INIT_ERROR));
+                }
+            },
+            Err(_) => metric_rust_qp_init(Some(INTERNAL_INIT_ERROR)),
+            Ok(_) => metric_rust_qp_init(None),
+        }
+
+        Ok(Arc::new(result.map_err(ServiceBuildError::QpInitError)?))
     }
 
     async fn js(
@@ -963,6 +1001,25 @@ pub(crate) fn metric_query_planning_plan_duration(planner: &'static str, start: 
     );
 }
 
+pub(crate) fn metric_rust_qp_init(init_error_kind: Option<&'static str>) {
+    if let Some(init_error_kind) = init_error_kind {
+        u64_counter!(
+            "apollo.router.lifecycle.query_planner.init",
+            "Rust query planner initialization",
+            1,
+            "init.error_kind" = init_error_kind,
+            "init.is_success" = false
+        );
+    } else {
+        u64_counter!(
+            "apollo.router.lifecycle.query_planner.init",
+            "Rust query planner initialization",
+            1,
+            "init.is_success" = true
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -1603,6 +1660,44 @@ mod tests {
             "apollo.router.query_planning.plan.duration",
             f64,
             "planner" = "js"
+        );
+    }
+
+    #[test]
+    fn test_metric_rust_qp_initialization() {
+        metric_rust_qp_init(None);
+        assert_counter!(
+            "apollo.router.lifecycle.query_planner.init",
+            1,
+            "init.is_success" = true
+        );
+        metric_rust_qp_init(Some(UNSUPPORTED_CONTEXT));
+        assert_counter!(
+            "apollo.router.lifecycle.query_planner.init",
+            1,
+            "init.error_kind" = "context",
+            "init.is_success" = false
+        );
+        metric_rust_qp_init(Some(UNSUPPORTED_OVERRIDES));
+        assert_counter!(
+            "apollo.router.lifecycle.query_planner.init",
+            1,
+            "init.error_kind" = "overrides",
+            "init.is_success" = false
+        );
+        metric_rust_qp_init(Some(UNSUPPORTED_FED1));
+        assert_counter!(
+            "apollo.router.lifecycle.query_planner.init",
+            1,
+            "init.error_kind" = "fed1",
+            "init.is_success" = false
+        );
+        metric_rust_qp_init(Some(INTERNAL_INIT_ERROR));
+        assert_counter!(
+            "apollo.router.lifecycle.query_planner.init",
+            1,
+            "init.error_kind" = "internal",
+            "init.is_success" = false
         );
     }
 }

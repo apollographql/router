@@ -13,6 +13,7 @@ use rand::seq::SliceRandom;
 use rand::thread_rng;
 use router_bridge::planner::PlanOptions;
 use router_bridge::planner::Planner;
+use router_bridge::planner::QueryPlannerConfig;
 use router_bridge::planner::UsageReporting;
 use sha2::Digest;
 use sha2::Sha256;
@@ -55,11 +56,11 @@ pub(crate) type InMemoryCachePlanner =
     InMemoryCache<CachingQueryKey, Result<QueryPlannerContent, Arc<QueryPlannerError>>>;
 pub(crate) const APOLLO_OPERATION_ID: &str = "apollo_operation_id";
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Hash)]
 pub(crate) enum ConfigMode {
     //FIXME: add the Rust planner structure once it is hashable and serializable,
     // for now use the JS config as it expected to be identical to the Rust one
-    Rust(Arc<QueryPlannerConfig>),
+    Rust(Arc<apollo_federation::query_plan::query_planner::QueryPlannerConfig>),
     Both(Arc<QueryPlannerConfig>),
     BothBestEffort(Arc<QueryPlannerConfig>),
     Js(Arc<QueryPlannerConfig>),
@@ -130,19 +131,22 @@ where
         match configuration.experimental_query_planner_mode {
             crate::configuration::QueryPlannerMode::New => {
                 "PLANNER-NEW".hash(&mut hasher);
-                configuration.rust_query_planner_config().hash(&mut hasher);
+                ConfigMode::Rust(Arc::new(configuration.rust_query_planner_config()))
+                    .hash(&mut hasher);
             }
             crate::configuration::QueryPlannerMode::Legacy => {
                 "PLANNER-LEGACY".hash(&mut hasher);
-                configuration.js_query_planner_config().hash(&mut hasher);
+                ConfigMode::Js(Arc::new(configuration.js_query_planner_config())).hash(&mut hasher);
             }
             crate::configuration::QueryPlannerMode::Both => {
                 "PLANNER-BOTH".hash(&mut hasher);
-                configuration.js_query_planner_config().hash(&mut hasher);
-                configuration.rust_query_planner_config().hash(&mut hasher);
+                ConfigMode::Js(Arc::new(configuration.js_query_planner_config())).hash(&mut hasher);
+                ConfigMode::Rust(Arc::new(configuration.rust_query_planner_config()))
+                    .hash(&mut hasher);
             }
             crate::configuration::QueryPlannerMode::BothBestEffort => {
                 ConfigMode::BothBestEffort(Arc::new(configuration.js_query_planner_config()))
+                    .hash(&mut hasher);
             }
         };
         let config_mode = Arc::new(QueryHash(hasher.finalize()));
