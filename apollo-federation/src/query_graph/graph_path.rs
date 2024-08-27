@@ -11,7 +11,6 @@ use std::sync::Arc;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
-use apollo_compiler::executable::DirectiveList;
 use itertools::Itertools;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
@@ -30,6 +29,7 @@ use crate::link::graphql_definition::BooleanOrVariable;
 use crate::link::graphql_definition::DeferDirectiveArguments;
 use crate::link::graphql_definition::OperationConditional;
 use crate::link::graphql_definition::OperationConditionalKind;
+use crate::operation::DirectiveList;
 use crate::operation::Field;
 use crate::operation::FieldData;
 use crate::operation::HasSelectionKey;
@@ -310,7 +310,7 @@ impl HasSelectionKey for OpPathElement {
 }
 
 impl OpPathElement {
-    pub(crate) fn directives(&self) -> &Arc<DirectiveList> {
+    pub(crate) fn directives(&self) -> &DirectiveList {
         match self {
             OpPathElement::Field(field) => &field.directives,
             OpPathElement::InlineFragment(inline_fragment) => &inline_fragment.directives,
@@ -427,6 +427,7 @@ impl OpPathElement {
         match self {
             Self::Field(_) => Some(self.clone()), // unchanged
             Self::InlineFragment(inline_fragment) => {
+                // TODO(@goto-bus-stop): is this not exactly the wrong way around?
                 let updated_directives: DirectiveList = inline_fragment
                     .directives
                     .get_all("defer")
@@ -880,6 +881,11 @@ where
         let mut edges = self.edges.clone();
         let mut edge_triggers = self.edge_triggers.clone();
         let mut edge_conditions = self.edge_conditions.clone();
+        let mut last_subgraph_entering_edge_info = if defer.is_none() {
+            self.last_subgraph_entering_edge_info.clone()
+        } else {
+            None
+        };
 
         let Some(new_edge) = edge.into() else {
             edges.push(edge);
@@ -895,11 +901,7 @@ where
                 // We clear `last_subgraph_entering_edge_info` as we enter a `@defer`. That is
                 // because `last_subgraph_entering_edge_info` is used to eliminate some non-optimal
                 // paths, but we don't want those optimizations to bypass a `@defer` application.
-                last_subgraph_entering_edge_info: if defer.is_some() {
-                    None
-                } else {
-                    self.last_subgraph_entering_edge_info.clone()
-                },
+                last_subgraph_entering_edge_info,
                 own_path_ids: self.own_path_ids.clone(),
                 overriding_path_ids: self.overriding_path_ids.clone(),
                 runtime_types_of_tail: Arc::new(
@@ -1077,6 +1079,12 @@ where
                 edges.push(edge);
                 edge_triggers.push(Arc::new(trigger));
                 edge_conditions.push(condition_path_tree);
+                if defer.is_none() && self.graph.is_cross_subgraph_edge(new_edge)? {
+                    last_subgraph_entering_edge_info = Some(SubgraphEnteringEdgeInfo {
+                        index: self.edges.len() - 1,
+                        conditions_cost: condition_cost,
+                    });
+                }
                 return Ok(GraphPath {
                     graph: self.graph.clone(),
                     head: self.head,
@@ -1089,16 +1097,7 @@ where
                     //
                     // PORT_NOTE: In the JS codebase, the information for the last subgraph-entering
                     // is set incorrectly, in that the index is off by one. We fix that bug here.
-                    last_subgraph_entering_edge_info: if defer.is_none()
-                        && self.graph.is_cross_subgraph_edge(new_edge)?
-                    {
-                        Some(SubgraphEnteringEdgeInfo {
-                            index: self.edges.len() - 1,
-                            conditions_cost: condition_cost,
-                        })
-                    } else {
-                        None
-                    },
+                    last_subgraph_entering_edge_info,
                     own_path_ids: self.own_path_ids.clone(),
                     overriding_path_ids: self.overriding_path_ids.clone(),
                     runtime_types_of_tail: Arc::new(self.graph.advance_possible_runtime_types(
@@ -1115,6 +1114,12 @@ where
         edges.push(edge);
         edge_triggers.push(Arc::new(trigger));
         edge_conditions.push(condition_path_tree);
+        if defer.is_none() && self.graph.is_cross_subgraph_edge(new_edge)? {
+            last_subgraph_entering_edge_info = Some(SubgraphEnteringEdgeInfo {
+                index: self.edges.len(),
+                conditions_cost: condition_cost,
+            });
+        }
         Ok(GraphPath {
             graph: self.graph.clone(),
             head: self.head,
@@ -1124,16 +1129,7 @@ where
             edge_conditions,
             // Again, we don't want to set `last_subgraph_entering_edge_info` if we're entering a
             // `@defer` (see above).
-            last_subgraph_entering_edge_info: if defer.is_none()
-                && self.graph.is_cross_subgraph_edge(new_edge)?
-            {
-                Some(SubgraphEnteringEdgeInfo {
-                    index: self.edges.len(),
-                    conditions_cost: condition_cost,
-                })
-            } else {
-                None
-            },
+            last_subgraph_entering_edge_info,
             own_path_ids: self.own_path_ids.clone(),
             overriding_path_ids: self.overriding_path_ids.clone(),
             runtime_types_of_tail: Arc::new(
@@ -1461,10 +1457,12 @@ where
         heap.push(HeapElement(self.clone()));
 
         while let Some(HeapElement(to_advance)) = heap.pop() {
-            let span = debug_span!("From {to_advance:?}");
+            debug!("From {to_advance:?}");
+            let span = debug_span!(" |");
             let _guard = span.enter();
             for edge in to_advance.next_edges()? {
-                let span = debug_span!("Testing edge {edge:?}");
+                debug!("Testing edge {edge:?}");
+                let span = debug_span!(" |");
                 let _guard = span.enter();
                 let edge_weight = self.graph.edge_weight(edge)?;
                 if edge_weight.transition.collect_operation_elements() {
@@ -1543,7 +1541,8 @@ where
                     continue;
                 }
 
-                let span = debug_span!("Validating conditions {edge_weight}");
+                debug!("Validating conditions {edge_weight}");
+                let span = debug_span!(" |");
                 let guard = span.enter();
                 // As we validate the condition for this edge, it might be necessary to jump to
                 // another subgraph, but if for that we need to jump to the same subgraph we're
@@ -1659,7 +1658,7 @@ where
                                 let last_subgraph_entering_edge_head_weight =
                                     self.graph.node_weight(last_subgraph_entering_edge_head)?;
                                 last_subgraph_entering_edge_head_weight.source
-                                    == last_subgraph_entering_edge_tail_weight.source
+                                    == edge_tail_weight.source
                             };
 
                             let direct_path_end_node =
@@ -1671,7 +1670,7 @@ where
                                             "Edge tail is unexpectedly a federated root",
                                         ));
                                     };
-                                    self.check_direct_path_from_node(
+                                    to_advance.check_direct_path_from_node(
                                         last_subgraph_entering_edge_info.index + 1,
                                         direct_path_start_node,
                                         edge_tail_type_pos,
@@ -1750,7 +1749,6 @@ where
                         edge_tail_weight.source.clone(),
                         Some((updated_path.clone(), cost)),
                     );
-                    debug!("Using edge, advance path: {updated_path:?}");
                     // It can be necessary to "chain" keys, because different subgraphs may have
                     // different keys exposed, and so we when we took a key, we want to check if
                     // there is a new key we can now use that takes us to other subgraphs. For other
@@ -2631,10 +2629,9 @@ impl OpGraphPath {
                             debug!("Casting into requested type {field_parent_pos}");
                             Arc::new(IndexSet::from_iter([field_parent_pos.clone()]))
                         } else {
-                            if interface_path.is_some() {
-                                debug!("No direct edge: type exploding interface {tail_weight} into possible runtime types {:?}", self.runtime_types_of_tail);
-                            } else {
-                                debug!("Type exploding interface {tail_weight} into possible runtime types {:?} as 2nd option", self.runtime_types_of_tail);
+                            match &interface_path {
+                                Some(_) => debug!("No direct edge: type exploding interface {tail_weight} into possible runtime types {:?}", self.runtime_types_of_tail),
+                                None => debug!("Type exploding interface {tail_weight} into possible runtime types {:?} as 2nd option", self.runtime_types_of_tail),
                             }
                             self.runtime_types_of_tail.clone()
                         };
@@ -2644,8 +2641,8 @@ impl OpGraphPath {
                         // any gives us empty options, we bail.
                         let mut options_for_each_implementation = vec![];
                         for implementation_type_pos in implementations.as_ref() {
-                            let span =
-                                debug_span!("Handling implementation {implementation_type_pos}");
+                            debug!("Handling implementation {implementation_type_pos}");
+                            let span = debug_span!(" |");
                             let guard = span.enter();
                             let implementation_inline_fragment =
                                 InlineFragment::new(InlineFragmentData {
@@ -3094,7 +3091,7 @@ impl OpGraphPath {
         // account (it may very well be that whatever comes after `u` is not in `A`, for instance).
         let self_tail_weight = self.graph.node_weight(self.tail)?;
         let other_tail_weight = self.graph.node_weight(other.tail)?;
-        if self_tail_weight.source == other_tail_weight.source {
+        if self_tail_weight.source != other_tail_weight.source {
             // As described above, we want to know if one of the paths has no jumps at all (after
             // the common prefix) while the other has some.
             self.compare_subgraph_jumps_after_last_common_node(other)
@@ -3182,9 +3179,9 @@ impl SimultaneousPaths {
                 product.saturating_mul(options.len())
             });
         if num_options > 1_000_000 {
-            return Err(FederationError::internal(
-                "flat_cartesian_product: excessive number of combinations: {num_options}",
-            ));
+            return Err(FederationError::internal(format!(
+                "flat_cartesian_product: excessive number of combinations: {num_options}"
+            )));
         }
         let mut product = Vec::with_capacity(num_options);
 
@@ -3236,9 +3233,9 @@ impl SimultaneousPaths {
         match (self.0.as_slice(), other.0.as_slice()) {
             ([a], [b]) => a.compare_single_path_options_complexity_out_of_context(b),
             ([a], _) => a.compare_single_vs_multi_path_options_complexity_out_of_context(other),
-            (_, [b]) => Ok(b
-                .compare_single_vs_multi_path_options_complexity_out_of_context(self)?
-                .reverse()),
+            (_, [b]) => b
+                .compare_single_vs_multi_path_options_complexity_out_of_context(self)
+                .map(Ordering::reverse),
             _ => Ok(Ordering::Equal),
         }
     }
@@ -3349,8 +3346,12 @@ impl SimultaneousPathsWithLazyIndirectPaths {
         operation_element: &OpPathElement,
         condition_resolver: &mut impl ConditionResolver,
     ) -> Result<Option<Vec<SimultaneousPathsWithLazyIndirectPaths>>, FederationError> {
-        let span = debug_span!("Trying to advance paths for operation", paths = %self.paths, operation = %operation_element);
-        let _gaurd = span.enter();
+        debug!(
+            "Trying to advance paths for operation: path = {}, operation = {operation_element}",
+            self.paths
+        );
+        let span = debug_span!(" |");
+        let _guard = span.enter();
         let updated_context = self.context.with_context_of(operation_element)?;
         let mut options_for_each_path = vec![];
 
@@ -3358,13 +3359,15 @@ impl SimultaneousPathsWithLazyIndirectPaths {
         // references to `self`, which means cloning these paths when iterating.
         let paths = self.paths.0.clone();
         for (path_index, path) in paths.iter().enumerate() {
-            let span = debug_span!("Computing options for {path}");
+            debug!("Computing options for {path}");
+            let span = debug_span!(" |");
             let gaurd = span.enter();
             let mut options = None;
             let should_reenter_subgraph = path.defer_on_tail.is_some()
                 && matches!(operation_element, OpPathElement::Field(_));
             if !should_reenter_subgraph {
-                let span = debug_span!("Direct options");
+                debug!("Direct options");
+                let span = debug_span!(" |");
                 let gaurd = span.enter();
                 let (advance_options, has_only_type_exploded_results) = path
                     .advance_with_operation_element(
@@ -3417,8 +3420,6 @@ impl SimultaneousPathsWithLazyIndirectPaths {
             // defer), that's ok, we'll just try with non-collecting edges.
             let mut options = options.unwrap_or_else(Vec::new);
             if let OpPathElement::Field(operation_field) = operation_element {
-                let span = debug_span!("Computing indirect paths:");
-                let _gaurd = span.enter();
                 // Add whatever options can be obtained by taking some non-collecting edges first.
                 let paths_with_non_collecting_edges = self
                     .indirect_options(&updated_context, path_index, condition_resolver)?
@@ -3428,13 +3429,11 @@ impl SimultaneousPathsWithLazyIndirectPaths {
                         "{} indirect paths",
                         paths_with_non_collecting_edges.paths.len()
                     );
-                    let span = debug_span!("Validating indirect options:");
-                    let _gaurd = span.enter();
                     for paths_with_non_collecting_edges in
                         paths_with_non_collecting_edges.paths.iter()
                     {
-                        let span =
-                            debug_span!("For indirect path {paths_with_non_collecting_edges}:");
+                        debug!("For indirect path {paths_with_non_collecting_edges}:");
+                        let span = debug_span!(" |");
                         let _gaurd = span.enter();
                         let (advance_options, _) = paths_with_non_collecting_edges
                             .advance_with_operation_element(
@@ -3679,18 +3678,16 @@ impl OpPath {
     }
 
     pub(crate) fn conditional_directives(&self) -> DirectiveList {
-        DirectiveList(
-            self.0
-                .iter()
-                .flat_map(|path_element| {
-                    path_element
-                        .directives()
-                        .iter()
-                        .filter(|d| d.name == "include" || d.name == "skip")
-                })
-                .cloned()
-                .collect(),
-        )
+        self.0
+            .iter()
+            .flat_map(|path_element| {
+                path_element
+                    .directives()
+                    .iter()
+                    .filter(|d| d.name == "include" || d.name == "skip")
+            })
+            .cloned()
+            .collect()
     }
 
     /// Filter any fragment element in the provided path whose type condition does not exist in the provided schema.
@@ -3839,7 +3836,6 @@ fn is_useless_followup_element(
 mod tests {
     use std::sync::Arc;
 
-    use apollo_compiler::executable::DirectiveList;
     use apollo_compiler::Name;
     use apollo_compiler::Schema;
     use petgraph::stable_graph::EdgeIndex;
@@ -3852,7 +3848,6 @@ mod tests {
     use crate::query_graph::graph_path::OpGraphPath;
     use crate::query_graph::graph_path::OpGraphPathTrigger;
     use crate::query_graph::graph_path::OpPathElement;
-    use crate::schema::position::FieldDefinitionPosition;
     use crate::schema::position::ObjectFieldDefinitionPosition;
     use crate::schema::ValidFederationSchema;
 
@@ -3883,14 +3878,7 @@ mod tests {
             type_name: Name::new("T").unwrap(),
             field_name: Name::new("t").unwrap(),
         };
-        let data = FieldData {
-            schema: schema.clone(),
-            field_position: FieldDefinitionPosition::Object(pos),
-            alias: None,
-            arguments: Arc::new(Vec::new()),
-            directives: Arc::new(DirectiveList::new()),
-            sibling_typename: None,
-        };
+        let data = FieldData::from_position(&schema, pos.into());
         let trigger = OpGraphPathTrigger::OpPathElement(OpPathElement::Field(Field::new(data)));
         let path = path
             .add(
@@ -3908,14 +3896,7 @@ mod tests {
             type_name: Name::new("ID").unwrap(),
             field_name: Name::new("id").unwrap(),
         };
-        let data = FieldData {
-            schema,
-            field_position: FieldDefinitionPosition::Object(pos),
-            alias: None,
-            arguments: Arc::new(Vec::new()),
-            directives: Arc::new(DirectiveList::new()),
-            sibling_typename: None,
-        };
+        let data = FieldData::from_position(&schema, pos.into());
         let trigger = OpGraphPathTrigger::OpPathElement(OpPathElement::Field(Field::new(data)));
         let path = path
             .add(

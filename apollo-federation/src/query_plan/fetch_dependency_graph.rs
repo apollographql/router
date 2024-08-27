@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::iter;
 use std::ops::Deref;
@@ -14,7 +12,6 @@ use apollo_compiler::ast::Type;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
-use apollo_compiler::executable::DirectiveList;
 use apollo_compiler::executable::VariableDefinition;
 use apollo_compiler::name;
 use apollo_compiler::schema;
@@ -33,7 +30,9 @@ use super::query_planner::SubgraphOperationCompression;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::graphql_definition::DeferDirectiveArguments;
+use crate::operation::ArgumentList;
 use crate::operation::ContainmentOptions;
+use crate::operation::DirectiveList;
 use crate::operation::Field;
 use crate::operation::FieldData;
 use crate::operation::InlineFragment;
@@ -46,8 +45,6 @@ use crate::operation::SelectionMap;
 use crate::operation::SelectionSet;
 use crate::operation::VariableCollector;
 use crate::operation::TYPENAME_FIELD;
-use crate::query_graph::extract_subgraphs_from_supergraph::FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME;
-use crate::query_graph::extract_subgraphs_from_supergraph::FEDERATION_REPRESENTATIONS_VAR_NAME;
 use crate::query_graph::graph_path::concat_op_paths;
 use crate::query_graph::graph_path::concat_paths_in_parents;
 use crate::query_graph::graph_path::OpGraphPathContext;
@@ -76,6 +73,8 @@ use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
 use crate::subgraph::spec::ANY_SCALAR_NAME;
 use crate::subgraph::spec::ENTITIES_QUERY;
+use crate::supergraph::FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME;
+use crate::supergraph::FEDERATION_REPRESENTATIONS_VAR_NAME;
 use crate::utils::logging::snapshot;
 
 /// Represents the value of a `@defer(label:)` argument.
@@ -928,7 +927,7 @@ impl FetchDependencyGraph {
     /// edges. In RS implementation we first collect the edges and then remove them. This has a side
     /// effect that if we ever end up with a cycle in a graph (which is an invalid state), this method
     /// may result in infinite loop.
-    fn collect_redundant_edges(&self, node_index: NodeIndex, acc: &mut HashSet<EdgeIndex>) {
+    fn collect_redundant_edges(&self, node_index: NodeIndex, acc: &mut IndexSet<EdgeIndex>) {
         let mut stack = vec![];
         for start_index in self.children_of(node_index) {
             stack.extend(self.children_of(start_index));
@@ -946,7 +945,7 @@ impl FetchDependencyGraph {
     /// If any deeply nested child of this node has an edge to any direct child of this node, the
     /// direct child is removed, as we know it is also reachable through the deeply nested route.
     fn remove_redundant_edges(&mut self, node_index: NodeIndex) {
-        let mut redundant_edges = HashSet::new();
+        let mut redundant_edges = IndexSet::default();
         self.collect_redundant_edges(node_index, &mut redundant_edges);
 
         if !redundant_edges.is_empty() {
@@ -1005,7 +1004,7 @@ impl FetchDependencyGraph {
 
         // Two phases for mutability reasons: first all redundant edges coming out of all nodes are
         // collected and then they are all removed.
-        let mut redundant_edges = HashSet::new();
+        let mut redundant_edges = IndexSet::default();
         for node_index in self.graph.node_indices() {
             self.collect_redundant_edges(node_index, &mut redundant_edges);
         }
@@ -1063,7 +1062,7 @@ impl FetchDependencyGraph {
             node.selection_set.selection_set.selections.is_empty()
                 && !self.is_root_node(node_index, node)
         };
-        let to_remove: HashSet<NodeIndex> = self
+        let to_remove: IndexSet<NodeIndex> = self
             .graph
             .node_references()
             .filter_map(|(node_index, node)| is_removable(node_index, node).then_some(node_index))
@@ -1072,16 +1071,18 @@ impl FetchDependencyGraph {
         if to_remove.is_empty() {
             return; // unchanged
         }
+        // Note: We remove empty nodes without relocating their children. The invariant is that
+        // the children of empty nodes (if any) must be accessible from the root via another path.
+        // Otherwise, they would've become inaccessible orphan nodes.
         self.retain_nodes(|node_index| !to_remove.contains(node_index));
     }
 
     /// - Calls `on_modification` if necessary.
     fn remove_useless_nodes(&mut self) -> Result<(), FederationError> {
         let root_nodes: Vec<_> = self.root_node_by_subgraph_iter().map(|(_, i)| *i).collect();
-        for node_index in root_nodes {
-            self.remove_useless_nodes_bottom_up(node_index)?;
-        }
-        Ok(())
+        root_nodes
+            .into_iter()
+            .try_for_each(|node_index| self.remove_useless_nodes_bottom_up(node_index))
     }
 
     /// Recursively collect removable useless nodes from the bottom up.
@@ -1299,7 +1300,7 @@ impl FetchDependencyGraph {
                         .any(|input| input.contains(selection)));
                 };
 
-                let impl_type_names: HashSet<_> = self
+                let impl_type_names: IndexSet<_> = self
                     .supergraph_schema
                     .possible_runtime_types(condition_in_supergraph.clone().into())?
                     .iter()
@@ -1360,10 +1361,9 @@ impl FetchDependencyGraph {
     /// - Calls `on_modification` if necessary.
     fn merge_child_fetches_for_same_subgraph_and_path(&mut self) -> Result<(), FederationError> {
         let root_nodes: Vec<_> = self.root_node_by_subgraph_iter().map(|(_, i)| *i).collect();
-        for node_index in root_nodes {
-            self.recursive_merge_child_fetches_for_same_subgraph_and_path(node_index)?;
-        }
-        Ok(()) // done
+        root_nodes.into_iter().try_for_each(|node_index| {
+            self.recursive_merge_child_fetches_for_same_subgraph_and_path(node_index)
+        })
     }
 
     /// Recursively merge child fetches top-down
@@ -1428,11 +1428,9 @@ impl FetchDependencyGraph {
         // Note: `children_nodes` above may contain invalid nodes at this point.
         //       So, we need to re-collect the children nodes after the merge.
         let children_nodes_after_merge: Vec<_> = self.children_of(node_index).collect();
-        for c in children_nodes_after_merge {
-            self.recursive_merge_child_fetches_for_same_subgraph_and_path(c)?;
-        }
-
-        Ok(())
+        children_nodes_after_merge
+            .into_iter()
+            .try_for_each(|c| self.recursive_merge_child_fetches_for_same_subgraph_and_path(c))
     }
 
     fn merge_fetches_to_same_subgraph_and_same_inputs(&mut self) -> Result<(), FederationError> {
@@ -1450,6 +1448,13 @@ impl FetchDependencyGraph {
         // generate a simple string key from each node subgraph name and mergeAt. We do "sanitize"
         // subgraph name, but have no worries for `mergeAt` since it contains either number of
         // field names, and the later is restricted by graphQL so as to not be an issue.
+        // PORT_NOTE: The JS version iterates over the nodes in their index order, which is also
+        // the insertion order. The Rust version uses a topological sort to ensure that we never
+        // merge an ancestor node into a descendant node. JS version's insertion order is almost
+        // topologically sorted, thanks to the way the graph is constructed from the root. However,
+        // it's not exactly topologically sorted. So, it's unclear whether that is 100% safe.
+        // Note: MultiMap preserves insertion order for values of the same key. Thus, the values
+        // of the same key in `by_subgraphs` will be topologically sorted as well.
         let mut by_subgraphs = MultiMap::new();
         let sorted_nodes = petgraph::algo::toposort(&self.graph, None)
             .map_err(|_| FederationError::internal("Failed to sort nodes due to cycle(s)"))?;
@@ -1470,7 +1475,7 @@ impl FetchDependencyGraph {
             }
 
             // Create disjoint sets of the nodes.
-            // buckets: an array where each entry is a "bucket" of groups that can all be merge together.
+            // buckets: an array where each entry is a "bucket" of nodes that can all be merge together.
             let mut buckets: Vec<(NodeIndex, Vec<NodeIndex>)> = Vec::new();
             let has_equal_inputs = |a: NodeIndex, b: NodeIndex| {
                 let a_node = self.node_weight(a)?;
@@ -1503,9 +1508,12 @@ impl FetchDependencyGraph {
                     continue;
                 };
 
-                // We pick the head for the group and merge all others into it. Note that which
-                // group we choose shouldn't matter since the merging preserves all the
+                // We pick the head for the nodes and merge all others into it. Note that which
+                // node we choose shouldn't matter since the merging preserves all the
                 // dependencies of each group (both parents and children).
+                // However, we must not merge an ancestor node into a descendant node. Thus,
+                // we choose the head as the first node in the bucket that is also the earliest
+                // in the topo-sorted order.
                 for node in rest {
                     self.merge_in_with_all_dependencies(*head, *node)?;
                 }
@@ -1756,7 +1764,7 @@ impl FetchDependencyGraph {
         let handled_defers_in_current = defers_in_current
             .iter()
             .map(|info| info.label.clone())
-            .collect::<HashSet<_>>();
+            .collect::<IndexSet<_>>();
         let unhandled_defer_nodes = all_deferred_nodes
             .keys()
             .filter(|label| !handled_defers_in_current.contains(*label))
@@ -2017,6 +2025,7 @@ impl FetchDependencyGraph {
         Ok(())
     }
 
+    /// Assumption: merged_id is not an ancestor of node_id in the graph.
     fn merge_in_internal(
         &mut self,
         node_id: NodeIndex,
@@ -2038,7 +2047,7 @@ impl FetchDependencyGraph {
 
         if path.is_empty() {
             mutable_node
-                .selection_set
+                .selection_set_mut()
                 .add_selections(&merged.selection_set.selection_set)?;
         } else {
             // The merged nodes might have some @include/@skip at top-level that are already part of the path. If so,
@@ -2048,7 +2057,7 @@ impl FetchDependencyGraph {
                 &path.conditional_directives(),
             )?;
             mutable_node
-                .selection_set
+                .selection_set_mut()
                 .add_at_path(path, Some(&Arc::new(merged_selection_set)))?;
         }
 
@@ -2071,6 +2080,7 @@ impl FetchDependencyGraph {
     // - node_id's defer_ref == merged_id's defer_ref
     // - node_id's subgraph_name == merged_id's subgraph_name
     // - node_id's merge_at == merged_id's merge_at
+    // - merged_id is not an ancestor of node_id in the graph.
     fn merge_in_with_all_dependencies(
         &mut self,
         node_id: NodeIndex,
@@ -2091,7 +2101,7 @@ impl FetchDependencyGraph {
         merged_id: NodeIndex,
         path_in_this: &OpPath,
     ) {
-        let mut new_parent_relations = HashMap::new();
+        let mut new_parent_relations = IndexMap::default();
         for child_id in self.children_of(merged_id) {
             // This could already be a child of `this`. Typically, we can have case where we have:
             //     1
@@ -2270,6 +2280,46 @@ impl std::fmt::Display for FetchDependencyGraph {
     }
 }
 
+// Necessary for `petgraph::dot::Dot::with_attr_getters` calls to compile, but not executed.
+impl std::fmt::Display for FetchDependencyGraphNode {
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Err(std::fmt::Error)
+    }
+}
+
+// Necessary for `petgraph::dot::Dot::with_attr_getters` calls to compile, but not executed.
+impl std::fmt::Display for FetchDependencyGraphEdge {
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Err(std::fmt::Error)
+    }
+}
+
+impl FetchDependencyGraph {
+    // GraphViz output for FetchDependencyGraph
+    pub fn to_dot(&self) -> String {
+        fn label_node(node_id: NodeIndex, node: &FetchDependencyGraphNode) -> String {
+            let label_str = node.multiline_display(node_id).to_string();
+            format!("label=\"{}\"", label_str.replace('"', "\\\""))
+        }
+
+        fn label_edge(edge_id: EdgeIndex) -> String {
+            format!("label=\"{}\"", edge_id.index())
+        }
+
+        let config = [
+            petgraph::dot::Config::NodeNoLabel,
+            petgraph::dot::Config::EdgeNoLabel,
+        ];
+        petgraph::dot::Dot::with_attr_getters(
+            &self.graph,
+            &config,
+            &(|_, er| label_edge(er.id())),
+            &(|_, (node_id, node)| label_node(node_id, node)),
+        )
+        .to_string()
+    }
+}
+
 impl FetchDependencyGraphNode {
     pub(crate) fn selection_set_mut(&mut self) -> &mut FetchSelectionSet {
         self.cached_cost = None;
@@ -2307,9 +2357,9 @@ impl FetchDependencyGraphNode {
     }
 
     fn remove_inputs_from_selection(&mut self) -> Result<(), FederationError> {
-        let fetch_selection_set = &mut self.selection_set;
         if let Some(inputs) = &mut self.inputs {
             self.cached_cost = None;
+            let fetch_selection_set = &mut self.selection_set;
             for (_, selection) in &inputs.selection_sets_per_parent_type {
                 fetch_selection_set.selection_set =
                     Arc::new(fetch_selection_set.selection_set.minus(selection)?);
@@ -2354,7 +2404,7 @@ impl FetchDependencyGraphNode {
         query_graph: &QueryGraph,
         handled_conditions: &Conditions,
         variable_definitions: &[Node<VariableDefinition>],
-        operation_directives: &Arc<DirectiveList>,
+        operation_directives: &DirectiveList,
         operation_compression: &mut SubgraphOperationCompression,
         operation_name: Option<Name>,
     ) -> Result<Option<super::PlanNode>, FederationError> {
@@ -2555,6 +2605,81 @@ impl FetchDependencyGraphNode {
         FetchDependencyNodeDisplay { node: self, index }
     }
 
+    // A variation of `fn display` with multiline output, which is more suitable for
+    // GraphViz output.
+    pub fn multiline_display(&self, index: NodeIndex) -> impl std::fmt::Display + '_ {
+        use std::fmt;
+        use std::fmt::Display;
+        use std::fmt::Formatter;
+
+        struct DisplayList<'a, T: Display>(&'a [T]);
+        impl<T: Display> Display for DisplayList<'_, T> {
+            fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+                let mut iter = self.0.iter();
+                if let Some(x) = iter.next() {
+                    write!(f, "{x}")?;
+                }
+                for x in iter {
+                    write!(f, "::{x}")?;
+                }
+                Ok(())
+            }
+        }
+
+        struct FetchDependencyNodeDisplay<'a> {
+            node: &'a FetchDependencyGraphNode,
+            index: NodeIndex,
+        }
+
+        impl Display for FetchDependencyNodeDisplay<'_> {
+            fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+                write!(f, "[{}]", self.index.index())?;
+                if self.node.defer_ref.is_some() {
+                    write!(f, "(deferred)")?;
+                }
+                if let Some(&id) = self.node.id.get() {
+                    write!(f, "{{id: {id}}}")?;
+                }
+
+                write!(f, " {}", self.node.subgraph_name)?;
+
+                match (self.node.merge_at.as_deref(), self.node.inputs.as_deref()) {
+                    (Some(merge_at), Some(inputs)) => {
+                        write!(
+                            f,
+                            // @(path::to::*::field)[{input1,input2} => { id }]
+                            "\n@({})\n{}\n=>\n{}\n",
+                            DisplayList(merge_at),
+                            inputs,
+                            self.node.selection_set.selection_set
+                        )?;
+                    }
+                    (Some(merge_at), None) => {
+                        write!(
+                            f,
+                            // @(path::to::*::field)[{} => { id }]
+                            "\n@({})\n{{}}\n=>\n{}\n",
+                            DisplayList(merge_at),
+                            self.node.selection_set.selection_set
+                        )?;
+                    }
+                    (None, _) => {
+                        // [(type){ id }]
+                        write!(
+                            f,
+                            "\n({})\n{}",
+                            self.node.parent_type, self.node.selection_set.selection_set
+                        )?;
+                    }
+                }
+
+                Ok(())
+            }
+        }
+
+        FetchDependencyNodeDisplay { node: self, index }
+    }
+
     // PORT_NOTE: In JS version, this value is memoized on the node struct.
     fn subgraph_and_merge_at_key(&self) -> Option<String> {
         // PORT_NOTE: In JS version, this hash value is defined as below.
@@ -2580,7 +2705,7 @@ fn operation_for_entities_fetch(
     subgraph_schema: &ValidFederationSchema,
     selection_set: SelectionSet,
     mut variable_definitions: Vec<Node<VariableDefinition>>,
-    operation_directives: &Arc<DirectiveList>,
+    operation_directives: &DirectiveList,
     operation_name: &Option<Name>,
 ) -> Result<Operation, FederationError> {
     variable_definitions.insert(0, representations_variable_definition(subgraph_schema)?);
@@ -2618,11 +2743,10 @@ fn operation_for_entities_fetch(
             schema: subgraph_schema.clone(),
             field_position: entities,
             alias: None,
-            arguments: Arc::new(vec![executable::Argument {
-                name: FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME,
-                value: executable::Value::Variable(FEDERATION_REPRESENTATIONS_VAR_NAME).into(),
-            }
-            .into()]),
+            arguments: ArgumentList::one((
+                FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME,
+                executable::Value::Variable(FEDERATION_REPRESENTATIONS_VAR_NAME),
+            )),
             directives: Default::default(),
             sibling_typename: None,
         })),
@@ -2647,7 +2771,7 @@ fn operation_for_entities_fetch(
         root_kind: SchemaRootDefinitionKind::Query,
         name: operation_name.clone(),
         variables: Arc::new(variable_definitions),
-        directives: Arc::clone(operation_directives),
+        directives: operation_directives.clone(),
         selection_set,
         named_fragments: Default::default(),
     })
@@ -2658,7 +2782,7 @@ fn operation_for_query_fetch(
     root_kind: SchemaRootDefinitionKind,
     selection_set: SelectionSet,
     variable_definitions: Vec<Node<VariableDefinition>>,
-    operation_directives: &Arc<DirectiveList>,
+    operation_directives: &DirectiveList,
     operation_name: &Option<Name>,
 ) -> Result<Operation, FederationError> {
     Ok(Operation {
@@ -2666,7 +2790,7 @@ fn operation_for_query_fetch(
         root_kind,
         name: operation_name.clone(),
         variables: Arc::new(variable_definitions),
-        directives: Arc::clone(operation_directives),
+        directives: operation_directives.clone(),
         selection_set,
         named_fragments: Default::default(),
     })
@@ -2778,10 +2902,10 @@ impl FetchInputs {
     }
 
     fn add_all(&mut self, other: &Self) -> Result<(), FederationError> {
-        for selections in other.selection_sets_per_parent_type.values() {
-            self.add(selections)?;
-        }
-        Ok(())
+        other
+            .selection_sets_per_parent_type
+            .values()
+            .try_for_each(|selections| self.add(selections))
     }
 
     fn contains(&self, other: &Self) -> bool {
@@ -3587,7 +3711,7 @@ fn wrap_selection_with_type_and_conditions<T>(
                 schema: supergraph_schema.clone(),
                 parent_type_position: wrapping_type.clone(),
                 type_condition_position: Some(type_condition.clone()),
-                directives: Arc::new([directive].into_iter().collect()),
+                directives: [directive].into_iter().collect(),
                 selection_id: SelectionId::new(),
             }),
             acc,

@@ -378,7 +378,7 @@ impl InstrumentData {
 
         populate_config_instrument!(
             apollo.router.config.demand_control,
-            "$.preview_demand_control[?(@.enabled == true)]",
+            "$.demand_control[?(@.enabled == true)]",
             opt.mode,
             "$.mode"
         );
@@ -400,7 +400,7 @@ impl InstrumentData {
             Self::get_first_key_from_path(
                 demand_control_attributes,
                 "opt.strategy",
-                "$.preview_demand_control[?(@.enabled == true)].strategy",
+                "$.demand_control[?(@.enabled == true)].strategy",
                 yaml,
             );
         }

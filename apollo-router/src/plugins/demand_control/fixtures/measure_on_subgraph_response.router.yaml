@@ -1,4 +1,4 @@
-preview_demand_control:
+demand_control:
   enabled: true
   mode: measure
   strategy:
