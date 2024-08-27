@@ -39,6 +39,30 @@ impl FieldVisitor<InputObjectFieldDefinitionPosition>
             ty: field_def.ty.clone(),
             directives: filter_directives(self.directive_deny_list, &field_def.directives),
         };
+
+        let input_type = self
+            .original_schema
+            .get_type(field_def.ty.inner_named_type().clone())?;
+        match input_type {
+            TypeDefinitionPosition::Scalar(pos) => {
+                try_pre_insert!(self.to_schema, pos)?;
+                try_insert!(
+                    self.to_schema,
+                    pos,
+                    pos.get(self.original_schema.schema())?.clone()
+                )?;
+            }
+            TypeDefinitionPosition::Enum(pos) => {
+                try_pre_insert!(self.to_schema, pos)?;
+                try_insert!(
+                    self.to_schema,
+                    pos,
+                    pos.get(self.original_schema.schema())?.clone()
+                )?;
+            }
+            _ => {}
+        }
+
         if let Some(old_field) = r#type.fields.get(&field.field_name) {
             if *old_field.deref().deref() != new_field {
                 return Err(FederationError::internal(

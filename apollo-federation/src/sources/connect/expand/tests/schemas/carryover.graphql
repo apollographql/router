@@ -1,13 +1,22 @@
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
-  @link(url: "https://specs.apollo.dev/tag/v0.3")
-  @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY)
+  @link(url: "https://specs.apollo.dev/tag/v0.3", import: ["@tag"])
+  @link(url: "https://specs.apollo.dev/inaccessible/v0.2", import: ["@inaccessible"], for: SECURITY)
+  @link(url: "https://specs.apollo.dev/authenticated/v0.1", import: ["@authenticated"], for: SECURITY)
+  @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", import: ["@requiresScopes"], for: SECURITY)
+  @link(url: "https://specs.apollo.dev/policy/v0.1", import: ["@policy"], for: SECURITY)
+  @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom"])
+  @link(url: "https://specs.apollo.dev/connect/v0.1", for: EXECUTION)
   @join__directive(graphs: [ONE], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"]})
   @join__directive(graphs: [ONE], name: "source", args: {name: "json", http: {baseURL: "http://example/"}})
 {
   query: Query
 }
+
+directive @authenticated on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
+
+directive @custom on OBJECT | FIELD_DEFINITION
 
 directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
 
@@ -26,6 +35,10 @@ directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boole
 directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @policy(policies: [[policy__Policy!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
+
+directive @requiresScopes(scopes: [[requiresScopes__Scope!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
 
 directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
 
@@ -61,12 +74,14 @@ enum link__Purpose {
   EXECUTION
 }
 
+scalar policy__Policy
+
 type Query
   @join__type(graph: ONE)
   @join__type(graph: TWO)
 {
-  ts: [T] @join__field(graph: ONE) @join__directive(graphs: [ONE], name: "connect", args: {source: "json", http: {GET: "/t"}, selection: "id\ntagged\nhidden\n# custom\n# authenticated\n# requiresScopes\n# policy\noverridden"})
-  t(id: ID): T @join__field(graph: ONE) @join__directive(graphs: [ONE], name: "connect", args: {source: "json", http: {GET: "/t/{$args.id}"}, selection: "id\ntagged\nhidden\n# custom\n# authenticated\n# requiresScopes\n# policy\noverridden", entity: true})
+  ts: [T] @join__field(graph: ONE) @join__directive(graphs: [ONE], name: "connect", args: {source: "json", http: {GET: "/t"}, selection: "id\ntagged\nhidden\ncustom\nauthenticated\nrequiresScopes\npolicy\noverridden"})
+  t(id: ID): T @join__field(graph: ONE) @join__directive(graphs: [ONE], name: "connect", args: {source: "json", http: {GET: "/t/{$args.id}"}, selection: "id\ntagged\nhidden\ncustom\nauthenticated\nrequiresScopes\npolicy\noverridden", entity: true})
 }
 
 type R
@@ -75,6 +90,8 @@ type R
   id: ID!
 }
 
+scalar requiresScopes__Scope
+
 type T
   @join__type(graph: ONE, key: "id")
   @join__type(graph: TWO, key: "id")
@@ -82,6 +99,10 @@ type T
   id: ID!
   tagged: String @join__field(graph: ONE) @tag(name: "tag")
   hidden: String @inaccessible @join__field(graph: ONE)
+  custom: String @join__field(graph: ONE) @custom
+  authenticated: String @join__field(graph: ONE) @authenticated
+  requiresScopes: String @join__field(graph: ONE) @requiresScopes(scopes: ["scope"])
+  policy: String @join__field(graph: ONE) @policy(policies: [["admin"]])
   overridden: String @join__field(graph: ONE, override: "two", overrideLabel: "label") @join__field(graph: TWO, overrideLabel: "label")
   r: R @join__field(graph: ONE) @join__directive(graphs: [ONE], name: "connect", args: {source: "json", http: {GET: "/t/{$this.id}/r"}, selection: "id"})
 }

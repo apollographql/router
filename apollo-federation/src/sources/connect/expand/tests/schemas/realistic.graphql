@@ -1,17 +1,19 @@
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
-  @link(url: "https://specs.apollo.dev/join/v0.4", for: EXECUTION)
+  @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
+  @link(url: "https://specs.apollo.dev/connect/v0.1", for: EXECUTION)
   @join__directive(graphs: [CONNECTORS], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"]})
   @join__directive(graphs: [CONNECTORS], name: "source", args: {name: "example", http: {baseURL: "http://example"}})
 {
   query: Query
+  mutation: Mutation
 }
 
 directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
 
 directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
-directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 
 directive @join__graph(name: String!, url: String!) on ENUM_VALUE
 
@@ -40,6 +42,23 @@ type AddressGeo
   lng: Float
 }
 
+input AddressGeoInput
+  @join__type(graph: CONNECTORS)
+{
+  lat: Float
+  lng: Float
+}
+
+input AddressInput
+  @join__type(graph: CONNECTORS)
+{
+  street: String
+  suite: String
+  city: String
+  zipcode: String
+  geo: AddressGeoInput
+}
+
 type CompanyInfo
   @join__type(graph: CONNECTORS)
 {
@@ -56,12 +75,31 @@ input CompanyInput
   catchPhrase: String
 }
 
+input CreateUserInput
+  @join__type(graph: CONNECTORS)
+{
+  name: String!
+  username: String!
+  email: EmailAddress
+  status: Status
+  address: AddressInput
+}
+
 scalar EmailAddress
   @join__type(graph: CONNECTORS)
+
+input join__ContextArgument {
+  name: String!
+  type: String!
+  context: String!
+  selection: join__FieldValue!
+}
 
 scalar join__DirectiveArguments
 
 scalar join__FieldSet
+
+scalar join__FieldValue
 
 enum join__Graph {
   CONNECTORS @join__graph(name: "connectors", url: "none")
@@ -81,12 +119,25 @@ enum link__Purpose {
   EXECUTION
 }
 
+type Mutation
+  @join__type(graph: CONNECTORS)
+{
+  createUser(input: CreateUserInput!): User @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "example", http: {POST: "/create/user", body: "$args.input { name username email status address { street suite city zipcode geo { lat lng } } }"}, selection: "id"})
+}
+
 type Query
   @join__type(graph: CONNECTORS)
 {
   filterUsersByEmailDomain(email: EmailAddress!): [User] @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "example", http: {GET: "/filter/users", body: "emailDomain: $args.email"}, selection: "id\nname"})
   usersByCompany(company: CompanyInput!): [User] @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "example", http: {GET: "/by-company/{$args.company.name}"}, selection: "id\nname\ncompany {\n  name\n  catchPhrase\n  bs\n}"})
   user(id: ID!): User @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "example", http: {GET: "/{$args.id}"}, selection: "id\nname\nusername\nemail\naddress {\n  street\n  suite\n  city\n  zipcode\n  geo {\n    lat\n    lng\n  }\n}\nphone\nwebsite\ncompany {\n  name\n  catchPhrase\n  bs\n  email\n}", entity: true})
+}
+
+enum Status
+  @join__type(graph: CONNECTORS)
+{
+  ACTIVE @join__enumValue(graph: CONNECTORS)
+  INACTIVE @join__enumValue(graph: CONNECTORS)
 }
 
 type User
@@ -100,4 +151,5 @@ type User
   phone: String
   website: String
   company: CompanyInfo
+  status: Status
 }

@@ -71,6 +71,26 @@ expression: connectors.by_service_name
                     ),
                     Field(
                         None,
+                        "custom",
+                        None,
+                    ),
+                    Field(
+                        None,
+                        "authenticated",
+                        None,
+                    ),
+                    Field(
+                        None,
+                        "requiresScopes",
+                        None,
+                    ),
+                    Field(
+                        None,
+                        "policy",
+                        None,
+                    ),
+                    Field(
+                        None,
                         "overridden",
                         None,
                     ),
@@ -157,6 +177,26 @@ expression: connectors.by_service_name
                     Field(
                         None,
                         "hidden",
+                        None,
+                    ),
+                    Field(
+                        None,
+                        "custom",
+                        None,
+                    ),
+                    Field(
+                        None,
+                        "authenticated",
+                        None,
+                    ),
+                    Field(
+                        None,
+                        "requiresScopes",
+                        None,
+                    ),
+                    Field(
+                        None,
+                        "policy",
                         None,
                     ),
                     Field(
