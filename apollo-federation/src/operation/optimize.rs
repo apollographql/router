@@ -3206,7 +3206,7 @@ mod tests {
     ///
 
     #[test]
-    fn reuse_fragments_with_same_directive_on_the_fragment() {
+    fn directive_propagation_with_fragment_reuse() {
         let schema_doc = r#"
             type Query {
               t1: T
@@ -3222,7 +3222,6 @@ mod tests {
             }
 
             directive @fragDefOnly on FRAGMENT_DEFINITION
-            directive @fragSpreadOnly on FRAGMENT_SPREAD
             directive @fragInlineOnly on INLINE_FRAGMENT
             directive @fragAll on FRAGMENT_DEFINITION | FRAGMENT_SPREAD | INLINE_FRAGMENT
         "#;
@@ -3242,27 +3241,27 @@ mod tests {
                 }
               }
               t3 {
-                ...DirectiveOnDef @fragSpreadOnly @fragAll
+                ...DirectiveOnDef @fragAll
               }
             }
         "#;
 
         test_fragments_roundtrip!(schema_doc, query, @r###"
-            query myQuery {
-              t1 {
-                a
-              }
-              t2 {
-                ... on T @fragInlineOnly @fragAll {
-                  a
-                }
-              }
-              t3 {
-                ... on T @fragSpreadOnly @fragAll {
-                  a
-                }
-              }
+        query myQuery {
+          t1 {
+            a
+          }
+          t2 {
+            ... on T @fragInlineOnly @fragAll {
+              a
             }
+          }
+          t3 {
+            ... on T @fragAll {
+              a
+            }
+          }
+        }
         "###);
     }
 

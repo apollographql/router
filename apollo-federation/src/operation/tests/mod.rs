@@ -3,13 +3,14 @@ use apollo_compiler::name;
 use apollo_compiler::schema::Schema;
 use apollo_compiler::ExecutableDocument;
 
+use super::Operation;
 use super::normalize_operation;
 use super::Name;
 use super::NamedFragments;
-use super::Operation;
 use super::Selection;
 use super::SelectionKey;
 use super::SelectionSet;
+use crate::error::FederationError;
 use crate::query_graph::graph_path::OpPathElement;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
@@ -39,6 +40,19 @@ pub(super) fn parse_schema(schema_doc: &str) -> ValidFederationSchema {
 
 pub(super) fn parse_operation(schema: &ValidFederationSchema, query: &str) -> Operation {
     Operation::parse(schema.clone(), query, "query.graphql", None).unwrap()
+}
+
+pub(super) fn parse_and_expand(schema: &ValidFederationSchema, query: &str) -> Result<Operation, FederationError> {
+    let doc = apollo_compiler::ExecutableDocument::parse_and_validate(
+        schema.schema(),
+        query,
+        "query.graphql",
+    )?;
+
+    let operation = doc.operations.anonymous.as_ref().expect("must have anonymous operation");
+    let fragments = NamedFragments::new(&doc.fragments, schema);
+
+    normalize_operation(operation, fragments, schema, &Default::default())
 }
 
 /// Parse and validate the query similarly to `parse_operation`, but does not construct the
@@ -1614,4 +1628,69 @@ fn used_variables() {
         .collect::<Vec<_>>();
     variables.sort();
     assert_eq!(variables, ["c", "d"], "works for a subset of the query");
+}
+
+#[test]
+fn directive_propagation() {
+    let schema_doc = r#"
+        type Query {
+          t1: T
+          t2: T
+          t3: T
+        }
+
+        type T {
+          a: Int
+          b: Int
+          c: Int
+          d: Int
+        }
+
+        directive @fragDefOnly on FRAGMENT_DEFINITION
+        directive @fragSpreadOnly on FRAGMENT_SPREAD
+        directive @fragInlineOnly on INLINE_FRAGMENT
+        directive @fragAll on FRAGMENT_DEFINITION | FRAGMENT_SPREAD | INLINE_FRAGMENT
+    "#;
+
+    let schema = parse_schema(schema_doc);
+
+    let query = parse_and_expand(&schema, r#"
+        fragment DirectiveOnDef on T @fragDefOnly @fragAll { a }
+        query {
+          t2 {
+            ... on T @fragInlineOnly @fragAll { a }
+          }
+          t3 {
+            ...DirectiveOnDef @fragAll
+          }
+        }
+    "#).expect("directive applications to be valid");
+    insta::assert_snapshot!(query, @r###"
+    fragment DirectiveOnDef on T @fragDefOnly @fragAll {
+      a
+    }
+
+    {
+      t2 {
+        ... on T @fragInlineOnly @fragAll {
+          a
+        }
+      }
+      t3 {
+        ... on T @fragAll {
+          a
+        }
+      }
+    }
+    "###);
+
+    let err = parse_and_expand(&schema, r#"
+        fragment DirectiveOnDef on T @fragDefOnly @fragAll { a }
+        query {
+          t1 {
+            ...DirectiveOnDef @fragSpreadOnly @fragAll
+          }
+        }
+    "#).expect_err("directive @fragSpreadOnly to be rejected");
+    insta::assert_snapshot!(err, @"Unsupported custom directive @fragSpreadOnly on fragment spread. Due to query transformations during planning, the router requires directives on fragment spreads to support both the FRAGMENT_SPREAD and INLINE_FRAGMENT locations.");
 }
