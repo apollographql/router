@@ -28,6 +28,7 @@ limits:
 Each limit takes an integer value. You can define any combination of [supported limits](#supported-limits).
 
 ## Supported limits
+
 ### `max_depth`
 
 Limits the deepest nesting of selection sets in an operation, including fields in fragments.
@@ -143,3 +144,92 @@ Whenever your router rejects a request because it exceeds an operation limit, th
 ```
 
 If you run your router in [`warn_only` mode](#warn_only-mode), the router logs the limit violation but executes the operation as normal, returning a 200 status code with the expected response.
+
+## Using telemetry to set operation limits
+
+Router telemetry can help you set operation limits, especially when you have a large number of existing operations. You can measure incoming operations over a fixed duration, then use the captured data as a baseline configuration.
+
+### Logging values
+
+To log limit information about every operation, you can configure the router with a [custom event](/router/configuration/telemetry/instrumentation/events#custom-events) to log the values of aliases, depth, height, and root_fields for each operation:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    events:
+      supergraph:
+        OPERATION_LIMIT_INFO:
+          message: operation limit info
+          on: response
+          level: info
+          attributes:
+            graphql.operation.name: true
+            query.aliases:
+              query: aliases
+            query.depth:
+              query: depth
+            query.height:
+              query: height
+            query.root_fields:
+              query: root_fields
+```
+
+<Note>
+
+For a large amount of traffic, you may prefer to collect and export metrics to your APM instead.
+
+</Note>
+
+### Collecting metrics
+
+To capture and view metrics to help set your operation limits, you can configure the router to collect [custom metrics](/router/configuration/telemetry/instrumentation/instruments#custom-instruments) on the values of aliases, depth, height, and root_fields for each operation:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    metrics:
+      common:
+        views:
+          # Define a custom view because operation limits are different than the default latency-oriented view of OpenTelemetry
+          - name: oplimits.*
+            aggregation:
+              histogram:
+                buckets:
+                  - 0
+                  - 5
+                  - 10
+                  - 25
+                  - 50
+                  - 100
+                  - 500
+                  - 1000
+  instrumentation:
+    instruments:
+      supergraph:
+        oplimits.aliases:
+          value:
+            query: aliases
+          type: histogram
+          unit: number
+          description: "Aliases for an operation"
+        oplimits.depth:
+          value:
+            query: depth
+          type: histogram
+          unit: number
+          description: "Depth for an operation"
+        oplimits.height:
+          value:
+            query: height
+          type: histogram
+          unit: number
+          description: "Height for an operation"
+        oplimits.root_fields:
+          value:
+            query: root_fields
+          type: histogram
+          unit: number
+          description: "Root fields for an operation"
+```
+
+You should also configure the router to [export metrics](/router/configuration/telemetry/exporters/metrics/overview) to your APM tool.
