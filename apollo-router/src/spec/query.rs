@@ -674,6 +674,10 @@ impl Query {
 
                         Ok(())
                     }
+                    Value::Null => {
+                        *output = Value::Null;
+                        Ok(())
+                    }
                     v => {
                         parameters.validation_errors.push(Error {
                             message: format!(
