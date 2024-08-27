@@ -140,19 +140,20 @@ async fn it_batches_with_errors_in_single_graph() -> Result<(), BoxError> {
     if test_is_enabled() {
         // Make sure that we got back what we wanted
         assert_yaml_snapshot!(responses, @r###"
-    ---
-    - data:
-        entryA:
-          index: 0
-    - errors:
-        - message: expected error in A
-    - data:
-        entryA:
-          index: 2
-    - data:
-        entryA:
-          index: 3
-    "###);
+        ---
+        - data:
+            entryA:
+              index: 0
+        - errors:
+            - message: expected error in A
+              path: []
+        - data:
+            entryA:
+              index: 2
+        - data:
+            entryA:
+              index: 3
+        "###);
     }
 
     Ok(())
@@ -189,24 +190,26 @@ async fn it_batches_with_errors_in_multi_graph() -> Result<(), BoxError> {
 
     if test_is_enabled() {
         assert_yaml_snapshot!(responses, @r###"
-    ---
-    - data:
-        entryA:
-          index: 0
-    - data:
-        entryB:
-          index: 0
-    - errors:
-        - message: expected error in A
-    - errors:
-        - message: expected error in B
-    - data:
-        entryA:
-          index: 2
-    - data:
-        entryB:
-          index: 2
-    "###);
+        ---
+        - data:
+            entryA:
+              index: 0
+        - data:
+            entryB:
+              index: 0
+        - errors:
+            - message: expected error in A
+              path: []
+        - errors:
+            - message: expected error in B
+              path: []
+        - data:
+            entryA:
+              index: 2
+        - data:
+            entryB:
+              index: 2
+        "###);
     }
 
     Ok(())
@@ -250,6 +253,7 @@ async fn it_handles_short_timeouts() -> Result<(), BoxError> {
               index: 0
         - errors:
             - message: Request timed out
+              path: []
               extensions:
                 code: REQUEST_TIMEOUT
         - data:
@@ -257,6 +261,7 @@ async fn it_handles_short_timeouts() -> Result<(), BoxError> {
               index: 1
         - errors:
             - message: Request timed out
+              path: []
               extensions:
                 code: REQUEST_TIMEOUT
         "###);
@@ -323,14 +328,17 @@ async fn it_handles_indefinite_timeouts() -> Result<(), BoxError> {
               index: 2
         - errors:
             - message: Request timed out
+              path: []
               extensions:
                 code: REQUEST_TIMEOUT
         - errors:
             - message: Request timed out
+              path: []
               extensions:
                 code: REQUEST_TIMEOUT
         - errors:
             - message: Request timed out
+              path: []
               extensions:
                 code: REQUEST_TIMEOUT
         "###);
@@ -554,22 +562,24 @@ async fn it_handles_cancelled_by_coprocessor() -> Result<(), BoxError> {
 
     if test_is_enabled() {
         assert_yaml_snapshot!(responses, @r###"
-    ---
-    - errors:
-        - message: Subgraph A is not allowed
-          extensions:
-            code: ERR_NOT_ALLOWED
-    - data:
-        entryB:
-          index: 0
-    - errors:
-        - message: Subgraph A is not allowed
-          extensions:
-            code: ERR_NOT_ALLOWED
-    - data:
-        entryB:
-          index: 1
-    "###);
+        ---
+        - errors:
+            - message: Subgraph A is not allowed
+              path: []
+              extensions:
+                code: ERR_NOT_ALLOWED
+        - data:
+            entryB:
+              index: 0
+        - errors:
+            - message: Subgraph A is not allowed
+              path: []
+              extensions:
+                code: ERR_NOT_ALLOWED
+        - data:
+            entryB:
+              index: 1
+        "###);
     }
 
     Ok(())
@@ -697,33 +707,34 @@ async fn it_handles_single_request_cancelled_by_coprocessor() -> Result<(), BoxE
 
     if test_is_enabled() {
         assert_yaml_snapshot!(responses, @r###"
-    ---
-    - data:
-        entryA:
-          index: 0
-    - data:
-        entryB:
-          index: 0
-    - data:
-        entryA:
-          index: 1
-    - data:
-        entryB:
-          index: 1
-    - errors:
-        - message: Subgraph A index 2 is not allowed
-          extensions:
-            code: ERR_NOT_ALLOWED
-    - data:
-        entryB:
-          index: 2
-    - data:
-        entryA:
-          index: 3
-    - data:
-        entryB:
-          index: 3
-    "###);
+        ---
+        - data:
+            entryA:
+              index: 0
+        - data:
+            entryB:
+              index: 0
+        - data:
+            entryA:
+              index: 1
+        - data:
+            entryB:
+              index: 1
+        - errors:
+            - message: Subgraph A index 2 is not allowed
+              path: []
+              extensions:
+                code: ERR_NOT_ALLOWED
+        - data:
+            entryB:
+              index: 2
+        - data:
+            entryA:
+              index: 3
+        - data:
+            entryB:
+              index: 3
+        "###);
     }
 
     Ok(())

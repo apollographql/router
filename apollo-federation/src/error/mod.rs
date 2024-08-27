@@ -4,6 +4,7 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Write;
 
+use apollo_compiler::executable::GetOperationError;
 use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::validation::WithErrors;
 use apollo_compiler::InvalidNameError;
@@ -29,6 +30,18 @@ impl From<SchemaRootKind> for String {
     }
 }
 
+#[derive(Clone, Debug, strum_macros::Display, PartialEq, Eq)]
+pub enum UnsupportedFeatureKind {
+    #[strum(to_string = "progressive overrides")]
+    ProgressiveOverrides,
+    #[strum(to_string = "defer")]
+    Defer,
+    #[strum(to_string = "context")]
+    Context,
+    #[strum(to_string = "alias")]
+    Alias,
+}
+
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum SingleFederationError {
     #[error(
@@ -44,6 +57,8 @@ pub enum SingleFederationError {
     InvalidGraphQLName(#[from] InvalidNameError),
     #[error("Subgraph invalid: {message}")]
     InvalidSubgraph { message: String },
+    #[error("Operation name not found")]
+    UnknownOperation,
     #[error("{message}")]
     DirectiveDefinitionInvalid { message: String },
     #[error("{message}")]
@@ -185,7 +200,10 @@ pub enum SingleFederationError {
     #[error("{message}")]
     OverrideOnInterface { message: String },
     #[error("{message}")]
-    UnsupportedFeature { message: String },
+    UnsupportedFeature {
+        message: String,
+        kind: UnsupportedFeatureKind,
+    },
     #[error("{message}")]
     InvalidFederationSupergraph { message: String },
     #[error("{message}")]
@@ -210,6 +228,7 @@ impl SingleFederationError {
             SingleFederationError::InvalidGraphQL { .. }
             | SingleFederationError::InvalidGraphQLName(_) => ErrorCode::InvalidGraphQL,
             SingleFederationError::InvalidSubgraph { .. } => ErrorCode::InvalidGraphQL,
+            SingleFederationError::UnknownOperation => ErrorCode::InvalidGraphQL,
             SingleFederationError::DirectiveDefinitionInvalid { .. } => {
                 ErrorCode::DirectiveDefinitionInvalid
             }
@@ -388,6 +407,12 @@ impl SingleFederationError {
 impl From<InvalidNameError> for FederationError {
     fn from(err: InvalidNameError) -> Self {
         SingleFederationError::from(err).into()
+    }
+}
+
+impl From<GetOperationError> for FederationError {
+    fn from(_: GetOperationError) -> Self {
+        SingleFederationError::UnknownOperation.into()
     }
 }
 

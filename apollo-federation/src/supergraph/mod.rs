@@ -1,7 +1,9 @@
-use std::collections::BTreeMap;
-use std::fmt;
+mod schema;
+mod subgraph;
+
 use std::fmt::Write;
 use std::ops::Deref;
+use std::ops::Not;
 use std::sync::Arc;
 
 use apollo_compiler::ast::Argument;
@@ -27,7 +29,6 @@ use apollo_compiler::schema::InterfaceType;
 use apollo_compiler::schema::NamedType;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::schema::ScalarType;
-use apollo_compiler::schema::SchemaBuilder;
 use apollo_compiler::schema::Type;
 use apollo_compiler::schema::UnionType;
 use apollo_compiler::validation::Valid;
@@ -37,6 +38,12 @@ use itertools::Itertools;
 use lazy_static::lazy_static;
 use time::OffsetDateTime;
 
+use self::schema::get_apollo_directive_names;
+pub(crate) use self::schema::new_empty_fed_2_subgraph_schema;
+use self::subgraph::FederationSubgraph;
+use self::subgraph::FederationSubgraphs;
+pub use self::subgraph::ValidFederationSubgraph;
+pub use self::subgraph::ValidFederationSubgraphs;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
@@ -49,9 +56,7 @@ use crate::link::join_spec_definition::JoinSpecDefinition;
 use crate::link::join_spec_definition::TypeDirectiveArguments;
 use crate::link::spec::Identity;
 use crate::link::spec::Version;
-use crate::link::spec::APOLLO_SPEC_DOMAIN;
 use crate::link::spec_definition::SpecDefinition;
-use crate::link::Link;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::schema::field_set::parse_field_set_without_normalization;
 use crate::schema::position::is_graphql_reserved_name;
@@ -76,7 +81,7 @@ use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 use crate::schema::type_and_directive_specification::UnionTypeSpecification;
 use crate::schema::FederationSchema;
-use crate::schema::ValidFederationSchema;
+use crate::utils::FallibleIterator;
 
 /// Assumes the given schema has been validated.
 ///
@@ -93,16 +98,19 @@ pub(crate) fn extract_subgraphs_from_supergraph(
     let (mut subgraphs, federation_spec_definitions, graph_enum_value_name_to_subgraph_name) =
         collect_empty_subgraphs(supergraph_schema, join_spec_definition)?;
 
-    let mut filtered_types = Vec::new();
-    for type_definition_position in supergraph_schema.get_types() {
-        if !join_spec_definition
-            .is_spec_type_name(supergraph_schema, type_definition_position.type_name())?
-            && !link_spec_definition
-                .is_spec_type_name(supergraph_schema, type_definition_position.type_name())?
-        {
-            filtered_types.push(type_definition_position);
-        }
-    }
+    let filtered_types: Vec<_> = supergraph_schema
+        .get_types()
+        .fallible_filter(|type_definition_position| {
+            join_spec_definition
+                .is_spec_type_name(supergraph_schema, type_definition_position.type_name())
+                .map(Not::not)
+        })
+        .and_then_filter(|type_definition_position| {
+            link_spec_definition
+                .is_spec_type_name(supergraph_schema, type_definition_position.type_name())
+                .map(Not::not)
+        })
+        .try_collect()?;
     if is_fed_1 {
         let unsupported =
             SingleFederationError::UnsupportedFederationVersion {
@@ -230,70 +238,6 @@ fn collect_empty_subgraphs(
     ))
 }
 
-/// TODO: Use the JS/programmatic approach instead of hard-coding definitions.
-pub(crate) fn new_empty_fed_2_subgraph_schema() -> Result<FederationSchema, FederationError> {
-    let builder = SchemaBuilder::new().adopt_orphan_extensions();
-    let builder = builder.parse(
-        r#"
-    extend schema
-        @link(url: "https://specs.apollo.dev/link/v1.0")
-        @link(url: "https://specs.apollo.dev/federation/v2.9")
-
-    directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-
-    scalar link__Import
-
-    enum link__Purpose {
-        """
-        \`SECURITY\` features provide metadata necessary to securely resolve fields.
-        """
-        SECURITY
-
-        """
-        \`EXECUTION\` features provide metadata necessary for operation execution.
-        """
-        EXECUTION
-    }
-
-    directive @federation__key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
-
-    directive @federation__requires(fields: federation__FieldSet!) on FIELD_DEFINITION
-
-    directive @federation__provides(fields: federation__FieldSet!) on FIELD_DEFINITION
-
-    directive @federation__external(reason: String) on OBJECT | FIELD_DEFINITION
-
-    directive @federation__tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
-
-    directive @federation__extends on OBJECT | INTERFACE
-
-    directive @federation__shareable on OBJECT | FIELD_DEFINITION
-
-    directive @federation__inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
-
-    directive @federation__override(from: String!, label: String) on FIELD_DEFINITION
-
-    directive @federation__composeDirective(name: String) repeatable on SCHEMA
-
-    directive @federation__interfaceObject on OBJECT
-
-    directive @federation__authenticated on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
-
-    directive @federation__requiresScopes(scopes: [[federation__Scope!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
-
-    directive @federation__cost(weight: Int!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
-
-    directive @federation__listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
-
-    scalar federation__FieldSet
-
-    scalar federation__Scope
-    "#,
-        "subgraph.graphql",
-    );
-    FederationSchema::new(builder.build()?)
-}
-
 struct TypeInfo {
     name: NamedType,
     // IndexMap<subgraph_enum_value: String, is_interface_object: bool>
@@ -306,43 +250,6 @@ struct TypeInfos {
     union_types: Vec<TypeInfo>,
     enum_types: Vec<TypeInfo>,
     input_object_types: Vec<TypeInfo>,
-}
-
-/// Builds a map of original name to new name for Apollo feature directives. This is
-/// used to handle cases where a directive is renamed via an import statement. For
-/// example, importing a directive with a custom name like
-/// ```graphql
-/// @link(url: "https://specs.apollo.dev/cost/v0.1", import: [{ name: "@cost", as: "@renamedCost" }])
-/// ```
-/// results in a map entry of `cost -> renamedCost` with the `@` prefix removed.
-///
-/// If the directive is imported under its default name, that also results in an entry. So,
-/// ```graphql
-/// @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@cost"])
-/// ```
-/// results in a map entry of `cost -> cost`. This duals as a way to check if a directive
-/// is included in the supergraph schema.
-///
-/// **Important:** This map does _not_ include directives imported from identities other
-/// than `specs.apollo.dev`. This helps us avoid extracting directives to subgraphs
-/// when a custom directive's name conflicts with that of a default one.
-fn get_apollo_directive_names(
-    supergraph_schema: &FederationSchema,
-) -> Result<IndexMap<Name, Name>, FederationError> {
-    let mut hm: IndexMap<Name, Name> = IndexMap::default();
-    for directive in &supergraph_schema.schema().schema_definition.directives {
-        if directive.name.as_str() == "link" {
-            if let Ok(link) = Link::from_directive_application(directive) {
-                if link.url.identity.domain != APOLLO_SPEC_DOMAIN {
-                    continue;
-                }
-                for import in link.imports {
-                    hm.insert(import.element.clone(), import.imported_name().clone());
-                }
-            }
-        }
-    }
-    Ok(hm)
 }
 
 fn extract_subgraphs_from_fed_2_supergraph(
@@ -501,11 +408,11 @@ fn add_all_empty_subgraph_types(
 
     for type_definition_position in filtered_types {
         let type_ = type_definition_position.get(supergraph_schema.schema())?;
-        let mut type_directive_applications = Vec::new();
-        for directive in type_.directives().get_all(&type_directive_definition.name) {
-            type_directive_applications
-                .push(join_spec_definition.type_directive_arguments(directive)?);
-        }
+        let type_directive_applications: Vec<_> = type_
+            .directives()
+            .get_all(&type_directive_definition.name)
+            .map(|directive| join_spec_definition.type_directive_arguments(directive))
+            .try_collect()?;
         let types_mut = match &type_definition_position {
             TypeDefinitionPosition::Scalar(pos) => {
                 // Scalar are a bit special in that they don't have any sub-component, so we don't
@@ -1652,105 +1559,6 @@ fn get_subgraph<'subgraph>(
         }
         .into()
     })
-}
-
-struct FederationSubgraph {
-    name: String,
-    url: String,
-    schema: FederationSchema,
-}
-
-struct FederationSubgraphs {
-    subgraphs: BTreeMap<String, FederationSubgraph>,
-}
-
-impl FederationSubgraphs {
-    fn new() -> Self {
-        FederationSubgraphs {
-            subgraphs: BTreeMap::new(),
-        }
-    }
-
-    fn add(&mut self, subgraph: FederationSubgraph) -> Result<(), FederationError> {
-        if self.subgraphs.contains_key(&subgraph.name) {
-            return Err(SingleFederationError::InvalidFederationSupergraph {
-                message: format!("A subgraph named \"{}\" already exists", subgraph.name),
-            }
-            .into());
-        }
-        self.subgraphs.insert(subgraph.name.clone(), subgraph);
-        Ok(())
-    }
-
-    fn get(&self, name: &str) -> Option<&FederationSubgraph> {
-        self.subgraphs.get(name)
-    }
-
-    fn get_mut(&mut self, name: &str) -> Option<&mut FederationSubgraph> {
-        self.subgraphs.get_mut(name)
-    }
-}
-
-impl IntoIterator for FederationSubgraphs {
-    type Item = <BTreeMap<String, FederationSubgraph> as IntoIterator>::Item;
-    type IntoIter = <BTreeMap<String, FederationSubgraph> as IntoIterator>::IntoIter;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.subgraphs.into_iter()
-    }
-}
-
-// TODO(@goto-bus-stop): consider an appropriate name for this in the public API
-// TODO(@goto-bus-stop): should this exist separately from the `crate::subgraph::Subgraph` type?
-#[derive(Debug, Clone)]
-pub struct ValidFederationSubgraph {
-    pub name: String,
-    pub url: String,
-    pub schema: ValidFederationSchema,
-}
-
-pub struct ValidFederationSubgraphs {
-    subgraphs: BTreeMap<Arc<str>, ValidFederationSubgraph>,
-}
-
-impl fmt::Debug for ValidFederationSubgraphs {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("ValidFederationSubgraphs ")?;
-        f.debug_map().entries(self.subgraphs.iter()).finish()
-    }
-}
-
-impl ValidFederationSubgraphs {
-    pub(crate) fn new() -> Self {
-        ValidFederationSubgraphs {
-            subgraphs: BTreeMap::new(),
-        }
-    }
-
-    pub(crate) fn add(&mut self, subgraph: ValidFederationSubgraph) -> Result<(), FederationError> {
-        if self.subgraphs.contains_key(subgraph.name.as_str()) {
-            return Err(SingleFederationError::InvalidFederationSupergraph {
-                message: format!("A subgraph named \"{}\" already exists", subgraph.name),
-            }
-            .into());
-        }
-        self.subgraphs
-            .insert(subgraph.name.as_str().into(), subgraph);
-        Ok(())
-    }
-
-    pub fn get(&self, name: &str) -> Option<&ValidFederationSubgraph> {
-        self.subgraphs.get(name)
-    }
-}
-
-impl IntoIterator for ValidFederationSubgraphs {
-    type Item = <BTreeMap<Arc<str>, ValidFederationSubgraph> as IntoIterator>::Item;
-    type IntoIter = <BTreeMap<Arc<str>, ValidFederationSubgraph> as IntoIterator>::IntoIter;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.subgraphs.into_iter()
-    }
 }
 
 lazy_static! {

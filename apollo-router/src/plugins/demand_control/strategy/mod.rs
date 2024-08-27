@@ -1,11 +1,10 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
-use apollo_compiler::validation::Valid;
+use ahash::HashMap;
 use apollo_compiler::ExecutableDocument;
-use apollo_compiler::Schema;
 
 use crate::graphql;
+use crate::plugins::demand_control::cost_calculator::schema::DemandControlledSchema;
 use crate::plugins::demand_control::cost_calculator::static_cost::StaticCostCalculator;
 use crate::plugins::demand_control::strategy::static_estimated::StaticEstimated;
 use crate::plugins::demand_control::DemandControlConfig;
@@ -75,15 +74,15 @@ impl Strategy {
 pub(crate) struct StrategyFactory {
     config: DemandControlConfig,
     #[allow(dead_code)]
-    supergraph_schema: Arc<Valid<Schema>>,
-    subgraph_schemas: Arc<HashMap<String, Arc<Valid<Schema>>>>,
+    supergraph_schema: Arc<DemandControlledSchema>,
+    subgraph_schemas: Arc<HashMap<String, DemandControlledSchema>>,
 }
 
 impl StrategyFactory {
     pub(crate) fn new(
         config: DemandControlConfig,
-        supergraph_schema: Arc<Valid<Schema>>,
-        subgraph_schemas: Arc<HashMap<String, Arc<Valid<Schema>>>>,
+        supergraph_schema: Arc<DemandControlledSchema>,
+        subgraph_schemas: Arc<HashMap<String, DemandControlledSchema>>,
     ) -> Self {
         Self {
             config,
@@ -97,6 +96,7 @@ impl StrategyFactory {
             StrategyConfig::StaticEstimated { list_size, max } => Arc::new(StaticEstimated {
                 max: *max,
                 cost_calculator: StaticCostCalculator::new(
+                    self.supergraph_schema.clone(),
                     self.subgraph_schemas.clone(),
                     *list_size,
                 ),
