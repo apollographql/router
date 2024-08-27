@@ -47,6 +47,7 @@ use crate::configuration::schema::Mode;
 use crate::graphql;
 use crate::notification::Notify;
 use crate::plugin::plugins;
+use crate::plugins::limits;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN_NAME;
@@ -154,7 +155,7 @@ pub struct Configuration {
 
     /// Configuration for operation limits, parser limits, HTTP limits, etc.
     #[serde(default)]
-    pub(crate) limits: Limits,
+    pub(crate) limits: limits::Config,
 
     /// Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.
     /// You probably don’t want this in production!
@@ -251,17 +252,24 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             tls: Tls,
             apq: Apq,
             persisted_queries: PersistedQueries,
-            limits: Limits,
+            limits: limits::Config,
             experimental_chaos: Chaos,
             batching: Batching,
             experimental_type_conditioned_fetching: bool,
             experimental_apollo_metrics_generation_mode: ApolloMetricsGenerationMode,
             experimental_query_planner_mode: QueryPlannerMode,
         }
-        let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
+        let mut ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
         let notify = Configuration::notify(&ad_hoc.apollo_plugins.plugins)
             .map_err(|e| serde::de::Error::custom(e.to_string()))?;
+
+        // Allow the limits plugin to use the configuration from the configuration struct.
+        // This means that the limits plugin will get the regular configuration via plugin init.
+        ad_hoc.apollo_plugins.plugins.insert(
+            "limits".to_string(),
+            serde_json::to_value(&ad_hoc.limits).unwrap(),
+        );
 
         // Use a struct literal instead of a builder to ensure this is exhaustive
         Configuration {
@@ -319,7 +327,7 @@ impl Configuration {
         tls: Option<Tls>,
         apq: Option<Apq>,
         persisted_query: Option<PersistedQueries>,
-        operation_limits: Option<Limits>,
+        operation_limits: Option<limits::Config>,
         chaos: Option<Chaos>,
         uplink: Option<UplinkConfig>,
         experimental_type_conditioned_fetching: Option<bool>,
@@ -439,7 +447,7 @@ impl Configuration {
         notify: Option<Notify<String, graphql::Response>>,
         apq: Option<Apq>,
         persisted_query: Option<PersistedQueries>,
-        operation_limits: Option<Limits>,
+        operation_limits: Option<limits::Config>,
         chaos: Option<Chaos>,
         uplink: Option<UplinkConfig>,
         batching: Option<Batching>,
@@ -853,106 +861,6 @@ impl Supergraph {
         }
 
         path
-    }
-}
-
-/// Configuration for operation limits, parser limits, HTTP limits, etc.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
-pub(crate) struct Limits {
-    /// If set, requests with operations deeper than this maximum
-    /// are rejected with a HTTP 400 Bad Request response and GraphQL error with
-    /// `"extensions": {"code": "MAX_DEPTH_LIMIT"}`
-    ///
-    /// Counts depth of an operation, looking at its selection sets,
-    /// including fields in fragments and inline fragments. The following
-    /// example has a depth of 3.
-    ///
-    /// ```graphql
-    /// query getProduct {
-    ///   book { # 1
-    ///     ...bookDetails
-    ///   }
-    /// }
-    ///
-    /// fragment bookDetails on Book {
-    ///   details { # 2
-    ///     ... on ProductDetailsBook {
-    ///       country # 3
-    ///     }
-    ///   }
-    /// }
-    /// ```
-    pub(crate) max_depth: Option<u32>,
-
-    /// If set, requests with operations higher than this maximum
-    /// are rejected with a HTTP 400 Bad Request response and GraphQL error with
-    /// `"extensions": {"code": "MAX_DEPTH_LIMIT"}`
-    ///
-    /// Height is based on simple merging of fields using the same name or alias,
-    /// but only within the same selection set.
-    /// For example `name` here is only counted once and the query has height 3, not 4:
-    ///
-    /// ```graphql
-    /// query {
-    ///     name { first }
-    ///     name { last }
-    /// }
-    /// ```
-    ///
-    /// This may change in a future version of Apollo Router to do
-    /// [full field merging across fragments][merging] instead.
-    ///
-    /// [merging]: https://spec.graphql.org/October2021/#sec-Field-Selection-Merging]
-    pub(crate) max_height: Option<u32>,
-
-    /// If set, requests with operations with more root fields than this maximum
-    /// are rejected with a HTTP 400 Bad Request response and GraphQL error with
-    /// `"extensions": {"code": "MAX_ROOT_FIELDS_LIMIT"}`
-    ///
-    /// This limit counts only the top level fields in a selection set,
-    /// including fragments and inline fragments.
-    pub(crate) max_root_fields: Option<u32>,
-
-    /// If set, requests with operations with more aliases than this maximum
-    /// are rejected with a HTTP 400 Bad Request response and GraphQL error with
-    /// `"extensions": {"code": "MAX_ALIASES_LIMIT"}`
-    pub(crate) max_aliases: Option<u32>,
-
-    /// If set to true (which is the default is dev mode),
-    /// requests that exceed a `max_*` limit are *not* rejected.
-    /// Instead they are executed normally, and a warning is logged.
-    pub(crate) warn_only: bool,
-
-    /// Limit recursion in the GraphQL parser to protect against stack overflow.
-    /// default: 500
-    pub(crate) parser_max_recursion: usize,
-
-    /// Limit the number of tokens the GraphQL parser processes before aborting.
-    pub(crate) parser_max_tokens: usize,
-
-    /// Limit the size of incoming HTTP requests read from the network,
-    /// to protect against running out of memory. Default: 2000000 (2 MB)
-    pub(crate) http_max_request_bytes: usize,
-}
-
-impl Default for Limits {
-    fn default() -> Self {
-        Self {
-            // These limits are opt-in
-            max_depth: None,
-            max_height: None,
-            max_root_fields: None,
-            max_aliases: None,
-            warn_only: false,
-            http_max_request_bytes: 2_000_000,
-            parser_max_tokens: 15_000,
-
-            // This is `apollo-parser`’s default, which protects against stack overflow
-            // but is still very high for "reasonable" queries.
-            // https://github.com/apollographql/apollo-rs/blob/apollo-parser%400.7.3/crates/apollo-parser/src/parser/mod.rs#L93-L104
-            parser_max_recursion: 500,
-        }
     }
 }
 

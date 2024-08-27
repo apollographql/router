@@ -756,14 +756,14 @@ mod tests {
                         .header("x-log-request", HeaderValue::from_static("log"))
                         .build()
                         .unwrap(),
-                    |_r| {
-                        router::Response::fake_builder()
+                    |_r|async  {
+                        Ok(router::Response::fake_builder()
                             .header("custom-header", "val1")
                             .header(CONTENT_LENGTH, "25")
                             .header("x-log-request", HeaderValue::from_static("log"))
                             .data(serde_json_bytes::json!({"data": "res"}))
                             .build()
-                            .expect("expecting valid response")
+                            .expect("expecting valid response"))
                     },
                 )
                 .await
@@ -790,17 +790,17 @@ mod tests {
                         .header("custom-header", "val1")
                         .build()
                         .unwrap(),
-                    |_r| {
+                    |_r| async {
                         let context_with_error = Context::new();
                         let _ = context_with_error
                             .insert(CONTAINS_GRAPHQL_ERROR, true)
                             .unwrap();
-                        router::Response::fake_builder()
+                        Ok(router::Response::fake_builder()
                             .header("custom-header", "val1")
                             .context(context_with_error)
                             .data(serde_json_bytes::json!({"errors": [{"message": "res"}]}))
                             .build()
-                            .expect("expecting valid response")
+                            .expect("expecting valid response"))
                     },
                 )
                 .await
@@ -827,14 +827,14 @@ mod tests {
                         .header("custom-header", "val1")
                         .build()
                         .unwrap(),
-                    |_r| {
-                        router::Response::fake_builder()
+                    |_r| async {
+                        Ok(router::Response::fake_builder()
                             .header("custom-header", "val1")
                             .header(CONTENT_LENGTH, "25")
                             .header("x-log-response", HeaderValue::from_static("log"))
                             .data(serde_json_bytes::json!({"data": "res"}))
                             .build()
-                            .expect("expecting valid response")
+                            .expect("expecting valid response"))
                     },
                 )
                 .await
