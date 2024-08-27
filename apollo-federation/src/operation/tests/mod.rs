@@ -3,10 +3,10 @@ use apollo_compiler::name;
 use apollo_compiler::schema::Schema;
 use apollo_compiler::ExecutableDocument;
 
-use super::Operation;
 use super::normalize_operation;
 use super::Name;
 use super::NamedFragments;
+use super::Operation;
 use super::Selection;
 use super::SelectionKey;
 use super::SelectionSet;
@@ -42,14 +42,21 @@ pub(super) fn parse_operation(schema: &ValidFederationSchema, query: &str) -> Op
     Operation::parse(schema.clone(), query, "query.graphql", None).unwrap()
 }
 
-pub(super) fn parse_and_expand(schema: &ValidFederationSchema, query: &str) -> Result<Operation, FederationError> {
+pub(super) fn parse_and_expand(
+    schema: &ValidFederationSchema,
+    query: &str,
+) -> Result<Operation, FederationError> {
     let doc = apollo_compiler::ExecutableDocument::parse_and_validate(
         schema.schema(),
         query,
         "query.graphql",
     )?;
 
-    let operation = doc.operations.anonymous.as_ref().expect("must have anonymous operation");
+    let operation = doc
+        .operations
+        .anonymous
+        .as_ref()
+        .expect("must have anonymous operation");
     let fragments = NamedFragments::new(&doc.fragments, schema);
 
     normalize_operation(operation, fragments, schema, &Default::default())
@@ -1654,7 +1661,9 @@ fn directive_propagation() {
 
     let schema = parse_schema(schema_doc);
 
-    let query = parse_and_expand(&schema, r#"
+    let query = parse_and_expand(
+        &schema,
+        r#"
         fragment DirectiveOnDef on T @fragDefOnly @fragAll { a }
         query {
           t2 {
@@ -1664,7 +1673,9 @@ fn directive_propagation() {
             ...DirectiveOnDef @fragAll
           }
         }
-    "#).expect("directive applications to be valid");
+    "#,
+    )
+    .expect("directive applications to be valid");
     insta::assert_snapshot!(query, @r###"
     fragment DirectiveOnDef on T @fragDefOnly @fragAll {
       a
@@ -1684,13 +1695,17 @@ fn directive_propagation() {
     }
     "###);
 
-    let err = parse_and_expand(&schema, r#"
+    let err = parse_and_expand(
+        &schema,
+        r#"
         fragment DirectiveOnDef on T @fragDefOnly @fragAll { a }
         query {
           t1 {
             ...DirectiveOnDef @fragSpreadOnly @fragAll
           }
         }
-    "#).expect_err("directive @fragSpreadOnly to be rejected");
+    "#,
+    )
+    .expect_err("directive @fragSpreadOnly to be rejected");
     insta::assert_snapshot!(err, @"Unsupported custom directive @fragSpreadOnly on fragment spread. Due to query transformations during planning, the router requires directives on fragment spreads to support both the FRAGMENT_SPREAD and INLINE_FRAGMENT locations.");
 }
