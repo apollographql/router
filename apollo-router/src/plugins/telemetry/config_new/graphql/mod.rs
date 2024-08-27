@@ -6,6 +6,7 @@ use serde::Deserialize;
 use serde_json_bytes::Value;
 use tower::BoxError;
 
+use super::conditional::Conditional;
 use super::instruments::CustomCounter;
 use super::instruments::CustomInstruments;
 use crate::graphql::ResponseVisitor;
@@ -34,12 +35,12 @@ pub(crate) struct GraphQLInstrumentsConfig {
     /// A histogram of the length of a selected field in the GraphQL response
     #[serde(rename = "list.length")]
     pub(crate) list_length:
-        DefaultedStandardInstrument<Extendable<GraphQLAttributes, GraphQLSelector>>,
+        DefaultedStandardInstrument<Extendable<GraphQLAttributes, Conditional<GraphQLSelector>>>,
 
     /// A counter of the number of times a field is used.
     #[serde(rename = "field.execution")]
     pub(crate) field_execution:
-        DefaultedStandardInstrument<Extendable<GraphQLAttributes, GraphQLSelector>>,
+        DefaultedStandardInstrument<Extendable<GraphQLAttributes, Conditional<GraphQLSelector>>>,
 }
 
 impl DefaultForLevel for GraphQLInstrumentsConfig {

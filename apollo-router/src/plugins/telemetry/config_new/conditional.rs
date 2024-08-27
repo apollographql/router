@@ -54,6 +54,16 @@ pub(crate) struct Conditional<Att> {
     pub(crate) value: Arc<Mutex<State<opentelemetry::Value>>>,
 }
 
+impl<Att> Clone for Conditional<Att> {
+    fn clone(&self) -> Self {
+        Self {
+            selector: self.selector.clone(),
+            condition: self.condition.clone(),
+            value: self.value.clone(),
+        }
+    }
+}
+
 #[cfg(test)]
 impl<Att> PartialEq for Conditional<Att>
 where

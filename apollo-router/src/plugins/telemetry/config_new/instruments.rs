@@ -25,6 +25,7 @@ use super::cache::attributes::CacheAttributes;
 use super::cache::CacheInstruments;
 use super::cache::CacheInstrumentsConfig;
 use super::cache::CACHE_METRIC;
+use super::conditional::Conditional;
 use super::graphql::selectors::ListLength;
 use super::graphql::GraphQLInstruments;
 use super::graphql::FIELD_EXECUTION;
@@ -928,7 +929,7 @@ pub(crate) struct RouterInstrumentsConfig {
     /// Histogram of server request duration
     #[serde(rename = "http.server.request.duration")]
     http_server_request_duration:
-        DefaultedStandardInstrument<Extendable<RouterAttributes, RouterSelector>>,
+        DefaultedStandardInstrument<Extendable<RouterAttributes, Conditional<RouterSelector>>>,
 
     /// Counter of active requests
     #[serde(rename = "http.server.active_requests")]
@@ -937,12 +938,12 @@ pub(crate) struct RouterInstrumentsConfig {
     /// Histogram of server request body size
     #[serde(rename = "http.server.request.body.size")]
     http_server_request_body_size:
-        DefaultedStandardInstrument<Extendable<RouterAttributes, RouterSelector>>,
+        DefaultedStandardInstrument<Extendable<RouterAttributes, Conditional<RouterSelector>>>,
 
     /// Histogram of server response body size
     #[serde(rename = "http.server.response.body.size")]
     http_server_response_body_size:
-        DefaultedStandardInstrument<Extendable<RouterAttributes, RouterSelector>>,
+        DefaultedStandardInstrument<Extendable<RouterAttributes, Conditional<RouterSelector>>>,
 }
 
 impl DefaultForLevel for RouterInstrumentsConfig {
@@ -1116,17 +1117,17 @@ pub(crate) struct SubgraphInstrumentsConfig {
     /// Histogram of client request duration
     #[serde(rename = "http.client.request.duration")]
     http_client_request_duration:
-        DefaultedStandardInstrument<Extendable<SubgraphAttributes, SubgraphSelector>>,
+        DefaultedStandardInstrument<Extendable<SubgraphAttributes, Conditional<SubgraphSelector>>>,
 
     /// Histogram of client request body size
     #[serde(rename = "http.client.request.body.size")]
     http_client_request_body_size:
-        DefaultedStandardInstrument<Extendable<SubgraphAttributes, SubgraphSelector>>,
+        DefaultedStandardInstrument<Extendable<SubgraphAttributes, Conditional<SubgraphSelector>>>,
 
     /// Histogram of client response body size
     #[serde(rename = "http.client.response.body.size")]
     http_client_response_body_size:
-        DefaultedStandardInstrument<Extendable<SubgraphAttributes, SubgraphSelector>>,
+        DefaultedStandardInstrument<Extendable<SubgraphAttributes, Conditional<SubgraphSelector>>>,
 }
 
 impl DefaultForLevel for SubgraphInstrumentsConfig {
@@ -1166,8 +1167,8 @@ where
     unit: String,
 
     /// Attributes to include on the instrument.
-    #[serde(default = "Extendable::empty_arc::<A, E>")]
-    attributes: Arc<Extendable<A, E>>,
+    #[serde(default = "Extendable::empty_arc::<A, Conditional<E>>")]
+    attributes: Arc<Extendable<A, Conditional<E>>>,
 
     /// The instrument conditions.
     #[serde(default = "Condition::empty::<E>")]
@@ -1825,7 +1826,7 @@ where
 {
     pub(crate) increment: Increment,
     pub(crate) selector: Option<Arc<T>>,
-    pub(crate) selectors: Option<Arc<Extendable<A, T>>>,
+    pub(crate) selectors: Option<Arc<Extendable<A, Conditional<T>>>>,
     pub(crate) counter: Option<Counter<f64>>,
     pub(crate) condition: Condition<T>,
     pub(crate) attributes: Vec<opentelemetry_api::KeyValue>,
@@ -2246,7 +2247,7 @@ where
     pub(crate) increment: Increment,
     pub(crate) condition: Condition<T>,
     pub(crate) selector: Option<Arc<T>>,
-    pub(crate) selectors: Option<Arc<Extendable<A, T>>>,
+    pub(crate) selectors: Option<Arc<Extendable<A, Conditional<T>>>>,
     pub(crate) histogram: Option<Histogram<f64>>,
     pub(crate) attributes: Vec<opentelemetry_api::KeyValue>,
     // Useful when it's an histogram on events to know if we have to count for an event or not

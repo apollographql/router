@@ -7,6 +7,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
+use super::conditional::Conditional;
 use super::instruments::CustomCounter;
 use super::selectors::SubgraphSelector;
 use crate::plugins::cache::entity::CacheHitMiss;
@@ -32,7 +33,8 @@ const CACHE_HIT: Key = Key::from_static_str("cache.hit");
 pub(crate) struct CacheInstrumentsConfig {
     /// A counter of times we have a cache hit or cache miss
     #[serde(rename = "apollo.router.operations.entity.cache")]
-    pub(crate) cache: DefaultedStandardInstrument<Extendable<CacheAttributes, SubgraphSelector>>,
+    pub(crate) cache:
+        DefaultedStandardInstrument<Extendable<CacheAttributes, Conditional<SubgraphSelector>>>,
 }
 
 impl DefaultForLevel for CacheInstrumentsConfig {

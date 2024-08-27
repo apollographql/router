@@ -1,0 +1,13 @@
+telemetry:
+  instrumentation:
+    instruments:
+      router:
+        http.server.active_requests: false
+        http.server.request.duration:
+          attributes:
+            graphql.operation.name:
+              operation_name: string
+              condition:
+                eq:
+                - request_header: include
+                - "operation_name"

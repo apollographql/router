@@ -9,6 +9,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
+use super::conditional::Conditional;
 use super::instruments::Increment;
 use super::instruments::StaticInstrument;
 use crate::metrics;
@@ -104,16 +105,19 @@ impl Selectors for SupergraphCostAttributes {
 pub(crate) struct CostInstrumentsConfig {
     /// A histogram of the estimated cost of the operation using the currently configured cost model
     #[serde(rename = "cost.estimated")]
-    pub(crate) cost_estimated:
-        DefaultedStandardInstrument<Extendable<SupergraphAttributes, SupergraphSelector>>,
+    pub(crate) cost_estimated: DefaultedStandardInstrument<
+        Extendable<SupergraphAttributes, Conditional<SupergraphSelector>>,
+    >,
     /// A histogram of the actual cost of the operation using the currently configured cost model
     #[serde(rename = "cost.actual")]
-    pub(crate) cost_actual:
-        DefaultedStandardInstrument<Extendable<SupergraphAttributes, SupergraphSelector>>,
+    pub(crate) cost_actual: DefaultedStandardInstrument<
+        Extendable<SupergraphAttributes, Conditional<SupergraphSelector>>,
+    >,
     /// A histogram of the delta between the estimated and actual cost of the operation using the currently configured cost model
     #[serde(rename = "cost.delta")]
-    pub(crate) cost_delta:
-        DefaultedStandardInstrument<Extendable<SupergraphAttributes, SupergraphSelector>>,
+    pub(crate) cost_delta: DefaultedStandardInstrument<
+        Extendable<SupergraphAttributes, Conditional<SupergraphSelector>>,
+    >,
 }
 
 impl CostInstrumentsConfig {
@@ -180,7 +184,9 @@ impl CostInstrumentsConfig {
 
     fn histogram(
         name: &'static str,
-        config: &DefaultedStandardInstrument<Extendable<SupergraphAttributes, SupergraphSelector>>,
+        config: &DefaultedStandardInstrument<
+            Extendable<SupergraphAttributes, Conditional<SupergraphSelector>>,
+        >,
         selector: SupergraphSelector,
         static_instruments: &Arc<HashMap<String, StaticInstrument>>,
     ) -> CustomHistogram<Request, Response, SupergraphAttributes, SupergraphSelector> {

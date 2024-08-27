@@ -1,0 +1,28 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
+description: Server duration metrics with custom attributes on condition
+expression: "&metrics.all()"
+info:
+  telemetry:
+    instrumentation:
+      instruments:
+        router:
+          http.server.active_requests: false
+          http.server.request.duration:
+            attributes:
+              graphql.operation.name:
+                operation_name: string
+                condition:
+                  eq:
+                    - request_header: include
+                    - operation_name
+---
+- name: http.server.request.duration
+  description: Duration of HTTP server requests.
+  unit: s
+  data:
+    datapoints:
+      - sum: 0.1
+        attributes:
+          http.request.method: GET
+          http.response.status_code: 200
