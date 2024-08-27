@@ -641,10 +641,12 @@ mod tests {
                         "String",
                     ),
                     selection: Path(
-                        Var(
-                            "$",
-                            Empty,
-                        ),
+                        PathSelection {
+                            path: Var(
+                                $,
+                                Empty,
+                            ),
+                        },
                     ),
                     inputs: RequestInputs {
                         args: {
@@ -661,10 +663,12 @@ mod tests {
                         "String",
                     ),
                     selection: Path(
-                        Var(
-                            "$",
-                            Empty,
-                        ),
+                        PathSelection {
+                            path: Var(
+                                $,
+                                Empty,
+                            ),
+                        },
                     ),
                     inputs: RequestInputs {
                         args: {
@@ -769,12 +773,14 @@ mod tests {
                         "String",
                     ),
                     selection: Path(
-                        Key(
-                            Field(
-                                "data",
+                        PathSelection {
+                            path: Key(
+                                Field(
+                                    "data",
+                                ),
+                                Empty,
                             ),
-                            Empty,
-                        ),
+                        },
                     ),
                     inputs: RequestInputs {
                         args: {
@@ -805,12 +811,14 @@ mod tests {
                         "String",
                     ),
                     selection: Path(
-                        Key(
-                            Field(
-                                "data",
+                        PathSelection {
+                            path: Key(
+                                Field(
+                                    "data",
+                                ),
+                                Empty,
                             ),
-                            Empty,
-                        ),
+                        },
                     ),
                     inputs: RequestInputs {
                         args: {
@@ -946,15 +954,24 @@ mod tests {
                                 Alias {
                                     name: "__typename",
                                 },
-                                Var(
-                                    "$typenames",
-                                    Key(
-                                        Field(
-                                            "_Entity",
+                                PathSelection {
+                                    path: Var(
+                                        $,
+                                        Method(
+                                            "echo",
+                                            Some(
+                                                MethodArgs(
+                                                    [
+                                                        String(
+                                                            "_Entity",
+                                                        ),
+                                                    ],
+                                                ),
+                                            ),
+                                            Empty,
                                         ),
-                                        Empty,
                                     ),
-                                ),
+                                },
                             ),
                             Field(
                                 None,
@@ -998,15 +1015,24 @@ mod tests {
                                 Alias {
                                     name: "__typename",
                                 },
-                                Var(
-                                    "$typenames",
-                                    Key(
-                                        Field(
-                                            "_Entity",
+                                PathSelection {
+                                    path: Var(
+                                        $,
+                                        Method(
+                                            "echo",
+                                            Some(
+                                                MethodArgs(
+                                                    [
+                                                        String(
+                                                            "_Entity",
+                                                        ),
+                                                    ],
+                                                ),
+                                            ),
+                                            Empty,
                                         ),
-                                        Empty,
                                     ),
-                                ),
+                                },
                             ),
                             Field(
                                 None,
@@ -1671,12 +1697,14 @@ mod tests {
                         "String",
                     ),
                     selection: Path(
-                        Key(
-                            Field(
-                                "data",
+                        PathSelection {
+                            path: Key(
+                                Field(
+                                    "data",
+                                ),
+                                Empty,
                             ),
-                            Empty,
-                        ),
+                        },
                     ),
                     inputs: RequestInputs {
                         args: {},
