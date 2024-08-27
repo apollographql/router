@@ -613,28 +613,23 @@ impl Query {
 
                 match input {
                     Value::Object(ref mut input_object) => {
-                        if let Some(typename_val) = input_object.get(TYPENAME) {
-                            if let Some(input_type) = typename_val.as_str() {
-                                // If there is a __typename, make sure the pointed type is a valid type of the schema. Otherwise, something is wrong, and in case we might
-                                // be inadvertently leaking some data for an @inacessible type or something, nullify the whole object. However, do note that due to `@interfaceObject`,
-                                // some subgraph can have returned a __typename that is the name of an interface in the supergraph, and this is fine (that is, we should not
-                                // return such a __typename to the user, but as long as it's not returned, having it in the internal data is ok and sometimes expected).
-                                let Some(ExtendedType::Object(_) | ExtendedType::Interface(_)) =
-                                    parameters.schema.types.get(input_type)
-                                else {
-                                    parameters.nullified.push(Path::from_response_slice(path));
-                                    *output = Value::Null;
-                                    return Ok(());
-                                };
-                            } else {
-                                parameters.validation_errors.push(Error {
-                                    message: format!("Invalid non-string value of type {} for __typename at {path:?}", typename_val.json_type_name()),
-                                    path: Some(Path::from_response_slice(path)),
-                                    ..Error::default()
-                                });
+                        // FIXME: we should return an error if __typename is not a string
+                        // but this might cause issues for some production deployments where
+                        // __typename might be missing or invalid (cf https://github.com/apollographql/router/commit/4a592f4933b7b9e46f14c7a98404b9e067687f09 )
+                        if let Some(input_type) =
+                            input_object.get(TYPENAME).and_then(|val| val.as_str())
+                        {
+                            // If there is a __typename, make sure the pointed type is a valid type of the schema. Otherwise, something is wrong, and in case we might
+                            // be inadvertently leaking some data for an @inacessible type or something, nullify the whole object. However, do note that due to `@interfaceObject`,
+                            // some subgraph can have returned a __typename that is the name of an interface in the supergraph, and this is fine (that is, we should not
+                            // return such a __typename to the user, but as long as it's not returned, having it in the internal data is ok and sometimes expected).
+                            let Some(ExtendedType::Object(_) | ExtendedType::Interface(_)) =
+                                parameters.schema.types.get(input_type)
+                            else {
+                                parameters.nullified.push(Path::from_response_slice(path));
                                 *output = Value::Null;
                                 return Ok(());
-                            }
+                            };
                         }
 
                         if output.is_null() {
