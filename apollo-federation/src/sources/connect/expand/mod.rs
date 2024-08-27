@@ -308,7 +308,7 @@ mod helpers {
 
             // We'll need to make sure that we always process the inputs first, since they need to be present
             // before any dependent types
-            self.process_inputs(&mut schema, connector, &field_def.arguments)?;
+            self.process_inputs(&mut schema, &field_def.arguments)?;
 
             // Actually process the type annotated with the connector, making sure to walk nested types
             match field_type {
@@ -390,62 +390,28 @@ mod helpers {
         fn process_inputs(
             &self,
             to_schema: &mut FederationSchema,
-            connector: &Connector,
             arguments: &[Node<InputValueDefinition>],
         ) -> Result<(), FederationError> {
-            // The body of the request might include references to input arguments / sibling fields
-            // that will need to be handled, so we extract any referenced variables now
-            let body_parameters = extract_params_from_body(connector)?;
+            // All inputs to a connector's field need to be carried over in order to always generate
+            // valid subgraphs
+            for arg in arguments {
+                let arg_type_name = arg.ty.inner_named_type();
+                let arg_type = self.original_schema.get_type(arg_type_name.clone())?;
+                let arg_extended_type = arg_type.get(self.original_schema.schema())?;
 
-            let parameters = connector
-                .transport
-                .connect_template
-                .parameters()
-                .map_err(|e| {
-                    FederationError::internal(format!(
-                        "could not extract path template parameters: {e}"
-                    ))
-                })?;
-            for parameter in Iterator::chain(body_parameters.iter(), &parameters) {
-                match parameter {
-                    // Ensure that input arguments are carried over to the new schema, including
-                    // any types associated with them.
-                    Parameter::Argument { argument, .. } => {
-                        // Get the argument type
-                        let arg = arguments
-                            .iter()
-                            .find(|a| a.name.as_str() == *argument)
-                            .ok_or(FederationError::internal(format!(
-                                "could not find argument: {argument}"
-                            )))?;
-                        let arg_type_name = arg.ty.inner_named_type();
-                        let arg_type = self.original_schema.get_type(arg_type_name.clone())?;
-                        let arg_extended_type = arg_type.get(self.original_schema.schema())?;
+                // If the input type isn't built in, then we need to carry it over, making sure to only walk
+                // if we have a complex input since leaf types can just be copied over.
+                if !arg_extended_type.is_built_in() {
+                    match arg_type {
+                        TypeDefinitionPosition::InputObject(input) => SchemaVisitor::new(
+                            self.original_schema,
+                            to_schema,
+                            &self.directive_deny_list,
+                        )
+                        .walk(input)?,
 
-                        // If the input type isn't built in (and hasn't been copied over yet), then we
-                        // need to carry it over.
-                        if !arg_extended_type.is_built_in()
-                            && to_schema.try_get_type(arg_type_name.clone()).is_none()
-                        {
-                            let visitor = SchemaVisitor::new(
-                                self.original_schema,
-                                to_schema,
-                                &self.directive_deny_list,
-                            );
-
-                            // Only walk if we have an input, making sure to simply insert the type otherwise
-                            match arg_type {
-                                TypeDefinitionPosition::InputObject(input) => {
-                                    visitor.walk(input)?
-                                }
-
-                                other => self.insert_custom_leaf(to_schema, &other)?,
-                            };
-                        }
-                    }
-
-                    // Any other parameter type is not from an input
-                    _ => continue,
+                        other => self.insert_custom_leaf(to_schema, &other)?,
+                    };
                 }
             }
 
