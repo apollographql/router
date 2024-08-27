@@ -1222,8 +1222,8 @@ expression: "&schema"
           "nullable": true
         },
         "subgraph": {
-          "$ref": "#/definitions/Config3",
-          "description": "#/definitions/Config3",
+          "$ref": "#/definitions/Config4",
+          "description": "#/definitions/Config4",
           "nullable": true
         }
       },
@@ -1321,8 +1321,8 @@ expression: "&schema"
       "description": "Telemetry configuration",
       "properties": {
         "apollo": {
-          "$ref": "#/definitions/Config8",
-          "description": "#/definitions/Config8"
+          "$ref": "#/definitions/Config9",
+          "description": "#/definitions/Config9"
         },
         "exporters": {
           "$ref": "#/definitions/Exporters",
@@ -1336,11 +1336,100 @@ expression: "&schema"
       "type": "object"
     },
     "Config": {
-      "description": "This is a broken plugin for testing purposes only.",
+      "additionalProperties": false,
+      "description": "Configuration for operation limits, parser limits, HTTP limits, etc.",
       "properties": {
-        "enabled": {
-          "description": "Enable the broken plugin.",
+        "http_max_request_bytes": {
+          "default": 2000000,
+          "description": "Limit the size of incoming HTTP requests read from the network, to protect against running out of memory. Default: 2000000 (2 MB)",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "max_aliases": {
+          "default": null,
+          "description": "If set, requests with operations with more aliases than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_ALIASES_LIMIT\"}`",
+          "format": "uint32",
+          "minimum": 0.0,
+          "nullable": true,
+          "type": "integer"
+        },
+        "max_depth": {
+          "default": null,
+          "description": "If set, requests with operations deeper than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_DEPTH_LIMIT\"}`\n\nCounts depth of an operation, looking at its selection sets,˛ including fields in fragments and inline fragments. The following example has a depth of 3.\n\n```graphql query getProduct { book { # 1 ...bookDetails } }\n\nfragment bookDetails on Book { details { # 2 ... on ProductDetailsBook { country # 3 } } } ```",
+          "format": "uint32",
+          "minimum": 0.0,
+          "nullable": true,
+          "type": "integer"
+        },
+        "max_height": {
+          "default": null,
+          "description": "If set, requests with operations higher than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_DEPTH_LIMIT\"}`\n\nHeight is based on simple merging of fields using the same name or alias, but only within the same selection set. For example `name` here is only counted once and the query has height 3, not 4:\n\n```graphql query { name { first } name { last } } ```\n\nThis may change in a future version of Apollo Router to do [full field merging across fragments][merging] instead.\n\n[merging]: https://spec.graphql.org/October2021/#sec-Field-Selection-Merging]",
+          "format": "uint32",
+          "minimum": 0.0,
+          "nullable": true,
+          "type": "integer"
+        },
+        "max_root_fields": {
+          "default": null,
+          "description": "If set, requests with operations with more root fields than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_ROOT_FIELDS_LIMIT\"}`\n\nThis limit counts only the top level fields in a selection set, including fragments and inline fragments.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "nullable": true,
+          "type": "integer"
+        },
+        "parser_max_recursion": {
+          "default": 500,
+          "description": "Limit recursion in the GraphQL parser to protect against stack overflow. default: 500",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "parser_max_tokens": {
+          "default": 15000,
+          "description": "Limit the number of tokens the GraphQL parser processes before aborting.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "warn_only": {
+          "default": false,
+          "description": "If set to true (which is the default is dev mode), requests that exceed a `max_*` limit are *not* rejected. Instead they are executed normally, and a warning is logged.",
           "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "Config10": {
+      "additionalProperties": false,
+      "properties": {
+        "batch_processor": {
+          "$ref": "#/definitions/BatchProcessorConfig",
+          "description": "#/definitions/BatchProcessorConfig"
+        },
+        "enabled": {
+          "description": "Enable otlp",
+          "type": "boolean"
+        },
+        "endpoint": {
+          "$ref": "#/definitions/UriEndpoint",
+          "description": "#/definitions/UriEndpoint"
+        },
+        "grpc": {
+          "$ref": "#/definitions/GrpcExporter",
+          "description": "#/definitions/GrpcExporter"
+        },
+        "http": {
+          "$ref": "#/definitions/HttpExporter",
+          "description": "#/definitions/HttpExporter"
+        },
+        "protocol": {
+          "$ref": "#/definitions/Protocol",
+          "description": "#/definitions/Protocol"
+        },
+        "temporality": {
+          "$ref": "#/definitions/Temporality",
+          "description": "#/definitions/Temporality"
         }
       },
       "required": [
@@ -1348,7 +1437,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config10": {
+    "Config11": {
       "additionalProperties": false,
       "description": "Prometheus configuration",
       "properties": {
@@ -1369,7 +1458,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Config11": {
+    "Config12": {
       "anyOf": [
         {
           "additionalProperties": false,
@@ -1415,7 +1504,7 @@ expression: "&schema"
         }
       ]
     },
-    "Config12": {
+    "Config13": {
       "additionalProperties": false,
       "properties": {
         "batch_processor": {
@@ -1436,7 +1525,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config13": {
+    "Config14": {
       "additionalProperties": false,
       "properties": {
         "batch_processor": {
@@ -1493,7 +1582,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config14": {
+    "Config15": {
       "additionalProperties": false,
       "description": "Configuration for the experimental traffic shaping plugin",
       "properties": {
@@ -1525,6 +1614,19 @@ expression: "&schema"
       "type": "object"
     },
     "Config2": {
+      "description": "This is a broken plugin for testing purposes only.",
+      "properties": {
+        "enabled": {
+          "description": "Enable the broken plugin.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "Config3": {
       "description": "Restricted plugin (for testing purposes only)",
       "properties": {
         "enabled": {
@@ -1537,7 +1639,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config3": {
+    "Config4": {
       "additionalProperties": false,
       "description": "Configure subgraph authentication",
       "properties": {
@@ -1557,7 +1659,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Config4": {
+    "Config5": {
       "additionalProperties": false,
       "description": "Configuration for header propagation",
       "properties": {
@@ -1577,7 +1679,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Config5": {
+    "Config6": {
       "additionalProperties": false,
       "description": "Configuration for exposing errors that originate from subgraphs",
       "properties": {
@@ -1597,7 +1699,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Config6": {
+    "Config7": {
       "additionalProperties": false,
       "description": "Configuration for entity caching",
       "properties": {
@@ -1625,11 +1727,11 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config7": {
+    "Config8": {
       "description": "Configuration for the progressive override plugin",
       "type": "object"
     },
-    "Config8": {
+    "Config9": {
       "additionalProperties": false,
       "properties": {
         "batch_processor": {
@@ -1703,43 +1805,6 @@ expression: "&schema"
           "description": "#/definitions/ForwardValues"
         }
       },
-      "type": "object"
-    },
-    "Config9": {
-      "additionalProperties": false,
-      "properties": {
-        "batch_processor": {
-          "$ref": "#/definitions/BatchProcessorConfig",
-          "description": "#/definitions/BatchProcessorConfig"
-        },
-        "enabled": {
-          "description": "Enable otlp",
-          "type": "boolean"
-        },
-        "endpoint": {
-          "$ref": "#/definitions/UriEndpoint",
-          "description": "#/definitions/UriEndpoint"
-        },
-        "grpc": {
-          "$ref": "#/definitions/GrpcExporter",
-          "description": "#/definitions/GrpcExporter"
-        },
-        "http": {
-          "$ref": "#/definitions/HttpExporter",
-          "description": "#/definitions/HttpExporter"
-        },
-        "protocol": {
-          "$ref": "#/definitions/Protocol",
-          "description": "#/definitions/Protocol"
-        },
-        "temporality": {
-          "$ref": "#/definitions/Temporality",
-          "description": "#/definitions/Temporality"
-        }
-      },
-      "required": [
-        "enabled"
-      ],
       "type": "object"
     },
     "ContextForward": {
@@ -3630,71 +3695,6 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Limits": {
-      "additionalProperties": false,
-      "description": "Configuration for operation limits, parser limits, HTTP limits, etc.",
-      "properties": {
-        "http_max_request_bytes": {
-          "default": 2000000,
-          "description": "Limit the size of incoming HTTP requests read from the network, to protect against running out of memory. Default: 2000000 (2 MB)",
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
-        },
-        "max_aliases": {
-          "default": null,
-          "description": "If set, requests with operations with more aliases than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_ALIASES_LIMIT\"}`",
-          "format": "uint32",
-          "minimum": 0.0,
-          "nullable": true,
-          "type": "integer"
-        },
-        "max_depth": {
-          "default": null,
-          "description": "If set, requests with operations deeper than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_DEPTH_LIMIT\"}`\n\nCounts depth of an operation, looking at its selection sets, including fields in fragments and inline fragments. The following example has a depth of 3.\n\n```graphql query getProduct { book { # 1 ...bookDetails } }\n\nfragment bookDetails on Book { details { # 2 ... on ProductDetailsBook { country # 3 } } } ```",
-          "format": "uint32",
-          "minimum": 0.0,
-          "nullable": true,
-          "type": "integer"
-        },
-        "max_height": {
-          "default": null,
-          "description": "If set, requests with operations higher than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_DEPTH_LIMIT\"}`\n\nHeight is based on simple merging of fields using the same name or alias, but only within the same selection set. For example `name` here is only counted once and the query has height 3, not 4:\n\n```graphql query { name { first } name { last } } ```\n\nThis may change in a future version of Apollo Router to do [full field merging across fragments][merging] instead.\n\n[merging]: https://spec.graphql.org/October2021/#sec-Field-Selection-Merging]",
-          "format": "uint32",
-          "minimum": 0.0,
-          "nullable": true,
-          "type": "integer"
-        },
-        "max_root_fields": {
-          "default": null,
-          "description": "If set, requests with operations with more root fields than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_ROOT_FIELDS_LIMIT\"}`\n\nThis limit counts only the top level fields in a selection set, including fragments and inline fragments.",
-          "format": "uint32",
-          "minimum": 0.0,
-          "nullable": true,
-          "type": "integer"
-        },
-        "parser_max_recursion": {
-          "default": 500,
-          "description": "Limit recursion in the GraphQL parser to protect against stack overflow. default: 500",
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
-        },
-        "parser_max_tokens": {
-          "default": 15000,
-          "description": "Limit the number of tokens the GraphQL parser processes before aborting.",
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
-        },
-        "warn_only": {
-          "default": false,
-          "description": "If set to true (which is the default is dev mode), requests that exceed a `max_*` limit are *not* rejected. Instead they are executed normally, and a warning is logged.",
-          "type": "boolean"
-        }
-      },
-      "type": "object"
-    },
     "ListLength": {
       "oneOf": [
         {
@@ -3874,12 +3874,12 @@ expression: "&schema"
           "description": "#/definitions/MetricsCommon"
         },
         "otlp": {
-          "$ref": "#/definitions/Config9",
-          "description": "#/definitions/Config9"
-        },
-        "prometheus": {
           "$ref": "#/definitions/Config10",
           "description": "#/definitions/Config10"
+        },
+        "prometheus": {
+          "$ref": "#/definitions/Config11",
+          "description": "#/definitions/Config11"
         }
       },
       "type": "object"
@@ -4148,8 +4148,8 @@ expression: "&schema"
       "additionalProperties": false,
       "properties": {
         "experimental.broken": {
-          "$ref": "#/definitions/Config",
-          "description": "#/definitions/Config"
+          "$ref": "#/definitions/Config2",
+          "description": "#/definitions/Config2"
         },
         "experimental.expose_query_plan": {
           "$ref": "#/definitions/ExposeQueryPlanConfig",
@@ -4160,8 +4160,8 @@ expression: "&schema"
           "description": "#/definitions/RecordConfig"
         },
         "experimental.restricted": {
-          "$ref": "#/definitions/Config2",
-          "description": "#/definitions/Config2"
+          "$ref": "#/definitions/Config3",
+          "description": "#/definitions/Config3"
         },
         "test.always_fails_to_start": {
           "$ref": "#/definitions/Conf",
@@ -7213,28 +7213,28 @@ expression: "&schema"
           "description": "#/definitions/TracingCommon"
         },
         "datadog": {
-          "$ref": "#/definitions/Config13",
-          "description": "#/definitions/Config13"
+          "$ref": "#/definitions/Config14",
+          "description": "#/definitions/Config14"
         },
         "experimental_response_trace_id": {
           "$ref": "#/definitions/ExposeTraceId",
           "description": "#/definitions/ExposeTraceId"
         },
         "jaeger": {
-          "$ref": "#/definitions/Config11",
-          "description": "#/definitions/Config11"
+          "$ref": "#/definitions/Config12",
+          "description": "#/definitions/Config12"
         },
         "otlp": {
-          "$ref": "#/definitions/Config9",
-          "description": "#/definitions/Config9"
+          "$ref": "#/definitions/Config10",
+          "description": "#/definitions/Config10"
         },
         "propagation": {
           "$ref": "#/definitions/Propagation",
           "description": "#/definitions/Propagation"
         },
         "zipkin": {
-          "$ref": "#/definitions/Config12",
-          "description": "#/definitions/Config12"
+          "$ref": "#/definitions/Config13",
+          "description": "#/definitions/Config13"
         }
       },
       "type": "object"
@@ -8324,8 +8324,8 @@ expression: "&schema"
       "description": "#/definitions/ForbidMutationsConfig"
     },
     "headers": {
-      "$ref": "#/definitions/Config4",
-      "description": "#/definitions/Config4"
+      "$ref": "#/definitions/Config5",
+      "description": "#/definitions/Config5"
     },
     "health_check": {
       "$ref": "#/definitions/HealthCheck",
@@ -8336,12 +8336,12 @@ expression: "&schema"
       "description": "#/definitions/Homepage"
     },
     "include_subgraph_errors": {
-      "$ref": "#/definitions/Config5",
-      "description": "#/definitions/Config5"
+      "$ref": "#/definitions/Config6",
+      "description": "#/definitions/Config6"
     },
     "limits": {
-      "$ref": "#/definitions/Limits",
-      "description": "#/definitions/Limits"
+      "$ref": "#/definitions/Config",
+      "description": "#/definitions/Config"
     },
     "override_subgraph_url": {
       "$ref": "#/definitions/Conf5",
@@ -8356,16 +8356,16 @@ expression: "&schema"
       "description": "#/definitions/Plugins"
     },
     "preview_entity_cache": {
-      "$ref": "#/definitions/Config6",
-      "description": "#/definitions/Config6"
+      "$ref": "#/definitions/Config7",
+      "description": "#/definitions/Config7"
     },
     "preview_file_uploads": {
       "$ref": "#/definitions/FileUploadsConfig",
       "description": "#/definitions/FileUploadsConfig"
     },
     "progressive_override": {
-      "$ref": "#/definitions/Config7",
-      "description": "#/definitions/Config7"
+      "$ref": "#/definitions/Config8",
+      "description": "#/definitions/Config8"
     },
     "rhai": {
       "$ref": "#/definitions/Conf6",
@@ -8392,8 +8392,8 @@ expression: "&schema"
       "description": "#/definitions/Tls"
     },
     "traffic_shaping": {
-      "$ref": "#/definitions/Config14",
-      "description": "#/definitions/Config14"
+      "$ref": "#/definitions/Config15",
+      "description": "#/definitions/Config15"
     }
   },
   "title": "Configuration",
