@@ -875,6 +875,92 @@ async fn test_nullability() {
 }
 
 #[tokio::test]
+async fn test_default_argument_values() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/default-args"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!("hello")))
+        .mount(&mock_server)
+        .await;
+
+    let response = execute(
+        NULLABILITY_SCHEMA,
+        &mock_server.uri(),
+        "query { defaultArgs }",
+        Default::default(),
+        None,
+        |_| {},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "defaultArgs": "hello"
+      }
+    }
+    "###);
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![Matcher::new()
+            .method("POST")
+            .path("/default-args")
+            .body(serde_json::json!({
+              "str": "default",
+              "int": 42,
+              "float": 1.23,
+              "bool": true,
+              "arr": ["default"],
+            }))
+            .build()],
+    );
+}
+
+#[tokio::test]
+async fn test_default_argument_overrides() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/default-args"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!("hello")))
+        .mount(&mock_server)
+        .await;
+
+    let response = execute(
+        NULLABILITY_SCHEMA,
+        &mock_server.uri(),
+        "query { defaultArgs(str: \"hi\" int: 108 float: 9.87 bool: false arr: [\"hi again\"]) }",
+        Default::default(),
+        None,
+        |_| {},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "defaultArgs": "hello"
+      }
+    }
+    "###);
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![Matcher::new()
+            .method("POST")
+            .path("/default-args")
+            .body(serde_json::json!({
+              "str": "hi",
+              "int": 108,
+              "float": 9.87,
+              "bool": false,
+              "arr": ["hi again"],
+            }))
+            .build()],
+    );
+}
+
+#[tokio::test]
 async fn test_form_encoding() {
     let mock_server = MockServer::start().await;
     Mock::given(method("POST"))

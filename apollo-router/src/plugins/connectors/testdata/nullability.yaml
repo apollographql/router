@@ -1,12 +1,12 @@
 # rover supergraph compose --config apollo-router/src/plugins/connectors/testdata/nullability.yaml > apollo-router/src/plugins/connectors/testdata/nullability.graphql
-federation_version: =2.9.0-connectors.8
+federation_version: =2.10.0-alpha.0
 subgraphs:
   connectors:
     routing_url: none
     schema:
       sdl: |
         extend schema
-          @link(url: "https://specs.apollo.dev/federation/v2.7")
+          @link(url: "https://specs.apollo.dev/federation/v2.10")
           @link(
             url: "https://specs.apollo.dev/connect/v0.1"
             import: ["@connect", "@source"]
@@ -55,5 +55,19 @@ subgraphs:
               }
               """
               entity: true
+            )
+
+          defaultArgs(
+            str: String = "default"
+            int: Int = 42
+            float: Float = 1.23
+            bool: Boolean = true
+            # TODO: input enums will be supported after 2.10.0-alpha.2
+            arr: [String] = ["default"]
+          ): String
+            @connect(
+              source: "json"
+              http: { POST: "/default-args", body: "str: $$args.str int: $$args.int float: $$args.float bool: $$args.bool arr: $$args.arr" }
+              selection: "$"
             )
         }
