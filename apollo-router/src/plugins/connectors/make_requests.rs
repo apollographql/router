@@ -32,13 +32,13 @@ impl RequestInputs {
     pub(crate) fn merge(
         &self,
         config: Option<&CustomConfiguration>,
-        context: Option<Map<ByteString, Value>>,
+        request_context: Option<Map<ByteString, Value>>,
     ) -> IndexMap<String, Value> {
         let mut map = IndexMap::with_capacity_and_hasher(3, Default::default());
         map.insert("$args".to_string(), Value::Object(self.args.clone()));
         map.insert("$this".to_string(), Value::Object(self.this.clone()));
-        if let Some(context) = context {
-            map.insert("$context".to_string(), json!(context));
+        if let Some(context) = request_context {
+            map.insert("$request.context".to_string(), json!(context));
         }
         if let Some(config) = config {
             map.insert("$config".to_string(), json!(config));
