@@ -140,7 +140,7 @@ telemetry:
               display_current_span: true
               display_service_name: true
               display_service_namespace: true
-              display_trace_id: true
+              display_trace_id: true # true|false|open_telemetry|hexadecimal|decimal|datadog|uuid
               display_span_id: true 
 ```
 
@@ -164,7 +164,7 @@ Example `text` output:
 | `display_timestamp`         | `true`\|`false`                | `true`    | The timestamp of when the event was raised.                             |
 | `display_service_name`      | `true`\|`false`                | `false`   | The service name as configured in metrics common.                       |
 | `display_service_namespace` | `true`\|`false`                | `false`   | The service namespace as configured in metrics common.                  |
-| `display_trace_id`          | `true`\|`false`                | `false`   | The trace id of the span in which the event was raised.                 |
+| `display_trace_id`          | `true`\|`false`\|`open_telemetry`\|`hexadecimal`\|`decimal`\|`datadog`\|`uuid`      | `false`   | The trace id of the span in which the event was raised.                 |
 | `display_span_id`           | `true`\|`false`                | `false`   | The span ID of the span in which the event was raised.                  |
 | `display_span_list`         | `true`\|`false`                | `true`    | A list of all spans to root in which the event was raised and all of their attributes. |
 | `display_current_span`      | `true`\|`false`                | `true`   | The span in which the event was raised and all of its' attributes.                     |
@@ -225,7 +225,7 @@ telemetry:
              display_current_span: true
              display_span_list: true
              display_resource: true
-             display_trace_id: true
+             display_trace_id: true # true|false|open_telemetry|hexadecimal|decimal|datadog|uuid
              display_span_id: true 
 ```
 
@@ -411,7 +411,7 @@ telemetry:
 | `display_timestamp`   | `true`\|`false`   | `true`  | `timestamp`   | The timestamp of when the event was raised.                                            |
 | `display_span_list`   | `true`\|`false`   | `true`  | `spans`       | A list of all spans to root in which the event was raised and all of their attributes. |
 | `display_resource`    | `true`\|`false`   | `true`  | `resource`    | The resource as configured in tracing common.                                          |
-| `display_trace_id`    | `true`\|`false`   | `true`  | `trace_id`    | The trace id of the span in which the event was raised.                                |
+| `display_trace_id`    | `true`\|`false`\|`open_telemetry`\|`hexadecimal`\|`decimal`\|`datadog`\|`uuid` | The trace id of the span in which the event was raised.                                |
 | `display_span_id`     | `true`\|`false`   | `true`  | `span_id`     | The span id of the span in which the event was raised.                                 |
 | `span_attributes`     | `[string]`        | `[]`    | `*`           | List of span attributes to attach to the JSON log object.                              |
 
