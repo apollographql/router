@@ -32,6 +32,7 @@ pub(crate) mod file_uploads;
 mod forbid_mutations;
 mod headers;
 mod include_subgraph_errors;
+pub(crate) mod limits;
 pub(crate) mod override_url;
 pub(crate) mod progressive_override;
 mod record_replay;
