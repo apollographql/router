@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "1.52.0"
+version = "1.52.1"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 repository = "https://github.com/apollographql/router/"
 documentation = "https://docs.rs/apollo-router"
@@ -68,7 +68,7 @@ askama = "0.12.1"
 access-json = "0.1.0"
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
-apollo-federation = { path = "../apollo-federation", version = "=1.52.0" }
+apollo-federation = { path = "../apollo-federation", version = "=1.52.1" }
 arc-swap = "1.6.0"
 async-channel = "1.9.0"
 async-compression = { version = "0.4.6", features = [
@@ -139,9 +139,6 @@ nu-ansi-term = "0.49"
 num-traits = "0.2.19"
 once_cell = "1.19.0"
 
-# Pin rowan to a version pre-MSRV bump. Remove if we update our rust-toolchain.
-rowan = "= 0.15.15"
-
 # Any package that starts with `opentelemetry` needs to be updated with care
 # because it is tightly intertwined with the `tracing` packages on account of
 # the `opentelemetry-tracing` package.
@@ -164,6 +161,8 @@ opentelemetry-aws = "0.8.0"
 # opentelemetry-datadog = { version = "0.8.0", features = ["reqwest-client"] }
 rmp = "0.8"
 # END TEMP DATADOG
+# Pin rowan until update to rust 1.77
+rowan = "=0.15.15"
 opentelemetry-http = "0.9.0"
 opentelemetry-jaeger = { version = "0.19.0", features = [
     "collector_client",
@@ -198,7 +197,7 @@ regex = "1.10.5"
 reqwest.workspace = true
 
 # note: this dependency should _always_ be pinned, prefix the version with an `=`
-router-bridge = "=0.5.30+v2.8.3"
+router-bridge = "=0.5.31+v2.8.5"
 
 rust-embed = { version = "8.4.0", features = ["include-exclude"] }
 rustls = "0.21.12"
