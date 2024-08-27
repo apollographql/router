@@ -184,13 +184,14 @@ async fn handle_request(
                         .map(|k| RedisKey(k.to_string()))
                         .collect::<Vec<_>>();
                     if !keys.is_empty() {
-                        count += keys.len() as u64;
+                        let len = keys.len() as u64;
+                        count += len;
                         storage.delete(keys).await;
 
                         u64_counter!(
                             "apollo.router.operations.entity.invalidation.entry",
                             "Entity cache counter for invalidated entries",
-                            1u64,
+                            len,
                             "origin" = origin,
                             "subgraph.name" = subgraph.clone()
                         );
