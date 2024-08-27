@@ -335,7 +335,7 @@ dependencies = [
  "reqwest",
  "rhai",
  "rmp",
- "router-bridge 0.6.0-beta.0+v2.9.0-beta.0",
+ "router-bridge 0.6.0-beta.1+v2.9.0-beta.0",
  "rowan",
  "rstack",
  "rust-embed",
@@ -5805,9 +5805,9 @@ dependencies = [
 
 [[package]]
 name = "router-bridge"
-version = "0.6.0-beta.0+v2.9.0-beta.0"
+version = "0.6.0-beta.1+v2.9.0-beta.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c862e7d7dd07e68e6b8f6bf110a0169ed6cc9709a4399df59329db135737f8d"
+checksum = "349dcc3134916c7888f2ebbb5c66fefa2693a1f9ff522e04672abb895b66cb9b"
 dependencies = [
  "anyhow",
  "async-channel 1.9.0",
