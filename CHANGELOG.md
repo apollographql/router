@@ -4,6 +4,30 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.52.1] - 2024-08-27
+
+> [!IMPORTANT]
+> If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), this release changes the hashing algorithm used for the cache keys.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new hashing algorithm comes into service.
+
+## 🔒 Security
+
+### CVE-2024-43783: Payload limits may exceed configured maximum
+
+Correct a denial-of-service vulnerability which, under certain non-default configurations below, made it possible to exceed the configured request payload maximums set with the [`limits.http_max_request_bytes`](https://www.apollographql.com/docs/router/configuration/overview/#http_max_request_bytes) option.
+
+This affects the following non-default Router configurations:
+
+1. Those configured to send request bodies to [External Coprocessors](https://www.apollographql.com/docs/router/customizations/coprocessor) where the `coprocessor.router.request.body` configuration option is set to `true`; or
+2. Those which declare custom native Rust plugins using the `plugins` configuration where those plugins access the request body in the `RouterService` layer.
+
+Rhai plugins are **not** impacted.  See the associated Github Advisory, [GHSA-x6xq-whh3-gg32](https://github.com/apollographql/router/security/advisories/GHSA-x6xq-whh3-gg32), for more information.
+
+### CVE-2024-43414: Update query planner to resolve uncontrolled recursion
+
+Update the version of `@apollo/query-planner` used by Router to v2.8.5 which corrects an uncontrolled recursion weakness (classified as [CWE-674](https://cwe.mitre.org/data/definitions/674.html)) during query planning for complex queries on particularly complex graphs.
+
+This weakness impacts all versions of Router prior to this release.  See the associated Github Advisory, [GHSA-fmj9-77q8-g6c4](https://github.com/apollographql/federation/security/advisories/GHSA-fmj9-77q8-g6c4), for more information.
+
 # [1.52.0] - 2024-07-30
 
 ## 🚀 Features

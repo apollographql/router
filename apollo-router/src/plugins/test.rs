@@ -1,4 +1,5 @@
 use std::any::TypeId;
+use std::future::Future;
 use std::ops::Deref;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -124,14 +125,17 @@ impl<T: Plugin> PluginTestHarness<T> {
     }
 
     #[allow(dead_code)]
-    pub(crate) async fn call_router(
+    pub(crate) async fn call_router<F>(
         &self,
         request: router::Request,
-        response_fn: fn(router::Request) -> router::Response,
-    ) -> Result<router::Response, BoxError> {
+        response_fn: fn(router::Request) -> F,
+    ) -> Result<router::Response, BoxError>
+    where
+        F: Future<Output = Result<router::Response, BoxError>> + Send + 'static,
+    {
         let service: router::BoxService = router::BoxService::new(
             ServiceBuilder::new()
-                .service_fn(move |req: router::Request| async move { Ok((response_fn)(req)) }),
+                .service_fn(move |req: router::Request| async move { (response_fn)(req).await }),
         );
 
         self.plugin.router_service(service).call(request).await
