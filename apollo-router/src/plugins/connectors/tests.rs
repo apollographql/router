@@ -594,6 +594,10 @@ async fn test_headers() {
             headers.insert("x-rename-connect", "renamed-by-connect".parse().unwrap());
             headers.insert("x-forward", "forwarded".parse().unwrap());
             headers.append("x-forward", "forwarded-again".parse().unwrap());
+            request
+                .context
+                .insert("val", String::from("val-from-request-context"))
+                .unwrap();
         },
     )
     .await;
@@ -633,6 +637,14 @@ async fn test_headers() {
             .header(
                 HeaderName::from_str("x-config-variable-connect").unwrap(),
                 HeaderValue::from_str("before val-from-config-connect after").unwrap(),
+            )
+            .header(
+                HeaderName::from_str("x-context-value-source").unwrap(),
+                HeaderValue::from_str("before val-from-request-context after").unwrap(),
+            )
+            .header(
+                HeaderName::from_str("x-context-value-connect").unwrap(),
+                HeaderValue::from_str("before val-from-request-context after").unwrap(),
             )
             .path("/users")
             .build()],

@@ -113,7 +113,7 @@ fn identifier(input: &str) -> IResult<&str, &str> {
 }
 
 fn namespace(input: &str) -> IResult<&str, &str> {
-    recognize(tag("$config"))(input)
+    recognize(alt((tag("$config"), tag("$context"))))(input)
 }
 
 fn path(input: &str) -> IResult<&str, &str> {

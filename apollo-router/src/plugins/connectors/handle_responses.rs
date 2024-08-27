@@ -70,7 +70,7 @@ pub(crate) async fn handle_responses<T: HttpBody>(
                     let mut res_data = {
                         let (res, apply_to_errors) = response_key.selection().apply_with_vars(
                             &json_data,
-                            &response_key.inputs().merge(connector.config.as_ref()),
+                            &response_key.inputs().merge(connector.config.as_ref(), None),
                         );
 
                         if let Some(ref debug) = debug {
