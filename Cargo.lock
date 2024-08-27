@@ -5781,9 +5781,9 @@ dependencies = [
 
 [[package]]
 name = "router-bridge"
-version = "0.5.30+v2.8.3"
+version = "0.5.31+v2.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b2b67ccfc13842df12e473cbb93fe306a8dc3d120cfa2be57e3537c71bf0e63"
+checksum = "672901b1ec6fd110ac41d61ca5e1754319d0edf39546a089a114ab865d42ae97"
 dependencies = [
  "anyhow",
  "async-channel 1.9.0",
@@ -5842,7 +5842,7 @@ dependencies = [
  "libfuzzer-sys",
  "log",
  "reqwest",
- "router-bridge 0.5.30+v2.8.3",
+ "router-bridge 0.5.31+v2.8.5",
  "schemars",
  "serde",
  "serde_json",
