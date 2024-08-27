@@ -513,8 +513,8 @@ mod helpers {
                         }
                     }
 
-                    Parameter::Context { item: _, paths: _ } => {
-                        // TODO Implement $context handling
+                    Parameter::Config { item: _, paths: _ } => {
+                        // TODO Implement $config handling
                     }
 
                     // All sibling fields marked by $this in a transport must be carried over to the output type
@@ -833,22 +833,22 @@ mod helpers {
                         paths: keys_iter.collect(),
                     });
                 }
-                Some((KnownVariable::Context, keys)) => {
+                Some((KnownVariable::Config, keys)) => {
                     let mut keys_iter = keys.into_iter();
                     let first_key = keys_iter.next().ok_or(FederationError::internal(
-                        "expected at least one key in $context",
+                        "expected at least one key in $config",
                     ))?;
-                    results.insert(Parameter::Context {
+                    results.insert(Parameter::Config {
                         item: first_key,
                         paths: keys_iter.collect(),
                     });
                 }
-                // To get the safety benefits of the KnownVariable enum, we
-                // need to enumerate all the cases explicitly, without
-                // wildcard matches. However, body.external_var_paths() only
-                // returns free (externally-provided) variables like $this,
-                // $args, and $context. The $ and @ variables, by contrast,
-                // are always bound to something within the input data.
+                // To get the safety benefits of the KnownVariable enum, we need
+                // to enumerate all the cases explicitly, without wildcard
+                // matches. However, body.external_var_paths() only returns free
+                // (externally-provided) variables like $this, $args, and
+                // $config. The $ and @ variables, by contrast, are always bound
+                // to something within the input data.
                 Some((kv @ KnownVariable::Dollar, _)) | Some((kv @ KnownVariable::AtSign, _)) => {
                     return Err(FederationError::internal(format!(
                         "got unexpected non-external variable: {:?}",

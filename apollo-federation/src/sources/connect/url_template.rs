@@ -504,11 +504,11 @@ pub enum Parameter<'a> {
         paths: Vec<&'a str>,
     },
 
-    Context {
-        /// The name of the context variable
+    Config {
+        /// The sub-property of $config to use
         item: &'a str,
 
-        /// Any optional nested selections on the $context variable
+        /// Any additional nested selections under $config.item
         paths: Vec<&'a str>,
     },
 }

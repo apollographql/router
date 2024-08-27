@@ -2,7 +2,7 @@
 pub(crate) enum KnownVariable {
     This,
     Args,
-    Context,
+    Config,
     Dollar,
     AtSign,
 }
@@ -12,7 +12,7 @@ impl KnownVariable {
         match var_name {
             "$this" => Some(Self::This),
             "$args" => Some(Self::Args),
-            "$context" => Some(Self::Context),
+            "$config" => Some(Self::Config),
             "$" => Some(Self::Dollar),
             "@" => Some(Self::AtSign),
             _ => None,
@@ -23,7 +23,7 @@ impl KnownVariable {
         match self {
             Self::This => "$this",
             Self::Args => "$args",
-            Self::Context => "$context",
+            Self::Config => "$config",
             Self::Dollar => "$",
             Self::AtSign => "@",
         }
