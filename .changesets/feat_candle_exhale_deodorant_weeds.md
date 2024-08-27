@@ -15,11 +15,11 @@ telemetry:
           level: info
           on: request
           attributes:
-            subgraph.response.status:
-              subgraph_response_status: code # This is a first warning because you can't access to the response if you're at the request stage
+            subgraph.response.status: code
+              # Warning: should use selector for subgraph_name: true instead of comparing strings of subgraph_name and product
           condition:
             eq:
-            - subgraph_name # Another warning because instead of writing subgraph_name: true which is the selector, you're asking for a comparison between 2 strings ("subgraph_name" and "product")
+            - subgraph_name
             - product
 ```
 
