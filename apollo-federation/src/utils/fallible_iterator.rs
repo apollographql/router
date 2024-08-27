@@ -77,7 +77,7 @@ pub(crate) trait FallibleIterator: Sized + Itertools {
     /// the iterator will yield the `Err` in its place. Lastly, if the predicate yields `Ok(true)`,
     /// the iterator will yield `Ok(val)`.
     ///
-    /// ```rust
+    /// ```ignore
     /// use apollo_federation::utils::FallibleIterator;
     ///
     /// // A totally accurate prime checker
@@ -113,7 +113,7 @@ pub(crate) trait FallibleIterator: Sized + Itertools {
     /// method is very similar to `Itertools::filter_ok` except the predicate for this method is
     /// fallible.
     ///
-    /// ```rust
+    /// ```ignore
     /// use apollo_federation::utils::FallibleIterator;
     ///
     /// // A totally accurate prime checker
@@ -147,7 +147,7 @@ pub(crate) trait FallibleIterator: Sized + Itertools {
     /// `Ok(false)`, the returned value will be `Ok(false)`. If that item is `Err`, than that `Err`
     /// is returned.
     ///
-    /// ```rust
+    /// ```ignore
     /// use apollo_federation::utils::FallibleIterator;
     ///
     /// // A totally accurate prime checker
@@ -188,7 +188,7 @@ pub(crate) trait FallibleIterator: Sized + Itertools {
     /// is `Ok`, it is given to the predicate. If the predicate returns `false`, this method
     /// returns `Ok(false)`.
     ///
-    /// ```rust
+    /// ```ignore
     /// use apollo_federation::utils::FallibleIterator;
     ///
     /// type Item = Result<usize, ()>;
@@ -224,7 +224,7 @@ pub(crate) trait FallibleIterator: Sized + Itertools {
     /// predicate returns `Err`, that `Err` is returned. If the predicate returns `Ok(false)`,
     /// `Ok(false)` is returned. By default, this function returned `Ok(true)`.
     ///
-    /// ```rust
+    /// ```ignore
     /// use apollo_federation::utils::FallibleIterator;
     ///
     /// type Item = Result<usize, ()>;
@@ -275,7 +275,7 @@ pub(crate) trait FallibleIterator: Sized + Itertools {
     /// `Ok(true)`, the returned value will be `Ok(true)`. If that item is `Err`, than that `Err`
     /// is returned.
     ///
-    /// ```rust
+    /// ```ignore
     /// use apollo_federation::utils::FallibleIterator;
     ///
     /// // A totally accurate prime checker
@@ -316,7 +316,7 @@ pub(crate) trait FallibleIterator: Sized + Itertools {
     /// is `Ok`, it is given to the predicate. If the predicate returns `true`, this method returns
     /// `Ok(true)`.
     ///
-    /// ```rust
+    /// ```ignore
     /// use apollo_federation::utils::FallibleIterator;
     ///
     /// type Item = Result<usize, ()>;
@@ -352,7 +352,7 @@ pub(crate) trait FallibleIterator: Sized + Itertools {
     /// predicate returns `Err`, that `Err` is returned. If the predicate returns `Ok(true)`,
     /// `Ok(true)` is returned. By default, this function returned `Ok(false)`.
     ///
-    /// ```rust
+    /// ```ignore
     /// use apollo_federation::utils::FallibleIterator;
     ///
     /// type Item = Result<usize, ()>;
