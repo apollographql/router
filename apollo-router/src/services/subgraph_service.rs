@@ -16,6 +16,7 @@ use http::header::{self};
 use http::response::Parts;
 use http::HeaderValue;
 use http::Request;
+use http::StatusCode;
 use hyper_rustls::ConfigBuilderExt;
 use itertools::Itertools;
 use mediatype::names::APPLICATION;
@@ -874,9 +875,34 @@ pub(crate) async fn process_batch(
     // Perform the actual fetch. If this fails then we didn't manage to make the call at all, so we can't do anything with it.
     tracing::debug!("fetching from subgraph: {service}");
     let (parts, content_type, body) =
-        do_fetch(client, &batch_context, &service, request, display_body)
+        match do_fetch(client, &batch_context, &service, request, display_body)
             .instrument(subgraph_req_span)
-            .await?;
+            .await
+        {
+            Ok(res) => res,
+            Err(err) => {
+                let resp = http::Response::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .body(err.to_graphql_error(None))
+                    .map_err(|err| FetchError::SubrequestHttpError {
+                        status_code: None,
+                        service: service.clone(),
+                        reason: format!("cannot create the http response from error: {err:?}"),
+                    })?;
+                let (parts, body) = resp.into_parts();
+                let body =
+                    serde_json::to_vec(&body).map_err(|err| FetchError::SubrequestHttpError {
+                        status_code: None,
+                        service: service.clone(),
+                        reason: format!("cannot serialize the error: {err:?}"),
+                    })?;
+                (
+                    parts,
+                    Ok(ContentType::ApplicationJson),
+                    Some(Ok(body.into())),
+                )
+            }
+        };
 
     let subgraph_response_event = batch_context
         .extensions()
@@ -1294,9 +1320,21 @@ pub(crate) async fn call_single_http(
 
     // Perform the actual fetch. If this fails then we didn't manage to make the call at all, so we can't do anything with it.
     let (parts, content_type, body) =
-        do_fetch(client, &context, service_name, request, display_body)
+        match do_fetch(client, &context, service_name, request, display_body)
             .instrument(subgraph_req_span)
-            .await?;
+            .await
+        {
+            Ok(resp) => resp,
+            Err(err) => {
+                return Ok(SubgraphResponse::builder()
+                    .subgraph_name(service_name.to_string())
+                    .error(err.to_graphql_error(None))
+                    .status_code(StatusCode::INTERNAL_SERVER_ERROR)
+                    .context(context)
+                    .extensions(Object::default())
+                    .build());
+            }
+        };
 
     let subgraph_response_event = context
         .extensions()
@@ -1711,6 +1749,17 @@ mod tests {
                 .status(StatusCode::UNAUTHORIZED)
                 .body(r#""#.into())
                 .unwrap())
+        }
+
+        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
+        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
+        server.await.unwrap();
+    }
+
+    // starts a local server emulating a subgraph returning connection closed
+    async fn emulate_subgraph_panic(listener: TcpListener) {
+        async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
+            panic!("test")
         }
 
         let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
@@ -2432,6 +2481,44 @@ mod tests {
             .await
             .unwrap();
         assert!(response.response.body().errors.is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_subgraph_service_panic() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        tokio::task::spawn(emulate_subgraph_panic(listener));
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            None,
+            Notify::default(),
+            HttpClientServiceFactory::from_config(
+                "test",
+                &Configuration::default(),
+                Http2Config::Enable,
+            ),
+        )
+        .expect("can create a SubgraphService");
+
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
+        let response = subgraph_service
+            .oneshot(
+                SubgraphRequest::builder()
+                    .supergraph_request(supergraph_request("query"))
+                    .subgraph_request(subgraph_http_request(url, "query"))
+                    .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
+                    .context(Context::new())
+                    .build(),
+            )
+            .await
+            .unwrap();
+        assert!(!response.response.body().errors.is_empty());
+        assert_eq!(
+            response.response.body().errors[0].message,
+            "HTTP fetch failed from 'test': HTTP fetch failed from 'test': connection closed before message completed"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]

@@ -8161,6 +8161,15 @@ expression: "&schema"
                 "display_trace_id": {
                   "$ref": "#/definitions/DisplayTraceIdFormat",
                   "description": "#/definitions/DisplayTraceIdFormat"
+                },
+                "span_attributes": {
+                  "default": [],
+                  "description": "List of span attributes to attach to the json log object",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array",
+                  "uniqueItems": true
                 }
               },
               "type": "object"
@@ -8308,6 +8317,10 @@ expression: "&schema"
       "$ref": "#/definitions/CSRFConfig",
       "description": "#/definitions/CSRFConfig"
     },
+    "demand_control": {
+      "$ref": "#/definitions/DemandControlConfig",
+      "description": "#/definitions/DemandControlConfig"
+    },
     "experimental_apollo_metrics_generation_mode": {
       "$ref": "#/definitions/ApolloMetricsGenerationMode",
       "description": "#/definitions/ApolloMetricsGenerationMode"
@@ -8360,10 +8373,6 @@ expression: "&schema"
     "plugins": {
       "$ref": "#/definitions/Plugins",
       "description": "#/definitions/Plugins"
-    },
-    "preview_demand_control": {
-      "$ref": "#/definitions/DemandControlConfig",
-      "description": "#/definitions/DemandControlConfig"
     },
     "preview_entity_cache": {
       "$ref": "#/definitions/Config6",
