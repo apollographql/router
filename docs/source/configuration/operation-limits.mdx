@@ -153,7 +153,7 @@ Router telemetry can help you set operation limits, especially when you have a l
 
 To log limit information about every operation, you can configure the router with a [custom event](/router/configuration/telemetry/instrumentation/events#custom-events) to log the values of aliases, depth, height, and root_fields for each operation:
 
-```
+```yaml title="router.yaml"
 telemetry:
   instrumentation:
     events:
@@ -184,7 +184,7 @@ For a large amount of traffic, you may prefer to collect and export metrics to y
 
 To capture and view metrics to help set your operation limits, you can configure the router to collect [custom metrics](/router/configuration/telemetry/instrumentation/instruments#custom-instruments) on the values of aliases, depth, height, and root_fields for each operation:
 
-```
+```yaml title="router.yaml"
 telemetry:
   exporters:
     metrics:
