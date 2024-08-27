@@ -62,7 +62,7 @@ subgraphs:
             int: Int = 42
             float: Float = 1.23
             bool: Boolean = true
-            # TODO: enums after 2.10.0-alpha.1
+            # TODO: input enums will be supported after 2.10.0-alpha.2
             arr: [String] = ["default"]
           ): String
             @connect(
