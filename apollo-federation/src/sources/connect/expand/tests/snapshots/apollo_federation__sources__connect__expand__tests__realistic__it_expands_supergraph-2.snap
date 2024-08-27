@@ -58,93 +58,95 @@ expression: connectors.by_service_name
             headers: {},
             body: Some(
                 Path(
-                    Var(
-                        "$args",
-                        Key(
-                            Field(
-                                "input",
-                            ),
-                            Selection(
-                                SubSelection {
-                                    selections: [
-                                        Field(
-                                            None,
-                                            "name",
-                                            None,
-                                        ),
-                                        Field(
-                                            None,
-                                            "username",
-                                            None,
-                                        ),
-                                        Field(
-                                            None,
-                                            "email",
-                                            None,
-                                        ),
-                                        Field(
-                                            None,
-                                            "status",
-                                            None,
-                                        ),
-                                        Field(
-                                            None,
-                                            "address",
-                                            Some(
-                                                SubSelection {
-                                                    selections: [
-                                                        Field(
-                                                            None,
-                                                            "street",
-                                                            None,
-                                                        ),
-                                                        Field(
-                                                            None,
-                                                            "suite",
-                                                            None,
-                                                        ),
-                                                        Field(
-                                                            None,
-                                                            "city",
-                                                            None,
-                                                        ),
-                                                        Field(
-                                                            None,
-                                                            "zipcode",
-                                                            None,
-                                                        ),
-                                                        Field(
-                                                            None,
-                                                            "geo",
-                                                            Some(
-                                                                SubSelection {
-                                                                    selections: [
-                                                                        Field(
-                                                                            None,
-                                                                            "lat",
-                                                                            None,
-                                                                        ),
-                                                                        Field(
-                                                                            None,
-                                                                            "lng",
-                                                                            None,
-                                                                        ),
-                                                                    ],
-                                                                    star: None,
-                                                                },
-                                                            ),
-                                                        ),
-                                                    ],
-                                                    star: None,
-                                                },
+                    PathSelection {
+                        path: Var(
+                            $args,
+                            Key(
+                                Field(
+                                    "input",
+                                ),
+                                Selection(
+                                    SubSelection {
+                                        selections: [
+                                            Field(
+                                                None,
+                                                "name",
+                                                None,
                                             ),
-                                        ),
-                                    ],
-                                    star: None,
-                                },
+                                            Field(
+                                                None,
+                                                "username",
+                                                None,
+                                            ),
+                                            Field(
+                                                None,
+                                                "email",
+                                                None,
+                                            ),
+                                            Field(
+                                                None,
+                                                "status",
+                                                None,
+                                            ),
+                                            Field(
+                                                None,
+                                                "address",
+                                                Some(
+                                                    SubSelection {
+                                                        selections: [
+                                                            Field(
+                                                                None,
+                                                                "street",
+                                                                None,
+                                                            ),
+                                                            Field(
+                                                                None,
+                                                                "suite",
+                                                                None,
+                                                            ),
+                                                            Field(
+                                                                None,
+                                                                "city",
+                                                                None,
+                                                            ),
+                                                            Field(
+                                                                None,
+                                                                "zipcode",
+                                                                None,
+                                                            ),
+                                                            Field(
+                                                                None,
+                                                                "geo",
+                                                                Some(
+                                                                    SubSelection {
+                                                                        selections: [
+                                                                            Field(
+                                                                                None,
+                                                                                "lat",
+                                                                                None,
+                                                                            ),
+                                                                            Field(
+                                                                                None,
+                                                                                "lng",
+                                                                                None,
+                                                                            ),
+                                                                        ],
+                                                                        star: None,
+                                                                    },
+                                                                ),
+                                                            ),
+                                                        ],
+                                                        star: None,
+                                                    },
+                                                ),
+                                            ),
+                                        ],
+                                        star: None,
+                                    },
+                                ),
                             ),
                         ),
-                    ),
+                    },
                 ),
             ),
         },
