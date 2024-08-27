@@ -508,11 +508,13 @@ impl Query {
                 if opt.is_some() {
                     *output = input.clone();
                 } else {
-                    parameters.validation_errors.push(Error {
-                        message: invalid_value_message(parent_type, field_type, field_or_index),
-                        path: Some(Path::from_response_slice(path)),
-                        ..Error::default()
-                    });
+                    if !input.is_null() {
+                        parameters.validation_errors.push(Error {
+                            message: invalid_value_message(parent_type, field_type, field_or_index),
+                            path: Some(Path::from_response_slice(path)),
+                            ..Error::default()
+                        });
+                    }
                     *output = Value::Null;
                 }
                 Ok(())
@@ -521,11 +523,13 @@ impl Query {
                 if input.as_f64().is_some() {
                     *output = input.clone();
                 } else {
-                    parameters.validation_errors.push(Error {
-                        message: invalid_value_message(parent_type, field_type, field_or_index),
-                        path: Some(Path::from_response_slice(path)),
-                        ..Error::default()
-                    });
+                    if !input.is_null() {
+                        parameters.validation_errors.push(Error {
+                            message: invalid_value_message(parent_type, field_type, field_or_index),
+                            path: Some(Path::from_response_slice(path)),
+                            ..Error::default()
+                        });
+                    }
                     *output = Value::Null;
                 }
                 Ok(())
@@ -534,11 +538,13 @@ impl Query {
                 if input.as_bool().is_some() {
                     *output = input.clone();
                 } else {
-                    parameters.validation_errors.push(Error {
-                        message: invalid_value_message(parent_type, field_type, field_or_index),
-                        path: Some(Path::from_response_slice(path)),
-                        ..Error::default()
-                    });
+                    if !input.is_null() {
+                        parameters.validation_errors.push(Error {
+                            message: invalid_value_message(parent_type, field_type, field_or_index),
+                            path: Some(Path::from_response_slice(path)),
+                            ..Error::default()
+                        });
+                    }
                     *output = Value::Null;
                 }
                 Ok(())
@@ -547,11 +553,13 @@ impl Query {
                 if input.as_str().is_some() {
                     *output = input.clone();
                 } else {
-                    parameters.validation_errors.push(Error {
-                        message: invalid_value_message(parent_type, field_type, field_or_index),
-                        path: Some(Path::from_response_slice(path)),
-                        ..Error::default()
-                    });
+                    if !input.is_null() {
+                        parameters.validation_errors.push(Error {
+                            message: invalid_value_message(parent_type, field_type, field_or_index),
+                            path: Some(Path::from_response_slice(path)),
+                            ..Error::default()
+                        });
+                    }
                     *output = Value::Null;
                 }
                 Ok(())
@@ -560,11 +568,13 @@ impl Query {
                 if input.is_string() || input.is_i64() || input.is_u64() || input.is_f64() {
                     *output = input.clone();
                 } else {
-                    parameters.validation_errors.push(Error {
-                        message: invalid_value_message(parent_type, field_type, field_or_index),
-                        path: Some(Path::from_response_slice(path)),
-                        ..Error::default()
-                    });
+                    if !input.is_null() {
+                        parameters.validation_errors.push(Error {
+                            message: invalid_value_message(parent_type, field_type, field_or_index),
+                            path: Some(Path::from_response_slice(path)),
+                            ..Error::default()
+                        });
+                    }
                     *output = Value::Null;
                 }
                 Ok(())
