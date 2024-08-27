@@ -2468,16 +2468,14 @@ impl FetchDependencyGraphNode {
         };
         let operation =
             operation_compression.compress(&self.subgraph_name, subgraph_schema, operation)?;
-        let operation_document = operation.try_into().map_err(|err| {
-            match err {
-                FederationError::SingleFederationError {
-                    inner: SingleFederationError::InvalidGraphQL { diagnostics },
-                    ..
-                } => {
-                    FederationError::internal(format!("Query planning produced an invalid subgraph operation.\n{diagnostics}"))
-                }
-                _ => err
-            }
+        let operation_document = operation.try_into().map_err(|err| match err {
+            FederationError::SingleFederationError {
+                inner: SingleFederationError::InvalidGraphQL { diagnostics },
+                ..
+            } => FederationError::internal(format!(
+                "Query planning produced an invalid subgraph operation.\n{diagnostics}"
+            )),
+            _ => err,
         })?;
 
         let node = super::PlanNode::Fetch(Box::new(super::FetchNode {
