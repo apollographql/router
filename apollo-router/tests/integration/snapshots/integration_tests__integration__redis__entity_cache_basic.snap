@@ -25,5 +25,11 @@ expression: response
         ]
       }
     ]
+  },
+  "extensions": {
+    "cache_keys": [
+      "824954bf-c35b-423f-bb83-8f790e0cf885",
+      "5921ebd6-fe5a-4ace-a44f-d854448e897b"
+    ]
   }
 }

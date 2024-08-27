@@ -418,6 +418,10 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
                     }
                 }
             },
+            "rhai": {
+                "scripts": "tests/fixtures",
+                "main": "entity_cache_keys.rhai",
+            },
             "include_subgraph_errors": {
                 "all": true
             }
