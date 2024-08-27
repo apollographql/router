@@ -1,0 +1,29 @@
+telemetry:
+  exporters:
+    metrics:
+      prometheus:
+        listen: 127.0.0.1:4000
+        enabled: true
+        path: /metrics
+      common:
+        views:
+          - name: apollo_router_http_request_duration_seconds
+            aggregation:
+              histogram:
+                buckets:
+                  - 0.1
+                  - 0.5
+                  - 1
+                  - 2
+                  - 3
+                  - 4
+                  - 5
+                  - 100
+include_subgraph_errors:
+  all: true
+preview_connectors:
+  subgraphs:
+    connectors:
+      sources:
+        json:
+          override_url: https://jsonplaceholder.typicode.com/

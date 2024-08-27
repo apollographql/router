@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::task::Poll;
+use std::time::Instant;
 
 use apollo_compiler::validation::Valid;
 use apollo_federation::sources::connect::Connector;
@@ -167,7 +168,26 @@ async fn execute(
                 http_request: req,
                 context,
             };
+
+            let now = Instant::now();
             let res = client.oneshot(req).await?;
+
+            f64_histogram!(
+                "apollo.router.http.connector.request.duration.seconds",
+                "Duration of connectors HTTP requests",
+                now.elapsed().as_secs_f64(),
+                "subgraph" = original_subgraph_name.clone(),
+                "connector" = connector.id.to_string()
+            );
+
+            u64_counter!(
+                "apollo.router.http.connector.requests.total",
+                "Total number of HTTP requests made through connectors",
+                1,
+                "status" = res.http_response.status().as_u16().to_string(),
+                "subgraph" = original_subgraph_name,
+                "connector" = connector.id.to_string()
+            );
 
             Ok::<_, BoxError>(ConnectorResponse {
                 result: ConnectorResult::HttpResponse(res.http_response),

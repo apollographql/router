@@ -1,12 +1,18 @@
 use std::time::Duration;
 
 use serde_json::json;
+use wiremock::matchers::method;
+use wiremock::matchers::path;
+use wiremock::Mock;
+use wiremock::MockServer;
+use wiremock::ResponseTemplate;
 
 use crate::integration::common::graph_os_enabled;
 use crate::integration::IntegrationTest;
 
 const PROMETHEUS_CONFIG: &str = include_str!("fixtures/prometheus.router.yaml");
 const SUBGRAPH_AUTH_CONFIG: &str = include_str!("fixtures/subgraph_auth.router.yaml");
+const CONNECTORS_CONFIG: &str = include_str!("fixtures/connectors.router.yaml");
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_metrics_reloading() {
@@ -219,4 +225,51 @@ async fn test_graphql_metrics() {
     router
             .assert_metrics_contains(r#"custom_histogram_sum{graphql_field_name="topProducts",graphql_field_type="Product",graphql_type_name="Query",otel_scope_name="apollo/router"} 3"#, None)
             .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_connectors_metrics() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                "id": 1,
+                "name": "Leanne Graham"
+            }])),
+        )
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/users/1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": 1,
+            "name": "Leanne Graham",
+            "username": "Bret",
+            "phone": "1-770-736-8031 x56442",
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let mut router = IntegrationTest::builder()
+        .config(
+            CONNECTORS_CONFIG.replace("https://jsonplaceholder.typicode.com/", &mock_server.uri()),
+        )
+        .supergraph("src/plugins/connectors/testdata/steelthread.graphql")
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    router
+        .execute_query(&json! {{"query": "query { users { id name username } }"}})
+        .await;
+
+    router.assert_metrics_contains(r#"apollo_router_http_connector_requests_total{connector="connectors.json http: GET /users",status="200",subgraph="connectors",otel_scope_name="apollo/router"} 1"#, None).await;
+    router.assert_metrics_contains(r#"apollo_router_http_connector_requests_total{connector="connectors.json http: GET /users/{$args.id!}",status="200",subgraph="connectors",otel_scope_name="apollo/router"} 1"#, None).await;
+
+    router.assert_metrics_contains(r#"apollo_router_http_connector_request_duration_seconds_bucket{connector="connectors.json http: GET /users",subgraph="connectors",otel_scope_name="apollo/router",le="5"} 1"#, None).await;
+    router.assert_metrics_contains(r#"apollo_router_http_connector_request_duration_seconds_bucket{connector="connectors.json http: GET /users",subgraph="connectors",otel_scope_name="apollo/router",le="+Inf"} 1"#, None).await;
+    router.assert_metrics_contains(r#"apollo_router_http_connector_request_duration_seconds_bucket{connector="connectors.json http: GET /users/{$args.id!}",subgraph="connectors",otel_scope_name="apollo/router",le="5"} 1"#, None).await;
+    router.assert_metrics_contains(r#"apollo_router_http_connector_request_duration_seconds_bucket{connector="connectors.json http: GET /users/{$args.id!}",subgraph="connectors",otel_scope_name="apollo/router",le="+Inf"} 1"#, None).await;
 }
