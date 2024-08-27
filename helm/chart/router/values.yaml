@@ -221,6 +221,13 @@ autoscaling:
   #     type: cpu
   #     targetUtilizationPercentage: 75
 
+# -- Sets the [rolling update strategy parameters](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#rolling-update-deployment).  Can take absolute values or % values.
+rollingUpdate:
+  {}
+# Defaults if not set are:
+#  maxUnavailable: 25%
+#  maxSurge: 25%
+
 nodeSelector: {}
 
 tolerations: []

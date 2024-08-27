@@ -97,7 +97,7 @@ impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
         &'a mut self,
         is_telemetry_disabled: bool,
         configuration: Arc<Configuration>,
-        schema: String,
+        schema: Arc<Schema>,
         previous_router: Option<&'a Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     ) -> Result<Self::RouterFactory, BoxError> {

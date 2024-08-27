@@ -193,6 +193,7 @@ struct Config {
 struct Headers {
     all_operations: Arc<Vec<Operation>>,
     subgraph_operations: HashMap<String, Arc<Vec<Operation>>>,
+    reserved_headers: Arc<HashSet<&'static HeaderName>>,
 }
 
 #[async_trait::async_trait]
@@ -220,6 +221,7 @@ impl Plugin for Headers {
         Ok(Headers {
             all_operations: Arc::new(operations),
             subgraph_operations,
+            reserved_headers: Arc::new(RESERVED_HEADERS.iter().collect()),
         })
     }
 
@@ -230,6 +232,7 @@ impl Plugin for Headers {
                     .get(name)
                     .cloned()
                     .unwrap_or_else(|| self.all_operations.clone()),
+                self.reserved_headers.clone(),
             ))
             .service(service)
             .boxed()
@@ -242,10 +245,13 @@ struct HeadersLayer {
 }
 
 impl HeadersLayer {
-    fn new(operations: Arc<Vec<Operation>>) -> Self {
+    fn new(
+        operations: Arc<Vec<Operation>>,
+        reserved_headers: Arc<HashSet<&'static HeaderName>>,
+    ) -> Self {
         Self {
             operations,
-            reserved_headers: Arc::new(RESERVED_HEADERS.iter().collect()),
+            reserved_headers,
         }
     }
 }
@@ -583,12 +589,13 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::Static(
-            InsertStatic {
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![Operation::Insert(Insert::Static(InsertStatic {
                 name: "c".try_into()?,
                 value: "d".try_into()?,
-            },
-        ))]))
+            }))]),
+            Arc::new(RESERVED_HEADERS.iter().collect()),
+        )
         .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
@@ -610,12 +617,15 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(
-            Insert::FromContext(InsertFromContext {
-                name: "header_from_context".try_into()?,
-                from_context: "my_key".to_string(),
-            }),
-        )]))
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![Operation::Insert(Insert::FromContext(
+                InsertFromContext {
+                    name: "header_from_context".try_into()?,
+                    from_context: "my_key".to_string(),
+                },
+            ))]),
+            Arc::new(RESERVED_HEADERS.iter().collect()),
+        )
         .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
@@ -637,13 +647,14 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::FromBody(
-            InsertFromBody {
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![Operation::Insert(Insert::FromBody(InsertFromBody {
                 name: "header_from_request".try_into()?,
                 path: JSONQuery::parse(".operationName")?,
                 default: None,
-            },
-        ))]))
+            }))]),
+            Arc::new(RESERVED_HEADERS.iter().collect()),
+        )
         .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
@@ -658,9 +669,10 @@ mod test {
             .withf(|request| request.assert_headers(vec![("ac", "vac"), ("ab", "vab")]))
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Remove(Remove::Named(
-            "aa".try_into()?,
-        ))]))
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![Operation::Remove(Remove::Named("aa".try_into()?))]),
+            Arc::new(RESERVED_HEADERS.iter().collect()),
+        )
         .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
@@ -675,9 +687,12 @@ mod test {
             .withf(|request| request.assert_headers(vec![("ac", "vac")]))
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Remove(Remove::Matching(
-            Regex::from_str("a[ab]")?,
-        ))]))
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![Operation::Remove(Remove::Matching(Regex::from_str(
+                "a[ab]",
+            )?))]),
+            Arc::new(RESERVED_HEADERS.iter().collect()),
+        )
         .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
@@ -701,11 +716,13 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service =
-            HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Matching {
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![Operation::Propagate(Propagate::Matching {
                 matching: Regex::from_str("d[ab]")?,
-            })]))
-            .layer(mock);
+            })]),
+            Arc::new(RESERVED_HEADERS.iter().collect()),
+        )
+        .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
         Ok(())
@@ -726,13 +743,15 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service =
-            HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![Operation::Propagate(Propagate::Named {
                 named: "da".try_into()?,
                 rename: None,
                 default: None,
-            })]))
-            .layer(mock);
+            })]),
+            Arc::new(RESERVED_HEADERS.iter().collect()),
+        )
+        .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
         Ok(())
@@ -753,13 +772,15 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service =
-            HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![Operation::Propagate(Propagate::Named {
                 named: "da".try_into()?,
                 rename: Some("ea".try_into()?),
                 default: None,
-            })]))
-            .layer(mock);
+            })]),
+            Arc::new(RESERVED_HEADERS.iter().collect()),
+        )
+        .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
         Ok(())
@@ -780,13 +801,15 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service =
-            HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![Operation::Propagate(Propagate::Named {
                 named: "ea".try_into()?,
                 rename: None,
                 default: Some("defaulted".try_into()?),
-            })]))
-            .layer(mock);
+            })]),
+            Arc::new(RESERVED_HEADERS.iter().collect()),
+        )
+        .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
         Ok(())

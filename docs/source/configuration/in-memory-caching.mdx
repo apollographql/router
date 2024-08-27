@@ -66,15 +66,18 @@ supergraph:
 To get more information on the planning and warm-up process use the following metrics (where `<storage>` can be `redis` for distributed cache or `memory`):
 
 * counters:
-  * `apollo_router_cache_size{kind="query planner", storage="<storage>}`: current size of the cache (only for in-memory cache)
-  * `apollo_router_cache_hit_count{kind="query planner", storage="<storage>}`
-  * `apollo_router_cache_miss_count{kind="query planner", storage="<storage>}`
+  * `apollo_router_cache_hit_count{kind="query planner", storage="<storage>"}`
+  * `apollo_router_cache_miss_count{kind="query planner", storage="<storage>"}`
 
 * histograms:
   * `apollo.router.query_planning.plan.duration`: time spent planning queries
   * `apollo_router_schema_loading_time`: time spent loading a schema
-  * `apollo_router_cache_hit_time{kind="query planner", storage="<storage>}`: time to get a value from the cache
-  * `apollo_router_cache_miss_time{kind="query planner", storage="<storage>}`
+  * `apollo_router_cache_hit_time{kind="query planner", storage="<storage>"}`: time to get a value from the cache
+  * `apollo_router_cache_miss_time{kind="query planner", storage="<storage>"}`
+
+* gauges
+  * `apollo_router_cache_size{kind="query planner", storage="memory"}`: current size of the cache (only for in-memory cache)
+  * `apollo.router.cache.storage.estimated_size{kind="query planner", storage="memory"}`: estimated storage size of the cache (only for in-memory query planner cache)
 
 Typically, we would look at `apollo_router_cache_size` and the cache hit rate to define the right size of the in memory cache,
 then look at `apollo_router_schema_loading_time` and `apollo.router.query_planning.plan.duration` to decide how much time we want to spend warming up queries.

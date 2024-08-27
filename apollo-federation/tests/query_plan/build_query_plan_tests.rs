@@ -720,3 +720,362 @@ fn defer_gets_stripped_out() {
     );
     assert_eq!(plan_one, plan_two)
 }
+
+#[test]
+fn test_merging_fetches_do_not_create_cycle_in_fetch_dependency_graph() {
+    // This is a test for ROUTER-546 (the second part).
+    let planner = planner!(
+        S: r#"
+          type Query {
+            start: T!
+          }
+
+          type T @key(fields: "id") {
+            id: String!
+          }
+          "#,
+        A: r#"
+          type T @key(fields: "id") {
+            id: String! @shareable
+            u: U! @shareable
+          }
+
+          type U @key(fields: "id") {
+            id: ID!
+            a: String! @shareable
+            b: String @shareable
+          }
+          "#,
+        B: r#"
+          type T @key(fields: "id") {
+            id: String! @external
+            u: U! @shareable
+          }
+
+          type U @key(fields: "id") {
+            id: ID!
+            a: String! @shareable
+            # Note: b is not here.
+          }
+
+          # This definition is necessary.
+          extend type W @key(fields: "id") {
+            id: ID @external
+          }
+          "#,
+        C: r#"
+          extend type U @key(fields: "id") {
+            id: ID! @external
+            a: String! @external
+            b: String @external
+            w: W @requires(fields: "a b")
+          }
+
+          type W @key(fields: "id") {
+            id: ID
+            y: Y
+            w1: Int
+            w2: Int
+            w3: Int
+            w4: Int
+            w5: Int
+          }
+
+          type Y {
+            y1: Int
+            y2: Int
+            y3: Int
+          }
+          "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            start {
+              u {
+                w {
+                  id
+                  w1
+                  w2
+                  w3
+                  w4
+                  w5
+                  y {
+                    y1
+                    y2
+                    y3
+                  }
+                }
+              }
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "S") {
+          {
+            start {
+              __typename
+              id
+            }
+          }
+        },
+        Parallel {
+          Sequence {
+            Flatten(path: "start") {
+              Fetch(service: "B") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    u {
+                      __typename
+                      id
+                    }
+                  }
+                }
+              },
+            },
+            Flatten(path: "start.u") {
+              Fetch(service: "A") {
+                {
+                  ... on U {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on U {
+                    b
+                    a
+                  }
+                }
+              },
+            },
+          },
+          Flatten(path: "start") {
+            Fetch(service: "A") {
+              {
+                ... on T {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on T {
+                  u {
+                    __typename
+                    id
+                    b
+                    a
+                  }
+                }
+              }
+            },
+          },
+        },
+        Flatten(path: "start.u") {
+          Fetch(service: "C") {
+            {
+              ... on U {
+                __typename
+                a
+                b
+                id
+              }
+            } =>
+            {
+              ... on U {
+                w {
+                  y {
+                    y1
+                    y2
+                    y3
+                  }
+                  id
+                  w1
+                  w2
+                  w3
+                  w4
+                  w5
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
+#[test]
+fn redundant_typename_for_inline_fragments_without_type_condition() {
+    let planner = planner!(
+        Subgraph1: r#"
+          type Query {
+            products: [Product]
+          }
+          interface Product {
+            name: String
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            products {
+              ... @skip(if: false) {
+                name
+              }
+            }
+          }
+        "#,
+        @r###"
+        QueryPlan {
+          Fetch(service: "Subgraph1") {
+            {
+              products {
+                __typename
+                ... @skip(if: false) {
+                  name
+                }
+              }
+            }
+          },
+        }
+        "###
+    );
+}
+
+#[test]
+fn test_merging_fetches_reset_cached_costs() {
+    // This is a test for ROUTER-553.
+    let planner = planner!(
+      A: r#"
+            type Query {
+                start: S @shareable
+            }
+
+            type S @key(fields: "id") {
+                id: ID!
+                u: U @shareable
+            }
+
+            type U @key(fields: "id") {
+                id: ID!
+            }
+        "#,
+      B: r#"
+            type Query {
+                start: S @shareable
+            }
+
+            type S @key(fields: "id") {
+                id: ID!
+            }
+        "#,
+      C: r#"
+            type S @key(fields: "id") {
+                id: ID!
+                x: X
+                a: String!
+            }
+
+            type X {
+                t: T
+            }
+
+            type T {
+                u: U @shareable
+            }
+
+            type U @key(fields: "id") {
+                id: ID!
+                b: String
+            }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"{
+            start {
+                u {
+                    b
+                }
+                a
+                x {
+                    t {
+                        u {
+                        id
+                        }
+                    }
+                }
+            }
+        }"#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "A") {
+          {
+            start {
+              __typename
+              u {
+                __typename
+                id
+              }
+              id
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "start") {
+            Fetch(service: "C") {
+              {
+                ... on S {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on S {
+                  a
+                  x {
+                    t {
+                      u {
+                        id
+                      }
+                    }
+                  }
+                }
+              }
+            },
+          },
+          Flatten(path: "start.u") {
+            Fetch(service: "C") {
+              {
+                ... on U {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on U {
+                  b
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "###
+    );
+}

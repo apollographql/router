@@ -26,6 +26,7 @@ use crate::error::FederationError;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
+use crate::utils::FallibleIterator;
 
 fn print_possible_runtimes(
     composite_type: &CompositeTypeDefinitionPosition,
@@ -403,7 +404,7 @@ impl FragmentSpread {
             &self.schema,
         ) {
             Ok(FragmentSpread::new(FragmentSpreadData::from_fragment(
-                &named_fragment,
+                named_fragment,
                 &self.directives,
             )))
         } else {
@@ -500,7 +501,7 @@ impl FragmentSpreadSelection {
         }
 
         let spread = FragmentSpread::new(FragmentSpreadData::from_fragment(
-            &named_fragment,
+            named_fragment,
             &self.spread.directives,
         ));
         Ok(FragmentSpreadSelection {
@@ -784,12 +785,9 @@ impl SelectionSet {
         parent_type: &CompositeTypeDefinitionPosition,
         schema: &ValidFederationSchema,
     ) -> Result<bool, FederationError> {
-        for selection in self.selections.values() {
-            if !selection.can_add_to(parent_type, schema)? {
-                return Ok(false);
-            }
-        }
-        Ok(true)
+        self.selections
+            .values()
+            .fallible_all(|selection| selection.can_add_to(parent_type, schema))
     }
 }
 
@@ -1261,7 +1259,7 @@ type T {
             assert!(rebased_fragments.is_ok());
             let rebased_fragments = rebased_fragments.unwrap();
             // F1 reduces to nothing, and F2 reduces to just __typename so we shouldn't keep them.
-            assert_eq!(1, rebased_fragments.size());
+            assert_eq!(1, rebased_fragments.len());
             assert!(rebased_fragments.contains(&name!("F3")));
             let rebased_fragment = rebased_fragments.fragments.get("F3").unwrap();
 
@@ -1337,7 +1335,7 @@ type T {
             assert!(rebased_fragments.is_ok());
             let rebased_fragments = rebased_fragments.unwrap();
             // F1 reduces to nothing, and F2 reduces to just __typename so we shouldn't keep them.
-            assert_eq!(1, rebased_fragments.size());
+            assert_eq!(1, rebased_fragments.len());
             assert!(rebased_fragments.contains(&name!("TheQuery")));
             let rebased_fragment = rebased_fragments.fragments.get("TheQuery").unwrap();
 
@@ -1414,7 +1412,7 @@ type T {
             assert!(rebased_fragments.is_ok());
             let rebased_fragments = rebased_fragments.unwrap();
             // F1 reduces to nothing, and F2 reduces to just __typename so we shouldn't keep them.
-            assert_eq!(1, rebased_fragments.size());
+            assert_eq!(1, rebased_fragments.len());
             assert!(rebased_fragments.contains(&name!("TQuery")));
             let rebased_fragment = rebased_fragments.fragments.get("TQuery").unwrap();
 
