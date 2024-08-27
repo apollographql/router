@@ -503,6 +503,14 @@ pub enum Parameter<'a> {
         /// Any optional nexted selection on the field
         paths: Vec<&'a str>,
     },
+
+    Config {
+        /// The sub-property of $config to use
+        item: &'a str,
+
+        /// Any additional nested selections under $config.item
+        paths: Vec<&'a str>,
+    },
 }
 
 impl Display for ParameterValue {

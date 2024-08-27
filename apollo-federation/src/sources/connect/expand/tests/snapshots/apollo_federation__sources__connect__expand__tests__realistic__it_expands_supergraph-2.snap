@@ -225,15 +225,17 @@ expression: connectors.by_service_name
                                 Alias {
                                     name: "emailDomain",
                                 },
-                                Var(
-                                    "$args",
-                                    Key(
-                                        Field(
-                                            "email",
+                                PathSelection {
+                                    path: Var(
+                                        $args,
+                                        Key(
+                                            Field(
+                                                "email",
+                                            ),
+                                            Empty,
                                         ),
-                                        Empty,
                                     ),
-                                ),
+                                },
                             ),
                         ],
                         star: None,

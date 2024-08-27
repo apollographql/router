@@ -206,8 +206,7 @@ mod helpers {
     use crate::schema::position::TypeDefinitionPosition;
     use crate::schema::FederationSchema;
     use crate::schema::ValidFederationSchema;
-    use crate::sources::connect::json_selection::ExtractParameters;
-    use crate::sources::connect::json_selection::StaticParameter;
+    use crate::sources::connect::json_selection::KnownVariable;
     use crate::sources::connect::url_template::Parameter;
     use crate::sources::connect::ConnectSpecDefinition;
     use crate::sources::connect::Connector;
@@ -514,6 +513,10 @@ mod helpers {
                         }
                     }
 
+                    Parameter::Config { item: _, paths: _ } => {
+                        // TODO Implement $config handling
+                    }
+
                     // All sibling fields marked by $this in a transport must be carried over to the output type
                     // regardless of its use in the output selection.
                     Parameter::Sibling { field, paths } => {
@@ -799,36 +802,69 @@ mod helpers {
     fn extract_params_from_body(
         connector: &Connector,
     ) -> Result<HashSet<Parameter>, FederationError> {
-        let body_parameters = connector
-            .transport
-            .body
-            .as_ref()
-            .and_then(JSONSelection::extract_parameters)
-            .unwrap_or_default();
+        let Some(body) = &connector.transport.body else {
+            return Ok(HashSet::default());
+        };
 
-        body_parameters
-            .iter()
-            .map(|StaticParameter { name, paths }| {
-                let mut parts = paths.iter();
-                let field = parts.next().ok_or(FederationError::internal(
-                    "expected parameter in JSONSelection to contain a field",
-                ))?;
+        use crate::sources::connect::json_selection::ExternalVarPaths;
+        let var_paths = body.external_var_paths();
 
-                match *name {
-                    "$args" => Ok(Parameter::Argument {
-                        argument: field,
-                        paths: parts.copied().collect(),
-                    }),
-                    "$this" => Ok(Parameter::Sibling {
-                        field,
-                        paths: parts.copied().collect(),
-                    }),
-                    other => Err(FederationError::internal(format!(
-                        "got unsupported parameter: {other}"
-                    ))),
+        let mut results = HashSet::with_capacity_and_hasher(var_paths.len(), Default::default());
+
+        for var_path in var_paths {
+            match var_path.var_name_and_nested_keys() {
+                Some((KnownVariable::Args, keys)) => {
+                    let mut keys_iter = keys.into_iter();
+                    let first_key = keys_iter.next().ok_or(FederationError::internal(
+                        "expected at least one key in $args",
+                    ))?;
+                    results.insert(Parameter::Argument {
+                        argument: first_key,
+                        paths: keys_iter.collect(),
+                    });
                 }
-            })
-            .collect::<Result<HashSet<_>, _>>()
+                Some((KnownVariable::This, keys)) => {
+                    let mut keys_iter = keys.into_iter();
+                    let first_key = keys_iter.next().ok_or(FederationError::internal(
+                        "expected at least one key in $this",
+                    ))?;
+                    results.insert(Parameter::Sibling {
+                        field: first_key,
+                        paths: keys_iter.collect(),
+                    });
+                }
+                Some((KnownVariable::Config, keys)) => {
+                    let mut keys_iter = keys.into_iter();
+                    let first_key = keys_iter.next().ok_or(FederationError::internal(
+                        "expected at least one key in $config",
+                    ))?;
+                    results.insert(Parameter::Config {
+                        item: first_key,
+                        paths: keys_iter.collect(),
+                    });
+                }
+                // To get the safety benefits of the KnownVariable enum, we need
+                // to enumerate all the cases explicitly, without wildcard
+                // matches. However, body.external_var_paths() only returns free
+                // (externally-provided) variables like $this, $args, and
+                // $config. The $ and @ variables, by contrast, are always bound
+                // to something within the input data.
+                Some((kv @ KnownVariable::Dollar, _)) | Some((kv @ KnownVariable::AtSign, _)) => {
+                    return Err(FederationError::internal(format!(
+                        "got unexpected non-external variable: {:?}",
+                        kv,
+                    )));
+                }
+                None => {
+                    return Err(FederationError::internal(format!(
+                        "could not extract variable from path: {:?}",
+                        var_path,
+                    )));
+                }
+            };
+        }
+
+        Ok(results)
     }
 }
 
