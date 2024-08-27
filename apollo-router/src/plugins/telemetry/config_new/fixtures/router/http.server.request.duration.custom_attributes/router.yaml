@@ -9,5 +9,5 @@ telemetry:
               operation_name: string
               condition:
                 eq:
-                - request_header: include
+                - response_header: include
                 - "operation_name"

@@ -18,11 +18,11 @@ events:
     - router_request:
         uri: "/hello"
         method: GET
-        headers:
-          include: operation_name
         body: |
           hello
     - router_response:
         body: |
           hello
         status: 200
+        headers:
+          include: operation_name

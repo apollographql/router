@@ -463,6 +463,41 @@ telemetry:
             graphql.type.name: true
 ```
 
+You can also have [conditions](./conditions) on your attributes, so instead of creating different custom metrics you could just put conditions on attributes you want to add in some cases:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    instruments:
+      router:
+        # Standard metrics
+        http.server.request.body.size:
+          attributes:
+            # Standard attributes
+            http.response.status_code: false
+            # Custom attribute
+            graphql.operation.name:
+              operation_name: string
+              condition: # Add this attribute only if the request header "debug" has the value "enabled"
+                eq:
+                - request_header: debug
+                - "enabled"
+        # Custom metric 
+        acme.metric: 
+          value: duration
+          type: counter
+          unit: s
+          description: "my description"
+          attributes:
+            http.response.status_code: true
+            "my_attribute":
+              response_header: "x-my-header"
+              condition: # Add this attribute only if the request header "debug" has the value "enabled"
+                eq:
+                - request_header: debug
+                - "enabled"
+```
+
 ### Instrument configuration reference
 
 | Option                      | Values                                                                         | Default    | Description                                   |
