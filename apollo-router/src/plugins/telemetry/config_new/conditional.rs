@@ -47,19 +47,25 @@ impl<T> From<T> for State<T> {
 /// Conditional is a stateful structure that may be called multiple times during the course of a request/response cycle.
 /// As each callback is called the underlying condition is updated. If the condition can eventually be evaluated then it returns
 /// Some(true|false) otherwise it returns None.
-#[derive(Clone, Debug, Default)]
+#[derive(Debug, Default)]
 pub(crate) struct Conditional<Att> {
     pub(crate) selector: Att,
-    pub(crate) condition: Option<Arc<Mutex<Condition<Att>>>>,
+    pub(crate) condition: Option<Mutex<Condition<Att>>>,
     pub(crate) value: Arc<Mutex<State<opentelemetry::Value>>>,
 }
 
-impl<Att> Clone for Conditional<Att> {
+impl<Att> Clone for Conditional<Att>
+where
+    Att: Clone,
+{
     fn clone(&self) -> Self {
         Self {
             selector: self.selector.clone(),
-            condition: self.condition.clone(),
-            value: self.value.clone(),
+            condition: self
+                .condition
+                .as_ref()
+                .map(|c| Mutex::new(c.lock().clone())),
+            value: Default::default(),
         }
     }
 }
@@ -408,7 +414,7 @@ where
 
                 Ok(Conditional {
                     selector,
-                    condition: condition.map(|c| Arc::new(Mutex::new(c))),
+                    condition: condition.map(Mutex::new),
                     value: Arc::new(Default::default()),
                 })
             }

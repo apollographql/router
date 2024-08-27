@@ -372,12 +372,12 @@ mod test {
                 selector: RouterSelector::StaticField {
                     r#static: "my-static-value".to_string().into(),
                 },
-                condition: Some(Arc::new(Mutex::new(Condition::Eq([
+                condition: Some(Mutex::new(Condition::Eq([
                     SelectorOrValue::Value(AttributeValue::Bool(true)),
                     SelectorOrValue::Selector(RouterSelector::OnGraphQLError {
                         on_graphql_error: true,
                     }),
-                ])))),
+                ]))),
                 value: Arc::new(Default::default()),
             },
         );
@@ -407,12 +407,12 @@ mod test {
                     redact: None,
                     default: None,
                 },
-                condition: Some(Arc::new(Mutex::new(Condition::Eq([
+                condition: Some(Mutex::new(Condition::Eq([
                     SelectorOrValue::Value(AttributeValue::Bool(true)),
                     SelectorOrValue::Selector(RouterSelector::OnGraphQLError {
                         on_graphql_error: true,
                     }),
-                ])))),
+                ]))),
                 value: Arc::new(Default::default()),
             },
         );
@@ -441,12 +441,12 @@ mod test {
                     redact: None,
                     default: None,
                 },
-                condition: Some(Arc::new(Mutex::new(Condition::Eq([
+                condition: Some(Mutex::new(Condition::Eq([
                     SelectorOrValue::Value(AttributeValue::Bool(true)),
                     SelectorOrValue::Selector(RouterSelector::OnGraphQLError {
                         on_graphql_error: true,
                     }),
-                ])))),
+                ]))),
                 value: Arc::new(Default::default()),
             },
         );
@@ -476,10 +476,10 @@ mod test {
             "test".to_string(),
             Conditional {
                 selector: selector.clone(),
-                condition: Some(Arc::new(Mutex::new(Condition::Eq([
+                condition: Some(Mutex::new(Condition::Eq([
                     SelectorOrValue::Value(AttributeValue::String("test_val".to_string())),
                     SelectorOrValue::Selector(selector),
-                ])))),
+                ]))),
                 value: Default::default(),
             },
         );
@@ -507,10 +507,10 @@ mod test {
             "test".to_string(),
             Conditional {
                 selector: selector.clone(),
-                condition: Some(Arc::new(Mutex::new(Condition::Eq([
+                condition: Some(Mutex::new(Condition::Eq([
                     SelectorOrValue::Value(AttributeValue::String("test_val".to_string())),
                     SelectorOrValue::Selector(selector),
-                ])))),
+                ]))),
                 value: Arc::new(Default::default()),
             },
         );
@@ -629,13 +629,13 @@ mod test {
                 selector: SupergraphSelector::StaticField {
                     r#static: String::from("error").into(),
                 },
-                condition: Some(Arc::new(Mutex::new(Condition::Exists(
+                condition: Some(Mutex::new(Condition::Exists(
                     SupergraphSelector::ResponseErrors {
                         response_errors: JsonPathInst::from_str("$[0].extensions.code").unwrap(),
                         redact: None,
                         default: None,
                     },
-                )))),
+                ))),
                 value: Arc::new(Default::default()),
             },
         );
@@ -753,12 +753,12 @@ mod test {
                     redact: None,
                     default: None,
                 },
-                condition: Some(Arc::new(Mutex::new(Condition::Eq([
+                condition: Some(Mutex::new(Condition::Eq([
                     SelectorOrValue::Value(AttributeValue::I64(200)),
                     SelectorOrValue::Selector(SubgraphSelector::SubgraphResponseStatus {
                         subgraph_response_status: ResponseStatus::Code,
                     }),
-                ])))),
+                ]))),
                 value: Arc::new(Default::default()),
             },
         );
@@ -785,12 +785,12 @@ mod test {
                     redact: None,
                     default: None,
                 },
-                condition: Some(Arc::new(Mutex::new(Condition::Eq([
+                condition: Some(Mutex::new(Condition::Eq([
                     SelectorOrValue::Value(AttributeValue::I64(400)),
                     SelectorOrValue::Selector(SubgraphSelector::SubgraphResponseStatus {
                         subgraph_response_status: ResponseStatus::Code,
                     }),
-                ])))),
+                ]))),
                 value: Arc::new(Default::default()),
             },
         );

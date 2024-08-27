@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::marker::PhantomData;
+use std::ops::Deref;
 use std::sync::Arc;
 
 use opentelemetry::metrics::Unit;
@@ -286,7 +287,7 @@ impl InstrumentsConfig {
                         DefaultedStandardInstrument::Bool(_)
                         | DefaultedStandardInstrument::Unset => None,
                         DefaultedStandardInstrument::Extendable { attributes } => {
-                            Some(attributes.clone())
+                            Some(Arc::new(attributes.deref().clone()))
                         }
                     },
                     updated: false,
@@ -304,7 +305,7 @@ impl InstrumentsConfig {
                         | DefaultedStandardInstrument::Unset => None,
                         DefaultedStandardInstrument::Extendable { attributes } => {
                             nb_attributes = attributes.custom.len();
-                            Some(attributes.clone())
+                            Some(Arc::new(attributes.deref().clone()))
                         }
                     };
                     CustomHistogram {
@@ -345,7 +346,7 @@ impl InstrumentsConfig {
                         | DefaultedStandardInstrument::Unset => None,
                         DefaultedStandardInstrument::Extendable { attributes } => {
                             nb_attributes = attributes.custom.len();
-                            Some(attributes.clone())
+                            Some(Arc::new(attributes.deref().clone()))
                         }
                     };
 
@@ -571,7 +572,7 @@ impl InstrumentsConfig {
                         | DefaultedStandardInstrument::Unset => None,
                         DefaultedStandardInstrument::Extendable { attributes } => {
                             nb_attributes = attributes.custom.len();
-                            Some(attributes.clone())
+                            Some(Arc::new(attributes.deref().clone()))
                         }
                     };
                     CustomHistogram {
@@ -608,7 +609,7 @@ impl InstrumentsConfig {
                         | DefaultedStandardInstrument::Unset => None,
                         DefaultedStandardInstrument::Extendable { attributes } => {
                             nb_attributes = attributes.custom.len();
-                            Some(attributes.clone())
+                            Some(Arc::new(attributes.deref().clone()))
                         }
                     };
                     CustomHistogram {
@@ -649,7 +650,7 @@ impl InstrumentsConfig {
                         | DefaultedStandardInstrument::Unset => None,
                         DefaultedStandardInstrument::Extendable { attributes } => {
                             nb_attributes = attributes.custom.len();
-                            Some(attributes.clone())
+                            Some(Arc::new(attributes.deref().clone()))
                         }
                     };
                     CustomHistogram {
@@ -758,7 +759,7 @@ impl InstrumentsConfig {
                     }
                     DefaultedStandardInstrument::Extendable { attributes } => {
                         nb_attributes = attributes.custom.len();
-                        Some(attributes.clone())
+                        Some(Arc::new(attributes.deref().clone()))
                     }
                 };
                 CustomHistogram {
@@ -858,7 +859,7 @@ impl InstrumentsConfig {
                     }
                     DefaultedStandardInstrument::Extendable { attributes } => {
                         nb_attributes = attributes.custom.len();
-                        Some(attributes.clone())
+                        Some(Arc::new(attributes.deref().clone()))
                     }
                 };
                 CustomCounter {
@@ -1439,7 +1440,7 @@ where
                                 counter: Some(counter),
                                 attributes: Vec::new(),
                                 selector,
-                                selectors: Some(instrument.attributes.clone()),
+                                selectors: Some(Arc::new(instrument.attributes.deref().clone())),
                                 incremented: false,
                             };
                             counters.push(CustomCounter {
@@ -1493,7 +1494,7 @@ where
                                 histogram: Some(histogram),
                                 attributes: Vec::new(),
                                 selector,
-                                selectors: Some(instrument.attributes.clone()),
+                                selectors: Some(Arc::new(instrument.attributes.deref().clone())),
                                 updated: false,
                             };
 

@@ -24,5 +24,10 @@ info:
     datapoints:
       - sum: 0.1
         attributes:
+          graphql.operation.name: TestQuery
+          http.request.method: GET
+          http.response.status_code: 200
+      - sum: 0.1
+        attributes:
           http.request.method: GET
           http.response.status_code: 200

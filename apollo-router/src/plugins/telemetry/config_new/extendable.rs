@@ -275,8 +275,6 @@ where
 }
 #[cfg(test)]
 mod test {
-    use std::sync::Arc;
-
     use parking_lot::Mutex;
 
     use crate::plugins::telemetry::config::AttributeValue;
@@ -404,12 +402,12 @@ mod test {
                     redact: None,
                     default: None
                 },
-                condition: Some(Arc::new(Mutex::new(Condition::Eq([
+                condition: Some(Mutex::new(Condition::Eq([
                     SelectorOrValue::Value(200.into()),
                     SelectorOrValue::Selector(RouterSelector::ResponseStatus {
                         response_status: ResponseStatus::Code
                     })
-                ])))),
+                ]))),
                 value: Default::default(),
             })
         );

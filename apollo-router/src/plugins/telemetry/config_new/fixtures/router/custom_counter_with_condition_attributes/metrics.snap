@@ -35,3 +35,7 @@ info:
           custom_attribute: custom_value
           http.request.method: GET
           static_one: foobar
+      - value: 1
+        attributes:
+          custom_attribute: custom_value
+          http.request.method: GET

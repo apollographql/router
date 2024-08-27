@@ -12,3 +12,17 @@ events:
         body: |
           hello
         status: 200
+  - - context:
+        map:
+          operation_name: TestQuery
+    - router_request:
+        uri: "/hello"
+        method: GET
+        headers:
+          include: operation_name
+        body: |
+          hello
+    - router_response:
+        body: |
+          hello
+        status: 200
