@@ -476,7 +476,7 @@ impl ValueExt for Value {
         match self {
             Value::Array(_) => "array",
             Value::Null => "null",
-            Value::Bool(_) => "booleqn",
+            Value::Bool(_) => "boolean",
             Value::Number(_) => "number",
             Value::String(_) => "string",
             Value::Object(_) => "object",
