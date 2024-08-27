@@ -1709,6 +1709,13 @@ mod graphql_utils {
         variables: &Map<ByteString, JSONValue>,
     ) -> Result<Map<ByteString, JSONValue>, BoxError> {
         let mut arguments = Map::new();
+
+        for argument_def in field.definition.arguments.iter() {
+            if let Some(value) = argument_def.default_value.as_ref() {
+                arguments.insert(argument_def.name.as_str(), argument_value_to_json(value)?);
+            }
+        }
+
         for argument in field.arguments.iter() {
             match &*argument.value {
                 apollo_compiler::schema::Value::Variable(name) => {
