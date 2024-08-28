@@ -876,7 +876,7 @@ jobs:
             - setup_remote_docker:
                 # CircleCI Image Policy
                 #   https://circleci.com/docs/remote-docker-images-support-policy/
-                version: 24.0.9
+                version: 20.10.24
                 docker_layer_caching: true
             - attach_workspace:
                 at: artifacts
