@@ -200,10 +200,26 @@ impl ConnectorContext {
     }
 }
 
+/// JSONSelection Request / Response Data
+///
+/// Contains all needed info and responses from the application of a JSONSelection
 pub(crate) struct SelectionData {
+    /// The original [`JSONSelection`] to resolve
     pub(crate) source: String,
+
+    /// A mapping of the original selection, taking into account renames and other
+    /// transformations requested by the client
+    ///
+    /// Refer to [`Self::source`] for the original, schema-supplied selection.
     pub(crate) transformed: String,
+
+    /// The result of applying the selection to JSON. An empty value
+    /// here can potentially mean that errors were encountered.
+    ///
+    /// Refer to [`Self::errors`] for any errors found during evaluation
     pub(crate) result: Option<serde_json_bytes::Value>,
+
+    /// A list of errors encountered during evaluation.
     pub(crate) errors: Vec<ApplyToError>,
 }
 
