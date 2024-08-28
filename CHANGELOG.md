@@ -58,7 +58,7 @@ By [@tninesling](https://github.com/tninesling) in https://github.com/apollograp
 
 The router now schedules background jobs to run the native (Rust) query planner to compare its results to the legacy implementation. This helps ascertain its correctness before making a decision to switch entirely to it from the legacy query planner.
 
-To learn more, go to [Experimental Query Planner Mode](https://www.apollographql.com/docs/router/configuration/configuration/experimental_query_planning_mode) docs.
+To learn more, go to [Experimental Query Planner Mode](https://www.apollographql.com/docs/router/configuration/configuration/experimental_query_planner_mode) docs.
 
 The router continues to use the legacy query planner to plan and execute operations, so there is no effect on the hot path.
 
