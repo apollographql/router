@@ -10,6 +10,7 @@ use apollo_compiler::ast;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_federation::error::FederationError;
+use apollo_federation::error::SingleFederationError;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use futures::future::BoxFuture;
 use opentelemetry_api::metrics::MeterProvider as _;
@@ -64,6 +65,10 @@ use crate::Configuration;
 
 pub(crate) const RUST_QP_MODE: &str = "rust";
 const JS_QP_MODE: &str = "js";
+const UNSUPPORTED_CONTEXT: &str = "context";
+const UNSUPPORTED_OVERRIDES: &str = "overrides";
+const UNSUPPORTED_FED1: &str = "fed1";
+const INTERNAL_INIT_ERROR: &str = "internal";
 
 #[derive(Clone)]
 /// A query planner that calls out to the nodejs router-bridge query planner.
@@ -81,7 +86,7 @@ pub(crate) struct BridgeQueryPlanner {
 }
 
 #[derive(Clone)]
-enum PlannerMode {
+pub(crate) enum PlannerMode {
     Js(Arc<Planner<QueryPlanResult>>),
     Both {
         js: Arc<Planner<QueryPlanResult>>,
@@ -115,6 +120,7 @@ impl PlannerMode {
         schema: &Schema,
         configuration: &Configuration,
         old_planner: Option<Arc<Planner<QueryPlanResult>>>,
+        rust_planner: Option<Arc<QueryPlanner>>,
     ) -> Result<Self, ServiceBuildError> {
         Ok(match configuration.experimental_query_planner_mode {
             QueryPlannerMode::New => Self::Rust {
@@ -124,16 +130,48 @@ impl PlannerMode {
                     old_planner,
                 )
                 .await?,
-                rust: Self::rust(schema, configuration)?,
+                rust: rust_planner
+                    .expect("expected Rust QP instance for `experimental_query_planner_mode: new`"),
             },
             QueryPlannerMode::Legacy => {
                 Self::Js(Self::js(&schema.raw_sdl, configuration, old_planner).await?)
             }
             QueryPlannerMode::Both => Self::Both {
                 js: Self::js(&schema.raw_sdl, configuration, old_planner).await?,
-                rust: Self::rust(schema, configuration)?,
+                rust: rust_planner.expect(
+                    "expected Rust QP instance for `experimental_query_planner_mode: both`",
+                ),
             },
+            QueryPlannerMode::BothBestEffort => {
+                if let Some(rust) = rust_planner {
+                    Self::Both {
+                        js: Self::js(&schema.raw_sdl, configuration, old_planner).await?,
+                        rust,
+                    }
+                } else {
+                    Self::Js(Self::js(&schema.raw_sdl, configuration, old_planner).await?)
+                }
+            }
         })
+    }
+
+    pub(crate) fn maybe_rust(
+        schema: &Schema,
+        configuration: &Configuration,
+    ) -> Result<Option<Arc<QueryPlanner>>, ServiceBuildError> {
+        match configuration.experimental_query_planner_mode {
+            QueryPlannerMode::Legacy => Ok(None),
+            QueryPlannerMode::New | QueryPlannerMode::Both => {
+                Ok(Some(Self::rust(schema, configuration)?))
+            }
+            QueryPlannerMode::BothBestEffort => match Self::rust(schema, configuration) {
+                Ok(planner) => Ok(Some(planner)),
+                Err(error) => {
+                    tracing::info!("Falling back to the legacy query planner: {error}");
+                    Ok(None)
+                }
+            },
+        }
     }
 
     fn rust(
@@ -146,17 +184,41 @@ impl PlannerMode {
                 .reuse_query_fragments
                 .unwrap_or(true),
             subgraph_graphql_validation: false,
-            generate_query_fragments: false,
+            generate_query_fragments: configuration.supergraph.generate_query_fragments,
             incremental_delivery:
                 apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig {
                     enable_defer: configuration.supergraph.defer_support,
                 },
             debug: Default::default(),
         };
-        Ok(Arc::new(QueryPlanner::new(
-            schema.federation_supergraph(),
-            config,
-        )?))
+        let result = QueryPlanner::new(schema.federation_supergraph(), config);
+
+        match &result {
+            Err(FederationError::SingleFederationError {
+                inner: error,
+                trace: _,
+            }) => match error {
+                SingleFederationError::UnsupportedFederationVersion { .. } => {
+                    metric_rust_qp_init(Some(UNSUPPORTED_FED1));
+                }
+                SingleFederationError::UnsupportedFeature { message: _, kind } => match kind {
+                    apollo_federation::error::UnsupportedFeatureKind::ProgressiveOverrides => {
+                        metric_rust_qp_init(Some(UNSUPPORTED_OVERRIDES))
+                    }
+                    apollo_federation::error::UnsupportedFeatureKind::Context => {
+                        metric_rust_qp_init(Some(UNSUPPORTED_CONTEXT))
+                    }
+                    _ => metric_rust_qp_init(Some(INTERNAL_INIT_ERROR)),
+                },
+                _ => {
+                    metric_rust_qp_init(Some(INTERNAL_INIT_ERROR));
+                }
+            },
+            Err(_) => metric_rust_qp_init(Some(INTERNAL_INIT_ERROR)),
+            Ok(_) => metric_rust_qp_init(None),
+        }
+
+        Ok(Arc::new(result.map_err(ServiceBuildError::QpInitError)?))
     }
 
     async fn js(
@@ -323,12 +385,13 @@ impl PlannerMode {
 
 impl BridgeQueryPlanner {
     pub(crate) async fn new(
-        schema: String,
+        schema: Arc<Schema>,
         configuration: Arc<Configuration>,
-        old_planner: Option<Arc<Planner<QueryPlanResult>>>,
+        old_js_planner: Option<Arc<Planner<QueryPlanResult>>>,
+        rust_planner: Option<Arc<QueryPlanner>>,
     ) -> Result<Self, ServiceBuildError> {
-        let schema = Schema::parse(&schema, &configuration)?;
-        let planner = PlannerMode::new(&schema, &configuration, old_planner).await?;
+        let planner =
+            PlannerMode::new(&schema, &configuration, old_js_planner, rust_planner).await?;
 
         let subgraph_schemas = Arc::new(planner.subgraphs().await?);
 
@@ -353,7 +416,7 @@ impl BridgeQueryPlanner {
 
         Ok(Self {
             planner,
-            schema: Arc::new(schema),
+            schema,
             subgraph_schemas,
             introspection,
             enable_authorization_directives,
@@ -369,6 +432,7 @@ impl BridgeQueryPlanner {
             .clone()
     }
 
+    #[cfg(test)]
     pub(crate) fn schema(&self) -> Arc<Schema> {
         self.schema.clone()
     }
@@ -606,6 +670,7 @@ impl BridgeQueryPlanner {
                         formatted_query_plan,
                         query: Arc::new(selections),
                         query_metrics,
+                        estimated_size: Default::default(),
                     }),
                 })
             }
@@ -878,12 +943,18 @@ impl BridgeQueryPlanner {
 }
 
 /// Data coming from the `plan` method on the router_bridge
-// Note: Reexported under `apollo_compiler::_private`
+// Note: Reexported under `apollo_router::_private`
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueryPlanResult {
     pub(super) formatted_query_plan: Option<Arc<String>>,
     pub(super) query_plan: QueryPlan,
+}
+
+impl QueryPlanResult {
+    pub fn formatted_query_plan(&self) -> Option<&str> {
+        self.formatted_query_plan.as_deref().map(String::as_str)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -894,7 +965,8 @@ pub(super) struct QueryPlan {
     pub(super) node: Option<Arc<PlanNode>>,
 }
 
-pub(crate) fn render_diff(differences: &[diff::Result<&str>]) -> String {
+// Note: Reexported under `apollo_router::_private`
+pub fn render_diff(differences: &[diff::Result<&str>]) -> String {
     let mut output = String::new();
     for diff_line in differences {
         match diff_line {
@@ -927,6 +999,25 @@ pub(crate) fn metric_query_planning_plan_duration(planner: &'static str, start: 
         start.elapsed().as_secs_f64(),
         "planner" = planner
     );
+}
+
+pub(crate) fn metric_rust_qp_init(init_error_kind: Option<&'static str>) {
+    if let Some(init_error_kind) = init_error_kind {
+        u64_counter!(
+            "apollo.router.lifecycle.query_planner.init",
+            "Rust query planner initialization",
+            1,
+            "init.error_kind" = init_error_kind,
+            "init.is_success" = false
+        );
+    } else {
+        u64_counter!(
+            "apollo.router.lifecycle.query_planner.init",
+            "Rust query planner initialization",
+            1,
+            "init.is_success" = true
+        );
+    }
 }
 
 #[cfg(test)]
@@ -981,13 +1072,12 @@ mod tests {
     #[test(tokio::test)]
     async fn federation_versions() {
         async {
-            let _planner = BridgeQueryPlanner::new(
-                include_str!("../testdata/minimal_supergraph.graphql").into(),
-                Default::default(),
-                None,
-            )
-            .await
-            .unwrap();
+            let sdl = include_str!("../testdata/minimal_supergraph.graphql");
+            let config = Arc::default();
+            let schema = Schema::parse(sdl, &config).unwrap();
+            let _planner = BridgeQueryPlanner::new(schema.into(), config, None, None)
+                .await
+                .unwrap();
 
             assert_gauge!(
                 "apollo.router.supergraph.federation",
@@ -999,13 +1089,12 @@ mod tests {
         .await;
 
         async {
-            let _planner = BridgeQueryPlanner::new(
-                include_str!("../testdata/minimal_fed2_supergraph.graphql").into(),
-                Default::default(),
-                None,
-            )
-            .await
-            .unwrap();
+            let sdl = include_str!("../testdata/minimal_fed2_supergraph.graphql");
+            let config = Arc::default();
+            let schema = Schema::parse(sdl, &config).unwrap();
+            let _planner = BridgeQueryPlanner::new(schema.into(), config, None, None)
+                .await
+                .unwrap();
 
             assert_gauge!(
                 "apollo.router.supergraph.federation",
@@ -1019,10 +1108,10 @@ mod tests {
 
     #[test(tokio::test)]
     async fn empty_query_plan_should_be_a_planner_error() {
-        let schema = Schema::parse(EXAMPLE_SCHEMA, &Default::default()).unwrap();
+        let schema = Arc::new(Schema::parse(EXAMPLE_SCHEMA, &Default::default()).unwrap());
         let query = include_str!("testdata/unknown_introspection_query.graphql");
 
-        let planner = BridgeQueryPlanner::new(EXAMPLE_SCHEMA.to_string(), Default::default(), None)
+        let planner = BridgeQueryPlanner::new(schema.clone(), Default::default(), None, None)
             .await
             .unwrap();
 
@@ -1121,10 +1210,10 @@ mod tests {
         configuration.supergraph.introspection = true;
         let configuration = Arc::new(configuration);
 
-        let planner =
-            BridgeQueryPlanner::new(EXAMPLE_SCHEMA.to_string(), configuration.clone(), None)
-                .await
-                .unwrap();
+        let schema = Schema::parse(EXAMPLE_SCHEMA, &configuration).unwrap();
+        let planner = BridgeQueryPlanner::new(schema.into(), configuration.clone(), None, None)
+            .await
+            .unwrap();
 
         macro_rules! s {
             ($query: expr) => {
@@ -1429,7 +1518,8 @@ mod tests {
         configuration.supergraph.introspection = true;
         let configuration = Arc::new(configuration);
 
-        let planner = BridgeQueryPlanner::new(schema.to_string(), configuration.clone(), None)
+        let schema = Schema::parse(schema, &configuration).unwrap();
+        let planner = BridgeQueryPlanner::new(schema.into(), configuration.clone(), None, None)
             .await
             .unwrap();
 
@@ -1570,6 +1660,44 @@ mod tests {
             "apollo.router.query_planning.plan.duration",
             f64,
             "planner" = "js"
+        );
+    }
+
+    #[test]
+    fn test_metric_rust_qp_initialization() {
+        metric_rust_qp_init(None);
+        assert_counter!(
+            "apollo.router.lifecycle.query_planner.init",
+            1,
+            "init.is_success" = true
+        );
+        metric_rust_qp_init(Some(UNSUPPORTED_CONTEXT));
+        assert_counter!(
+            "apollo.router.lifecycle.query_planner.init",
+            1,
+            "init.error_kind" = "context",
+            "init.is_success" = false
+        );
+        metric_rust_qp_init(Some(UNSUPPORTED_OVERRIDES));
+        assert_counter!(
+            "apollo.router.lifecycle.query_planner.init",
+            1,
+            "init.error_kind" = "overrides",
+            "init.is_success" = false
+        );
+        metric_rust_qp_init(Some(UNSUPPORTED_FED1));
+        assert_counter!(
+            "apollo.router.lifecycle.query_planner.init",
+            1,
+            "init.error_kind" = "fed1",
+            "init.is_success" = false
+        );
+        metric_rust_qp_init(Some(INTERNAL_INIT_ERROR));
+        assert_counter!(
+            "apollo.router.lifecycle.query_planner.init",
+            1,
+            "init.error_kind" = "internal",
+            "init.is_success" = false
         );
     }
 }

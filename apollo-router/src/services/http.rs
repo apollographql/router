@@ -9,6 +9,7 @@ use super::router::body::RouterBody;
 use super::Plugins;
 use crate::Context;
 
+pub(crate) mod body_stream;
 pub(crate) mod service;
 #[cfg(test)]
 mod tests;
@@ -33,12 +34,12 @@ pub(crate) struct HttpResponse {
 
 #[derive(Clone)]
 pub(crate) struct HttpClientServiceFactory {
-    pub(crate) service: Arc<dyn MakeHttpService>,
+    pub(crate) service: HttpClientService,
     pub(crate) plugins: Arc<Plugins>,
 }
 
 impl HttpClientServiceFactory {
-    pub(crate) fn new(service: Arc<dyn MakeHttpService>, plugins: Arc<Plugins>) -> Self {
+    pub(crate) fn new(service: HttpClientService, plugins: Arc<Plugins>) -> Self {
         HttpClientServiceFactory { service, plugins }
     }
 
@@ -59,17 +60,19 @@ impl HttpClientServiceFactory {
         .unwrap();
 
         HttpClientServiceFactory {
-            service: Arc::new(service),
+            service,
             plugins: Arc::new(IndexMap::default()),
         }
     }
 
     pub(crate) fn create(&self, name: &str) -> BoxService {
-        let service = self.service.make();
+        let service = self.service.clone();
         self.plugins
             .iter()
             .rev()
-            .fold(service, |acc, (_, e)| e.http_client_service(name, acc))
+            .fold(service.boxed(), |acc, (_, e)| {
+                e.http_client_service(name, acc)
+            })
     }
 }
 

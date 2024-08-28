@@ -1,11 +1,13 @@
-use std::collections::HashSet;
+use std::sync::Arc;
 
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::VariableDefinition;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 
+use super::query_planner::SubgraphOperationCompression;
 use crate::error::FederationError;
-use crate::operation::RebasedFragments;
+use crate::operation::DirectiveList;
 use crate::operation::SelectionSet;
 use crate::query_graph::QueryGraph;
 use crate::query_plan::conditions::Conditions;
@@ -44,10 +46,11 @@ const FETCH_COST: QueryPlanCost = 1000.0;
 const PIPELINING_COST: QueryPlanCost = 100.0;
 
 pub(crate) struct FetchDependencyGraphToQueryPlanProcessor {
-    variable_definitions: Vec<Node<VariableDefinition>>,
-    fragments: Option<RebasedFragments>,
+    variable_definitions: Arc<Vec<Node<VariableDefinition>>>,
+    operation_directives: DirectiveList,
+    operation_compression: SubgraphOperationCompression,
     operation_name: Option<Name>,
-    assigned_defer_labels: Option<HashSet<String>>,
+    assigned_defer_labels: Option<IndexSet<String>>,
     counter: u32,
 }
 
@@ -241,14 +244,16 @@ fn sequence_cost(values: impl IntoIterator<Item = QueryPlanCost>) -> QueryPlanCo
 
 impl FetchDependencyGraphToQueryPlanProcessor {
     pub(crate) fn new(
-        variable_definitions: Vec<Node<VariableDefinition>>,
-        fragments: Option<RebasedFragments>,
+        variable_definitions: Arc<Vec<Node<VariableDefinition>>>,
+        operation_directives: DirectiveList,
+        operation_compression: SubgraphOperationCompression,
         operation_name: Option<Name>,
-        assigned_defer_labels: Option<HashSet<String>>,
+        assigned_defer_labels: Option<IndexSet<String>>,
     ) -> Self {
         Self {
             variable_definitions,
-            fragments,
+            operation_directives,
+            operation_compression,
             operation_name,
             assigned_defer_labels,
             counter: 0,
@@ -276,7 +281,8 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
             query_graph,
             handled_conditions,
             &self.variable_definitions,
-            self.fragments.as_mut(),
+            &self.operation_directives,
+            &mut self.operation_compression,
             op_name,
         )
     }

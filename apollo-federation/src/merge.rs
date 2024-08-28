@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::iter;
@@ -128,6 +127,7 @@ impl Merger {
             needs_inaccessible: false,
         }
     }
+
     fn merge(&mut self, subgraphs: ValidFederationSubgraphs) -> Result<MergeSuccess, MergeFailure> {
         let mut subgraphs = subgraphs
             .into_iter()
@@ -534,20 +534,33 @@ impl Merger {
                 );
 
                 for arg in field.arguments.iter() {
-                    let arguments = &mut supergraph_field.make_mut().arguments;
-                    if let Some(index) = arguments.iter().position(|a| a.name == arg.name) {
-                        if let Some(existing_arg) = arguments.get_mut(index) {
-                            // TODO add args
-                            let mutable_arg = existing_arg.make_mut();
-                            self.add_inaccessible(
-                                directive_names,
-                                &mut mutable_arg.directives,
-                                &arg.directives,
-                            );
-                        } else {
-                            // TODO mismatch no args
-                        }
-                    }
+                    let arguments_to_merge = &mut supergraph_field.make_mut().arguments;
+                    let argument_to_merge = arguments_to_merge
+                        .iter_mut()
+                        .find_map(|a| (a.name == arg.name).then(|| a.make_mut()));
+
+                    if let Some(argument) = argument_to_merge {
+                        self.add_inaccessible(
+                            directive_names,
+                            &mut argument.directives,
+                            &arg.directives,
+                        );
+                    } else {
+                        let mut argument = InputValueDefinition {
+                            name: arg.name.clone(),
+                            description: arg.description.clone(),
+                            directives: Default::default(),
+                            ty: arg.ty.clone(),
+                            default_value: arg.default_value.clone(),
+                        };
+
+                        self.add_inaccessible(
+                            directive_names,
+                            &mut argument.directives,
+                            &arg.directives,
+                        );
+                        arguments_to_merge.push(argument.into());
+                    };
                 }
 
                 let requires_directive_option = field
@@ -702,19 +715,6 @@ impl Merger {
             );
         }
     }
-}
-
-fn filter_directives<'a, D, I, O>(deny_list: &IndexSet<Name>, directives: D) -> O
-where
-    D: IntoIterator<Item = &'a I>,
-    I: 'a + AsRef<Directive> + Clone,
-    O: FromIterator<I>,
-{
-    directives
-        .into_iter()
-        .filter(|d| !deny_list.contains(&d.as_ref().name))
-        .cloned()
-        .collect()
 }
 
 struct DirectiveNames {
@@ -1581,8 +1581,8 @@ fn add_core_feature_inaccessible(supergraph: &mut Schema) {
 // TODO use apollo_compiler::executable::FieldSet
 fn parse_keys<'a>(
     directives: impl Iterator<Item = &'a Component<Directive>> + Sized,
-) -> HashSet<&'a str> {
-    HashSet::from_iter(
+) -> IndexSet<&'a str> {
+    IndexSet::from_iter(
         directives
             .flat_map(|k| {
                 let field_set = directive_string_arg_value(k, &name!("fields")).unwrap();

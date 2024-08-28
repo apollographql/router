@@ -118,6 +118,7 @@ async fn test_invalid_error_locations() -> Result<(), BoxError> {
             "data": null,
             "errors": [{
                 "message":"service 'products' response was malformed: invalid `locations` within error: invalid type: boolean `true`, expected u32",
+                "path": [],
                 "extensions": {
                     "service": "products",
                     "reason": "invalid `locations` within error: invalid type: boolean `true`, expected u32",

@@ -25,7 +25,7 @@ macro_rules! snapshot {
         #[cfg(feature = "snapshot_tracing")]
         tracing::trace!(
             snapshot = std::any::type_name_of_val(&$value),
-            data = serde_json::to_string(&$value).expect(concat!(
+            data = ron::ser::to_string(&$value).expect(concat!(
                 "Could not serialize value for a snapshot with message: ",
                 $msg
             )),
@@ -36,7 +36,7 @@ macro_rules! snapshot {
         #[cfg(feature = "snapshot_tracing")]
         tracing::trace!(
             snapshot = std::any::type_name_of_val(&$value),
-            data = serde_json::to_string(&$value).expect(concat!(
+            data = ron::ser::to_string(&$value).expect(concat!(
                 "Could not serialize value for a snapshot with message: ",
                 $msg
             )),

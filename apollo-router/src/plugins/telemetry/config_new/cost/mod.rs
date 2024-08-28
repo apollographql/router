@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use opentelemetry::metrics::MeterProvider;
@@ -9,6 +10,7 @@ use serde::Deserialize;
 use tower::BoxError;
 
 use super::instruments::Increment;
+use super::instruments::StaticInstrument;
 use crate::metrics;
 use crate::plugins::demand_control::CostContext;
 use crate::plugins::telemetry::config::AttributeValue;
@@ -115,7 +117,28 @@ pub(crate) struct CostInstrumentsConfig {
 }
 
 impl CostInstrumentsConfig {
-    pub(crate) fn to_instruments(&self) -> CostInstruments {
+    pub(crate) fn new_static_instruments(&self) -> HashMap<String, StaticInstrument> {
+        let meter = metrics::meter_provider()
+            .meter(crate::plugins::telemetry::config_new::instruments::METER_NAME);
+
+        [(
+            COST_ESTIMATED.to_string(),
+            StaticInstrument::Histogram(meter.f64_histogram(COST_ESTIMATED).with_description("Estimated cost of the operation using the currently configured cost model").init()),
+        ),(
+            COST_ACTUAL.to_string(),
+            StaticInstrument::Histogram(meter.f64_histogram(COST_ACTUAL).with_description("Actual cost of the operation using the currently configured cost model").init()),
+        ),(
+            COST_DELTA.to_string(),
+            StaticInstrument::Histogram(meter.f64_histogram(COST_DELTA).with_description("Delta between the estimated and actual cost of the operation using the currently configured cost model").init()),
+        )]
+        .into_iter()
+        .collect()
+    }
+
+    pub(crate) fn to_instruments(
+        &self,
+        static_instruments: Arc<HashMap<String, StaticInstrument>>,
+    ) -> CostInstruments {
         let cost_estimated = self.cost_estimated.is_enabled().then(|| {
             Self::histogram(
                 COST_ESTIMATED,
@@ -123,6 +146,7 @@ impl CostInstrumentsConfig {
                 SupergraphSelector::Cost {
                     cost: CostValue::Estimated,
                 },
+                &static_instruments,
             )
         });
 
@@ -133,6 +157,7 @@ impl CostInstrumentsConfig {
                 SupergraphSelector::Cost {
                     cost: CostValue::Actual,
                 },
+                &static_instruments,
             )
         });
 
@@ -143,6 +168,7 @@ impl CostInstrumentsConfig {
                 SupergraphSelector::Cost {
                     cost: CostValue::Delta,
                 },
+                &static_instruments,
             )
         });
         CostInstruments {
@@ -156,9 +182,8 @@ impl CostInstrumentsConfig {
         name: &'static str,
         config: &DefaultedStandardInstrument<Extendable<SupergraphAttributes, SupergraphSelector>>,
         selector: SupergraphSelector,
+        static_instruments: &Arc<HashMap<String, StaticInstrument>>,
     ) -> CustomHistogram<Request, Response, SupergraphAttributes, SupergraphSelector> {
-        let meter = metrics::meter_provider()
-            .meter(crate::plugins::telemetry::config_new::instruments::METER_NAME);
         let mut nb_attributes = 0;
         let selectors = match config {
             DefaultedStandardInstrument::Bool(_) | DefaultedStandardInstrument::Unset => None,
@@ -172,7 +197,13 @@ impl CostInstrumentsConfig {
             inner: Mutex::new(CustomHistogramInner {
                 increment: Increment::EventCustom(None),
                 condition: Condition::True,
-                histogram: Some(meter.f64_histogram(name).init()),
+                histogram: Some(
+                    static_instruments
+                        .get(name)
+                        .expect("cannot get static instrument for cost; this should not happen")
+                        .as_histogram()
+                        .expect("cannot convert instrument to histogram for cost; this should not happen").clone(),
+                ),
                 attributes: Vec::with_capacity(nb_attributes),
                 selector: Some(Arc::new(selector)),
                 selectors,
@@ -307,6 +338,8 @@ pub(crate) fn add_cost_attributes(context: &Context, custom_attributes: &mut Vec
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
+
     use crate::context::OPERATION_NAME;
     use crate::plugins::demand_control::CostContext;
     use crate::plugins::telemetry::config_new::cost::CostInstruments;
@@ -318,7 +351,7 @@ mod test {
     #[test]
     fn test_default_estimated() {
         let config = config(include_str!("fixtures/cost_estimated.router.yaml"));
-        let instruments = config.to_instruments();
+        let instruments = config.to_instruments(Arc::new(config.new_static_instruments()));
         make_request(&instruments);
 
         assert_histogram_sum!("cost.estimated", 100.0);
@@ -330,7 +363,7 @@ mod test {
     #[test]
     fn test_default_actual() {
         let config = config(include_str!("fixtures/cost_actual.router.yaml"));
-        let instruments = config.to_instruments();
+        let instruments = config.to_instruments(Arc::new(config.new_static_instruments()));
         make_request(&instruments);
 
         assert_histogram_sum!("cost.actual", 10.0);
@@ -342,7 +375,7 @@ mod test {
     #[test]
     fn test_default_delta() {
         let config = config(include_str!("fixtures/cost_delta.router.yaml"));
-        let instruments = config.to_instruments();
+        let instruments = config.to_instruments(Arc::new(config.new_static_instruments()));
         make_request(&instruments);
 
         assert_histogram_sum!("cost.delta", 90.0);
@@ -356,7 +389,7 @@ mod test {
         let config = config(include_str!(
             "fixtures/cost_estimated_with_attributes.router.yaml"
         ));
-        let instruments = config.to_instruments();
+        let instruments = config.to_instruments(Arc::new(config.new_static_instruments()));
         make_request(&instruments);
 
         assert_histogram_sum!("cost.estimated", 100.0, cost.result = "COST_TOO_EXPENSIVE");
@@ -370,7 +403,7 @@ mod test {
         let config = config(include_str!(
             "fixtures/cost_actual_with_attributes.router.yaml"
         ));
-        let instruments = config.to_instruments();
+        let instruments = config.to_instruments(Arc::new(config.new_static_instruments()));
         make_request(&instruments);
 
         assert_histogram_sum!("cost.actual", 10.0, cost.result = "COST_TOO_EXPENSIVE");
@@ -384,7 +417,7 @@ mod test {
         let config = config(include_str!(
             "fixtures/cost_delta_with_attributes.router.yaml"
         ));
-        let instruments = config.to_instruments();
+        let instruments = config.to_instruments(Arc::new(config.new_static_instruments()));
         make_request(&instruments);
 
         assert_histogram_sum!(

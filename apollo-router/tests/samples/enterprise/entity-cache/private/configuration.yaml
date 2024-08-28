@@ -3,6 +3,10 @@ override_subgraph_url:
 include_subgraph_errors:
   all: true
 
+rhai:
+  scripts: "tests/samples/enterprise/entity-cache/private"
+  main: "private.rhai"
+
 preview_entity_cache:
   enabled: true
   redis:
@@ -11,7 +15,7 @@ preview_entity_cache:
   subgraph:
     all:
       enabled: true
+      ttl: 10s
     subgraphs:
-      reviews:
-        ttl: 120s
-        enabled: true
+      accounts:
+        private_id: "user"

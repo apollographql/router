@@ -1,9 +1,12 @@
-use std::collections::BTreeMap;
-use std::fmt;
+mod schema;
+mod subgraph;
+
 use std::fmt::Write;
 use std::ops::Deref;
 use std::sync::Arc;
 
+use apollo_compiler::ast::Argument;
+use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
@@ -25,18 +28,25 @@ use apollo_compiler::schema::InterfaceType;
 use apollo_compiler::schema::NamedType;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::schema::ScalarType;
-use apollo_compiler::schema::SchemaBuilder;
 use apollo_compiler::schema::Type;
 use apollo_compiler::schema::UnionType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use itertools::Itertools;
 use lazy_static::lazy_static;
 use time::OffsetDateTime;
 
+use self::schema::get_apollo_directive_names;
+pub(crate) use self::schema::new_empty_fed_2_subgraph_schema;
+use self::subgraph::FederationSubgraph;
+use self::subgraph::FederationSubgraphs;
+pub use self::subgraph::ValidFederationSubgraph;
+pub use self::subgraph::ValidFederationSubgraphs;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
+use crate::link::cost_spec_definition::CostSpecDefinition;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
@@ -46,6 +56,7 @@ use crate::link::join_spec_definition::TypeDirectiveArguments;
 use crate::link::spec::Identity;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
+use crate::link::DEFAULT_LINK_NAME;
 use crate::schema::field_set::parse_field_set_without_normalization;
 use crate::schema::position::is_graphql_reserved_name;
 use crate::schema::position::CompositeTypeDefinitionPosition;
@@ -69,7 +80,6 @@ use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 use crate::schema::type_and_directive_specification::UnionTypeSpecification;
 use crate::schema::FederationSchema;
-use crate::schema::ValidFederationSchema;
 
 /// Assumes the given schema has been validated.
 ///
@@ -223,69 +233,9 @@ fn collect_empty_subgraphs(
     ))
 }
 
-/// TODO: Use the JS/programmatic approach instead of hard-coding definitions.
-pub(crate) fn new_empty_fed_2_subgraph_schema() -> Result<FederationSchema, FederationError> {
-    let builder = SchemaBuilder::new().adopt_orphan_extensions();
-    let builder = builder.parse(
-        r#"
-    extend schema
-        @link(url: "https://specs.apollo.dev/link/v1.0")
-        @link(url: "https://specs.apollo.dev/federation/v2.5")
-
-    directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-
-    scalar link__Import
-
-    enum link__Purpose {
-        """
-        \`SECURITY\` features provide metadata necessary to securely resolve fields.
-        """
-        SECURITY
-
-        """
-        \`EXECUTION\` features provide metadata necessary for operation execution.
-        """
-        EXECUTION
-    }
-
-    directive @federation__key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
-
-    directive @federation__requires(fields: federation__FieldSet!) on FIELD_DEFINITION
-
-    directive @federation__provides(fields: federation__FieldSet!) on FIELD_DEFINITION
-
-    directive @federation__external(reason: String) on OBJECT | FIELD_DEFINITION
-
-    directive @federation__tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
-
-    directive @federation__extends on OBJECT | INTERFACE
-
-    directive @federation__shareable on OBJECT | FIELD_DEFINITION
-
-    directive @federation__inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
-
-    directive @federation__override(from: String!, label: String) on FIELD_DEFINITION
-
-    directive @federation__composeDirective(name: String) repeatable on SCHEMA
-
-    directive @federation__interfaceObject on OBJECT
-
-    directive @federation__authenticated on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
-
-    directive @federation__requiresScopes(scopes: [[federation__Scope!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
-
-    scalar federation__FieldSet
-
-    scalar federation__Scope
-    "#,
-        "subgraph.graphql",
-    );
-    FederationSchema::new(builder.build()?)
-}
-
 struct TypeInfo {
     name: NamedType,
-    // HashMap<subgraph_enum_value: String, is_interface_object: bool>
+    // IndexMap<subgraph_enum_value: String, is_interface_object: bool>
     subgraph_info: IndexMap<Name, bool>,
 }
 
@@ -305,6 +255,8 @@ fn extract_subgraphs_from_fed_2_supergraph(
     join_spec_definition: &'static JoinSpecDefinition,
     filtered_types: &Vec<TypeDefinitionPosition>,
 ) -> Result<(), FederationError> {
+    let original_directive_names = get_apollo_directive_names(supergraph_schema)?;
+
     let TypeInfos {
         object_types,
         interface_types,
@@ -318,6 +270,7 @@ fn extract_subgraphs_from_fed_2_supergraph(
         federation_spec_definitions,
         join_spec_definition,
         filtered_types,
+        &original_directive_names,
     )?;
 
     extract_object_type_content(
@@ -327,6 +280,7 @@ fn extract_subgraphs_from_fed_2_supergraph(
         federation_spec_definitions,
         join_spec_definition,
         &object_types,
+        &original_directive_names,
     )?;
     extract_interface_type_content(
         supergraph_schema,
@@ -335,6 +289,7 @@ fn extract_subgraphs_from_fed_2_supergraph(
         federation_spec_definitions,
         join_spec_definition,
         &interface_types,
+        &original_directive_names,
     )?;
     extract_union_type_content(
         supergraph_schema,
@@ -347,15 +302,25 @@ fn extract_subgraphs_from_fed_2_supergraph(
         supergraph_schema,
         subgraphs,
         graph_enum_value_name_to_subgraph_name,
+        federation_spec_definitions,
         join_spec_definition,
         &enum_types,
+        &original_directive_names,
     )?;
     extract_input_object_type_content(
         supergraph_schema,
         subgraphs,
         graph_enum_value_name_to_subgraph_name,
+        federation_spec_definitions,
         join_spec_definition,
         &input_object_types,
+        &original_directive_names,
+    )?;
+
+    extract_join_directives(
+        supergraph_schema,
+        subgraphs,
+        graph_enum_value_name_to_subgraph_name,
     )?;
 
     // We add all the "executable" directive definitions from the supergraph to each subgraphs, as
@@ -401,7 +366,10 @@ fn extract_subgraphs_from_fed_2_supergraph(
         })
         .collect::<Vec<_>>();
     for subgraph in subgraphs.subgraphs.values_mut() {
-        remove_inactive_requires_and_provides_from_subgraph(&mut subgraph.schema)?;
+        remove_inactive_requires_and_provides_from_subgraph(
+            supergraph_schema,
+            &mut subgraph.schema,
+        )?;
         remove_unused_types_from_subgraph(&mut subgraph.schema)?;
         for definition in all_executable_directive_definitions.iter() {
             let pos = DirectiveDefinitionPosition {
@@ -422,6 +390,7 @@ fn add_all_empty_subgraph_types(
     federation_spec_definitions: &IndexMap<Name, &'static FederationSpecDefinition>,
     join_spec_definition: &'static JoinSpecDefinition,
     filtered_types: &Vec<TypeDefinitionPosition>,
+    original_directive_names: &IndexMap<Name, Name>,
 ) -> Result<TypeInfos, FederationError> {
     let type_directive_definition =
         join_spec_definition.type_directive_definition(supergraph_schema)?;
@@ -451,6 +420,13 @@ fn add_all_empty_subgraph_types(
                         graph_enum_value_name_to_subgraph_name,
                         &type_directive_application.graph,
                     )?;
+                    let federation_spec_definition = federation_spec_definitions
+                        .get(&type_directive_application.graph)
+                        .ok_or_else(|| SingleFederationError::InvalidFederationSupergraph {
+                            message: "Subgraph unexpectedly does not use federation spec"
+                                .to_owned(),
+                        })?;
+
                     pos.pre_insert(&mut subgraph.schema)?;
                     pos.insert(
                         &mut subgraph.schema,
@@ -460,6 +436,17 @@ fn add_all_empty_subgraph_types(
                             directives: Default::default(),
                         }),
                     )?;
+
+                    if let Some(cost_spec_definition) =
+                        federation_spec_definition.get_cost_spec_definition(&subgraph.schema)
+                    {
+                        cost_spec_definition.propagate_demand_control_directives_for_scalar(
+                            &mut subgraph.schema,
+                            pos.get(supergraph_schema.schema())?,
+                            pos,
+                            original_directive_names,
+                        )?;
+                    }
                 }
                 None
             }
@@ -705,6 +692,7 @@ fn extract_object_type_content(
     federation_spec_definitions: &IndexMap<Name, &'static FederationSpecDefinition>,
     join_spec_definition: &JoinSpecDefinition,
     info: &[TypeInfo],
+    original_directive_names: &IndexMap<Name, Name>,
 ) -> Result<(), FederationError> {
     let field_directive_definition =
         join_spec_definition.field_directive_definition(supergraph_schema)?;
@@ -754,6 +742,29 @@ fn extract_object_type_content(
             )?;
         }
 
+        for graph_enum_value in subgraph_info.keys() {
+            let subgraph = get_subgraph(
+                subgraphs,
+                graph_enum_value_name_to_subgraph_name,
+                graph_enum_value,
+            )?;
+            let federation_spec_definition = federation_spec_definitions
+                .get(graph_enum_value)
+                .ok_or_else(|| SingleFederationError::InvalidFederationSupergraph {
+                    message: "Subgraph unexpectedly does not use federation spec".to_owned(),
+                })?;
+            if let Some(cost_spec_definition) =
+                federation_spec_definition.get_cost_spec_definition(&subgraph.schema)
+            {
+                cost_spec_definition.propagate_demand_control_directives_for_object(
+                    &mut subgraph.schema,
+                    type_,
+                    &pos,
+                    original_directive_names,
+                )?;
+            }
+        }
+
         for (field_name, field) in type_.fields.iter() {
             let field_pos = pos.field(field_name.clone());
             let mut field_directive_applications = Vec::new();
@@ -777,6 +788,8 @@ fn extract_object_type_content(
                             message: "Subgraph unexpectedly does not use federation spec"
                                 .to_owned(),
                         })?;
+                    let cost_spec_definition =
+                        federation_spec_definition.get_cost_spec_definition(&subgraph.schema);
                     add_subgraph_field(
                         field_pos.clone().into(),
                         field,
@@ -784,6 +797,8 @@ fn extract_object_type_content(
                         federation_spec_definition,
                         is_shareable,
                         None,
+                        cost_spec_definition,
+                        original_directive_names,
                     )?;
                 }
             } else {
@@ -814,6 +829,8 @@ fn extract_object_type_content(
                             message: "Subgraph unexpectedly does not use federation spec"
                                 .to_owned(),
                         })?;
+                    let cost_spec_definition =
+                        federation_spec_definition.get_cost_spec_definition(&subgraph.schema);
                     if !subgraph_info.contains_key(graph_enum_value) {
                         return Err(
                             SingleFederationError::InvalidFederationSupergraph {
@@ -833,6 +850,8 @@ fn extract_object_type_content(
                         federation_spec_definition,
                         is_shareable,
                         Some(field_directive_application),
+                        cost_spec_definition,
+                        original_directive_names,
                     )?;
                 }
             }
@@ -849,6 +868,7 @@ fn extract_interface_type_content(
     federation_spec_definitions: &IndexMap<Name, &'static FederationSpecDefinition>,
     join_spec_definition: &JoinSpecDefinition,
     info: &[TypeInfo],
+    original_directive_names: &IndexMap<Name, Name>,
 ) -> Result<(), FederationError> {
     let field_directive_definition =
         join_spec_definition.field_directive_definition(supergraph_schema)?;
@@ -971,6 +991,8 @@ fn extract_interface_type_content(
                             message: "Subgraph unexpectedly does not use federation spec"
                                 .to_owned(),
                         })?;
+                    let cost_spec_definition =
+                        federation_spec_definition.get_cost_spec_definition(&subgraph.schema);
                     add_subgraph_field(
                         pos.field(field_name.clone()),
                         field,
@@ -978,6 +1000,8 @@ fn extract_interface_type_content(
                         federation_spec_definition,
                         false,
                         None,
+                        cost_spec_definition,
+                        original_directive_names,
                     )?;
                 }
             } else {
@@ -1001,6 +1025,8 @@ fn extract_interface_type_content(
                             message: "Subgraph unexpectedly does not use federation spec"
                                 .to_owned(),
                         })?;
+                    let cost_spec_definition =
+                        federation_spec_definition.get_cost_spec_definition(&subgraph.schema);
                     if !subgraph_info.contains_key(graph_enum_value) {
                         return Err(
                             SingleFederationError::InvalidFederationSupergraph {
@@ -1020,6 +1046,8 @@ fn extract_interface_type_content(
                         federation_spec_definition,
                         false,
                         Some(field_directive_application),
+                        cost_spec_definition,
+                        original_directive_names,
                     )?;
                 }
             }
@@ -1125,8 +1153,10 @@ fn extract_enum_type_content(
     supergraph_schema: &FederationSchema,
     subgraphs: &mut FederationSubgraphs,
     graph_enum_value_name_to_subgraph_name: &IndexMap<Name, Arc<str>>,
+    federation_spec_definitions: &IndexMap<Name, &'static FederationSpecDefinition>,
     join_spec_definition: &JoinSpecDefinition,
     info: &[TypeInfo],
+    original_directive_names: &IndexMap<Name, Name>,
 ) -> Result<(), FederationError> {
     // This was added in join 0.3, so it can genuinely be None.
     let enum_value_directive_definition =
@@ -1141,6 +1171,29 @@ fn extract_enum_type_content(
             type_name: (*type_name).clone(),
         };
         let type_ = pos.get(supergraph_schema.schema())?;
+
+        for graph_enum_value in subgraph_info.keys() {
+            let subgraph = get_subgraph(
+                subgraphs,
+                graph_enum_value_name_to_subgraph_name,
+                graph_enum_value,
+            )?;
+            let federation_spec_definition = federation_spec_definitions
+                .get(graph_enum_value)
+                .ok_or_else(|| SingleFederationError::InvalidFederationSupergraph {
+                    message: "Subgraph unexpectedly does not use federation spec".to_owned(),
+                })?;
+            if let Some(cost_spec_definition) =
+                federation_spec_definition.get_cost_spec_definition(&subgraph.schema)
+            {
+                cost_spec_definition.propagate_demand_control_directives_for_enum(
+                    &mut subgraph.schema,
+                    type_,
+                    &pos,
+                    original_directive_names,
+                )?;
+            }
+        }
 
         for (value_name, value) in type_.values.iter() {
             let value_pos = pos.value(value_name.clone());
@@ -1209,8 +1262,10 @@ fn extract_input_object_type_content(
     supergraph_schema: &FederationSchema,
     subgraphs: &mut FederationSubgraphs,
     graph_enum_value_name_to_subgraph_name: &IndexMap<Name, Arc<str>>,
+    federation_spec_definitions: &IndexMap<Name, &'static FederationSpecDefinition>,
     join_spec_definition: &JoinSpecDefinition,
     info: &[TypeInfo],
+    original_directive_names: &IndexMap<Name, Name>,
 ) -> Result<(), FederationError> {
     let field_directive_definition =
         join_spec_definition.field_directive_definition(supergraph_schema)?;
@@ -1242,7 +1297,22 @@ fn extract_input_object_type_content(
                         graph_enum_value_name_to_subgraph_name,
                         graph_enum_value,
                     )?;
-                    add_subgraph_input_field(input_field_pos.clone(), input_field, subgraph, None)?;
+                    let federation_spec_definition = federation_spec_definitions
+                        .get(graph_enum_value)
+                        .ok_or_else(|| SingleFederationError::InvalidFederationSupergraph {
+                            message: "Subgraph unexpectedly does not use federation spec"
+                                .to_owned(),
+                        })?;
+                    let cost_spec_definition =
+                        federation_spec_definition.get_cost_spec_definition(&subgraph.schema);
+                    add_subgraph_input_field(
+                        input_field_pos.clone(),
+                        input_field,
+                        subgraph,
+                        None,
+                        cost_spec_definition,
+                        original_directive_names,
+                    )?;
                 }
             } else {
                 for field_directive_application in &field_directive_applications {
@@ -1257,6 +1327,14 @@ fn extract_input_object_type_content(
                         graph_enum_value_name_to_subgraph_name,
                         graph_enum_value,
                     )?;
+                    let federation_spec_definition = federation_spec_definitions
+                        .get(graph_enum_value)
+                        .ok_or_else(|| SingleFederationError::InvalidFederationSupergraph {
+                            message: "Subgraph unexpectedly does not use federation spec"
+                                .to_owned(),
+                        })?;
+                    let cost_spec_definition =
+                        federation_spec_definition.get_cost_spec_definition(&subgraph.schema);
                     if !subgraph_info.contains_key(graph_enum_value) {
                         return Err(
                             SingleFederationError::InvalidFederationSupergraph {
@@ -1274,6 +1352,8 @@ fn extract_input_object_type_content(
                         input_field,
                         subgraph,
                         Some(field_directive_application),
+                        cost_spec_definition,
+                        original_directive_names,
                     )?;
                 }
             }
@@ -1283,6 +1363,7 @@ fn extract_input_object_type_content(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn add_subgraph_field(
     object_or_interface_field_definition_position: ObjectOrInterfaceFieldDefinitionPosition,
     field: &FieldDefinition,
@@ -1290,6 +1371,8 @@ fn add_subgraph_field(
     federation_spec_definition: &'static FederationSpecDefinition,
     is_shareable: bool,
     field_directive_application: Option<&FieldDirectiveArguments>,
+    cost_spec_definition: Option<&'static CostSpecDefinition>,
+    original_directive_names: &IndexMap<Name, Name>,
 ) -> Result<(), FederationError> {
     let field_directive_application =
         field_directive_application.unwrap_or_else(|| &FieldDirectiveArguments {
@@ -1317,15 +1400,25 @@ fn add_subgraph_field(
     };
 
     for argument in &field.arguments {
+        let mut destination_argument = InputValueDefinition {
+            description: None,
+            name: argument.name.clone(),
+            ty: argument.ty.clone(),
+            default_value: argument.default_value.clone(),
+            directives: Default::default(),
+        };
+        if let Some(cost_spec_definition) = cost_spec_definition {
+            cost_spec_definition.propagate_demand_control_directives(
+                &subgraph.schema,
+                &argument.directives,
+                &mut destination_argument.directives,
+                original_directive_names,
+            )?;
+        }
+
         subgraph_field
             .arguments
-            .push(Node::new(InputValueDefinition {
-                description: None,
-                name: argument.name.clone(),
-                ty: argument.ty.clone(),
-                default_value: argument.default_value.clone(),
-                directives: Default::default(),
-            }))
+            .push(Node::new(destination_argument))
     }
     if let Some(requires) = &field_directive_application.requires {
         subgraph_field.directives.push(Node::new(
@@ -1367,6 +1460,15 @@ fn add_subgraph_field(
         ));
     }
 
+    if let Some(cost_spec_definition) = cost_spec_definition {
+        cost_spec_definition.propagate_demand_control_directives(
+            &subgraph.schema,
+            &field.directives,
+            &mut subgraph_field.directives,
+            original_directive_names,
+        )?;
+    }
+
     match object_or_interface_field_definition_position {
         ObjectOrInterfaceFieldDefinitionPosition::Object(pos) => {
             pos.insert(&mut subgraph.schema, Component::from(subgraph_field))?;
@@ -1384,6 +1486,8 @@ fn add_subgraph_input_field(
     input_field: &InputValueDefinition,
     subgraph: &mut FederationSubgraph,
     field_directive_application: Option<&FieldDirectiveArguments>,
+    cost_spec_definition: Option<&'static CostSpecDefinition>,
+    original_directive_names: &IndexMap<Name, Name>,
 ) -> Result<(), FederationError> {
     let field_directive_application =
         field_directive_application.unwrap_or_else(|| &FieldDirectiveArguments {
@@ -1400,13 +1504,22 @@ fn add_subgraph_input_field(
         Some(t) => Node::new(decode_type(t)?),
         None => input_field.ty.clone(),
     };
-    let subgraph_input_field = InputValueDefinition {
+    let mut subgraph_input_field = InputValueDefinition {
         description: None,
         name: input_object_field_definition_position.field_name.clone(),
         ty: subgraph_input_field_type,
         default_value: input_field.default_value.clone(),
         directives: Default::default(),
     };
+
+    if let Some(cost_spec_definition) = cost_spec_definition {
+        cost_spec_definition.propagate_demand_control_directives(
+            &subgraph.schema,
+            &input_field.directives,
+            &mut subgraph_input_field.directives,
+            original_directive_names,
+        )?;
+    }
 
     input_object_field_definition_position
         .insert(&mut subgraph.schema, Component::from(subgraph_input_field))?;
@@ -1441,105 +1554,6 @@ fn get_subgraph<'subgraph>(
         }
         .into()
     })
-}
-
-struct FederationSubgraph {
-    name: String,
-    url: String,
-    schema: FederationSchema,
-}
-
-struct FederationSubgraphs {
-    subgraphs: BTreeMap<String, FederationSubgraph>,
-}
-
-impl FederationSubgraphs {
-    fn new() -> Self {
-        FederationSubgraphs {
-            subgraphs: BTreeMap::new(),
-        }
-    }
-
-    fn add(&mut self, subgraph: FederationSubgraph) -> Result<(), FederationError> {
-        if self.subgraphs.contains_key(&subgraph.name) {
-            return Err(SingleFederationError::InvalidFederationSupergraph {
-                message: format!("A subgraph named \"{}\" already exists", subgraph.name),
-            }
-            .into());
-        }
-        self.subgraphs.insert(subgraph.name.clone(), subgraph);
-        Ok(())
-    }
-
-    fn get(&self, name: &str) -> Option<&FederationSubgraph> {
-        self.subgraphs.get(name)
-    }
-
-    fn get_mut(&mut self, name: &str) -> Option<&mut FederationSubgraph> {
-        self.subgraphs.get_mut(name)
-    }
-}
-
-impl IntoIterator for FederationSubgraphs {
-    type Item = <BTreeMap<String, FederationSubgraph> as IntoIterator>::Item;
-    type IntoIter = <BTreeMap<String, FederationSubgraph> as IntoIterator>::IntoIter;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.subgraphs.into_iter()
-    }
-}
-
-// TODO(@goto-bus-stop): consider an appropriate name for this in the public API
-// TODO(@goto-bus-stop): should this exist separately from the `crate::subgraph::Subgraph` type?
-#[derive(Debug)]
-pub struct ValidFederationSubgraph {
-    pub name: String,
-    pub url: String,
-    pub schema: ValidFederationSchema,
-}
-
-pub struct ValidFederationSubgraphs {
-    subgraphs: BTreeMap<Arc<str>, ValidFederationSubgraph>,
-}
-
-impl fmt::Debug for ValidFederationSubgraphs {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("ValidFederationSubgraphs ")?;
-        f.debug_map().entries(self.subgraphs.iter()).finish()
-    }
-}
-
-impl ValidFederationSubgraphs {
-    pub(crate) fn new() -> Self {
-        ValidFederationSubgraphs {
-            subgraphs: BTreeMap::new(),
-        }
-    }
-
-    pub(crate) fn add(&mut self, subgraph: ValidFederationSubgraph) -> Result<(), FederationError> {
-        if self.subgraphs.contains_key(subgraph.name.as_str()) {
-            return Err(SingleFederationError::InvalidFederationSupergraph {
-                message: format!("A subgraph named \"{}\" already exists", subgraph.name),
-            }
-            .into());
-        }
-        self.subgraphs
-            .insert(subgraph.name.as_str().into(), subgraph);
-        Ok(())
-    }
-
-    pub fn get(&self, name: &str) -> Option<&ValidFederationSubgraph> {
-        self.subgraphs.get(name)
-    }
-}
-
-impl IntoIterator for ValidFederationSubgraphs {
-    type Item = <BTreeMap<Arc<str>, ValidFederationSubgraph> as IntoIterator>::Item;
-    type IntoIter = <BTreeMap<Arc<str>, ValidFederationSubgraph> as IntoIterator>::IntoIter;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.subgraphs.into_iter()
-    }
 }
 
 lazy_static! {
@@ -1787,6 +1801,7 @@ fn add_federation_operations(
 /// unnecessarily. Besides, if a usage adds something useless, there is a chance it hasn't fully
 /// understood something, and warning about that fact through an error is more helpful.
 fn remove_inactive_requires_and_provides_from_subgraph(
+    supergraph_schema: &FederationSchema,
     schema: &mut FederationSchema,
 ) -> Result<(), FederationError> {
     let federation_spec_definition = get_federation_spec_definition_from_subgraph(schema)?;
@@ -1838,6 +1853,7 @@ fn remove_inactive_requires_and_provides_from_subgraph(
 
     for pos in object_or_interface_field_definition_positions {
         remove_inactive_applications(
+            supergraph_schema,
             schema,
             federation_spec_definition,
             FieldSetDirectiveKind::Requires,
@@ -1845,6 +1861,7 @@ fn remove_inactive_requires_and_provides_from_subgraph(
             pos.clone(),
         )?;
         remove_inactive_applications(
+            supergraph_schema,
             schema,
             federation_spec_definition,
             FieldSetDirectiveKind::Provides,
@@ -1862,6 +1879,7 @@ enum FieldSetDirectiveKind {
 }
 
 fn remove_inactive_applications(
+    supergraph_schema: &FederationSchema,
     schema: &mut FederationSchema,
     federation_spec_definition: &'static FederationSpecDefinition,
     directive_kind: FieldSetDirectiveKind,
@@ -1871,7 +1889,7 @@ fn remove_inactive_applications(
     let mut replacement_directives = Vec::new();
     let field = object_or_interface_field_definition_position.get(schema.schema())?;
     for directive in field.directives.get_all(name_in_schema) {
-        let (fields, parent_type_pos) = match directive_kind {
+        let (fields, parent_type_pos, target_schema) = match directive_kind {
             FieldSetDirectiveKind::Provides => {
                 let fields = federation_spec_definition
                     .provides_directive_arguments(directive)?
@@ -1879,7 +1897,7 @@ fn remove_inactive_applications(
                 let parent_type_pos: CompositeTypeDefinitionPosition = schema
                     .get_type(field.ty.inner_named_type().clone())?
                     .try_into()?;
-                (fields, parent_type_pos)
+                (fields, parent_type_pos, schema.schema())
             }
             FieldSetDirectiveKind::Requires => {
                 let fields = federation_spec_definition
@@ -1890,7 +1908,8 @@ fn remove_inactive_applications(
                         .parent()
                         .clone()
                         .into();
-                (fields, parent_type_pos)
+                // @requires needs to be validated against the supergraph schema
+                (fields, parent_type_pos, supergraph_schema.schema())
             }
         };
         // TODO: The assume_valid_ref() here is non-ideal, in the sense that the error messages we
@@ -1900,7 +1919,7 @@ fn remove_inactive_applications(
         // At best, we could try to shift this computation to after the subgraph schema validation
         // step, but its unclear at this time whether performing this shift affects correctness (and
         // it takes time to determine that). So for now, we keep this here.
-        let valid_schema = Valid::assume_valid_ref(schema.schema());
+        let valid_schema = Valid::assume_valid_ref(target_schema);
         // TODO: In the JS codebase, this function ends up getting additionally used in the schema
         // upgrader, where parsing the field set may error. In such cases, we end up skipping those
         // directives instead of returning error here, as it pollutes the list of error messages
@@ -2094,10 +2113,181 @@ fn maybe_dump_subgraph_schema(subgraph: FederationSubgraph, message: &mut String
     };
 }
 
+////////////////////////////////////////////////////////////////////////////////
+/// @join__directive extraction
+
+static JOIN_DIRECTIVE: &str = "join__directive";
+
+/// Converts `@join__directive(graphs: [A], name: "foo")` to `@foo` in the A subgraph.
+/// If the directive is a link directive on the schema definition, we also need
+/// to update the metadata and add the imported definitions.
+fn extract_join_directives(
+    supergraph_schema: &FederationSchema,
+    subgraphs: &mut FederationSubgraphs,
+    graph_enum_value_name_to_subgraph_name: &IndexMap<Name, Arc<str>>,
+) -> Result<(), FederationError> {
+    let join_directives = match supergraph_schema
+        .referencers()
+        .get_directive(JOIN_DIRECTIVE)
+    {
+        Ok(directives) => directives,
+        Err(_) => {
+            // No join directives found, nothing to do.
+            return Ok(());
+        }
+    };
+
+    if let Some(schema_def_pos) = &join_directives.schema {
+        let schema_def = schema_def_pos.get(supergraph_schema.schema());
+        let directives = schema_def
+            .directives
+            .iter()
+            .filter_map(|d| {
+                if d.name == JOIN_DIRECTIVE {
+                    Some(join_directive_to_real_directive(d))
+                } else {
+                    None
+                }
+            })
+            .collect_vec();
+
+        // TODO: Do we need to handle the link directive being renamed?
+        let (links, others) = directives
+            .into_iter()
+            .partition::<Vec<_>, _>(|(d, _)| d.name == DEFAULT_LINK_NAME);
+
+        // After adding links, we'll check the link against a safelist of
+        // specs and check_or_add the spec definitions if necessary.
+        for (link_directive, subgraph_enum_values) in links {
+            for subgraph_enum_value in subgraph_enum_values {
+                let subgraph = get_subgraph(
+                    subgraphs,
+                    graph_enum_value_name_to_subgraph_name,
+                    &subgraph_enum_value,
+                )?;
+
+                schema_def_pos.insert_directive(
+                    &mut subgraph.schema,
+                    Component::new(link_directive.clone()),
+                )?;
+
+                // TODO: add imported definitions from relevant specs
+            }
+        }
+
+        // Other directives are added normally.
+        for (directive, subgraph_enum_values) in others {
+            for subgraph_enum_value in subgraph_enum_values {
+                let subgraph = get_subgraph(
+                    subgraphs,
+                    graph_enum_value_name_to_subgraph_name,
+                    &subgraph_enum_value,
+                )?;
+
+                schema_def_pos
+                    .insert_directive(&mut subgraph.schema, Component::new(directive.clone()))?;
+            }
+        }
+    }
+
+    for object_field_pos in &join_directives.object_fields {
+        let object_field = object_field_pos.get(supergraph_schema.schema())?;
+        let directives = object_field
+            .directives
+            .iter()
+            .filter_map(|d| {
+                if d.name == JOIN_DIRECTIVE {
+                    Some(join_directive_to_real_directive(d))
+                } else {
+                    None
+                }
+            })
+            .collect_vec();
+
+        for (directive, subgraph_enum_values) in directives {
+            for subgraph_enum_value in subgraph_enum_values {
+                let subgraph = get_subgraph(
+                    subgraphs,
+                    graph_enum_value_name_to_subgraph_name,
+                    &subgraph_enum_value,
+                )?;
+
+                object_field_pos
+                    .insert_directive(&mut subgraph.schema, Node::new(directive.clone()))?;
+            }
+        }
+    }
+
+    // TODO
+    // - join_directives.directive_arguments
+    // - join_directives.enum_types
+    // - join_directives.enum_values
+    // - join_directives.input_object_fields
+    // - join_directives.input_object_types
+    // - join_directives.interface_field_arguments
+    // - join_directives.interface_fields
+    // - join_directives.interface_types
+    // - join_directives.object_field_arguments
+    // - join_directives.object_types
+    // - join_directives.scalar_types
+    // - join_directives.union_types
+
+    Ok(())
+}
+
+fn join_directive_to_real_directive(directive: &Node<Directive>) -> (Directive, Vec<Name>) {
+    let subgraph_enum_values = directive
+        .argument_by_name("graphs")
+        .and_then(|arg| arg.as_list())
+        .map(|list| {
+            list.iter()
+                .map(|node| {
+                    Name::new(
+                        node.as_enum()
+                            .expect("join__directive(graphs:) value is an enum")
+                            .as_str(),
+                    )
+                    .expect("join__directive(graphs:) value is a valid name")
+                })
+                .collect()
+        })
+        .expect("join__directive(graphs:) missing");
+
+    let name = directive
+        .argument_by_name("name")
+        .expect("join__directive(name:) is present")
+        .as_str()
+        .expect("join__directive(name:) is a string");
+
+    let arguments = directive
+        .argument_by_name("args")
+        .and_then(|a| a.as_object())
+        .map(|args| {
+            args.iter()
+                .map(|(k, v)| {
+                    Argument {
+                        name: k.clone(),
+                        value: v.clone(),
+                    }
+                    .into()
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let directive = Directive {
+        name: Name::new(name).expect("join__directive(name:) is a valid name"),
+        arguments,
+    };
+
+    (directive, subgraph_enum_values)
+}
+
 #[cfg(test)]
 mod tests {
     use apollo_compiler::name;
     use apollo_compiler::Schema;
+    use insta::assert_snapshot;
 
     use crate::schema::FederationSchema;
     use crate::ValidFederationSubgraphs;
@@ -2708,5 +2898,80 @@ mod tests {
         let subgraph = subgraphs.get("b").unwrap();
         let user_type = subgraph.schema.schema().get_object("User");
         assert!(user_type.is_none());
+    }
+
+    #[test]
+    fn test_join_directives() {
+        let supergraph = r###"schema
+                @link(url: "https://specs.apollo.dev/link/v1.0")
+                @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
+                @join__directive(graphs: [SUBGRAPH], name: "link", args: {url: "https://specs.apollo.dev/hello/v0.1", import: ["@hello"]})
+            {
+                query: Query
+            }
+
+            directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+            directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+            directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+            directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+            directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+            directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+            input join__ContextArgument {
+                name: String!
+                type: String!
+                context: String!
+                selection: join__FieldValue!
+            }
+
+            scalar join__DirectiveArguments
+
+            scalar join__FieldSet
+
+            scalar join__FieldValue
+
+            enum join__Graph {
+                SUBGRAPH @join__graph(name: "subgraph", url: "none")
+            }
+
+            scalar link__Import
+
+            enum link__Purpose {
+                """
+                `SECURITY` features provide metadata necessary to securely resolve fields.
+                """
+                SECURITY
+
+                """
+                `EXECUTION` features provide metadata necessary for operation execution.
+                """
+                EXECUTION
+            }
+
+            type Query
+                @join__type(graph: SUBGRAPH)
+            {
+                f: String
+            }
+        "###;
+
+        let schema = Schema::parse(supergraph, "supergraph.graphql").unwrap();
+        let ValidFederationSubgraphs { subgraphs } = super::extract_subgraphs_from_supergraph(
+            &FederationSchema::new(schema).unwrap(),
+            Some(true),
+        )
+        .unwrap();
+
+        let subgraph = subgraphs.get("subgraph").unwrap();
+        assert_snapshot!(subgraph.schema.schema().schema_definition.directives, @r###" @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.9") @link(url: "https://specs.apollo.dev/hello/v0.1", import: ["@hello"])"###);
     }
 }

@@ -54,11 +54,14 @@ plugins:
 
 preview_entity_cache:
   enabled: true
-  redis:
-    urls:
-      - https://example.com
+  invalidation:
+    listen: 127.0.0.1:4000
+    path: /invalidation
   subgraph:
     all:
+      redis:
+        urls:
+          - https://example.com
       enabled: false
     subgraphs:
       product:
@@ -89,7 +92,7 @@ preview_file_uploads:
       enabled: true
       mode: stream
 
-preview_demand_control:
+demand_control:
   enabled: true
   mode: measure
   strategy:
