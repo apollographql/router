@@ -83,6 +83,7 @@ use crate::services::RouterResponse;
 use crate::services::SupergraphResponse;
 use crate::services::MULTIPART_DEFER_ACCEPT;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
+use crate::spec::Schema;
 use crate::test_harness::http_client;
 use crate::test_harness::http_client::MaybeMultipart;
 use crate::uplink::license_enforcement::LicenseState;
@@ -2265,14 +2266,11 @@ async fn test_supergraph_timeout() {
     let conf: Arc<Configuration> = Arc::new(serde_json::from_value(config).unwrap());
 
     let schema = include_str!("..//testdata/minimal_supergraph.graphql");
-    let planner = BridgeQueryPlannerPool::new(
-        schema.to_string(),
-        conf.clone(),
-        NonZeroUsize::new(1).unwrap(),
-    )
-    .await
-    .unwrap();
-    let schema = planner.schema();
+    let schema = Arc::new(Schema::parse(schema, &conf).unwrap());
+    let planner =
+        BridgeQueryPlannerPool::new(schema.clone(), conf.clone(), NonZeroUsize::new(1).unwrap())
+            .await
+            .unwrap();
 
     // we do the entire supergraph rebuilding instead of using `from_supergraph_mock_callback_and_configuration`
     // because we need the plugins to apply on the supergraph

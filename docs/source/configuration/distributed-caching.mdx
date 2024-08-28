@@ -137,7 +137,7 @@ supergraph:
         urls: ["redis://..."] #highlight-line
         username: admin/123 # Optional, can be part of the urls directly, mainly useful if you have special character like '/' in your password that doesn't work in url. This field takes precedence over the username in the URL
         password: admin # Optional, can be part of the urls directly, mainly useful if you have special character like '/' in your password that doesn't work in url. This field takes precedence over the password in the URL
-        timeout: 5ms # Optional, by default: 2ms
+        timeout: 2s # Optional, by default: 500ms
         ttl: 24h # Optional
         namespace: "prefix"  # Optional
         #tls:
@@ -147,7 +147,7 @@ supergraph:
 
 #### Timeout
 
-Connecting and sending commands to Redis are subject to a timeout, set by default to 2ms, that can be overriden.
+Connecting and sending commands to Redis are subject to a timeout, set by default to 500ms, that can be overriden.
 
 
 #### TTL

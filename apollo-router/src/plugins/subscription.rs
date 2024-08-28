@@ -229,7 +229,7 @@ fn default_path() -> String {
     String::from("/callback")
 }
 
-fn default_listen_addr() -> ListenAddr {
+pub(crate) fn default_listen_addr() -> ListenAddr {
     ListenAddr::SocketAddr("127.0.0.1:4000".parse().expect("valid ListenAddr"))
 }
 

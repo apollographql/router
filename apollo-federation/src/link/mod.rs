@@ -1,14 +1,16 @@
-use std::collections::HashMap;
 use std::fmt;
 use std::str;
 use std::sync::Arc;
 
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::name;
+use apollo_compiler::schema::Component;
 use apollo_compiler::InvalidNameError;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::Schema;
 use thiserror::Error;
 
 use crate::error::FederationError;
@@ -20,6 +22,7 @@ use crate::link::spec::Identity;
 use crate::link::spec::Url;
 
 pub(crate) mod argument;
+pub(crate) mod cost_spec_definition;
 pub mod database;
 pub(crate) mod federation_spec_definition;
 pub(crate) mod graphql_definition;
@@ -329,6 +332,24 @@ impl Link {
             purpose,
         })
     }
+
+    pub fn for_identity<'schema>(
+        schema: &'schema Schema,
+        identity: &Identity,
+    ) -> Option<(Self, &'schema Component<Directive>)> {
+        schema
+            .schema_definition
+            .directives
+            .iter()
+            .find_map(|directive| {
+                let link = Link::from_directive_application(directive).ok()?;
+                if link.url.identity == *identity {
+                    Some((link, directive))
+                } else {
+                    None
+                }
+            })
+    }
 }
 
 impl fmt::Display for Link {
@@ -366,10 +387,10 @@ pub struct LinkedElement {
 #[derive(Default, Eq, PartialEq, Debug)]
 pub struct LinksMetadata {
     pub(crate) links: Vec<Arc<Link>>,
-    pub(crate) by_identity: HashMap<Identity, Arc<Link>>,
-    pub(crate) by_name_in_schema: HashMap<Name, Arc<Link>>,
-    pub(crate) types_by_imported_name: HashMap<Name, (Arc<Link>, Arc<Import>)>,
-    pub(crate) directives_by_imported_name: HashMap<Name, (Arc<Link>, Arc<Import>)>,
+    pub(crate) by_identity: IndexMap<Identity, Arc<Link>>,
+    pub(crate) by_name_in_schema: IndexMap<Name, Arc<Link>>,
+    pub(crate) types_by_imported_name: IndexMap<Name, (Arc<Link>, Arc<Import>)>,
+    pub(crate) directives_by_imported_name: IndexMap<Name, (Arc<Link>, Arc<Import>)>,
 }
 
 impl LinksMetadata {

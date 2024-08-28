@@ -219,16 +219,32 @@ pub(crate) enum ApolloMetricsGenerationMode {
 /// Query planner modes.
 #[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
 #[derivative(Debug)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum QueryPlannerMode {
     /// Use the new Rust-based implementation.
+    ///
+    /// Raises an error at Router startup if the the new planner does not support the schema
+    /// (such as using legacy Apollo Federation 1)
     New,
     /// Use the old JavaScript-based implementation.
-    #[default]
     Legacy,
-    /// Use Rust-based and Javascript-based implementations side by side, logging warnings if the
-    /// implementations disagree.
+    /// Use primarily the Javascript-based implementation,
+    /// but also schedule background jobs to run the Rust implementation and compare results,
+    /// logging warnings if the implementations disagree.
+    ///
+    /// Raises an error at Router startup if the the new planner does not support the schema
+    /// (such as using legacy Apollo Federation 1)
     Both,
+    /// Use primarily the Javascript-based implementation,
+    /// but also schedule on a best-effort basis background jobs
+    /// to run the Rust implementation and compare results,
+    /// logging warnings if the implementations disagree.
+    ///
+    /// Falls back to `legacy` with a warning
+    /// if the the new planner does not support the schema
+    /// (such as using legacy Apollo Federation 1)
+    #[default]
+    BothBestEffort,
 }
 
 impl<'de> serde::Deserialize<'de> for Configuration {

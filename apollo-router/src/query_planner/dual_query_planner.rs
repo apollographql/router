@@ -25,6 +25,8 @@ use crate::query_planner::bridge_query_planner::metric_query_planning_plan_durat
 use crate::query_planner::bridge_query_planner::RUST_QP_MODE;
 use crate::query_planner::convert::convert_root_query_plan_node;
 use crate::query_planner::render_diff;
+use crate::query_planner::rewrites::DataRewrite;
+use crate::query_planner::selection::Selection;
 use crate::query_planner::DeferredNode;
 use crate::query_planner::PlanNode;
 use crate::query_planner::Primary;
@@ -138,19 +140,20 @@ impl BothModeComparisonJob {
             (Ok(js_plan), Ok(rust_plan)) => {
                 let js_root_node = &js_plan.query_plan.node;
                 let rust_root_node = convert_root_query_plan_node(rust_plan);
-                is_matched = opt_plan_node_matches(js_root_node, &rust_root_node);
-                if is_matched {
-                    tracing::debug!("JS and Rust query plans match{operation_desc}! 🎉");
-                } else {
-                    tracing::debug!("JS v.s. Rust query plan mismatch{operation_desc}");
-                    if let Some(formatted) = &js_plan.formatted_query_plan {
+                let match_result = opt_plan_node_matches(js_root_node, &rust_root_node);
+                is_matched = match_result.is_ok();
+                match match_result {
+                    Ok(_) => tracing::debug!("JS and Rust query plans match{operation_desc}! 🎉"),
+                    Err(err) => {
+                        tracing::debug!("JS v.s. Rust query plan mismatch{operation_desc}");
+                        tracing::debug!("{}", err.full_description());
                         tracing::debug!(
                             "Diff of formatted plans:\n{}",
-                            render_diff(&diff::lines(formatted, &rust_plan.to_string()))
+                            diff_plan(js_plan, rust_plan)
                         );
+                        tracing::trace!("JS query plan Debug: {js_root_node:#?}");
+                        tracing::trace!("Rust query plan Debug: {rust_root_node:#?}");
                     }
-                    tracing::trace!("JS query plan Debug: {js_root_node:#?}");
-                    tracing::trace!("Rust query plan Debug: {rust_root_node:#?}");
                 }
             }
         }
@@ -168,7 +171,62 @@ impl BothModeComparisonJob {
 
 // Specific comparison functions
 
-fn fetch_node_matches(this: &FetchNode, other: &FetchNode) -> bool {
+pub struct MatchFailure {
+    description: String,
+    backtrace: std::backtrace::Backtrace,
+}
+
+impl MatchFailure {
+    pub fn description(&self) -> String {
+        self.description.clone()
+    }
+
+    pub fn full_description(&self) -> String {
+        format!("{}\n\nBacktrace:\n{}", self.description, self.backtrace)
+    }
+
+    fn new(description: String) -> MatchFailure {
+        MatchFailure {
+            description,
+            backtrace: std::backtrace::Backtrace::force_capture(),
+        }
+    }
+
+    fn add_description(self: MatchFailure, description: &str) -> MatchFailure {
+        MatchFailure {
+            description: format!("{}\n{}", self.description, description),
+            backtrace: self.backtrace,
+        }
+    }
+}
+
+macro_rules! check_match {
+    ($pred:expr) => {
+        if !$pred {
+            return Err(MatchFailure::new(format!(
+                "mismatch at {}",
+                stringify!($pred)
+            )));
+        }
+    };
+}
+
+macro_rules! check_match_eq {
+    ($a:expr, $b:expr) => {
+        if $a != $b {
+            let message = format!(
+                "mismatch between {} and {}:\nleft: {:?}\nright: {:?}",
+                stringify!($a),
+                stringify!($b),
+                $a,
+                $b
+            );
+            return Err(MatchFailure::new(message));
+        }
+    };
+}
+
+fn fetch_node_matches(this: &FetchNode, other: &FetchNode) -> Result<(), MatchFailure> {
     let FetchNode {
         service_name,
         requires,
@@ -183,16 +241,18 @@ fn fetch_node_matches(this: &FetchNode, other: &FetchNode) -> bool {
         schema_aware_hash: _, // ignored
         authorization,
     } = this;
-    *service_name == other.service_name
-        && *requires == other.requires
-        && vec_matches_sorted(variable_usages, &other.variable_usages)
-        && *operation_kind == other.operation_kind
-        && *id == other.id
-        && *input_rewrites == other.input_rewrites
-        && *output_rewrites == other.output_rewrites
-        && *context_rewrites == other.context_rewrites
-        && *authorization == other.authorization
-        && operation_matches(operation, &other.operation)
+
+    check_match_eq!(*service_name, other.service_name);
+    check_match_eq!(*operation_kind, other.operation_kind);
+    check_match_eq!(*id, other.id);
+    check_match_eq!(*authorization, other.authorization);
+    check_match!(same_selection_set_sorted(requires, &other.requires));
+    check_match!(vec_matches_sorted(variable_usages, &other.variable_usages));
+    check_match!(same_rewrites(input_rewrites, &other.input_rewrites));
+    check_match!(same_rewrites(output_rewrites, &other.output_rewrites));
+    check_match!(same_rewrites(context_rewrites, &other.context_rewrites));
+    operation_matches(operation, &other.operation)?;
+    Ok(())
 }
 
 fn subscription_primary_matches(this: &SubscriptionNode, other: &SubscriptionNode) -> bool {
@@ -211,22 +271,27 @@ fn subscription_primary_matches(this: &SubscriptionNode, other: &SubscriptionNod
         && *operation_kind == other.operation_kind
         && *input_rewrites == other.input_rewrites
         && *output_rewrites == other.output_rewrites
-        && operation_matches(operation, &other.operation)
+        && operation_matches(operation, &other.operation).is_ok()
 }
 
-fn operation_matches(this: &SubgraphOperation, other: &SubgraphOperation) -> bool {
+fn operation_matches(
+    this: &SubgraphOperation,
+    other: &SubgraphOperation,
+) -> Result<(), MatchFailure> {
     let this_ast = match ast::Document::parse(this.as_serialized(), "this_operation.graphql") {
         Ok(document) => document,
         Err(_) => {
-            // TODO: log error
-            return false;
+            return Err(MatchFailure::new(
+                "Failed to parse this operation".to_string(),
+            ));
         }
     };
     let other_ast = match ast::Document::parse(other.as_serialized(), "other_operation.graphql") {
         Ok(document) => document,
         Err(_) => {
-            // TODO: log error
-            return false;
+            return Err(MatchFailure::new(
+                "Failed to parse other operation".to_string(),
+            ));
         }
     };
     same_ast_document(&this_ast, &other_ast)
@@ -235,20 +300,49 @@ fn operation_matches(this: &SubgraphOperation, other: &SubgraphOperation) -> boo
 // The rest is calling the comparison functions above instead of `PartialEq`,
 // but otherwise behave just like `PartialEq`:
 
-// Note: Reexported under `apollo_compiler::_private`
-pub fn plan_matches(js_plan: &QueryPlanResult, rust_plan: &QueryPlan) -> bool {
+// Note: Reexported under `apollo_router::_private`
+pub fn plan_matches(js_plan: &QueryPlanResult, rust_plan: &QueryPlan) -> Result<(), MatchFailure> {
     let js_root_node = &js_plan.query_plan.node;
     let rust_root_node = convert_root_query_plan_node(rust_plan);
     opt_plan_node_matches(js_root_node, &rust_root_node)
 }
 
+pub fn diff_plan(js_plan: &QueryPlanResult, rust_plan: &QueryPlan) -> String {
+    let js_root_node = &js_plan.query_plan.node;
+    let rust_root_node = convert_root_query_plan_node(rust_plan);
+
+    match (js_root_node, rust_root_node) {
+        (None, None) => String::from(""),
+        (None, Some(rust)) => {
+            let rust = &format!("{rust:#?}");
+            let differences = diff::lines("", rust);
+            render_diff(&differences)
+        }
+        (Some(js), None) => {
+            let js = &format!("{js:#?}");
+            let differences = diff::lines(js, "");
+            render_diff(&differences)
+        }
+        (Some(js), Some(rust)) => {
+            let rust = &format!("{rust:#?}");
+            let js = &format!("{js:#?}");
+            let differences = diff::lines(js, rust);
+            render_diff(&differences)
+        }
+    }
+}
+
 fn opt_plan_node_matches(
     this: &Option<impl Borrow<PlanNode>>,
     other: &Option<impl Borrow<PlanNode>>,
-) -> bool {
+) -> Result<(), MatchFailure> {
     match (this, other) {
-        (None, None) => true,
-        (None, Some(_)) | (Some(_), None) => false,
+        (None, None) => Ok(()),
+        (None, Some(_)) | (Some(_), None) => Err(MatchFailure::new(format!(
+            "mismatch at opt_plan_node_matches\nleft: {:?}\nright: {:?}",
+            this.is_some(),
+            other.is_some()
+        ))),
         (Some(this), Some(other)) => plan_node_matches(this.borrow(), other.borrow()),
     }
 }
@@ -256,6 +350,22 @@ fn opt_plan_node_matches(
 fn vec_matches<T>(this: &[T], other: &[T], item_matches: impl Fn(&T, &T) -> bool) -> bool {
     this.len() == other.len()
         && std::iter::zip(this, other).all(|(this, other)| item_matches(this, other))
+}
+
+fn vec_matches_result<T>(
+    this: &[T],
+    other: &[T],
+    item_matches: impl Fn(&T, &T) -> Result<(), MatchFailure>,
+) -> Result<(), MatchFailure> {
+    check_match_eq!(this.len(), other.len());
+    std::iter::zip(this, other)
+        .enumerate()
+        .try_fold((), |_acc, (index, (this, other))| {
+            item_matches(this, other)
+                .map_err(|err| err.add_description(&format!("under item[{}]", index)))
+        })?;
+    assert!(vec_matches(this, other, |a, b| item_matches(a, b).is_ok()));
+    Ok(())
 }
 
 fn vec_matches_sorted<T: Ord + Clone>(this: &[T], other: &[T]) -> bool {
@@ -293,16 +403,65 @@ fn vec_matches_as_set<T>(this: &[T], other: &[T], item_matches: impl Fn(&T, &T) 
         })
 }
 
-fn plan_node_matches(this: &PlanNode, other: &PlanNode) -> bool {
+fn vec_matches_result_as_set<T>(
+    this: &[T],
+    other: &[T],
+    item_matches: impl Fn(&T, &T) -> bool,
+) -> Result<(), MatchFailure> {
+    // Set-inclusion test in both directions
+    check_match_eq!(this.len(), other.len());
+    for (index, this_node) in this.iter().enumerate() {
+        if !other
+            .iter()
+            .any(|other_node| item_matches(this_node, other_node))
+        {
+            return Err(MatchFailure::new(format!(
+                "mismatched set: missing item[{}]",
+                index
+            )));
+        }
+    }
+    for other_node in other.iter() {
+        if !this
+            .iter()
+            .any(|this_node| item_matches(this_node, other_node))
+        {
+            return Err(MatchFailure::new(
+                "mismatched set: extra item found".to_string(),
+            ));
+        }
+    }
+    assert!(vec_matches_as_set(this, other, item_matches));
+    Ok(())
+}
+
+fn option_to_string(name: Option<impl ToString>) -> String {
+    name.map_or_else(|| "<none>".to_string(), |name| name.to_string())
+}
+
+fn plan_node_matches(this: &PlanNode, other: &PlanNode) -> Result<(), MatchFailure> {
     match (this, other) {
         (PlanNode::Sequence { nodes: this }, PlanNode::Sequence { nodes: other }) => {
-            vec_matches(this, other, plan_node_matches)
+            vec_matches_result(this, other, plan_node_matches)
+                .map_err(|err| err.add_description("under Sequence node"))?;
         }
         (PlanNode::Parallel { nodes: this }, PlanNode::Parallel { nodes: other }) => {
-            vec_matches_as_set(this, other, plan_node_matches)
+            vec_matches_result_as_set(this, other, |a, b| plan_node_matches(a, b).is_ok())
+                .map_err(|err| err.add_description("under Parallel node"))?;
         }
-        (PlanNode::Fetch(this), PlanNode::Fetch(other)) => fetch_node_matches(this, other),
-        (PlanNode::Flatten(this), PlanNode::Flatten(other)) => flatten_node_matches(this, other),
+        (PlanNode::Fetch(this), PlanNode::Fetch(other)) => {
+            fetch_node_matches(this, other).map_err(|err| {
+                err.add_description(&format!(
+                    "under Fetch node (operation name: {})",
+                    option_to_string(this.operation_name.as_ref())
+                ))
+            })?;
+        }
+        (PlanNode::Flatten(this), PlanNode::Flatten(other)) => {
+            flatten_node_matches(this, other).map_err(|err| {
+                err.add_description(&format!("under Flatten node (path: {})", this.path))
+            })?;
+        }
         (
             PlanNode::Defer { primary, deferred },
             PlanNode::Defer {
@@ -310,8 +469,8 @@ fn plan_node_matches(this: &PlanNode, other: &PlanNode) -> bool {
                 deferred: other_deferred,
             },
         ) => {
-            defer_primary_node_matches(primary, other_primary)
-                && vec_matches(deferred, other_deferred, deferred_node_matches)
+            check_match!(defer_primary_node_matches(primary, other_primary));
+            check_match!(vec_matches(deferred, other_deferred, deferred_node_matches));
         }
         (
             PlanNode::Subscription { primary, rest },
@@ -320,8 +479,9 @@ fn plan_node_matches(this: &PlanNode, other: &PlanNode) -> bool {
                 rest: other_rest,
             },
         ) => {
-            subscription_primary_matches(primary, other_primary)
-                && opt_plan_node_matches(rest, other_rest)
+            check_match!(subscription_primary_matches(primary, other_primary));
+            opt_plan_node_matches(rest, other_rest)
+                .map_err(|err| err.add_description("under Subscription"))?;
         }
         (
             PlanNode::Condition {
@@ -335,17 +495,25 @@ fn plan_node_matches(this: &PlanNode, other: &PlanNode) -> bool {
                 else_clause: other_else_clause,
             },
         ) => {
-            condition == other_condition
-                && opt_plan_node_matches(if_clause, other_if_clause)
-                && opt_plan_node_matches(else_clause, other_else_clause)
+            check_match_eq!(condition, other_condition);
+            opt_plan_node_matches(if_clause, other_if_clause)
+                .map_err(|err| err.add_description("under Condition node (if_clause)"))?;
+            opt_plan_node_matches(else_clause, other_else_clause)
+                .map_err(|err| err.add_description("under Condition node (else_clause)"))?;
         }
-        _ => false,
-    }
+        _ => {
+            return Err(MatchFailure::new(format!(
+                "mismatched plan node types\nleft: {:?}\nright: {:?}",
+                this, other
+            )))
+        }
+    };
+    Ok(())
 }
 
 fn defer_primary_node_matches(this: &Primary, other: &Primary) -> bool {
     let Primary { subselection, node } = this;
-    *subselection == other.subselection && opt_plan_node_matches(node, &other.node)
+    *subselection == other.subselection && opt_plan_node_matches(node, &other.node).is_ok()
 }
 
 fn deferred_node_matches(this: &DeferredNode, other: &DeferredNode) -> bool {
@@ -360,18 +528,101 @@ fn deferred_node_matches(this: &DeferredNode, other: &DeferredNode) -> bool {
         && *label == other.label
         && *query_path == other.query_path
         && *subselection == other.subselection
-        && opt_plan_node_matches(node, &other.node)
+        && opt_plan_node_matches(node, &other.node).is_ok()
 }
 
-fn flatten_node_matches(this: &FlattenNode, other: &FlattenNode) -> bool {
+fn flatten_node_matches(this: &FlattenNode, other: &FlattenNode) -> Result<(), MatchFailure> {
     let FlattenNode { path, node } = this;
-    *path == other.path && plan_node_matches(node, &other.node)
+    check_match_eq!(*path, other.path);
+    plan_node_matches(node, &other.node)
+}
+
+// Copied and modified from `apollo_federation::operation::SelectionKey`
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum SelectionKey {
+    Field {
+        /// The field alias (if specified) or field name in the resulting selection set.
+        response_name: Name,
+        directives: ast::DirectiveList,
+    },
+    FragmentSpread {
+        /// The name of the fragment.
+        fragment_name: Name,
+        directives: ast::DirectiveList,
+    },
+    InlineFragment {
+        /// The optional type condition of the fragment.
+        type_condition: Option<Name>,
+        directives: ast::DirectiveList,
+    },
+}
+
+fn get_selection_key(selection: &Selection) -> SelectionKey {
+    match selection {
+        Selection::Field(field) => SelectionKey::Field {
+            response_name: field.response_name().clone(),
+            directives: Default::default(),
+        },
+        Selection::InlineFragment(fragment) => SelectionKey::InlineFragment {
+            type_condition: fragment.type_condition.clone(),
+            directives: Default::default(),
+        },
+    }
+}
+
+fn hash_value<T: Hash>(x: &T) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    x.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn hash_selection_key(selection: &Selection) -> u64 {
+    hash_value(&get_selection_key(selection))
+}
+
+fn same_selection(x: &Selection, y: &Selection) -> bool {
+    let x_key = get_selection_key(x);
+    let y_key = get_selection_key(y);
+    if x_key != y_key {
+        return false;
+    }
+    let x_selections = x.selection_set();
+    let y_selections = y.selection_set();
+    match (x_selections, y_selections) {
+        (Some(x), Some(y)) => same_selection_set_sorted(x, y),
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+fn same_selection_set_sorted(x: &[Selection], y: &[Selection]) -> bool {
+    fn sorted_by_selection_key(s: &[Selection]) -> Vec<&Selection> {
+        let mut sorted: Vec<&Selection> = s.iter().collect();
+        sorted.sort_by_key(|x| hash_selection_key(x));
+        sorted
+    }
+
+    if x.len() != y.len() {
+        return false;
+    }
+    sorted_by_selection_key(x)
+        .into_iter()
+        .zip(sorted_by_selection_key(y))
+        .all(|(x, y)| same_selection(x, y))
+}
+
+fn same_rewrites(x: &Option<Vec<DataRewrite>>, y: &Option<Vec<DataRewrite>>) -> bool {
+    match (x, y) {
+        (None, None) => true,
+        (Some(x), Some(y)) => vec_matches_as_set(x, y, |a, b| a == b),
+        _ => false,
+    }
 }
 
 //==================================================================================================
 // AST comparison functions
 
-fn same_ast_document(x: &ast::Document, y: &ast::Document) -> bool {
+fn same_ast_document(x: &ast::Document, y: &ast::Document) -> Result<(), MatchFailure> {
     fn split_definitions(
         doc: &ast::Document,
     ) -> (
@@ -403,57 +654,57 @@ fn same_ast_document(x: &ast::Document, y: &ast::Document) -> bool {
         "Different number of operation definitions"
     );
 
-    x_ops.len() == y_ops.len()
-        && x_ops
-            .iter()
-            .zip(y_ops.iter())
-            .all(|(x_op, y_op)| same_ast_operation_definition(x_op, y_op))
-        && x_frags.len() == y_frags.len()
-        && x_frags
-            .iter()
-            .zip(y_frags.iter())
-            .all(|(x_frag, y_frag)| same_ast_fragment_definition(x_frag, y_frag))
+    check_match_eq!(x_ops.len(), y_ops.len());
+    x_ops
+        .iter()
+        .zip(y_ops.iter())
+        .try_fold((), |_, (x_op, y_op)| {
+            same_ast_operation_definition(x_op, y_op)
+                .map_err(|err| err.add_description("under operation definition"))
+        })?;
+    check_match_eq!(x_frags.len(), y_frags.len());
+    x_frags
+        .iter()
+        .zip(y_frags.iter())
+        .try_fold((), |_, (x_frag, y_frag)| {
+            same_ast_fragment_definition(x_frag, y_frag)
+                .map_err(|err| err.add_description("under fragment definition"))
+        })?;
+    Ok(())
 }
 
 fn same_ast_operation_definition(
     x: &ast::OperationDefinition,
     y: &ast::OperationDefinition,
-) -> bool {
+) -> Result<(), MatchFailure> {
     // Note: Operation names are ignored, since parallel fetches may have different names.
-    x.operation_type == y.operation_type
-        && vec_matches_sorted_by(&x.variables, &y.variables, |x, y| x.name.cmp(&y.name))
-        && x.directives == y.directives
-        && same_ast_selection_set_sorted(&x.selection_set, &y.selection_set)
+    check_match_eq!(x.operation_type, y.operation_type);
+    check_match!(vec_matches_sorted_by(&x.variables, &y.variables, |x, y| x
+        .name
+        .cmp(&y.name)));
+    check_match_eq!(x.directives, y.directives);
+    check_match!(same_ast_selection_set_sorted(
+        &x.selection_set,
+        &y.selection_set
+    ));
+    Ok(())
 }
 
-fn same_ast_fragment_definition(x: &ast::FragmentDefinition, y: &ast::FragmentDefinition) -> bool {
-    x.name == y.name
-        && x.type_condition == y.type_condition
-        && x.directives == y.directives
-        && same_ast_selection_set_sorted(&x.selection_set, &y.selection_set)
+fn same_ast_fragment_definition(
+    x: &ast::FragmentDefinition,
+    y: &ast::FragmentDefinition,
+) -> Result<(), MatchFailure> {
+    check_match_eq!(x.name, y.name);
+    check_match_eq!(x.type_condition, y.type_condition);
+    check_match_eq!(x.directives, y.directives);
+    check_match!(same_ast_selection_set_sorted(
+        &x.selection_set,
+        &y.selection_set
+    ));
+    Ok(())
 }
 
-// Copied and modified from `apollo_federation::operation::SelectionKey`
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) enum SelectionKey {
-    Field {
-        /// The field alias (if specified) or field name in the resulting selection set.
-        response_name: Name,
-        directives: ast::DirectiveList,
-    },
-    FragmentSpread {
-        /// The name of the fragment.
-        fragment_name: Name,
-        directives: ast::DirectiveList,
-    },
-    InlineFragment {
-        /// The optional type condition of the fragment.
-        type_condition: Option<Name>,
-        directives: ast::DirectiveList,
-    },
-}
-
-fn get_selection_key(selection: &ast::Selection) -> SelectionKey {
+fn get_ast_selection_key(selection: &ast::Selection) -> SelectionKey {
     match selection {
         ast::Selection::Field(field) => SelectionKey::Field {
             response_name: field.response_name().clone(),
@@ -473,7 +724,7 @@ fn get_selection_key(selection: &ast::Selection) -> SelectionKey {
 use std::ops::Not;
 
 /// Get the sub-selections of a selection.
-fn get_selection_set(selection: &ast::Selection) -> Option<&Vec<ast::Selection>> {
+fn get_ast_selection_set(selection: &ast::Selection) -> Option<&Vec<ast::Selection>> {
     match selection {
         ast::Selection::Field(field) => field
             .selection_set
@@ -486,13 +737,13 @@ fn get_selection_set(selection: &ast::Selection) -> Option<&Vec<ast::Selection>>
 }
 
 fn same_ast_selection(x: &ast::Selection, y: &ast::Selection) -> bool {
-    let x_key = get_selection_key(x);
-    let y_key = get_selection_key(y);
+    let x_key = get_ast_selection_key(x);
+    let y_key = get_ast_selection_key(y);
     if x_key != y_key {
         return false;
     }
-    let x_selections = get_selection_set(x);
-    let y_selections = get_selection_set(y);
+    let x_selections = get_ast_selection_set(x);
+    let y_selections = get_ast_selection_set(y);
     match (x_selections, y_selections) {
         (Some(x), Some(y)) => same_ast_selection_set_sorted(x, y),
         (None, None) => true,
@@ -500,20 +751,14 @@ fn same_ast_selection(x: &ast::Selection, y: &ast::Selection) -> bool {
     }
 }
 
-fn hash_value<T: Hash>(x: &T) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    x.hash(&mut hasher);
-    hasher.finish()
-}
-
-fn hash_selection_key(selection: &ast::Selection) -> u64 {
-    hash_value(&get_selection_key(selection))
+fn hash_ast_selection_key(selection: &ast::Selection) -> u64 {
+    hash_value(&get_ast_selection_key(selection))
 }
 
 fn same_ast_selection_set_sorted(x: &[ast::Selection], y: &[ast::Selection]) -> bool {
     fn sorted_by_selection_key(s: &[ast::Selection]) -> Vec<&ast::Selection> {
         let mut sorted: Vec<&ast::Selection> = s.iter().collect();
-        sorted.sort_by_key(|x| hash_selection_key(x));
+        sorted.sort_by_key(|x| hash_ast_selection_key(x));
         sorted
     }
 
@@ -536,7 +781,7 @@ mod ast_comparison_tests {
         let op_y = r#"query($qv1: Int!, $qv2: String!) { x(arg1: $qv1, arg2: $qv2) }"#;
         let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
         let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
-        assert!(super::same_ast_document(&ast_x, &ast_y));
+        assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
     }
 
     #[test]
@@ -553,7 +798,7 @@ mod ast_comparison_tests {
             "#;
         let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
         let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
-        assert!(super::same_ast_document(&ast_x, &ast_y));
+        assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
     }
 
     #[test]
@@ -562,7 +807,7 @@ mod ast_comparison_tests {
         let op_y = r#"{ y x { z w } }"#;
         let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
         let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
-        assert!(super::same_ast_document(&ast_x, &ast_y));
+        assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
     }
 
     #[test]
@@ -571,6 +816,6 @@ mod ast_comparison_tests {
         let op_y = r#"{ q { ...f1 ...f2 } } fragment f2 on T { w z } fragment f1 on T { x y }"#;
         let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
         let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
-        assert!(super::same_ast_document(&ast_x, &ast_y));
+        assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
     }
 }

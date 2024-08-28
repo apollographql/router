@@ -1,6 +1,6 @@
 [package]
 name = "apollo-federation"
-version = "1.52.1"
+version = "1.53.0"
 authors = ["The Apollo GraphQL Contributors"]
 edition = "2021"
 description = "Apollo Federation"
@@ -14,7 +14,7 @@ autotests = false                                      # Integration tests are m
 # logging statements that capture serialized versions of key data structures.
 # This logging is gated behind a feature to avoid any unnecessary (even if
 # small) runtime costs where this data will not be desired.
-snapshot_tracing = []
+snapshot_tracing = ["ron"]
 
 [dependencies]
 apollo-compiler.workspace = true
@@ -36,6 +36,7 @@ strum_macros = "0.26.0"
 thiserror = "1.0"
 url = "2"
 tracing = "0.1.40"
+ron = { version = "0.8.1", optional = true }
 
 [dev-dependencies]
 hex.workspace = true

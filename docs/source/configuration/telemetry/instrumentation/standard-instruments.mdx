@@ -38,6 +38,7 @@ These instruments can be consumed by configuring a [metrics exporter](../exporte
 - `apollo_router_cache_miss_count` - Number of cache misses
 - `apollo_router_cache_hit_time` - Time to hit the cache in seconds
 - `apollo_router_cache_miss_time` - Time to miss the cache in seconds
+- `apollo.router.cache.storage.estimated_size` - The estimated storage size of the cache in bytes (query planner in memory only).
 
 All cache metrics listed above have the following attributes:
 
@@ -65,6 +66,8 @@ The coprocessor operations metric has the following attributes:
 - `apollo.router.query_planning.plan.duration` - Histogram of plan durations isolated to query planning time only.
 - `apollo.router.query_planning.total.duration` - Histogram of plan durations including queue time.
 - `apollo.router.query_planning.queued` - A gauge of the number of queued plans requests.
+- `apollo.router.v8.heap.used` - heap memory used by V8, in bytes.
+- `apollo.router.v8.heap.total` - total heap allocated by V8, in bytes.
 
 ### Uplink
 

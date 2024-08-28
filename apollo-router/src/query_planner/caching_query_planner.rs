@@ -24,7 +24,9 @@ use tower_service::Service;
 use tracing::Instrument;
 
 use super::fetch::QueryHash;
+use crate::cache::estimate_size;
 use crate::cache::storage::InMemoryCache;
+use crate::cache::storage::ValueType;
 use crate::cache::DeduplicatingCache;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
@@ -60,6 +62,7 @@ pub(crate) enum ConfigMode {
     // for now use the JS config as it expected to be identical to the Rust one
     Rust(Arc<QueryPlannerConfig>),
     Both(Arc<QueryPlannerConfig>),
+    BothBestEffort(Arc<QueryPlannerConfig>),
     Js(Arc<QueryPlannerConfig>),
 }
 
@@ -132,6 +135,9 @@ where
             }
             crate::configuration::QueryPlannerMode::Both => {
                 ConfigMode::Both(Arc::new(configuration.js_query_planner_config()))
+            }
+            crate::configuration::QueryPlannerMode::BothBestEffort => {
+                ConfigMode::BothBestEffort(Arc::new(configuration.js_query_planner_config()))
             }
         };
         Ok(Self {
@@ -230,10 +236,13 @@ where
         } else {
             cache_keys.len()
         };
-        tracing::info!(
-            "warming up the query plan cache with {} queries, this might take a while",
-            capacity
-        );
+
+        if capacity > 0 {
+            tracing::info!(
+                "warming up the query plan cache with {} queries, this might take a while",
+                capacity
+            );
+        }
 
         // persisted queries are added first because they should get a lower priority in the LRU cache,
         // since a lot of them may be there to support old clients
@@ -684,6 +693,17 @@ pub(crate) struct WarmUpCachingQueryKey {
     pub(crate) introspection: bool,
 }
 
+impl ValueType for Result<QueryPlannerContent, Arc<QueryPlannerError>> {
+    fn estimated_size(&self) -> Option<usize> {
+        match self {
+            Ok(QueryPlannerContent::Plan { plan }) => Some(plan.estimated_size()),
+            Ok(QueryPlannerContent::Response { response }) => Some(estimate_size(response)),
+            Ok(QueryPlannerContent::IntrospectionDisabled) => None,
+            Err(e) => Some(estimate_size(e)),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use mockall::mock;
@@ -835,6 +855,7 @@ mod tests {
                     .into(),
                     query: Arc::new(Query::empty()),
                     query_metrics: Default::default(),
+                    estimated_size: Default::default(),
                 };
                 let qp_content = QueryPlannerContent::Plan {
                     plan: Arc::new(query_plan),

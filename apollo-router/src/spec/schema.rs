@@ -5,7 +5,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 
-use apollo_compiler::ast;
 use apollo_compiler::schema::Implementers;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
@@ -38,32 +37,30 @@ pub(crate) struct Schema {
 pub(crate) struct ApiSchema(pub(crate) ValidFederationSchema);
 
 impl Schema {
-    pub(crate) fn parse_ast(sdl: &str) -> Result<ast::Document, SchemaError> {
+    pub(crate) fn parse(raw_sdl: &str, config: &Configuration) -> Result<Self, SchemaError> {
+        Self::parse_arc(raw_sdl.to_owned().into(), config)
+    }
+
+    pub(crate) fn parse_arc(
+        raw_sdl: Arc<String>,
+        config: &Configuration,
+    ) -> Result<Self, SchemaError> {
+        let start = Instant::now();
         let mut parser = apollo_compiler::parser::Parser::new();
-        let result = parser.parse_ast(sdl, "schema.graphql");
+        let result = parser.parse_ast(raw_sdl.as_ref(), "schema.graphql");
 
         // Trace log recursion limit data
         let recursion_limit = parser.recursion_reached();
         tracing::trace!(?recursion_limit, "recursion limit data");
 
-        result.map_err(|invalid| {
-            SchemaError::Parse(ParseErrors {
-                errors: invalid.errors,
-            })
-        })
-    }
-
-    pub(crate) fn parse_compiler_schema(
-        sdl: &str,
-    ) -> Result<Valid<apollo_compiler::Schema>, SchemaError> {
-        Self::parse_ast(sdl)?
+        let definitions = result
+            .map_err(|invalid| {
+                SchemaError::Parse(ParseErrors {
+                    errors: invalid.errors,
+                })
+            })?
             .to_schema_validate()
-            .map_err(|errors| SchemaError::Validate(errors.into()))
-    }
-
-    pub(crate) fn parse(sdl: &str, config: &Configuration) -> Result<Self, SchemaError> {
-        let start = Instant::now();
-        let definitions = Self::parse_compiler_schema(sdl)?;
+            .map_err(|errors| SchemaError::Validate(errors.into()))?;
 
         let mut subgraphs = HashMap::new();
         // TODO: error if not found?
@@ -111,7 +108,7 @@ impl Schema {
         let implementers_map = definitions.implementers_map();
         let supergraph = Supergraph::from_schema(definitions)?;
 
-        let schema_id = Arc::new(Schema::schema_id(sdl));
+        let schema_id = Arc::new(Schema::schema_id(&raw_sdl));
 
         let api_schema = supergraph
             .to_api_schema(ApiSchemaOptions {
@@ -125,7 +122,7 @@ impl Schema {
             })?;
 
         Ok(Schema {
-            raw_sdl: Arc::new(sdl.to_owned()),
+            raw_sdl,
             supergraph,
             subgraphs,
             implementers_map,

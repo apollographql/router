@@ -23,6 +23,17 @@ pub(crate) enum Selection {
     InlineFragment(InlineFragment),
 }
 
+impl Selection {
+    pub(crate) fn selection_set(&self) -> Option<&[Selection]> {
+        match self {
+            Selection::Field(Field { selections, .. }) => selections.as_deref(),
+            Selection::InlineFragment(InlineFragment { selections, .. }) => {
+                Some(selections.as_slice())
+            }
+        }
+    }
+}
+
 /// The field that is used
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,6 +48,13 @@ pub(crate) struct Field {
     /// The selections for the field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) selections: Option<Vec<Selection>>,
+}
+
+impl Field {
+    // Mirroring `apollo_compiler::Field::response_name`
+    pub(crate) fn response_name(&self) -> &Name {
+        self.alias.as_ref().unwrap_or(&self.name)
+    }
 }
 
 /// An inline fragment.
