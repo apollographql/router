@@ -118,6 +118,8 @@ type User
   @join__type(graph: REVIEWS, key: "id") {
   id: ID!
   name: String @join__field(graph: ACCOUNTS)
-  username: String @join__field(graph: ACCOUNTS)
+  username: String
+    @join__field(graph: ACCOUNTS)
+    @join__field(graph: REVIEWS, external: true)
   reviews: [Review] @join__field(graph: REVIEWS)
 }

@@ -8,9 +8,13 @@ schema
 }
 
 directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
 directive @tag(
   name: String!
 ) repeatable on FIELD_DEFINITION | INTERFACE | OBJECT | UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
 directive @join__field(
   graph: join__Graph
   requires: join__FieldSet
@@ -117,6 +121,8 @@ type User
   @join__type(graph: REVIEWS, key: "id") {
   id: ID!
   name: String @join__field(graph: ACCOUNTS)
-  username: String @join__field(graph: REVIEWS, external: true)
+  username: String
+    @join__field(graph: ACCOUNTS)
+    @join__field(graph: REVIEWS, external: true)
   reviews: [Review] @join__field(graph: REVIEWS)
 }
