@@ -685,6 +685,7 @@ pub(crate) async fn create_plugins(
             }
         }
     }
+    add_mandatory_apollo_plugin!("limits");
     add_mandatory_apollo_plugin!("traffic_shaping");
     add_optional_apollo_plugin!("forbid_mutations");
     add_optional_apollo_plugin!("subscription");
@@ -698,7 +699,7 @@ pub(crate) async fn create_plugins(
     // This relative ordering is documented in `docs/source/customizations/native.mdx`:
     add_optional_apollo_plugin!("rhai");
     add_optional_apollo_plugin!("coprocessor");
-    add_optional_apollo_plugin!("preview_demand_control");
+    add_optional_apollo_plugin!("demand_control");
     add_user_plugins!();
 
     // Macros above remove from `apollo_plugin_factories`, so anything left at the end
