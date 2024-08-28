@@ -69,7 +69,7 @@
         ],
         "Client Protocol: HTTP Multipart": ["/executing-operations/subscription-multipart-protocol", ["enterprise"]]
       },
-      "Demand Control": ["/executing-operations/demand-control", ["enterprise", "preview"]]
+      "Demand Control": ["/executing-operations/demand-control", ["enterprise"]]
     },
     "Telemetry and Monitoring": {
       "Overview": "/configuration/telemetry/overview",
