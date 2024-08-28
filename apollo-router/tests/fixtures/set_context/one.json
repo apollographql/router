@@ -395,19 +395,17 @@
         "operationName": "Query_fetch_dependent_failure__Subgraph1__0"
       },
       "response": {
-        "response": {
-          "data": null,
-          "errors": [{
-            "message": "Some error",
-            "locations": [
-              {
-                "line": 3,
-                "column": 5
-              }
-            ],
-            "path": ["t", "u"]    
-          }]
-        }
+        "data": null,
+        "errors": [{
+          "message": "Some error",
+          "locations": [
+            {
+              "line": 3,
+              "column": 5
+            }
+          ],
+          "path": ["t", "u"]    
+        }]
       }
     }
   ]

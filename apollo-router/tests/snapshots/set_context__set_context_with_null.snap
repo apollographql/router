@@ -3,15 +3,29 @@ source: apollo-router/tests/set_context.rs
 expression: response
 ---
 {
-  "data": {
-    "t": {
-      "id": "1",
-      "u": {
-        "field": 1234
-      }
+  "data": null,
+  "errors": [
+    {
+      "message": "Some error",
+      "locations": [
+        {
+          "line": 3,
+          "column": 5
+        }
+      ],
+      "path": [
+        "t",
+        "u"
+      ]
     }
-  },
+  ],
   "extensions": {
+    "valueCompletion": [
+      {
+        "message": "Cannot return null for non-nullable field Query.t",
+        "path": []
+      }
+    ],
     "apolloQueryPlan": {
       "object": {
         "kind": "QueryPlan",
