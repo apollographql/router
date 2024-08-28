@@ -1,4 +1,6 @@
+experimental_apollo_metrics_generation_mode: new
+
 telemetry:
   apollo:
-    signature_normalization_algorithm: enhanced
-    metrics_reference_mode: extended
+    experimental_apollo_signature_normalization_algorithm: enhanced
+    experimental_apollo_metrics_reference_mode: extended
