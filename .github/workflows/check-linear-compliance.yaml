@@ -1,0 +1,26 @@
+name: Find Linear Issue in Pull Request
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, reopened, edited]
+
+jobs:
+  check-linear-issue-on-pull-request:
+    runs-on: small
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+      - name: Checkout Shared Github Actions Repo
+        uses: actions/checkout@v4
+        with:
+          repository: validationcloud/shared-github-actions
+          ref: main
+          path: shared-github-actions
+          token: ${{ secrets.AUTOMATION_VC_PAT }}
+
+      - name: Find the Linear Issue
+        uses: ./shared-github-actions/check-linear-compliance
+        with:
+          token: ${{ secrets.AUTOMATION_VC_PAT }}
+          linear-api-key: ${{ secrets.LINEAR_API_KEY }}
