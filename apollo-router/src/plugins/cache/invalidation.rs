@@ -196,6 +196,7 @@ async fn handle_request(
                         );
                     }
                 }
+                scan_res.next()?;
             }
         }
     }
