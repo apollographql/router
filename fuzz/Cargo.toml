@@ -20,7 +20,7 @@ reqwest = { workspace = true, features = ["json", "blocking"] }
 serde_json.workspace = true
 tokio.workspace = true
 # note: this dependency should _always_ be pinned, prefix the version with an `=`
-router-bridge = "=0.5.31+v2.8.5"
+router-bridge = "=0.6.0+v2.9.0"
 
 [dev-dependencies]
 anyhow = "1"
