@@ -48,7 +48,7 @@ use crate::integration::IntegrationTest;
 async fn query_planner_cache() -> Result<(), BoxError> {
     // If this test fails and the cache key format changed you'll need to update the key here.
     // Look at the top of the file for instructions on getting the new cache key.
-    let known_cache_key = "plan:0:v2.8.5:70f115ebba5991355c17f4f56ba25bb093c519c4db49a30f3b10de279a4e3fa4:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:4f9f0183101b2f249a364b98adadfda6e5e2001d1f2465c988428cf1ac0b545f";
+    let known_cache_key = "plan:0:v2.9.0:16385ebef77959fcdc520ad507eb1f7f7df28f1d54a0569e3adabcb4cd00d7ce:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:8ecc6cbc98bab2769e6666a72ba47a4ebd90e6f62256ddcbdc7f352a805e0fe6";
 
     let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
     let client = RedisClient::new(config, None, None, None);
@@ -433,13 +433,13 @@ async fn entity_cache() -> Result<(), BoxError> {
     insta::assert_json_snapshot!(response);
 
     let s:String = client
-          .get("version:1.0:subgraph:products:type:Query:hash:0df945dc1bc08f7fc02e8905b4c72aa9112f29bb7a214e4a38d199f0aa635b48:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .get("version:1.0:subgraph:products:type:Query:hash:0b4d791a3403d76643db0a9e4a8d304b1cd1f8c4ab68cb58ab7ccdc116a1da1c:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
     insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
-    let s: String = client.get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:1de543dab57fde0f00247922ccc4f76d4c916ae26a89dd83cd1a62300d0cda20:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c").await.unwrap();
+    let s: String = client.get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:04c47a3b857394fb0feef5b999adc073b8ab7416e3bc871f54c0b885daae8359:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c").await.unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
     insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
@@ -547,7 +547,7 @@ async fn entity_cache() -> Result<(), BoxError> {
     insta::assert_json_snapshot!(response);
 
     let s:String = client
-        .get("version:1.0:subgraph:reviews:type:Product:entity:d9a4cd73308dd13ca136390c10340823f94c335b9da198d2339c886c738abf0d:hash:1de543dab57fde0f00247922ccc4f76d4c916ae26a89dd83cd1a62300d0cda20:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+        .get("version:1.0:subgraph:reviews:type:Product:entity:d9a4cd73308dd13ca136390c10340823f94c335b9da198d2339c886c738abf0d:hash:04c47a3b857394fb0feef5b999adc073b8ab7416e3bc871f54c0b885daae8359:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
         .await
         .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
@@ -768,7 +768,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
     insta::assert_json_snapshot!(response);
 
     let s:String = client
-          .get("version:1.0:subgraph:products:type:Query:hash:0df945dc1bc08f7fc02e8905b4c72aa9112f29bb7a214e4a38d199f0aa635b48:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .get("version:1.0:subgraph:products:type:Query:hash:0b4d791a3403d76643db0a9e4a8d304b1cd1f8c4ab68cb58ab7ccdc116a1da1c:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
@@ -789,7 +789,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
     );
 
     let s: String = client
-        .get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:1de543dab57fde0f00247922ccc4f76d4c916ae26a89dd83cd1a62300d0cda20:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+        .get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:04c47a3b857394fb0feef5b999adc073b8ab7416e3bc871f54c0b885daae8359:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
         .await
         .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
@@ -833,7 +833,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
     insta::assert_json_snapshot!(response);
 
     let s:String = client
-          .get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:3b6ef3c8fd34c469d59f513942c5f4c8f91135e828712de2024e2cd4613c50ae:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:f7d6d3af2706afe346e3d5fd353e61bd186d2fc64cb7b3c13a62162189519b5f:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
@@ -943,7 +943,7 @@ async fn connection_failure_blocks_startup() {
 async fn query_planner_redis_update_query_fragments() {
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_query_fragments.router.yaml"),
-        "plan:0:v2.8.5:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:78f3ccab3def369f4b809a0f8c8f6e90545eb08cd1efeb188ffc663b902c1f2d",
+        "plan:0:v2.9.0:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:cda2b4e476fdce9c4c435627b26cedd177cfbe04ab335fc3e3d895c0d79d965e",
     )
     .await;
 }
@@ -973,7 +973,7 @@ async fn query_planner_redis_update_introspection() {
     // test just passes locally.
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_introspection.router.yaml"),
-        "plan:0:v2.8.5:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:99a70d6c967eea3bc68721e1094f586f5ae53c7e12f83a650abd5758c372d048",
+        "plan:0:v2.9.0:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:259dd917e4de09b5469629849b91e8ffdfbed2587041fad68b5963369bb13283",
     )
     .await;
 }
@@ -993,7 +993,7 @@ async fn query_planner_redis_update_defer() {
     // test just passes locally.
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_defer.router.yaml"),
-        "plan:0:v2.8.5:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:d6a3d7807bb94cfb26be4daeb35e974680b53755658fafd4c921c70cec1b7c39",
+        "plan:0:v2.9.0:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:e4376fe032160ce16399e520c6e815da6cb5cf4dc94a06175b86b64a9bf80201",
     )
     .await;
 }
@@ -1015,7 +1015,7 @@ async fn query_planner_redis_update_type_conditional_fetching() {
         include_str!(
             "fixtures/query_planner_redis_config_update_type_conditional_fetching.router.yaml"
         ),
-        "plan:0:v2.8.5:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:8991411cc7b66d9f62ab1e661f2ce9ccaf53b0d203a275e43ced9a8b6bba02dd",
+        "plan:0:v2.9.0:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:83d899fcb42d2202c39fc8350289b8247021da00ecf3d844553c190c49410507",
     )
     .await;
 }
@@ -1037,7 +1037,7 @@ async fn query_planner_redis_update_reuse_query_fragments() {
         include_str!(
             "fixtures/query_planner_redis_config_update_reuse_query_fragments.router.yaml"
         ),
-        "plan:0:v2.8.5:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:c05e89caeb8efc4e8233e8648099b33414716fe901e714416fd0f65a67867f07",
+        "plan:0:v2.9.0:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:d48f92f892bd67071694c0538a7e657ff8e0c52e1718f475190c17b503e9e8c3",
     )
     .await;
 }
@@ -1062,7 +1062,8 @@ async fn test_redis_query_plan_config_update(updated_config: &str, new_cache_key
     router.clear_redis_cache().await;
 
     // If the tests above are failing, this is the key that needs to be changed first.
-    let starting_key = "plan:0:v2.8.5:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:a52c81e3e2e47c8363fbcd2653e196431c15716acc51fce4f58d9368ac4c2d8d";
+    let starting_key = "plan:0:v2.9.0:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:0966f1528d47cee30b6140a164be16148dd360ee10b87744991e9d35af8e8a27";
+
     router.execute_default_query().await;
     router.assert_redis_cache_contains(starting_key, None).await;
     router.update_config(updated_config).await;
