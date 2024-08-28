@@ -56,17 +56,10 @@ scalar join__FieldSet
 scalar link__Import
 
 enum join__Graph {
-  ACCOUNTS
-    @join__graph(name: "accounts", url: "https://accounts.demo.starstuff.dev/")
-  INVENTORY
-    @join__graph(
-      name: "inventory"
-      url: "https://inventory.demo.starstuff.dev/"
-    )
-  PRODUCTS
-    @join__graph(name: "products", url: "https://products.demo.starstuff.dev/")
-  REVIEWS
-    @join__graph(name: "reviews", url: "https://reviews.demo.starstuff.dev/")
+  ACCOUNTS @join__graph(name: "invalidation-entity-key-accounts", url: "https://accounts.demo.starstuff.dev")
+  INVENTORY @join__graph(name: "invalidation-entity-key-inventory", url: "https://inventory.demo.starstuff.dev")
+  PRODUCTS @join__graph(name: "invalidation-entity-key-products", url: "https://products.demo.starstuff.dev")
+  REVIEWS @join__graph(name: "invalidation-entity-key-reviews", url: "https://reviews.demo.starstuff.dev")
 }
 
 enum link__Purpose {
@@ -111,9 +104,9 @@ type Query
 
 type Review @join__type(graph: REVIEWS, key: "id") {
   author: User @join__field(graph: REVIEWS, provides: "username")
-  body: 
+  body: String 
   id: ID!
-  product:
+  product: Product
 }
 
 type User
