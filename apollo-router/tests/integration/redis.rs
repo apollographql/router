@@ -973,7 +973,7 @@ async fn query_planner_redis_update_introspection() {
     // test just passes locally.
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_introspection.router.yaml"),
-        "plan:0:v2.8.5:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:78f3ccab3def369f4b809a0f8c8f6e90545eb08cd1efeb188ffc663b902c1f2d",
+        "plan:0:v2.8.5:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:99a70d6c967eea3bc68721e1094f586f5ae53c7e12f83a650abd5758c372d048",
     )
     .await;
 }
