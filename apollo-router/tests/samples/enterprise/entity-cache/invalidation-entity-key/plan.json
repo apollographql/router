@@ -172,15 +172,23 @@
             },
             "expected_response":{
                 "data":{
-                    "topProducts":[{"reviews":null},{"reviews":null}]
+                    "topProducts":[
+                        {"reviews": [{
+                            "body": "A"
+                        },{
+                            "body": "B"
+                        }]},
+                        {"reviews":null}]
                 },
                 "errors":[
                     {
                         "message":"HTTP fetch failed from 'invalidation-entity-key-reviews': 500: Internal Server Error",
+                        "path": ["topProducts", 1],
                         "extensions":{"code":"SUBREQUEST_HTTP_ERROR","service":"invalidation-entity-key-reviews","reason":"500: Internal Server Error","http":{"status":500}}
                     },
                     {
                         "message":"service 'invalidation-entity-key-reviews' response was malformed: {}",
+                        "path": ["topProducts", 1],
                         "extensions":{"service":"invalidation-entity-key-reviews","reason":"{}","code":"SUBREQUEST_MALFORMED_RESPONSE"}
                     }
                 ]

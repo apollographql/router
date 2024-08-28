@@ -4,6 +4,7 @@ use std::collections::HashSet;
 
 use axum::headers::HeaderName;
 use derivative::Derivative;
+use num_traits::ToPrimitive;
 use opentelemetry::sdk::metrics::new_view;
 use opentelemetry::sdk::metrics::Aggregation;
 use opentelemetry::sdk::metrics::Instrument;
@@ -91,6 +92,14 @@ pub(crate) struct Instrumentation {
     pub(crate) spans: config_new::spans::Spans,
     /// Instrument configuration
     pub(crate) instruments: config_new::instruments::InstrumentsConfig,
+}
+
+impl Instrumentation {
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        self.events.validate()?;
+        self.instruments.validate()?;
+        self.spans.validate()
+    }
 }
 
 /// Metrics configuration
@@ -495,7 +504,12 @@ impl PartialOrd for AttributeValue {
             (AttributeValue::F64(f1), AttributeValue::F64(f2)) => f1.partial_cmp(f2),
             (AttributeValue::I64(i1), AttributeValue::I64(i2)) => i1.partial_cmp(i2),
             (AttributeValue::String(s1), AttributeValue::String(s2)) => s1.partial_cmp(s2),
-            // Arrays and mismatched types are incomparable
+            // Mismatched numerics are comparable
+            (AttributeValue::F64(f1), AttributeValue::I64(i)) => {
+                i.to_f64().as_ref().and_then(|f2| f1.partial_cmp(f2))
+            }
+            (AttributeValue::I64(i), AttributeValue::F64(f)) => i.to_f64()?.partial_cmp(f),
+            // Arrays and other mismatched types are incomparable
             _ => None,
         }
     }

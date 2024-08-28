@@ -5,6 +5,12 @@ description: Subgraph entity caching for GraphOS Router with GraphOS Enterprise.
 minVersion: 1.40.0
 ---
 
+<SummitCallout
+  topic="graph performance"
+  workshopName="Better, faster, stronger: Advanced configurations to boost your router performance"
+  URL="https://reg.summit.graphql.com/flow/apollo/summit24/AttendeePortal/page/catalog/session/1712947098784001VPCx"
+/>
+
 <EnterpriseFeature />
 
 <PreviewFeature />
@@ -91,7 +97,7 @@ preview_entity_cache:
       # Configure Redis
       redis:
         urls: ["redis://..."]
-        timeout: 5ms # Optional, by default: 2ms
+        timeout: 2s # Optional, by default: 500ms
         ttl: 24h # Optional, by default no expiration
     # Configure entity caching per subgraph, overrides options from the "all" section
     subgraphs:
