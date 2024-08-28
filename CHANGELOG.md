@@ -13,7 +13,7 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ### Support demand control directives ([PR #5777](https://github.com/apollographql/router/pull/5777))
 
-> ⚠️ This is a [GraphOS Router feature](https://www.apollographql.com/graphos).
+> ⚠️ This is a [GraphOS Router feature](https://www.apollographql.com/graphos-router).
 
 The router supports two new demand control directives, `@cost` and `@listSize`, that you can use to provide more accurate estimates of GraphQL operation costs to the router's demand control plugin.
 
@@ -57,6 +57,8 @@ By [@tninesling](https://github.com/tninesling) in https://github.com/apollograp
 ### Enable native query planner to run in the background ([PR #5790](https://github.com/apollographql/router/pull/5790), [PR #5811](https://github.com/apollographql/router/pull/5811), [PR #5771](https://github.com/apollographql/router/pull/5771), [PR #5860](https://github.com/apollographql/router/pull/5860))
 
 The router now schedules background jobs to run the native (Rust) query planner to compare its results to the legacy implementation. This helps ascertain its correctness before making a decision to switch entirely to it from the legacy query planner.
+
+To learn more, go to [Experimental Query Planner Mode](https://www.apollographql.com/docs/router/configuration/configuration/experimental_query_planning_mode) docs.
 
 The router continues to use the legacy query planner to plan and execute operations, so there is no effect on the hot path.
 
