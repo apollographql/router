@@ -11,35 +11,9 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ## 🚀 Features
 
-### Add warnings for invalid configuration of custom telemetry ([PR #5759](https://github.com/apollographql/router/issues/5759))
-
-The router now logs warnings when running with telemetry that may have invalid custom configurations.
-
-For example, you may customize telemetry using invalid conditions or inaccessible statuses:
-
-```yaml
-telemetry:
-  instrumentation:
-    events:
-      subgraph:
-        my.event:
-          message: "Auditing Router Event"
-          level: info
-          on: request
-          attributes:
-            subgraph.response.status: code
-              # Warning: should use selector for subgraph_name: true instead of comparing strings of subgraph_name and product
-          condition:
-            eq:
-            - subgraph_name
-            - product
-```
-
-Although the configuration is syntactically correct, its customization is invalid, and the router now outputs warnings for such invalid configurations.
-
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5759
-
 ### Support demand control directives ([PR #5777](https://github.com/apollographql/router/pull/5777))
+
+> ⚠️ This is a [GraphOS Router feature](https://www.apollographql.com/graphos).
 
 The router supports two new demand control directives, `@cost` and `@listSize`, that you can use to provide more accurate estimates of GraphQL operation costs to the router's demand control plugin.
 
@@ -70,19 +44,15 @@ To learn more, go to [Demand Control](https://www.apollographql.com/docs/router/
 
 By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/5777
 
-### Add V8 heap usage metrics ([PR #5781](https://github.com/apollographql/router/pull/5781))
+### General Availability (GA) of Demand Control ([PR #5868](https://github.com/apollographql/router/pull/5868))
 
-The router supports new gauge metrics for tracking heap memory usage of the V8 Javascript engine:
-- `apollo.router.v8.heap.used`: heap memory used by V8, in bytes
-- `apollo.router.v8.heap.total`: total heap allocated by V8, in bytes
+Demand control in the router is now a generally available (GA) feature.
 
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/5781
+**GA compatibility update**: if you used demand control during its preview, to use it in GA you must update your configuration from `preview_demand_control` to `demand_control`.
 
-### Update Federation to v2.9.0 ([PR #5902](https://github.com/apollographql/router/pull/5902))
+To learn more, go to [Demand Control](https://www.apollographql.com/docs/router/executing-operations/demand-control/) docs.
 
-This updates the router to Federation v2.9.0.
-
-By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/5902
+By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/5868
 
 ### Enable native query planner to run in the background ([PR #5790](https://github.com/apollographql/router/pull/5790), [PR #5811](https://github.com/apollographql/router/pull/5811), [PR #5771](https://github.com/apollographql/router/pull/5771), [PR #5860](https://github.com/apollographql/router/pull/5860))
 
@@ -97,6 +67,48 @@ experimental_query_planner_mode: legacy
 ```
 
 By [SimonSapin](https://github.com/SimonSapin) in ([PR #5790](https://github.com/apollographql/router/pull/5790), [PR #5811](https://github.com/apollographql/router/pull/5811), [PR #5771](https://github.com/apollographql/router/pull/5771) [PR #5860](https://github.com/apollographql/router/pull/5860))
+
+### Add warnings for invalid configuration of custom telemetry ([PR #5759](https://github.com/apollographql/router/issues/5759))
+
+The router now logs warnings when running with telemetry that may have invalid custom configurations.
+
+For example, you may customize telemetry using invalid conditions or inaccessible statuses:
+
+```yaml
+telemetry:
+  instrumentation:
+    events:
+      subgraph:
+        my.event:
+          message: "Auditing Router Event"
+          level: info
+          on: request
+          attributes:
+            subgraph.response.status: code
+              # Warning: should use selector for subgraph_name: true instead of comparing strings of subgraph_name and product
+          condition:
+            eq:
+            - subgraph_name
+            - product
+```
+
+Although the configuration is syntactically correct, its customization is invalid, and the router now outputs warnings for such invalid configurations.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5759
+
+### Add V8 heap usage metrics ([PR #5781](https://github.com/apollographql/router/pull/5781))
+
+The router supports new gauge metrics for tracking heap memory usage of the V8 Javascript engine:
+- `apollo.router.v8.heap.used`: heap memory used by V8, in bytes
+- `apollo.router.v8.heap.total`: total heap allocated by V8, in bytes
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/5781
+
+### Update Federation to v2.9.0 ([PR #5902](https://github.com/apollographql/router/pull/5902))
+
+This updates the router to Federation v2.9.0.
+
+By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/5902
 
 ### Helm: Support `maxSurge` and `maxUnavailable` for rolling updates ([Issue #5664](https://github.com/apollographql/router/issues/5664))
 
@@ -139,9 +151,9 @@ You can configure the format with the `format` option:
 ```yaml
 telemetry:
   exporters:
-    tracing: 
-      propagation: 
-        request: 
+    tracing:
+      propagation:
+        request:
           header_name: "my_header"
           # Must be in UUID form, with or without dashes
           format: uuid
@@ -152,16 +164,6 @@ Note that incoming requests must be some form of UUID, either with or without da
 To learn about supported formats, go to [`request` configuration reference](https://apollographql.com/docs/router/configuration/telemetry/exporters/tracing/overview#request-configuration-reference) docs.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/5803
-
-### General Availability (GA) of Demand Control ([PR #5868](https://github.com/apollographql/router/pull/5868))
-
-Demand control in the router is now a generally available (GA) feature.
-
-**GA compatibility update**: if you used demand control during its preview, to use it in GA you must update your configuration from `preview_demand_control` to `demand_control`.
-
-To learn more, go to [Demand Control](https://www.apollographql.com/docs/router/executing-operations/demand-control/) docs.
-
-By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/5868
 
 ### New `apollo.router.cache.storage.estimated_size` gauge ([PR #5770](https://github.com/apollographql/router/pull/5770))
 
@@ -317,8 +319,7 @@ Previously, if the in-memory cache wasn't mutated, the `apollo_router_cache_size
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/5770
 
-### fix(subgraph_service): when the subgraph connection is closed or in error, return a proper subgraph response ([PR #5859](https://github.com/apollographql/router/pull/5859))
-
+### Interrupted subgraph connections trigger error responses and subgraph service hook points ([PR #5859](https://github.com/apollographql/router/pull/5859))
 
 The router now returns a proper subgraph response, with an error if necessary, when a subgraph connection is closed or returns an error.
 
@@ -360,7 +361,7 @@ The router now always reports a short name in the `type` attribute for the `apol
 
 By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/5816
 
-### Enable progressive override with federation 2.7 and above ([PR #5754](https://github.com/apollographql/router/pull/5754))
+### Enable progressive override with Federation 2.7 and above ([PR #5754](https://github.com/apollographql/router/pull/5754))
 
 The progressive override feature is now available when using Federation v2.7 and above.
 
@@ -415,7 +416,7 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ## 📚 Documentation
 
-### Add sections on using @cost and @listSize to demand control docs ([PR #5839](https://github.com/apollographql/router/pull/5839))
+### Add sections on using `@cost` and `@listSize` to demand control docs ([PR #5839](https://github.com/apollographql/router/pull/5839))
 
 Updates the demand control documentation to include details on `@cost` and `@listSize` for more accurate cost estimation.
 
