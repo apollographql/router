@@ -943,7 +943,7 @@ async fn connection_failure_blocks_startup() {
 async fn query_planner_redis_update_query_fragments() {
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_query_fragments.router.yaml"),
-        "plan:0:v2.8.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:cda2b4e476fdce9c4c435627b26cedd177cfbe04ab335fc3e3d895c0d79d965e",
+        "plan:0:v2.8.5:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:78f3ccab3def369f4b809a0f8c8f6e90545eb08cd1efeb188ffc663b902c1f2d",
     )
     .await;
 }

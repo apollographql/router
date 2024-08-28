@@ -111,9 +111,9 @@ type Query
 
 type Review @join__type(graph: REVIEWS, key: "id") {
   author: User @join__field(graph: REVIEWS, provides: "username")
-  body: String @join__field(graph: REVIEWS)
+  body: 
   id: ID!
-  product: Product @join__field(graph: REVIEWS)
+  product:
 }
 
 type User
