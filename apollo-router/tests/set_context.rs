@@ -206,7 +206,10 @@ async fn test_set_context_with_null() {
     let response = run_single_request(
         QUERY,
         &[
-            ("Subgraph1", include_str!("fixtures/set_context/one_null_param.json")),
+            (
+                "Subgraph1",
+                include_str!("fixtures/set_context/one_null_param.json"),
+            ),
             ("Subgraph2", include_str!("fixtures/set_context/two.json")),
         ],
     )
@@ -259,7 +262,10 @@ async fn test_set_context_unrelated_fetch_failure() {
     let response = run_single_request(
         QUERY,
         &[
-            ("Subgraph1", include_str!("fixtures/set_context/one_fetch_failure.json")),
+            (
+                "Subgraph1",
+                include_str!("fixtures/set_context/one_fetch_failure.json"),
+            ),
             ("Subgraph2", include_str!("fixtures/set_context/two.json")),
         ],
     )
@@ -285,7 +291,10 @@ async fn test_set_context_dependent_fetch_failure() {
     let response = run_single_request(
         QUERY,
         &[
-            ("Subgraph1", include_str!("fixtures/set_context/one_dependent_fetch_failure.json")),
+            (
+                "Subgraph1",
+                include_str!("fixtures/set_context/one_dependent_fetch_failure.json"),
+            ),
             ("Subgraph2", include_str!("fixtures/set_context/two.json")),
         ],
     )
