@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use http::header;
 use http::header::CACHE_CONTROL;
+use multimap::MultiMap;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -26,12 +27,16 @@ use tracing::Level;
 use super::cache_control::CacheControl;
 use super::invalidation::Invalidation;
 use super::invalidation::InvalidationOrigin;
+use super::invalidation_endpoint::InvalidationEndpointConfig;
+use super::invalidation_endpoint::InvalidationService;
+use super::invalidation_endpoint::SubgraphInvalidationConfig;
 use super::metrics::CacheMetricContextKey;
 use super::metrics::CacheMetricsService;
 use crate::batching::BatchQuery;
 use crate::cache::redis::RedisCacheStorage;
 use crate::cache::redis::RedisKey;
 use crate::cache::redis::RedisValue;
+use crate::cache::storage::ValueType;
 use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::configuration::RedisCache;
 use crate::error::FetchError;
@@ -49,6 +54,8 @@ use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::TYPENAME;
 use crate::Context;
+use crate::Endpoint;
+use crate::ListenAddr;
 
 /// Change this key if you introduce a breaking change in entity caching algorithm to make sure it won't take the previous entries
 pub(crate) const ENTITY_CACHE_VERSION: &str = "1.0";
@@ -60,7 +67,8 @@ register_plugin!("apollo", "preview_entity_cache", EntityCache);
 
 #[derive(Clone)]
 pub(crate) struct EntityCache {
-    storage: Option<RedisCacheStorage>,
+    storage: Arc<Storage>,
+    endpoint_config: Option<Arc<InvalidationEndpointConfig>>,
     subgraphs: Arc<SubgraphConfiguration<Subgraph>>,
     entity_type: Option<String>,
     enabled: bool,
@@ -69,16 +77,30 @@ pub(crate) struct EntityCache {
     pub(crate) invalidation: Invalidation,
 }
 
+pub(crate) struct Storage {
+    all: Option<RedisCacheStorage>,
+    subgraphs: HashMap<String, RedisCacheStorage>,
+}
+
+impl Storage {
+    pub(crate) fn get(&self, subgraph: &str) -> Option<&RedisCacheStorage> {
+        self.subgraphs.get(subgraph).or(self.all.as_ref())
+    }
+}
+
 /// Configuration for entity caching
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) struct Config {
-    redis: RedisCache,
     /// Enable or disable the entity caching feature
     #[serde(default)]
     enabled: bool,
 
+    /// Configure invalidation per subgraph
     subgraph: SubgraphConfiguration<Subgraph>,
+
+    /// Global invalidation configuration
+    invalidation: Option<InvalidationEndpointConfig>,
 
     /// Entity caching evaluation metrics
     #[serde(default)]
@@ -86,17 +108,35 @@ pub(crate) struct Config {
 }
 
 /// Per subgraph configuration for entity caching
-#[derive(Clone, Debug, Default, JsonSchema, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[derive(Clone, Debug, JsonSchema, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 pub(crate) struct Subgraph {
+    /// Redis configuration
+    pub(crate) redis: Option<RedisCache>,
+
     /// expiration for all keys for this subgraph, unless overriden by the `Cache-Control` header in subgraph responses
     pub(crate) ttl: Option<Ttl>,
 
     /// activates caching for this subgraph, overrides the global configuration
-    pub(crate) enabled: Option<bool>,
+    pub(crate) enabled: bool,
 
     /// Context key used to separate cache sections per user
     pub(crate) private_id: Option<String>,
+
+    /// Invalidation configuration
+    pub(crate) invalidation: Option<SubgraphInvalidationConfig>,
+}
+
+impl Default for Subgraph {
+    fn default() -> Self {
+        Self {
+            redis: None,
+            enabled: true,
+            ttl: Default::default(),
+            private_id: Default::default(),
+            invalidation: Default::default(),
+        }
+    }
 }
 
 /// Per subgraph configuration for entity caching
@@ -147,26 +187,64 @@ impl Plugin for EntityCache {
             .query
             .as_ref()
             .map(|q| q.name.to_string());
-        let required_to_start = init.config.redis.required_to_start;
-        // we need to explicitely disable TTL reset because it is managed directly by this plugin
-        let mut redis_config = init.config.redis.clone();
-        redis_config.reset_ttl = false;
-        let storage = match RedisCacheStorage::new(redis_config).await {
-            Ok(storage) => Some(storage),
-            Err(e) => {
-                tracing::error!(
-                    cache = "entity",
-                    e,
-                    "could not open connection to Redis for caching",
-                );
-                if required_to_start {
-                    return Err(e);
-                }
-                None
-            }
-        };
 
-        if init.config.redis.ttl.is_none()
+        let mut all = None;
+
+        if let Some(redis) = &init.config.subgraph.all.redis {
+            let mut redis_config = redis.clone();
+            let required_to_start = redis_config.required_to_start;
+            // we need to explicitely disable TTL reset because it is managed directly by this plugin
+            redis_config.reset_ttl = false;
+            all = match RedisCacheStorage::new(redis_config).await {
+                Ok(storage) => Some(storage),
+                Err(e) => {
+                    tracing::error!(
+                        cache = "entity",
+                        e,
+                        "could not open connection to Redis for caching",
+                    );
+                    if required_to_start {
+                        return Err(e);
+                    }
+                    None
+                }
+            };
+        }
+        let mut subgraph_storages = HashMap::new();
+        for (subgraph, config) in &init.config.subgraph.subgraphs {
+            if let Some(redis) = &config.redis {
+                let required_to_start = redis.required_to_start;
+                // we need to explicitely disable TTL reset because it is managed directly by this plugin
+                let mut redis_config = redis.clone();
+                redis_config.reset_ttl = false;
+                let storage = match RedisCacheStorage::new(redis_config).await {
+                    Ok(storage) => Some(storage),
+                    Err(e) => {
+                        tracing::error!(
+                            cache = "entity",
+                            e,
+                            "could not open connection to Redis for caching",
+                        );
+                        if required_to_start {
+                            return Err(e);
+                        }
+                        None
+                    }
+                };
+                if let Some(storage) = storage {
+                    subgraph_storages.insert(subgraph.clone(), storage);
+                }
+            }
+        }
+
+        if init
+            .config
+            .subgraph
+            .all
+            .redis
+            .as_ref()
+            .map(|r| r.ttl.is_none())
+            .unwrap_or(false)
             && init
                 .config
                 .subgraph
@@ -179,12 +257,34 @@ impl Plugin for EntityCache {
                 .into());
         }
 
+        if init
+            .config
+            .subgraph
+            .all
+            .invalidation
+            .as_ref()
+            .map(|i| i.shared_key.is_empty())
+            .unwrap_or_default()
+        {
+            return Err(
+                "you must set a default shared_key invalidation for all subgraphs"
+                    .to_string()
+                    .into(),
+            );
+        }
+
+        let storage = Arc::new(Storage {
+            all,
+            subgraphs: subgraph_storages,
+        });
+
         let invalidation = Invalidation::new(storage.clone()).await?;
 
         Ok(Self {
             storage,
             entity_type,
             enabled: init.config.enabled,
+            endpoint_config: init.config.invalidation.clone().map(Arc::new),
             subgraphs: Arc::new(init.config.subgraph),
             metrics: init.config.metrics,
             private_queries: Arc::new(RwLock::new(HashSet::new())),
@@ -214,8 +314,8 @@ impl Plugin for EntityCache {
         name: &str,
         mut service: subgraph::BoxService,
     ) -> subgraph::BoxService {
-        let storage = match self.storage.clone() {
-            Some(storage) => storage,
+        let storage = match self.storage.get(name) {
+            Some(storage) => storage.clone(),
             None => {
                 return ServiceBuilder::new()
                     .map_response(move |response: subgraph::Response| {
@@ -240,13 +340,8 @@ impl Plugin for EntityCache {
             .clone()
             .map(|t| t.0)
             .or_else(|| storage.ttl());
-        let subgraph_enabled = self.enabled
-            && self
-                .subgraphs
-                .get(name)
-                .enabled
-                // if the top level `enabled` is true but there is no other configuration, caching is enabled for this plugin
-                .unwrap_or(true);
+        let subgraph_enabled =
+            self.enabled && (self.subgraphs.all.enabled || self.subgraphs.get(name).enabled);
         let private_id = self.subgraphs.get(name).private_id.clone();
 
         let name = name.to_string();
@@ -300,6 +395,40 @@ impl Plugin for EntityCache {
                 .boxed()
         }
     }
+
+    fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
+        let mut map = MultiMap::new();
+        if self.enabled
+            && self
+                .subgraphs
+                .all
+                .invalidation
+                .as_ref()
+                .map(|i| i.enabled)
+                .unwrap_or_default()
+        {
+            match &self.endpoint_config {
+                Some(endpoint_config) => {
+                    let endpoint = Endpoint::from_router_service(
+                        endpoint_config.path.clone(),
+                        InvalidationService::new(self.subgraphs.clone(), self.invalidation.clone())
+                            .boxed(),
+                    );
+                    tracing::info!(
+                        "Entity caching invalidation endpoint listening on: {}{}",
+                        endpoint_config.listen,
+                        endpoint_config.path
+                    );
+                    map.insert(endpoint_config.listen.clone(), endpoint);
+                }
+                None => {
+                    tracing::warn!("Cannot start entity caching invalidation endpoint because the listen address and endpoint is not configured");
+                }
+            }
+        }
+
+        map
+    }
 }
 
 impl EntityCache {
@@ -311,9 +440,18 @@ impl EntityCache {
     where
         Self: Sized,
     {
-        let invalidation = Invalidation::new(Some(storage.clone())).await?;
+        use std::net::IpAddr;
+        use std::net::Ipv4Addr;
+        use std::net::SocketAddr;
+
+        let storage = Arc::new(Storage {
+            all: Some(storage),
+            subgraphs: HashMap::new(),
+        });
+        let invalidation = Invalidation::new(storage.clone()).await?;
+
         Ok(Self {
-            storage: Some(storage),
+            storage,
             entity_type: None,
             enabled: true,
             subgraphs: Arc::new(SubgraphConfiguration {
@@ -322,6 +460,13 @@ impl EntityCache {
             }),
             metrics: Metrics::default(),
             private_queries: Default::default(),
+            endpoint_config: Some(Arc::new(InvalidationEndpointConfig {
+                path: String::from("/invalidation"),
+                listen: ListenAddr::SocketAddr(SocketAddr::new(
+                    IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                    4000,
+                )),
+            })),
             invalidation,
         })
     }
@@ -446,11 +591,13 @@ impl InnerCacheService {
                             // we did not know in advance that this was a query with a private scope, so we update the cache key
                             if !is_known_private {
                                 self.private_queries.write().await.insert(query.to_string());
+
+                                if let Some(s) = private_id.as_ref() {
+                                    root_cache_key = format!("{root_cache_key}:{s}");
+                                }
                             }
 
-                            if let Some(s) = private_id.as_ref() {
-                                root_cache_key = format!("{root_cache_key}:{s}");
-                            } else {
+                            if private_id.is_none() {
                                 // the response has a private scope but we don't have a way to differentiate users, so we do not store the response in cache
                                 return Ok(response);
                             }
@@ -512,8 +659,48 @@ impl InnerCacheService {
             .await?
             {
                 ControlFlow::Break(response) => Ok(response),
-                ControlFlow::Continue((request, cache_result)) => {
-                    let mut response = self.service.call(request).await?;
+                ControlFlow::Continue((request, mut cache_result)) => {
+                    let context = request.context.clone();
+                    let mut response = match self.service.call(request).await {
+                        Ok(response) => response,
+                        Err(e) => {
+                            let e = match e.downcast::<FetchError>() {
+                                Ok(inner) => match *inner {
+                                    FetchError::SubrequestHttpError { .. } => *inner,
+                                    _ => FetchError::SubrequestHttpError {
+                                        status_code: None,
+                                        service: self.name.to_string(),
+                                        reason: inner.to_string(),
+                                    },
+                                },
+                                Err(e) => FetchError::SubrequestHttpError {
+                                    status_code: None,
+                                    service: self.name.to_string(),
+                                    reason: e.to_string(),
+                                },
+                            };
+
+                            let graphql_error = e.to_graphql_error(None);
+
+                            let (new_entities, new_errors) = assemble_response_from_errors(
+                                &[graphql_error],
+                                &mut cache_result.0,
+                            );
+
+                            let mut data = Object::default();
+                            data.insert(ENTITIES, new_entities.into());
+
+                            let mut response = subgraph::Response::builder()
+                                .context(context)
+                                .data(Value::Object(data))
+                                .errors(new_errors)
+                                .extensions(Object::new())
+                                .build();
+                            CacheControl::no_store().to_headers(response.response.headers_mut())?;
+
+                            return Ok(response);
+                        }
+                    };
 
                     let mut cache_control =
                         if response.response.headers().contains_key(CACHE_CONTROL) {
@@ -740,6 +927,12 @@ struct CacheEntry {
     data: Value,
 }
 
+impl ValueType for CacheEntry {
+    fn estimated_size(&self) -> Option<usize> {
+        None
+    }
+}
+
 async fn cache_store_root_from_response(
     cache: RedisCacheStorage,
     subgraph_ttl: Option<Duration>,
@@ -820,6 +1013,15 @@ async fn cache_store_entities_from_response(
             .and_then(|v| v.as_object_mut())
             .map(|o| o.insert(ENTITIES, new_entities.into()));
         response.response.body_mut().data = data;
+        response.response.body_mut().errors = new_errors;
+    } else {
+        let (new_entities, new_errors) =
+            assemble_response_from_errors(&response.response.body().errors, &mut result_from_cache);
+
+        let mut data = Object::default();
+        data.insert(ENTITIES, new_entities.into());
+
+        response.response.body_mut().data = Some(Value::Object(data));
         response.response.body_mut().errors = new_errors;
     }
 
@@ -1173,4 +1375,32 @@ async fn insert_entities_in_result(
     }
 
     Ok((new_entities, new_errors))
+}
+
+fn assemble_response_from_errors(
+    graphql_errors: &[Error],
+    result: &mut Vec<IntermediateResult>,
+) -> (Vec<Value>, Vec<Error>) {
+    let mut new_entities = Vec::new();
+    let mut new_errors = Vec::new();
+
+    for (new_entity_idx, IntermediateResult { cache_entry, .. }) in result.drain(..).enumerate() {
+        match cache_entry {
+            Some(v) => {
+                new_entities.push(v.data);
+            }
+            None => {
+                new_entities.push(Value::Null);
+
+                for mut error in graphql_errors.iter().cloned() {
+                    error.path = Some(Path(vec![
+                        PathElement::Key(ENTITIES.to_string(), None),
+                        PathElement::Index(new_entity_idx),
+                    ]));
+                    new_errors.push(error);
+                }
+            }
+        }
+    }
+    (new_entities, new_errors)
 }

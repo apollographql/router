@@ -1,6 +1,7 @@
 FROM debian:bookworm-slim AS downloader
 ARG ROUTER_RELEASE=latest
 ARG ARTIFACT_URL=
+ARG CIRCLE_TOKEN=
 
 # Install curl
 RUN \
@@ -12,15 +13,16 @@ WORKDIR /dist
 
 # Run the Router downloader which puts Router into current working directory
 RUN if [ -z "${ARTIFACT_URL}"]; then \
-    curl -sSL https://router.apollo.dev/download/nix/${ROUTER_RELEASE}/ | sh; \
+    curl -sSL "https://router.apollo.dev/download/nix/${ROUTER_RELEASE}"/ | sh; \
   else \
     cd /; \
-    curl -sSL -o - ${ARTIFACT_URL} | tar -xzf -; \
+    curl -sSL -H "Circle-Token: ${CIRCLE_TOKEN}" -o - "${ARTIFACT_URL}" | tar -xzf -; \
     cd -; \
   fi
 
 FROM debian:bookworm-slim AS distro
 ARG DEBUG_IMAGE=false
+ARG REPO_URL=https://github.com/apollographql/router
 
 # Add a user to run the router as
 RUN useradd -m router
@@ -52,8 +54,8 @@ RUN mkdir config schema
 # Copy configuration for docker image
 COPY dockerfiles/router.yaml config
 
-LABEL org.opencontainers.image.authors="Apollo Graph, Inc. https://github.com/apollographql/router"
-LABEL org.opencontainers.image.source="https://github.com/apollographql/router"
+LABEL org.opencontainers.image.authors="Apollo Graph, Inc. ${REPO_URL}"
+LABEL org.opencontainers.image.source="${REPO_URL}"
 
 ENV APOLLO_ROUTER_CONFIG_PATH="/dist/config/router.yaml"
 
