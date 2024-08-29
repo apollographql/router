@@ -4,6 +4,12 @@ subtitle: Configure router caching for query plans and automatic persisted queri
 description: Configure in-memory caching for improved performance in Apollo GraphOS Router or Apollo Router Core. Configure query plans and automatic persisted queries caching.
 ---
 
+<SummitCallout
+  topic="graph performance"
+  workshopName="Better, faster, stronger: Advanced configurations to boost your router performance"
+  URL="https://reg.summit.graphql.com/flow/apollo/summit24/AttendeePortal/page/catalog/session/1712947098784001VPCx"
+/>
+
 Both GraphOS Router and Apollo Router Core use an in-memory LRU cache to store the following data:
 
 - [Generated query plans](#caching-query-plans)
@@ -36,18 +42,6 @@ supergraph:
     cache:
       in_memory:
         limit: 512 # This is the default value.
-```
-
-On schema reloads, the cache will be reset, and queries will need to go through query planning again. To avoid latencies right after the reload, you can configure the router to pregenerate query plans for the most used queries before switching to the new schema:
-
-```yaml title="router.yaml"
-supergraph:
-  query_planning:
-    # Pre-plan the 100 most used operations when the supergraph changes.  (Default is "0", disabled.)
-    warmed_up_queries: 100
-    cache:
-      in_memory:
-        limit: 512
 ```
 
 ### Cache warm-up

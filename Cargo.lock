@@ -178,7 +178,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-federation"
-version = "1.52.0"
+version = "1.53.0"
 dependencies = [
  "apollo-compiler",
  "derive_more",
@@ -229,7 +229,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "1.52.0"
+version = "1.53.0"
 dependencies = [
  "access-json",
  "ahash",
@@ -398,7 +398,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "1.52.0"
+version = "1.53.0"
 dependencies = [
  "apollo-parser",
  "apollo-router",
@@ -414,7 +414,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "1.52.0"
+version = "1.53.0"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
@@ -5623,9 +5623,9 @@ dependencies = [
 
 [[package]]
 name = "router-bridge"
-version = "0.5.30+v2.8.3"
+version = "0.6.0+v2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b2b67ccfc13842df12e473cbb93fe306a8dc3d120cfa2be57e3537c71bf0e63"
+checksum = "96ef4910ade6753863c8437a76e88e236ab91688dcfe739d73417ae7848f3b92"
 dependencies = [
  "anyhow",
  "async-channel 1.9.0",

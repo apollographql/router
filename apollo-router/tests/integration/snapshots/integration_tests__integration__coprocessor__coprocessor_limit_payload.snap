@@ -1,0 +1,5 @@
+---
+source: apollo-router/tests/integration/coprocessor.rs
+expression: response.text().await?
+---
+"{\"errors\":[{\"message\":\"Request body payload too large\",\"extensions\":{\"details\":\"Request body payload too large\",\"code\":\"INVALID_GRAPHQL_REQUEST\"}}]}"
