@@ -280,6 +280,8 @@ impl<'a> QueryHashVisitor<'a> {
                 "^DIRECTIVE_LIST_END".hash(self);
 
                 self.hash_join_type(&o.name, &o.directives)?;
+                "^OBJECT_END".hash(self);
+
                 //FIXME: hash implemented interfaces?
             }
             ExtendedType::Interface(i) => {
@@ -292,7 +294,29 @@ impl<'a> QueryHashVisitor<'a> {
                 "^DIRECTIVE_LIST_END".hash(self);
 
                 self.hash_join_type(&i.name, &i.directives)?;
-                //FIXME: hash implemented interfaces?
+
+                "^IMPLEMENTED_INTERFACES_LIST".hash(self);
+                for implementor in &i.implements_interfaces {
+                    self.hash_type_by_name(&implementor.name)?;
+                }
+                "^IMPLEMENTED_INTERFACES_LIST_END".hash(self);
+
+                if let Some(implementers) = self.schema().implementers_map().get(&i.name) {
+                    "^IMPLEMENTER_OBJECT_LIST".hash(self);
+
+                    for object in &implementers.objects {
+                        self.hash_type_by_name(&object)?;
+                    }
+                    "^IMPLEMENTER_OBJECT_LIST_END".hash(self);
+
+                    "^IMPLEMENTER_INTERFACE_LIST".hash(self);
+                    for interface in &implementers.interfaces {
+                        self.hash_type_by_name(&interface)?;
+                    }
+                    "^IMPLEMENTER_INTERFACE_LIST_END".hash(self);
+                }
+
+                "^INTERFACE_END".hash(self);
             }
             ExtendedType::Union(u) => {
                 "^UNION".hash(self);
@@ -2192,6 +2216,67 @@ mod tests {
         assert_ne!(
             hash(schema, query_one).from_visitor,
             hash(schema, query_two).from_visitor
+        );
+    }
+
+    #[test]
+    fn it_changes_on_implementors_list_changes() {
+        let schema_one: &str = r#"
+        interface SomeInterface {
+          value: String
+        }
+
+        type Foo implements SomeInterface {
+          value: String
+        }
+
+        type Bar implements SomeInterface {
+          value: String
+        }
+
+        union FooOrBar = Foo | Bar
+
+        type Query {
+          fooOrBar: FooOrBar
+        }
+        "#;
+        let schema_two: &str = r#"
+        interface SomeInterface {
+          value: String
+        }
+
+        type Foo {
+          value: String # <= This field shouldn't be a part of query plan anymore
+        }
+
+        type Bar implements SomeInterface {
+          value: String
+        }
+
+        union FooOrBar = Foo | Bar
+
+        type Query {
+          fooOrBar: FooOrBar
+        }
+        "#;
+
+        let query = r#"
+        {
+          fooOrBar {
+            ... on SomeInterface {
+              value
+            }
+          } 
+        }
+        "#;
+
+        assert_ne!(
+            hash(schema_one, query).from_hash_query,
+            hash(schema_two, query).from_hash_query
+        );
+        assert_ne!(
+            hash(schema_one, query).from_visitor,
+            hash(schema_two, query).from_visitor
         );
     }
 }
