@@ -55,6 +55,7 @@ use crate::sources::connect::spec::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
 use crate::sources::connect::spec::schema::SOURCE_NAME_ARGUMENT_NAME;
 use crate::sources::connect::ConnectSpecDefinition;
 use crate::subgraph::spec::CONTEXT_DIRECTIVE_NAME;
+use crate::subgraph::spec::EXTERNAL_DIRECTIVE_NAME;
 use crate::subgraph::spec::FROM_CONTEXT_DIRECTIVE_NAME;
 use crate::subgraph::spec::INTF_OBJECT_DIRECTIVE_NAME;
 
@@ -67,6 +68,11 @@ pub fn validate(schema: Schema) -> Vec<Message> {
     let Some((link, link_directive)) = Link::for_identity(&schema, &connect_identity) else {
         return Vec::new(); // There are no connectors-related directives to validate
     };
+
+    let federation = Link::for_identity(&schema, &Identity::federation_identity());
+    let external_directive_name = federation
+        .map(|(link, _)| link.directive_name_in_schema(&EXTERNAL_DIRECTIVE_NAME))
+        .unwrap_or(EXTERNAL_DIRECTIVE_NAME.clone());
 
     let mut messages = check_conflicting_directives(&schema);
 
@@ -126,6 +132,7 @@ pub fn validate(schema: Schema) -> Vec<Message> {
         &seen_fields,
         source_map,
         &connect_directive_name,
+        &external_directive_name,
     ));
 
     if source_directive_name == DEFAULT_SOURCE_DIRECTIVE_NAME
@@ -150,6 +157,7 @@ fn check_seen_fields(
     seen_fields: &IndexSet<(Name, Name)>,
     source_map: &SourceMap,
     connect_directive_name: &Name,
+    external_directive_name: &Name,
 ) -> Vec<Message> {
     let all_fields: IndexSet<_> = schema
         .types
@@ -167,7 +175,18 @@ fn check_seen_fields(
             }
             let coord = |(name, _): (&Name, _)| (extended_type.name().clone(), name.clone());
             match extended_type {
-                ExtendedType::Object(object) => Some(object.fields.iter().map(coord)),
+                ExtendedType::Object(object) => Some(
+                    // ignore @external fields
+                    object
+                        .fields
+                        .iter()
+                        .filter(|(_, def)| {
+                            !def.directives
+                                .iter()
+                                .any(|dir| &dir.name == external_directive_name)
+                        })
+                        .map(coord),
+                ),
                 ExtendedType::Interface(_) => None, // TODO: when interfaces are supported (probably should include fields from implementing/member types as well)
                 _ => None,
             }

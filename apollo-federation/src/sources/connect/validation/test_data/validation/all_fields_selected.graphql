@@ -1,4 +1,8 @@
 extend schema
+  @link(
+    url: "https://specs.apollo.dev/federation/v2.10"
+    import: ["@key", "@external", "@requires"]
+  )
   @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect"])
 
 type Query {
@@ -14,10 +18,19 @@ type Query {
     )
 }
 
-type T {
+type T @key(fields: "id") {
   id: ID!
   unselected: String!
   child: C
+  external: External @external
+  computed: String!
+    @requires(fields: "external")
+    @connect(
+      http: {
+        GET: "http://test/computed?id={$this.id}&external={$this.external}"
+      }
+      selection: "$"
+    )
 }
 
 type C {
@@ -27,4 +40,8 @@ type C {
 
 type Unused {
   unselected: ID!
+}
+
+type External {
+  id: ID! @external
 }
