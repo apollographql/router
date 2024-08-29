@@ -1,0 +1,30 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect"])
+
+type Query {
+  ts: [T]
+    @connect(
+      http: { GET: "http://test/ts" }
+      selection: """
+      id
+      child {
+        id
+      }
+      """
+    )
+}
+
+type T {
+  id: ID!
+  unselected: String!
+  child: C
+}
+
+type C {
+  id: ID!
+  unselected: String
+}
+
+type Unused {
+  unselected: ID!
+}

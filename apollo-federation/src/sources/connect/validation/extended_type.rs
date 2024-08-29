@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use apollo_compiler::ast::FieldDefinition;
@@ -39,6 +40,7 @@ pub(super) fn validate_extended_type(
     source_directive_name: &Name,
     all_source_names: &[SourceName],
     source_map: &Arc<IndexMap<FileId, Arc<SourceFile>>>,
+    seen_fields: &mut HashSet<String>,
 ) -> Vec<Message> {
     match extended_type {
         ExtendedType::Object(object) => validate_object_fields(
@@ -47,6 +49,7 @@ pub(super) fn validate_extended_type(
             connect_directive_name,
             source_directive_name,
             all_source_names,
+            seen_fields,
         ),
         ExtendedType::Union(union_type) => vec![validate_abstract_type(
             SourceSpan::recompose(union_type.location(), union_type.name.location()),
@@ -77,7 +80,12 @@ fn validate_object_fields(
     connect_directive_name: &Name,
     source_directive_name: &Name,
     source_names: &[SourceName],
+    seen_fields: &mut HashSet<String>,
 ) -> Vec<Message> {
+    if object.is_built_in() {
+        return Vec::new();
+    }
+
     let source_map = &schema.sources;
     let is_subscription = schema
         .schema_definition
@@ -123,6 +131,7 @@ fn validate_object_fields(
                 connect_directive_name,
                 source_directive_name,
                 schema,
+                seen_fields,
             )
         })
         .collect()
@@ -136,6 +145,7 @@ fn validate_field(
     connect_directive_name: &Name,
     source_directive_name: &Name,
     schema: &Schema,
+    seen_fields: &mut HashSet<String>,
 ) -> Vec<Message> {
     let source_map = &schema.sources;
     let mut errors = Vec::new();
@@ -165,6 +175,8 @@ fn validate_field(
         return errors;
     };
 
+    seen_fields.insert(format!("{}.{}", object.name, field.name));
+
     // direct recursion isn't allowed, like a connector on User.friends: [User]
     if matches!(category, ObjectCategory::Other) && &object.name == field.ty.inner_named_type() {
         errors.push(Message {
@@ -179,7 +191,13 @@ fn validate_field(
                 });
     }
 
-    errors.extend(validate_selection(field, connect_directive, object, schema));
+    errors.extend(validate_selection(
+        field,
+        connect_directive,
+        object,
+        schema,
+        seen_fields,
+    ));
 
     errors.extend(validate_entity_arg(
         field,

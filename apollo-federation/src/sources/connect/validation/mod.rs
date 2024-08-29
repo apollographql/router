@@ -23,14 +23,17 @@ mod selection;
 mod source_name;
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::ops::Range;
 
+use apollo_compiler::ast::OperationType;
 use apollo_compiler::ast::Value;
 use apollo_compiler::name;
 use apollo_compiler::parser::LineColumn;
 use apollo_compiler::parser::SourceMap;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
+use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
@@ -103,6 +106,8 @@ pub fn validate(schema: Schema) -> Vec<Message> {
         }
     }
 
+    let mut seen_fields = HashSet::new();
+
     let connect_errors = schema.types.values().flat_map(|extended_type| {
         validate_extended_type(
             extended_type,
@@ -111,9 +116,49 @@ pub fn validate(schema: Schema) -> Vec<Message> {
             &source_directive_name,
             &all_source_names,
             source_map,
+            &mut seen_fields,
         )
     });
     messages.extend(connect_errors);
+
+    let all_fields: HashSet<_> = schema
+        .types
+        .values()
+        .filter_map(|extended_type| {
+            if extended_type.is_built_in() {
+                return None;
+            }
+            // ignore root fields, we have different validations for them
+            if schema.root_operation(OperationType::Query) == Some(extended_type.name())
+                || schema.root_operation(OperationType::Mutation) == Some(extended_type.name())
+                || schema.root_operation(OperationType::Subscription) == Some(extended_type.name())
+            {
+                return None;
+            }
+            let coord = |(name, _)| format!("{}.{}", extended_type.name(), name);
+            match extended_type {
+                ExtendedType::Object(object) => Some(object.fields.iter().map(coord)),
+                ExtendedType::Interface(_) => None, // TODO: when interfaces are supported
+                // ExtendedType::Interface(interface) => Some(interface.fields.iter().map(coord)),
+                _ => None,
+            }
+        })
+        .flatten()
+        .collect();
+
+    messages.extend((&all_fields - &seen_fields).iter().map(|field| {
+        let parts = field.splitn(2, '.').collect_vec();
+        let field_def = schema.type_field(parts[0], parts[1]).expect("field {field} exists");
+        Message {
+            code: Code::UnresolvedField,
+            message: format!(
+                "No connector resolves `{field}`. Make sure it appears in a `selection:` for a `{connect_directive_name}` directive.",
+                field = field,
+                connect_directive_name = connect_directive_name
+            ),
+            locations: field_def.line_column_range(source_map).into_iter().collect(),
+        }
+    }));
 
     if source_directive_name == DEFAULT_SOURCE_DIRECTIVE_NAME
         && messages
@@ -350,6 +395,8 @@ pub enum Code {
     MissingHeaderSource,
     /// Fields that return an object type must use a group JSONSelection `{}`
     GroupSelectionRequiredForObject,
+    /// Fields in the schema that aren't resolved by a connector
+    UnresolvedField,
 }
 
 impl Code {
