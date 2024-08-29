@@ -1,8 +1,8 @@
-use std::collections::HashSet;
 use std::iter::once;
 use std::ops::Range;
 
 use apollo_compiler::ast::FieldDefinition;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::parser::LineColumn;
 use apollo_compiler::parser::SourceMap;
 use apollo_compiler::schema::Component;
@@ -32,7 +32,7 @@ pub(super) fn validate_selection(
     connect_directive: &Node<Directive>,
     parent_type: &Node<ObjectType>,
     schema: &Schema,
-    seen_fields: &mut HashSet<String>,
+    seen_fields: &mut IndexSet<(Name, Name)>,
 ) -> Option<Message> {
     let (selection_value, json_selection) =
         match get_json_selection(connect_directive, parent_type, &field.name, &schema.sources) {
@@ -180,7 +180,7 @@ struct SelectionValidator<'schema, 'a> {
     path: Vec<PathPart<'schema>>,
     selection_location: Option<Range<LineColumn>>,
     selection_coordinate: String,
-    seen_fields: &'a mut HashSet<String>,
+    seen_fields: &'a mut IndexSet<(Name, Name)>,
 }
 
 impl SelectionValidator<'_, '_> {
@@ -325,9 +325,9 @@ impl<'schema> FieldVisitor<Field<'schema>> for SelectionValidator<'schema, '_> {
         })?;
         let is_group = field.selection.next_subselection().is_some();
 
-        self.seen_fields.insert(format!(
-            "{parent_type}.{field_name}",
-            parent_type = self.last_field().ty().name
+        self.seen_fields.insert((
+            self.last_field().ty().name.clone(),
+            field.definition.name.clone(),
         ));
 
         match (field_type, is_group) {

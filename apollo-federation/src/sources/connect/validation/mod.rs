@@ -23,11 +23,11 @@ mod selection;
 mod source_name;
 
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::ops::Range;
 
 use apollo_compiler::ast::OperationType;
 use apollo_compiler::ast::Value;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
 use apollo_compiler::parser::LineColumn;
 use apollo_compiler::parser::SourceMap;
@@ -106,7 +106,7 @@ pub fn validate(schema: Schema) -> Vec<Message> {
         }
     }
 
-    let mut seen_fields = HashSet::new();
+    let mut seen_fields = IndexSet::default();
 
     let connect_errors = schema.types.values().flat_map(|extended_type| {
         validate_extended_type(
@@ -121,44 +121,12 @@ pub fn validate(schema: Schema) -> Vec<Message> {
     });
     messages.extend(connect_errors);
 
-    let all_fields: HashSet<_> = schema
-        .types
-        .values()
-        .filter_map(|extended_type| {
-            if extended_type.is_built_in() {
-                return None;
-            }
-            // ignore root fields, we have different validations for them
-            if schema.root_operation(OperationType::Query) == Some(extended_type.name())
-                || schema.root_operation(OperationType::Mutation) == Some(extended_type.name())
-                || schema.root_operation(OperationType::Subscription) == Some(extended_type.name())
-            {
-                return None;
-            }
-            let coord = |(name, _)| format!("{}.{}", extended_type.name(), name);
-            match extended_type {
-                ExtendedType::Object(object) => Some(object.fields.iter().map(coord)),
-                ExtendedType::Interface(_) => None, // TODO: when interfaces are supported
-                // ExtendedType::Interface(interface) => Some(interface.fields.iter().map(coord)),
-                _ => None,
-            }
-        })
-        .flatten()
-        .collect();
-
-    messages.extend((&all_fields - &seen_fields).iter().map(|field| {
-        let parts = field.splitn(2, '.').collect_vec();
-        let field_def = schema.type_field(parts[0], parts[1]).expect("field {field} exists");
-        Message {
-            code: Code::UnresolvedField,
-            message: format!(
-                "No connector resolves `{field}`. Make sure it appears in a `selection:` for a `{connect_directive_name}` directive.",
-                field = field,
-                connect_directive_name = connect_directive_name
-            ),
-            locations: field_def.line_column_range(source_map).into_iter().collect(),
-        }
-    }));
+    messages.extend(check_seen_fields(
+        &schema,
+        &seen_fields,
+        source_map,
+        &connect_directive_name,
+    ));
 
     if source_directive_name == DEFAULT_SOURCE_DIRECTIVE_NAME
         && messages
@@ -174,6 +142,58 @@ pub fn validate(schema: Schema) -> Vec<Message> {
         });
     }
     messages
+}
+
+/// Check that all fields that are selected in the schema are resolved by a connector.
+fn check_seen_fields(
+    schema: &Schema,
+    seen_fields: &IndexSet<(Name, Name)>,
+    source_map: &SourceMap,
+    connect_directive_name: &Name,
+) -> Vec<Message> {
+    let all_fields: IndexSet<_> = schema
+        .types
+        .values()
+        .filter_map(|extended_type| {
+            if extended_type.is_built_in() {
+                return None;
+            }
+            // ignore root fields, we have different validations for them
+            if schema.root_operation(OperationType::Query) == Some(extended_type.name())
+                || schema.root_operation(OperationType::Mutation) == Some(extended_type.name())
+                || schema.root_operation(OperationType::Subscription) == Some(extended_type.name())
+            {
+                return None;
+            }
+            let coord = |(name, _): (&Name, _)| (extended_type.name().clone(), name.clone());
+            match extended_type {
+                ExtendedType::Object(object) => Some(object.fields.iter().map(coord)),
+                ExtendedType::Interface(_) => None, // TODO: when interfaces are supported (probably should include fields from implementing/member types as well)
+                _ => None,
+            }
+        })
+        .flatten()
+        .collect();
+
+    (&all_fields - seen_fields).iter().map(move |(parent_type, field_name)| {
+        let Ok(field_def) = schema.type_field(parent_type, field_name) else {
+            // This should never happen, but if it does, we don't want to panic
+            return Message {
+                code: Code::GraphQLError,
+                message: format!(
+                    "Field `{parent_type}.{field_name}` is missing from the schema.",
+                ),
+                locations: Vec::new(),
+            };
+        };
+        Message {
+            code: Code::UnresolvedField,
+            message: format!(
+                "No connector resolves `{parent_type}.{field_name}`. Make sure it appears in a `selection:` for a `{connect_directive_name}` directive.",
+            ),
+            locations: field_def.line_column_range(source_map).into_iter().collect(),
+        }
+    }).collect()
 }
 
 fn check_conflicting_directives(schema: &Schema) -> Vec<Message> {

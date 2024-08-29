@@ -1,8 +1,8 @@
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::parser::FileId;
 use apollo_compiler::parser::SourceFile;
 use apollo_compiler::parser::SourceMap;
@@ -40,7 +40,7 @@ pub(super) fn validate_extended_type(
     source_directive_name: &Name,
     all_source_names: &[SourceName],
     source_map: &Arc<IndexMap<FileId, Arc<SourceFile>>>,
-    seen_fields: &mut HashSet<String>,
+    seen_fields: &mut IndexSet<(Name, Name)>,
 ) -> Vec<Message> {
     match extended_type {
         ExtendedType::Object(object) => validate_object_fields(
@@ -80,7 +80,7 @@ fn validate_object_fields(
     connect_directive_name: &Name,
     source_directive_name: &Name,
     source_names: &[SourceName],
-    seen_fields: &mut HashSet<String>,
+    seen_fields: &mut IndexSet<(Name, Name)>,
 ) -> Vec<Message> {
     if object.is_built_in() {
         return Vec::new();
@@ -137,6 +137,7 @@ fn validate_object_fields(
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn validate_field(
     field: &Component<FieldDefinition>,
     category: ObjectCategory,
@@ -145,7 +146,7 @@ fn validate_field(
     connect_directive_name: &Name,
     source_directive_name: &Name,
     schema: &Schema,
-    seen_fields: &mut HashSet<String>,
+    seen_fields: &mut IndexSet<(Name, Name)>,
 ) -> Vec<Message> {
     let source_map = &schema.sources;
     let mut errors = Vec::new();
@@ -175,7 +176,7 @@ fn validate_field(
         return errors;
     };
 
-    seen_fields.insert(format!("{}.{}", object.name, field.name));
+    seen_fields.insert((object.name.clone(), field.name.clone()));
 
     // direct recursion isn't allowed, like a connector on User.friends: [User]
     if matches!(category, ObjectCategory::Other) && &object.name == field.ty.inner_named_type() {
