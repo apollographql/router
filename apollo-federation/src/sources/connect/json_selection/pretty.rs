@@ -8,6 +8,7 @@
 use itertools::Itertools;
 
 use super::lit_expr::LitExpr;
+use super::location::Parsed;
 use crate::sources::connect::json_selection::JSONSelection;
 use crate::sources::connect::json_selection::MethodArgs;
 use crate::sources::connect::json_selection::NamedSelection;
@@ -47,14 +48,20 @@ fn indent_chars(indent: usize) -> String {
 impl PrettyPrintable for JSONSelection {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
         match self {
-            // Top-level fields should not be wrapped in {}, so we manually unroll here
             JSONSelection::Named(named) => named.print_subselections(indentation),
             JSONSelection::Path(path) => path.pretty_print_with_indentation(inline, indentation),
         }
     }
 }
 
-impl PrettyPrintable for SubSelection {
+impl PrettyPrintable for Parsed<JSONSelection> {
+    fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
+        self.node()
+            .pretty_print_with_indentation(inline, indentation)
+    }
+}
+
+impl PrettyPrintable for Parsed<SubSelection> {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
         let mut result = String::new();
         let indent = indent_chars(indentation);
@@ -113,7 +120,14 @@ impl PrettyPrintable for PathSelection {
     }
 }
 
-impl PrettyPrintable for PathList {
+impl PrettyPrintable for Parsed<PathSelection> {
+    fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
+        self.node()
+            .pretty_print_with_indentation(inline, indentation)
+    }
+}
+
+impl PrettyPrintable for Parsed<PathList> {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
         let mut result = String::new();
 
@@ -121,18 +135,18 @@ impl PrettyPrintable for PathList {
             result.push_str(indent_chars(indentation).as_str());
         }
 
-        match self {
-            Self::Var(var, tail) => {
+        match self.node() {
+            PathList::Var(var, tail) => {
                 let rest = tail.pretty_print_with_indentation(true, indentation);
                 result.push_str(var.as_str());
                 result.push_str(rest.as_str());
             }
-            Self::Key(key, tail) => {
+            PathList::Key(key, tail) => {
                 let rest = tail.pretty_print_with_indentation(true, indentation);
                 result.push_str(key.dotted().as_str());
                 result.push_str(rest.as_str());
             }
-            Self::Method(method, args, tail) => {
+            PathList::Method(method, args, tail) => {
                 result.push_str("->");
                 result.push_str(method.as_str());
                 if let Some(args) = args {
@@ -146,19 +160,19 @@ impl PrettyPrintable for PathList {
                         .as_str(),
                 );
             }
-            Self::Selection(sub) => {
+            PathList::Selection(sub) => {
                 let sub = sub.pretty_print_with_indentation(true, indentation);
                 result.push(' ');
                 result.push_str(sub.as_str());
             }
-            Self::Empty => {}
+            PathList::Empty => {}
         }
 
         result
     }
 }
 
-impl PrettyPrintable for MethodArgs {
+impl PrettyPrintable for Parsed<MethodArgs> {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
         let mut result = String::new();
 
@@ -185,14 +199,14 @@ impl PrettyPrintable for MethodArgs {
     }
 }
 
-impl PrettyPrintable for LitExpr {
+impl PrettyPrintable for Parsed<LitExpr> {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
         let mut result = String::new();
         if !inline {
             result.push_str(indent_chars(indentation).as_str());
         }
 
-        match self {
+        match self.node() {
             LitExpr::String(s) => {
                 let safely_quoted = serde_json_bytes::Value::String(s.clone().into()).to_string();
                 result.push_str(safely_quoted.as_str());
@@ -209,7 +223,7 @@ impl PrettyPrintable for LitExpr {
                     } else {
                         result.push_str(", ");
                     }
-                    let key = serde_json_bytes::Value::String(key.clone().into()).to_string();
+                    let key = serde_json_bytes::Value::String(key.as_str().into()).to_string();
                     result.push_str(key.as_str());
                     result.push_str(": ");
                     result.push_str(
@@ -247,7 +261,7 @@ impl PrettyPrintable for LitExpr {
     }
 }
 
-impl PrettyPrintable for NamedSelection {
+impl PrettyPrintable for Parsed<NamedSelection> {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
         let mut result = String::new();
 
@@ -255,8 +269,8 @@ impl PrettyPrintable for NamedSelection {
             result.push_str(indent_chars(indentation).as_str());
         }
 
-        match self {
-            Self::Field(alias, field_key, sub) => {
+        match self.node() {
+            NamedSelection::Field(alias, field_key, sub) => {
                 if let Some(alias) = alias {
                     result.push_str(alias.name.as_str());
                     result.push_str(": ");
@@ -276,14 +290,14 @@ impl PrettyPrintable for NamedSelection {
                     result.push_str(sub.as_str());
                 }
             }
-            Self::Path(alias, path) => {
+            NamedSelection::Path(alias, path) => {
                 result.push_str(alias.name.as_str());
                 result.push_str(": ");
 
                 let path = path.pretty_print_with_indentation(true, indentation);
                 result.push_str(path.trim_start());
             }
-            Self::Group(alias, sub) => {
+            NamedSelection::Group(alias, sub) => {
                 result.push_str(alias.name.as_str());
                 result.push_str(": ");
 
@@ -296,7 +310,7 @@ impl PrettyPrintable for NamedSelection {
     }
 }
 
-impl PrettyPrintable for StarSelection {
+impl PrettyPrintable for Parsed<StarSelection> {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
         let mut result = String::new();
 

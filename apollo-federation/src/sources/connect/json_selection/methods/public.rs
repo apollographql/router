@@ -14,7 +14,7 @@ use crate::sources::connect::json_selection::VarsWithPathsMap;
 
 pub(super) fn echo_method(
     method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
@@ -37,7 +37,7 @@ pub(super) fn echo_method(
 
 pub(super) fn map_method(
     method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
@@ -85,7 +85,7 @@ pub(super) fn map_method(
 
 pub(super) fn match_method(
     method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
@@ -98,7 +98,7 @@ pub(super) fn match_method(
     // value is returned.
     if let Some(MethodArgs(args)) = method_args {
         for pair in args {
-            if let LitExpr::Array(pair) = pair {
+            if let LitExpr::Array(pair) = pair.node() {
                 if pair.len() == 2 {
                     if let Some(candidate) = pair[0].apply_to_path(data, vars, input_path, errors) {
                         if candidate == *data {
@@ -125,7 +125,7 @@ pub(super) fn match_method(
 
 pub(super) fn first_method(
     method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
@@ -158,7 +158,7 @@ pub(super) fn first_method(
 
 pub(super) fn last_method(
     method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
@@ -191,7 +191,7 @@ pub(super) fn last_method(
 
 pub(super) fn slice_method(
     method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
@@ -259,7 +259,7 @@ pub(super) fn slice_method(
 
 pub(super) fn size_method(
     method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
@@ -309,7 +309,7 @@ pub(super) fn size_method(
 // well as it handles objects with named properties like { key, value }.
 pub(super) fn entries_method(
     method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,

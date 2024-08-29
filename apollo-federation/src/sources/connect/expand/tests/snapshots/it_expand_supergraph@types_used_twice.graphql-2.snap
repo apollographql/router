@@ -45,63 +45,105 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
             body: None,
         },
         selection: Named(
-            SubSelection {
-                selections: [
-                    Field(
-                        None,
-                        Field(
-                            "a",
-                        ),
-                        Some(
-                            SubSelection {
-                                selections: [
-                                    Field(
-                                        None,
-                                        Field(
-                                            "id",
-                                        ),
-                                        None,
+            Parsed {
+                node: SubSelection {
+                    selections: [
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "a",
                                     ),
-                                ],
-                                star: None,
-                            },
-                        ),
-                    ),
-                    Field(
-                        None,
-                        Field(
-                            "b",
-                        ),
-                        Some(
-                            SubSelection {
-                                selections: [
-                                    Field(
-                                        None,
-                                        Field(
-                                            "a",
-                                        ),
-                                        Some(
-                                            SubSelection {
-                                                selections: [
-                                                    Field(
+                                    loc: None,
+                                },
+                                Some(
+                                    Parsed {
+                                        node: SubSelection {
+                                            selections: [
+                                                Parsed {
+                                                    node: Field(
                                                         None,
-                                                        Field(
-                                                            "id",
-                                                        ),
+                                                        Parsed {
+                                                            node: Field(
+                                                                "id",
+                                                            ),
+                                                            loc: None,
+                                                        },
                                                         None,
                                                     ),
-                                                ],
-                                                star: None,
-                                            },
-                                        ),
+                                                    loc: None,
+                                                },
+                                            ],
+                                            star: None,
+                                        },
+                                        loc: None,
+                                    },
+                                ),
+                            ),
+                            loc: None,
+                        },
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "b",
                                     ),
-                                ],
-                                star: None,
-                            },
-                        ),
-                    ),
-                ],
-                star: None,
+                                    loc: None,
+                                },
+                                Some(
+                                    Parsed {
+                                        node: SubSelection {
+                                            selections: [
+                                                Parsed {
+                                                    node: Field(
+                                                        None,
+                                                        Parsed {
+                                                            node: Field(
+                                                                "a",
+                                                            ),
+                                                            loc: None,
+                                                        },
+                                                        Some(
+                                                            Parsed {
+                                                                node: SubSelection {
+                                                                    selections: [
+                                                                        Parsed {
+                                                                            node: Field(
+                                                                                None,
+                                                                                Parsed {
+                                                                                    node: Field(
+                                                                                        "id",
+                                                                                    ),
+                                                                                    loc: None,
+                                                                                },
+                                                                                None,
+                                                                            ),
+                                                                            loc: None,
+                                                                        },
+                                                                    ],
+                                                                    star: None,
+                                                                },
+                                                                loc: None,
+                                                            },
+                                                        ),
+                                                    ),
+                                                    loc: None,
+                                                },
+                                            ],
+                                            star: None,
+                                        },
+                                        loc: None,
+                                    },
+                                ),
+                            ),
+                            loc: None,
+                        },
+                    ],
+                    star: None,
+                },
+                loc: None,
             },
         ),
         config: None,

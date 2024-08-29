@@ -21,6 +21,8 @@ use nom::sequence::tuple;
 use nom::IResult;
 
 use super::helpers::spaces_or_comments;
+use super::location::parsed_tag;
+use super::location::Parsed;
 use super::parser::parse_string_literal;
 use super::parser::Key;
 use super::parser::PathSelection;
@@ -32,26 +34,30 @@ pub enum LitExpr {
     Number(serde_json::Number),
     Bool(bool),
     Null,
-    Object(IndexMap<String, LitExpr>),
-    Array(Vec<LitExpr>),
+    Object(IndexMap<Parsed<Key>, Parsed<LitExpr>>),
+    Array(Vec<Parsed<LitExpr>>),
     Path(PathSelection),
 }
 
 impl LitExpr {
     // LitExpr      ::= LitPrimitive | LitObject | LitArray | PathSelection
     // LitPrimitive ::= LitString | LitNumber | "true" | "false" | "null"
-    pub fn parse(input: &str) -> IResult<&str, Self> {
+    pub fn parse(input: &str) -> IResult<&str, Parsed<Self>> {
         tuple((
             spaces_or_comments,
             alt((
-                map(parse_string_literal, Self::String),
+                map(parse_string_literal, |s| s.take_as(Self::String)),
                 Self::parse_number,
-                map(tag("true"), |_| Self::Bool(true)),
-                map(tag("false"), |_| Self::Bool(false)),
-                map(tag("null"), |_| Self::Null),
+                map(parsed_tag("true"), |t| {
+                    Parsed::new(Self::Bool(true), t.loc())
+                }),
+                map(parsed_tag("false"), |f| {
+                    Parsed::new(Self::Bool(false), f.loc())
+                }),
+                map(parsed_tag("null"), |n| Parsed::new(Self::Null, n.loc())),
                 Self::parse_object,
                 Self::parse_array,
-                map(PathSelection::parse, Self::Path),
+                map(PathSelection::parse, |path| path.take_as(Self::Path)),
             )),
             spaces_or_comments,
         ))(input)
@@ -59,7 +65,7 @@ impl LitExpr {
     }
 
     // LitNumber ::= "-"? ([0-9]+ ("." [0-9]*)? | "." [0-9]+)
-    fn parse_number(input: &str) -> IResult<&str, Self> {
+    fn parse_number(input: &str) -> IResult<&str, Parsed<Self>> {
         let (suffix, (neg, _spaces, num)) = delimited(
             spaces_or_comments,
             tuple((
@@ -93,7 +99,7 @@ impl LitExpr {
         }
 
         if let Ok(lit_number) = number.parse().map(Self::Number) {
-            Ok((suffix, lit_number))
+            Ok((suffix, Parsed::new(lit_number, None)))
         } else {
             Err(nom::Err::Failure(nom::error::Error::new(
                 input,
@@ -103,7 +109,7 @@ impl LitExpr {
     }
 
     // LitObject ::= "{" (LitProperty ("," LitProperty)* ","?)? "}"
-    fn parse_object(input: &str) -> IResult<&str, Self> {
+    fn parse_object(input: &str) -> IResult<&str, Parsed<Self>> {
         delimited(
             tuple((spaces_or_comments, char('{'), spaces_or_comments)),
             map(
@@ -115,9 +121,9 @@ impl LitExpr {
                 |properties| {
                     let mut output = IndexMap::default();
                     if let Some(((first_key, first_value), rest, _trailing_comma)) = properties {
-                        output.insert(first_key.to_string(), first_value);
+                        output.insert(first_key, first_value);
                         for (key, value) in rest {
-                            output.insert(key.to_string(), value);
+                            output.insert(key, value);
                         }
                     }
                     Self::Object(output)
@@ -125,16 +131,17 @@ impl LitExpr {
             ),
             tuple((spaces_or_comments, char('}'), spaces_or_comments)),
         )(input)
+        .map(|(input, output)| (input, Parsed::new(output, None)))
     }
 
     // LitProperty ::= Key ":" LitExpr
-    fn parse_property(input: &str) -> IResult<&str, (String, Self)> {
+    fn parse_property(input: &str) -> IResult<&str, (Parsed<Key>, Parsed<Self>)> {
         tuple((Key::parse, char(':'), Self::parse))(input)
-            .map(|(input, (key, _, value))| (input, (key.as_string(), value)))
+            .map(|(input, (key, _, value))| (input, (key, value)))
     }
 
     // LitArray ::= "[" (LitExpr ("," LitExpr)* ","?)? "]"
-    fn parse_array(input: &str) -> IResult<&str, Self> {
+    fn parse_array(input: &str) -> IResult<&str, Parsed<Self>> {
         delimited(
             tuple((spaces_or_comments, char('['), spaces_or_comments)),
             map(
@@ -154,6 +161,11 @@ impl LitExpr {
             ),
             tuple((spaces_or_comments, char(']'), spaces_or_comments)),
         )(input)
+        .map(|(input, output)| (input, Parsed::new(output, None)))
+    }
+
+    pub(super) fn into_parsed(self) -> Parsed<Self> {
+        Parsed::new(self, None)
     }
 
     pub(super) fn as_i64(&self) -> Option<i64> {
@@ -191,73 +203,116 @@ impl ExternalVarPaths for LitExpr {
 mod tests {
     use super::super::known_var::KnownVariable;
     use super::*;
+    use crate::sources::connect::json_selection::location::StripLoc;
     use crate::sources::connect::json_selection::PathList;
 
     #[test]
     fn test_lit_expr_parse_primitives() {
         assert_eq!(
             LitExpr::parse("'hello'"),
-            Ok(("", LitExpr::String("hello".to_string()))),
+            Ok(("", Parsed::new(LitExpr::String("hello".to_string()), None))),
         );
         assert_eq!(
             LitExpr::parse("\"hello\""),
-            Ok(("", LitExpr::String("hello".to_string()))),
+            Ok(("", Parsed::new(LitExpr::String("hello".to_string()), None))),
         );
 
         assert_eq!(
             LitExpr::parse("123"),
-            Ok(("", LitExpr::Number(serde_json::Number::from(123)))),
+            Ok((
+                "",
+                Parsed::new(LitExpr::Number(serde_json::Number::from(123)), None)
+            )),
         );
         assert_eq!(
             LitExpr::parse("-123"),
-            Ok(("", LitExpr::Number(serde_json::Number::from(-123)))),
+            Ok((
+                "",
+                Parsed::new(LitExpr::Number(serde_json::Number::from(-123)), None)
+            )),
         );
         assert_eq!(
             LitExpr::parse(" - 123 "),
-            Ok(("", LitExpr::Number(serde_json::Number::from(-123)))),
+            Ok((
+                "",
+                Parsed::new(LitExpr::Number(serde_json::Number::from(-123)), None)
+            )),
         );
         assert_eq!(
             LitExpr::parse("123.456"),
             Ok((
                 "",
-                LitExpr::Number(serde_json::Number::from_f64(123.456).unwrap())
+                Parsed::new(
+                    LitExpr::Number(serde_json::Number::from_f64(123.456).unwrap()),
+                    None
+                ),
             )),
         );
         assert_eq!(
             LitExpr::parse(".456"),
             Ok((
                 "",
-                LitExpr::Number(serde_json::Number::from_f64(0.456).unwrap())
+                Parsed::new(
+                    LitExpr::Number(serde_json::Number::from_f64(0.456).unwrap()),
+                    None
+                ),
             )),
         );
         assert_eq!(
             LitExpr::parse("-.456"),
             Ok((
                 "",
-                LitExpr::Number(serde_json::Number::from_f64(-0.456).unwrap())
+                Parsed::new(
+                    LitExpr::Number(serde_json::Number::from_f64(-0.456).unwrap()),
+                    None
+                ),
             )),
         );
         assert_eq!(
             LitExpr::parse("123."),
             Ok((
                 "",
-                LitExpr::Number(serde_json::Number::from_f64(123.0).unwrap())
+                Parsed::new(
+                    LitExpr::Number(serde_json::Number::from_f64(123.0).unwrap()),
+                    None
+                ),
             )),
         );
         assert_eq!(
             LitExpr::parse("-123."),
             Ok((
                 "",
-                LitExpr::Number(serde_json::Number::from_f64(-123.0).unwrap())
+                Parsed::new(
+                    LitExpr::Number(serde_json::Number::from_f64(-123.0).unwrap()),
+                    None
+                ),
             )),
         );
 
-        assert_eq!(LitExpr::parse("true"), Ok(("", LitExpr::Bool(true))));
-        assert_eq!(LitExpr::parse(" true "), Ok(("", LitExpr::Bool(true))));
-        assert_eq!(LitExpr::parse("false"), Ok(("", LitExpr::Bool(false))));
-        assert_eq!(LitExpr::parse(" false "), Ok(("", LitExpr::Bool(false))));
-        assert_eq!(LitExpr::parse("null"), Ok(("", LitExpr::Null)));
-        assert_eq!(LitExpr::parse(" null "), Ok(("", LitExpr::Null)));
+        assert_eq!(
+            LitExpr::parse("true"),
+            Ok(("", Parsed::new(LitExpr::Bool(true), None)))
+        );
+        assert_eq!(
+            LitExpr::parse(" true "),
+            Ok(("", Parsed::new(LitExpr::Bool(true), None)))
+        );
+        assert_eq!(
+            LitExpr::parse("false"),
+            Ok(("", Parsed::new(LitExpr::Bool(false), None)))
+        );
+        assert_eq!(
+            LitExpr::parse(" false "),
+            Ok(("", Parsed::new(LitExpr::Bool(false), None)))
+        );
+        assert_eq!(
+            LitExpr::parse("null"),
+            Ok(("", Parsed::new(LitExpr::Null, None)))
+        );
+        assert_eq!(
+            LitExpr::parse(" null "),
+            Ok(("", Parsed::new(LitExpr::Null, None)))
+        );
     }
 
     #[test]
@@ -266,77 +321,87 @@ mod tests {
             LitExpr::parse("{'a': 1}"),
             Ok((
                 "",
-                LitExpr::Object({
-                    let mut map = IndexMap::default();
-                    map.insert(
-                        "a".to_string(),
-                        LitExpr::Number(serde_json::Number::from(1)),
-                    );
-                    map
-                })
+                Parsed::new(
+                    LitExpr::Object({
+                        let mut map = IndexMap::default();
+                        map.insert(
+                            Parsed::new(Key::quoted("a"), None),
+                            Parsed::new(LitExpr::Number(serde_json::Number::from(1)), None),
+                        );
+                        map
+                    }),
+                    None
+                ),
             ))
         );
 
         {
-            let expected = LitExpr::Object({
+            fn make_expected<'a>(a_key: Key, b_key: Key) -> IResult<&'a str, Parsed<LitExpr>> {
                 let mut map = IndexMap::default();
                 map.insert(
-                    "a".to_string(),
-                    LitExpr::Number(serde_json::Number::from(1)),
+                    Parsed::new(a_key, None),
+                    Parsed::new(LitExpr::Number(serde_json::Number::from(1)), None),
                 );
                 map.insert(
-                    "b".to_string(),
-                    LitExpr::Number(serde_json::Number::from(2)),
+                    Parsed::new(b_key, None),
+                    Parsed::new(LitExpr::Number(serde_json::Number::from(2)), None),
                 );
-                map
-            });
+                Ok(("", Parsed::new(LitExpr::Object(map), None)))
+            }
             assert_eq!(
                 LitExpr::parse("{'a': 1, 'b': 2}"),
-                Ok(("", expected.clone()))
+                make_expected(Key::quoted("a"), Key::quoted("b")),
             );
             assert_eq!(
                 LitExpr::parse("{ a : 1, 'b': 2}"),
-                Ok(("", expected.clone()))
+                make_expected(Key::field("a"), Key::quoted("b")),
             );
-            assert_eq!(LitExpr::parse("{ a : 1, b: 2}"), Ok(("", expected.clone())));
+            assert_eq!(
+                LitExpr::parse("{ a : 1, b: 2}"),
+                make_expected(Key::field("a"), Key::field("b")),
+            );
             assert_eq!(
                 LitExpr::parse("{ \"a\" : 1, \"b\": 2 }"),
-                Ok(("", expected.clone()))
+                make_expected(Key::quoted("a"), Key::quoted("b")),
             );
             assert_eq!(
                 LitExpr::parse("{ \"a\" : 1, b: 2 }"),
-                Ok(("", expected.clone()))
+                make_expected(Key::quoted("a"), Key::field("b")),
             );
             assert_eq!(
                 LitExpr::parse("{ a : 1, \"b\": 2 }"),
-                Ok(("", expected.clone()))
+                make_expected(Key::field("a"), Key::quoted("b")),
             );
         }
     }
 
+    fn check(input: &str, expected: LitExpr) {
+        match LitExpr::parse(input) {
+            Ok((remainder, parsed)) => {
+                assert_eq!(remainder, "");
+                assert_eq!(parsed.strip_loc(), Parsed::new(expected, None));
+            }
+            Err(e) => panic!("Failed to parse '{}': {:?}", input, e),
+        };
+    }
+
     #[test]
     fn test_lit_expr_parse_arrays() {
-        assert_eq!(
-            LitExpr::parse("[1, 2]"),
-            Ok((
-                "",
-                LitExpr::Array(vec![
-                    LitExpr::Number(serde_json::Number::from(1)),
-                    LitExpr::Number(serde_json::Number::from(2)),
-                ])
-            ))
+        check(
+            "[1, 2]",
+            LitExpr::Array(vec![
+                Parsed::new(LitExpr::Number(serde_json::Number::from(1)), None),
+                Parsed::new(LitExpr::Number(serde_json::Number::from(2)), None),
+            ]),
         );
 
-        assert_eq!(
-            LitExpr::parse("[1, true, 'three']"),
-            Ok((
-                "",
-                LitExpr::Array(vec![
-                    LitExpr::Number(serde_json::Number::from(1)),
-                    LitExpr::Bool(true),
-                    LitExpr::String("three".to_string()),
-                ])
-            ))
+        check(
+            "[1, true, 'three']",
+            LitExpr::Array(vec![
+                Parsed::new(LitExpr::Number(serde_json::Number::from(1)), None),
+                Parsed::new(LitExpr::Bool(true), None),
+                Parsed::new(LitExpr::String("three".to_string()), None),
+            ]),
         );
     }
 
@@ -344,91 +409,120 @@ mod tests {
     fn test_lit_expr_parse_paths() {
         {
             let expected = LitExpr::Path(PathSelection {
-                path: PathList::Key(
-                    Key::Field("a".to_string()),
-                    Box::new(PathList::Key(
-                        Key::Field("b".to_string()),
-                        Box::new(PathList::Key(
-                            Key::Field("c".to_string()),
-                            Box::new(PathList::Empty),
-                        )),
-                    )),
+                path: Parsed::new(
+                    PathList::Key(
+                        Parsed::new(Key::Field("a".to_string()), None),
+                        Parsed::new(
+                            PathList::Key(
+                                Parsed::new(Key::Field("b".to_string()), None),
+                                Parsed::new(
+                                    PathList::Key(
+                                        Parsed::new(Key::Field("c".to_string()), None),
+                                        Parsed::new(PathList::Empty, None),
+                                    ),
+                                    None,
+                                ),
+                            ),
+                            None,
+                        ),
+                    ),
+                    None,
                 ),
             });
-            assert_eq!(LitExpr::parse("a.b.c"), Ok(("", expected.clone())));
-            assert_eq!(LitExpr::parse(" a . b . c "), Ok(("", expected.clone())));
+            check("a.b.c", expected.clone());
+            check(" a . b . c ", expected.clone());
         }
 
         {
             let expected = LitExpr::Path(PathSelection {
-                path: PathList::Key(Key::Field("data".to_string()), Box::new(PathList::Empty)),
+                path: Parsed::new(
+                    PathList::Key(
+                        Parsed::new(Key::Field("data".to_string()), None),
+                        Parsed::new(PathList::Empty, None),
+                    ),
+                    None,
+                ),
             });
-            assert_eq!(LitExpr::parse(".data"), Ok(("", expected.clone())));
-            assert_eq!(LitExpr::parse(" . data "), Ok(("", expected.clone())));
+            check(".data", expected.clone());
+            check(" . data ", expected.clone());
         }
 
         {
             let expected = LitExpr::Array(vec![
-                LitExpr::Path(PathSelection {
-                    path: PathList::Key(Key::Field("a".to_string()), Box::new(PathList::Empty)),
-                }),
-                LitExpr::Path(PathSelection {
-                    path: PathList::Key(
-                        Key::Field("b".to_string()),
-                        Box::new(PathList::Key(
-                            Key::Field("c".to_string()),
-                            Box::new(PathList::Empty),
-                        )),
-                    ),
-                }),
-                LitExpr::Path(PathSelection {
-                    path: PathList::Key(
-                        Key::Field("d".to_string()),
-                        Box::new(PathList::Key(
-                            Key::Field("e".to_string()),
-                            Box::new(PathList::Key(
-                                Key::Field("f".to_string()),
-                                Box::new(PathList::Empty),
-                            )),
-                        )),
-                    ),
-                }),
+                Parsed::new(
+                    LitExpr::Path(PathSelection {
+                        path: Parsed::new(
+                            PathList::Key(
+                                Parsed::new(Key::Field("a".to_string()), None),
+                                Parsed::new(PathList::Empty, None),
+                            ),
+                            None,
+                        ),
+                    }),
+                    None,
+                ),
+                Parsed::new(
+                    LitExpr::Path(PathSelection {
+                        path: Parsed::new(
+                            PathList::Key(
+                                Parsed::new(Key::Field("b".to_string()), None),
+                                Parsed::new(
+                                    PathList::Key(
+                                        Parsed::new(Key::Field("c".to_string()), None),
+                                        Parsed::new(PathList::Empty, None),
+                                    ),
+                                    None,
+                                ),
+                            ),
+                            None,
+                        ),
+                    }),
+                    None,
+                ),
+                Parsed::new(
+                    LitExpr::Path(PathSelection {
+                        path: Parsed::new(
+                            PathList::Key(
+                                Parsed::new(Key::Field("d".to_string()), None),
+                                Parsed::new(
+                                    PathList::Key(
+                                        Parsed::new(Key::Field("e".to_string()), None),
+                                        Parsed::new(
+                                            PathList::Key(
+                                                Parsed::new(Key::Field("f".to_string()), None),
+                                                Parsed::new(PathList::Empty, None),
+                                            ),
+                                            None,
+                                        ),
+                                    ),
+                                    None,
+                                ),
+                            ),
+                            None,
+                        ),
+                    }),
+                    None,
+                ),
             ]);
-            assert_eq!(
-                LitExpr::parse("[.a, b.c, .d.e.f]"),
-                Ok(("", expected.clone()))
-            );
-            assert_eq!(
-                LitExpr::parse("[.a, b.c, .d.e.f,]"),
-                Ok(("", expected.clone()))
-            );
-            assert_eq!(
-                LitExpr::parse("[ . a , b . c , . d . e . f ]"),
-                Ok(("", expected.clone()))
-            );
-            assert_eq!(
-                LitExpr::parse("[ . a , b . c , . d . e . f , ]"),
-                Ok(("", expected.clone()))
-            );
-            assert_eq!(
-                LitExpr::parse(
-                    r#"[
+            check("[.a, b.c, .d.e.f]", expected.clone());
+            check("[.a, b.c, .d.e.f,]", expected.clone());
+            check("[ . a , b . c , . d . e . f ]", expected.clone());
+            check("[ . a , b . c , . d . e . f , ]", expected.clone());
+            check(
+                r#"[
                 .a,
                 b.c,
                 .d.e.f,
-            ]"#
-                ),
-                Ok(("", expected.clone()))
+            ]"#,
+                expected.clone(),
             );
-            assert_eq!(
-                LitExpr::parse(
-                    r#"[
+            check(
+                r#"[
                 . a ,
                 . b . c ,
                 d . e . f ,
-            ]"#
-                ),
-                Ok(("", expected.clone()))
+            ]"#,
+                expected.clone(),
             );
         }
 
@@ -436,60 +530,72 @@ mod tests {
             let expected = LitExpr::Object({
                 let mut map = IndexMap::default();
                 map.insert(
-                    "a".to_string(),
-                    LitExpr::Path(PathSelection {
-                        path: PathList::Var(
-                            KnownVariable::Args,
-                            Box::new(PathList::Key(
-                                Key::Field("a".to_string()),
-                                Box::new(PathList::Empty),
-                            )),
-                        ),
-                    }),
+                    Parsed::new(Key::Field("a".to_string()), None),
+                    Parsed::new(
+                        LitExpr::Path(PathSelection {
+                            path: Parsed::new(
+                                PathList::Var(
+                                    Parsed::new(KnownVariable::Args, None),
+                                    Parsed::new(
+                                        PathList::Key(
+                                            Parsed::new(Key::Field("a".to_string()), None),
+                                            Parsed::new(PathList::Empty, None),
+                                        ),
+                                        None,
+                                    ),
+                                ),
+                                None,
+                            ),
+                        }),
+                        None,
+                    ),
                 );
                 map.insert(
-                    "b".to_string(),
-                    LitExpr::Path(PathSelection {
-                        path: PathList::Var(
-                            KnownVariable::This,
-                            Box::new(PathList::Key(
-                                Key::Field("b".to_string()),
-                                Box::new(PathList::Empty),
-                            )),
-                        ),
-                    }),
+                    Parsed::new(Key::Field("b".to_string()), None),
+                    Parsed::new(
+                        LitExpr::Path(PathSelection {
+                            path: Parsed::new(
+                                PathList::Var(
+                                    Parsed::new(KnownVariable::This, None),
+                                    Parsed::new(
+                                        PathList::Key(
+                                            Parsed::new(Key::Field("b".to_string()), None),
+                                            Parsed::new(PathList::Empty, None),
+                                        ),
+                                        None,
+                                    ),
+                                ),
+                                None,
+                            ),
+                        }),
+                        None,
+                    ),
                 );
                 map
             });
 
-            assert_eq!(
-                LitExpr::parse(
-                    r#"{
-                    a: $args.a,
-                    b: $this.b,
-                }"#
-                ),
-                Ok(("", expected.clone())),
+            check(
+                r#"{
+                a: $args.a,
+                b: $this.b,
+            }"#,
+                expected.clone(),
             );
 
-            assert_eq!(
-                LitExpr::parse(
-                    r#"{
-                    b: $this.b,
-                    a: $args.a,
-                }"#
-                ),
-                Ok(("", expected.clone())),
+            check(
+                r#"{
+                b: $this.b,
+                a: $args.a,
+            }"#,
+                expected.clone(),
             );
 
-            assert_eq!(
-                LitExpr::parse(
-                    r#" {
-                    a : $args . a ,
-                    b : $this . b
-                ,} "#
-                ),
-                Ok(("", expected.clone())),
+            check(
+                r#" {
+                a : $args . a ,
+                b : $this . b
+            ,} "#,
+                expected.clone(),
             );
         }
     }

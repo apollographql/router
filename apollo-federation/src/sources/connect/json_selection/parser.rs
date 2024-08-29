@@ -1,7 +1,6 @@
 use std::fmt::Display;
 
 use nom::branch::alt;
-use nom::bytes::complete::tag;
 use nom::character::complete::char;
 use nom::character::complete::one_of;
 use nom::combinator::all_consuming;
@@ -19,6 +18,9 @@ use serde_json_bytes::Value as JSON;
 use super::helpers::spaces_or_comments;
 use super::known_var::KnownVariable;
 use super::lit_expr::LitExpr;
+use super::location::merge_locs;
+use super::location::parsed_tag;
+use super::location::Parsed;
 
 pub(crate) trait ExternalVarPaths {
     fn external_var_paths(&self) -> Vec<&PathSelection>;
@@ -32,16 +34,19 @@ pub enum JSONSelection {
     // Although we reuse the SubSelection type for the JSONSelection::Named
     // case, we parse it as a sequence of NamedSelection items without the
     // {...} curly braces that SubSelection::parse expects.
-    Named(SubSelection),
-    Path(PathSelection),
+    Named(Parsed<SubSelection>),
+    Path(Parsed<PathSelection>),
 }
 
 impl JSONSelection {
     pub fn empty() -> Self {
-        JSONSelection::Named(SubSelection {
-            selections: vec![],
-            star: None,
-        })
+        JSONSelection::Named(Parsed::new(
+            SubSelection {
+                selections: vec![],
+                star: None,
+            },
+            None,
+        ))
     }
 
     pub fn is_empty(&self) -> bool {
@@ -49,7 +54,7 @@ impl JSONSelection {
             JSONSelection::Named(subselect) => {
                 subselect.selections.is_empty() && subselect.star.is_none()
             }
-            JSONSelection::Path(path) => path.path == PathList::Empty,
+            JSONSelection::Path(path) => *path.path == PathList::Empty,
         }
     }
 
@@ -58,6 +63,7 @@ impl JSONSelection {
             all_consuming(map(SubSelection::parse_naked, Self::Named)),
             all_consuming(map(PathSelection::parse, Self::Path)),
         ))(input)
+        .map(|(input, node)| (input, node))
     }
 
     pub(crate) fn next_subselection(&self) -> Option<&SubSelection> {
@@ -91,13 +97,17 @@ impl ExternalVarPaths for JSONSelection {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum NamedSelection {
-    Field(Option<Alias>, Key, Option<SubSelection>),
-    Path(Alias, PathSelection),
-    Group(Alias, SubSelection),
+    Field(
+        Option<Parsed<Alias>>,
+        Parsed<Key>,
+        Option<Parsed<SubSelection>>,
+    ),
+    Path(Parsed<Alias>, Parsed<PathSelection>),
+    Group(Parsed<Alias>, Parsed<SubSelection>),
 }
 
 impl NamedSelection {
-    pub(crate) fn parse(input: &str) -> IResult<&str, Self> {
+    pub(crate) fn parse(input: &str) -> IResult<&str, Parsed<Self>> {
         alt((
             // We must try parsing NamedPathSelection before NamedFieldSelection
             // and NamedQuotedSelection because a NamedPathSelection without a
@@ -113,23 +123,32 @@ impl NamedSelection {
         ))(input)
     }
 
-    fn parse_field(input: &str) -> IResult<&str, Self> {
+    fn parse_field(input: &str) -> IResult<&str, Parsed<Self>> {
         tuple((
             opt(Alias::parse),
             delimited(spaces_or_comments, Key::parse, spaces_or_comments),
             opt(SubSelection::parse),
         ))(input)
-        .map(|(input, (alias, name, selection))| (input, Self::Field(alias, name, selection)))
+        .map(|(input, (alias, name, selection))| {
+            (
+                input,
+                Parsed::new(Self::Field(alias, name, selection), None),
+            )
+        })
     }
 
-    fn parse_path(input: &str) -> IResult<&str, Self> {
+    fn parse_path(input: &str) -> IResult<&str, Parsed<Self>> {
         tuple((Alias::parse, PathSelection::parse))(input)
-            .map(|(input, (alias, path))| (input, Self::Path(alias, path)))
+            .map(|(input, (alias, path))| (input, Parsed::new(Self::Path(alias, path), None)))
     }
 
-    fn parse_group(input: &str) -> IResult<&str, Self> {
+    fn parse_group(input: &str) -> IResult<&str, Parsed<Self>> {
         tuple((Alias::parse, SubSelection::parse))(input)
-            .map(|(input, (alias, group))| (input, Self::Group(alias, group)))
+            .map(|(input, (alias, group))| (input, Parsed::new(Self::Group(alias, group), None)))
+    }
+
+    fn into_parsed(self) -> Parsed<Self> {
+        Parsed::new(self, None)
     }
 
     #[allow(dead_code)]
@@ -193,17 +212,21 @@ impl ExternalVarPaths for NamedSelection {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct PathSelection {
-    pub(super) path: PathList,
+    pub(super) path: Parsed<PathList>,
 }
 
 impl PathSelection {
-    pub fn parse(input: &str) -> IResult<&str, Self> {
+    pub fn parse(input: &str) -> IResult<&str, Parsed<Self>> {
         let (input, path) = PathList::parse(input)?;
-        Ok((input, Self { path }))
+        Ok((input, Parsed::new(Self { path }, None)))
+    }
+
+    fn into_parsed(self) -> Parsed<Self> {
+        Parsed::new(self, None)
     }
 
     pub(crate) fn var_name_and_nested_keys(&self) -> Option<(&KnownVariable, Vec<&str>)> {
-        match &self.path {
+        match self.path.as_ref() {
             PathList::Var(var_name, tail) => Some((var_name, tail.prefix_of_keys())),
             _ => None,
         }
@@ -215,7 +238,7 @@ impl PathSelection {
 
     pub(super) fn from_slice(keys: &[Key], selection: Option<SubSelection>) -> Self {
         Self {
-            path: PathList::from_slice(keys, selection),
+            path: Parsed::new(PathList::from_slice(keys, selection), None),
         }
     }
 
@@ -231,7 +254,7 @@ impl PathSelection {
 impl ExternalVarPaths for PathSelection {
     fn external_var_paths(&self) -> Vec<&PathSelection> {
         let mut paths = vec![];
-        match &self.path {
+        match self.path.node() {
             PathList::Var(var_name, tail) => {
                 // The $ and @ variables refer to parts of the current JSON
                 // data, so they do not need to be surfaced as external variable
@@ -261,34 +284,36 @@ impl ExternalVarPaths for PathSelection {
 
 impl From<PathList> for PathSelection {
     fn from(path: PathList) -> Self {
-        Self { path }
+        Self {
+            path: Parsed::new(path, None),
+        }
     }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(super) enum PathList {
     // A VarPath must start with a variable (either $identifier, $, or @),
-    // followed by any number of PathStep items (the Box<PathList>). Because we
+    // followed by any number of PathStep items (the Parsed<PathList>). Because we
     // represent the @ quasi-variable using PathList::Var, this variant handles
     // both VarPath and AtPath from the grammar. The String variable name must
     // always contain the $ character. The PathList::Var variant may only appear
     // at the beginning of a PathSelection's PathList, not in the middle.
-    Var(KnownVariable, Box<PathList>),
+    Var(Parsed<KnownVariable>, Parsed<PathList>),
 
     // A PathSelection that starts with a PathList::Key is a KeyPath, but a
     // PathList::Key also counts as PathStep item, so it may also appear in the
     // middle/tail of a PathList.
-    Key(Key, Box<PathList>),
+    Key(Parsed<Key>, Parsed<PathList>),
 
     // A PathList::Method is a PathStep item that may appear only in the
     // middle/tail (not the beginning) of a PathSelection. Methods are
     // distinguished from .keys by their ->method invocation syntax.
-    Method(String, Option<MethodArgs>, Box<PathList>),
+    Method(Parsed<String>, Option<Parsed<MethodArgs>>, Parsed<PathList>),
 
     // Optionally, a PathList may end with a SubSelection, which applies a set
     // of named selections to the final value of the path. PathList::Selection
     // by itself is not a valid PathList.
-    Selection(SubSelection),
+    Selection(Parsed<SubSelection>),
 
     // Every PathList must be terminated by either PathList::Selection or
     // PathList::Empty. PathList::Empty by itself is not a valid PathList.
@@ -296,63 +321,91 @@ pub(super) enum PathList {
 }
 
 impl PathList {
-    pub fn parse(input: &str) -> IResult<&str, Self> {
+    pub fn parse(input: &str) -> IResult<&str, Parsed<Self>> {
         match Self::parse_with_depth(input, 0) {
-            Ok((remainder, Self::Empty)) => Err(nom::Err::Error(nom::error::Error::new(
-                remainder,
-                nom::error::ErrorKind::IsNot,
-            ))),
+            Ok((remainder, parsed)) if matches!(*parsed, Self::Empty) => Err(nom::Err::Error(
+                nom::error::Error::new(remainder, nom::error::ErrorKind::IsNot),
+            )),
             otherwise => otherwise,
         }
     }
 
-    fn parse_with_depth(input: &str, depth: usize) -> IResult<&str, Self> {
+    fn into_parsed(self) -> Parsed<Self> {
+        Parsed::new(self, None)
+    }
+
+    fn parse_with_depth(input: &str, depth: usize) -> IResult<&str, Parsed<Self>> {
         let (input, _spaces) = spaces_or_comments(input)?;
 
         // Variable references (including @ references) and key references
         // without a leading . are accepted only at depth 0, or at the beginning
         // of the PathSelection.
         if depth == 0 {
-            if let Ok((suffix, opt_var)) = delimited(
-                tuple((spaces_or_comments, char('$'))),
+            if let Ok((suffix, (_, dollar, opt_var, _))) = tuple((
+                spaces_or_comments,
+                parsed_tag("$"),
                 opt(parse_identifier_no_space),
                 spaces_or_comments,
-            )(input)
+            ))(input)
             {
-                let (input, rest) = Self::parse_with_depth(suffix, depth + 1)?;
-                // Note the $ prefix is included in the variable name.
-                let var_name = format!("${}", opt_var.unwrap_or("".to_string()));
-                return if let Some(known_var) = KnownVariable::from_str(&var_name) {
-                    Ok((input, Self::Var(known_var, Box::new(rest))))
+                let dollar_loc = dollar.loc();
+                let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
+                let full_loc = merge_locs(dollar_loc, rest.loc());
+                return if let Some(var) = opt_var {
+                    let full_name = format!("{}{}", dollar.node(), var.as_str());
+                    if let Some(known_var) = KnownVariable::from_str(full_name.as_str()) {
+                        let var_loc = merge_locs(dollar_loc, var.loc());
+                        let parsed_known_var = Parsed::new(known_var, var_loc);
+                        Ok((
+                            remainder,
+                            Parsed::new(Self::Var(parsed_known_var, rest), full_loc),
+                        ))
+                    } else {
+                        // Reject unknown variables at parse time.
+                        // TODO Improve these parse error messages.
+                        Err(nom::Err::Error(nom::error::Error::new(
+                            input,
+                            nom::error::ErrorKind::IsNot,
+                        )))
+                    }
                 } else {
-                    // Reject unknown variables at parse time.
-                    // TODO Improve these parse error messages.
-                    Err(nom::Err::Error(nom::error::Error::new(
-                        input,
-                        nom::error::ErrorKind::IsNot,
-                    )))
+                    let parsed_dollar_var = Parsed::new(KnownVariable::Dollar, dollar_loc);
+                    Ok((
+                        remainder,
+                        Parsed::new(Self::Var(parsed_dollar_var, rest), full_loc),
+                    ))
                 };
             }
 
-            if let Ok((suffix, _)) =
-                tuple((spaces_or_comments, char('@'), spaces_or_comments))(input)
+            if let Ok((suffix, (_, at, _))) =
+                tuple((spaces_or_comments, parsed_tag("@"), spaces_or_comments))(input)
             {
                 let (input, rest) = Self::parse_with_depth(suffix, depth + 1)?;
+                let full_loc = merge_locs(at.loc(), rest.loc());
                 // Because we include the $ in the variable name for ordinary
                 // variables, we have the freedom to store other symbols as
                 // special variables, such as @ for the current value. In fact,
                 // as long as we can parse the token(s) as a PathList::Var, the
                 // name of a variable could technically be any string we like.
-                return Ok((input, Self::Var(KnownVariable::AtSign, Box::new(rest))));
+                return Ok((
+                    input,
+                    Parsed::new(
+                        Self::Var(Parsed::new(KnownVariable::AtSign, at.loc()), rest),
+                        full_loc,
+                    ),
+                ));
             }
 
             if let Ok((suffix, key)) = Key::parse(input) {
                 let (input, rest) = Self::parse_with_depth(suffix, depth + 1)?;
-                return match rest {
+                return match rest.node() {
                     Self::Empty | Self::Selection(_) => Err(nom::Err::Error(
                         nom::error::Error::new(input, nom::error::ErrorKind::IsNot),
                     )),
-                    rest => Ok((input, Self::Key(key, Box::new(rest)))),
+                    _ => {
+                        let full_loc = merge_locs(key.loc(), rest.loc());
+                        Ok((input, Parsed::new(Self::Key(key, rest), full_loc)))
+                    }
                 };
             }
         }
@@ -360,14 +413,16 @@ impl PathList {
         // The .key case is applicable at any depth. If it comes first in the
         // path selection, $.key is implied, but the distinction is preserved
         // (using Self::Path rather than Self::Var) for accurate reprintability.
-        if let Ok((suffix, key)) = preceded(
-            tuple((spaces_or_comments, char('.'), spaces_or_comments)),
+        if let Ok((suffix, (_, dot, _, key))) = tuple((
+            spaces_or_comments,
+            parsed_tag("."),
+            spaces_or_comments,
             Key::parse,
-        )(input)
+        ))(input)
         {
-            // tuple((char('.'), Key::parse))(input) {
             let (input, rest) = Self::parse_with_depth(suffix, depth + 1)?;
-            return Ok((input, Self::Key(key, Box::new(rest))));
+            let full_loc = merge_locs(dot.loc(), rest.loc());
+            return Ok((input, Parsed::new(Self::Key(key, rest), full_loc)));
         }
 
         if depth == 0 {
@@ -381,24 +436,35 @@ impl PathList {
 
         // PathSelection can never start with a naked ->method (instead, use
         // $->method if you want to operate on the current value).
-        if let Ok((suffix, (method, args))) = preceded(
-            tuple((spaces_or_comments, tag("->"), spaces_or_comments)),
-            tuple((parse_identifier, opt(MethodArgs::parse))),
-        )(input)
+        if let Ok((suffix, (_, arrow, _, method, args))) = tuple((
+            spaces_or_comments,
+            parsed_tag("->"),
+            spaces_or_comments,
+            parse_identifier,
+            opt(MethodArgs::parse),
+        ))(input)
         {
             let (input, rest) = Self::parse_with_depth(suffix, depth + 1)?;
-            return Ok((input, Self::Method(method, args, Box::new(rest))));
+            let full_loc = merge_locs(arrow.loc(), rest.loc());
+            return Ok((
+                input,
+                Parsed::new(Self::Method(method, args, rest), full_loc),
+            ));
         }
 
         // Likewise, if the PathSelection has a SubSelection, it must appear at
         // the end of a non-empty path.
         if let Ok((suffix, selection)) = SubSelection::parse(input) {
-            return Ok((suffix, Self::Selection(selection)));
+            let selection_loc = selection.loc();
+            return Ok((
+                suffix,
+                Parsed::new(Self::Selection(selection), selection_loc),
+            ));
         }
 
         // The Self::Empty enum case is used to indicate the end of a
         // PathSelection that has no SubSelection.
-        Ok((input, Self::Empty))
+        Ok((input, Parsed::new(Self::Empty, None)))
     }
 
     pub(super) fn is_single_key(&self) -> bool {
@@ -421,10 +487,11 @@ impl PathList {
 
     pub(super) fn from_slice(properties: &[Key], selection: Option<SubSelection>) -> Self {
         match properties {
-            [] => selection.map_or(Self::Empty, Self::Selection),
-            [head, tail @ ..] => {
-                Self::Key(head.clone(), Box::new(Self::from_slice(tail, selection)))
-            }
+            [] => selection.map_or(Self::Empty, |sub| Self::Selection(Parsed::new(sub, None))),
+            [head, tail @ ..] => Self::Key(
+                Parsed::new(head.clone(), None),
+                Parsed::new(Self::from_slice(tail, selection), None),
+            ),
         }
     }
 
@@ -483,12 +550,12 @@ impl ExternalVarPaths for PathList {
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct SubSelection {
-    pub(super) selections: Vec<NamedSelection>,
-    pub(super) star: Option<StarSelection>,
+    pub(super) selections: Vec<Parsed<NamedSelection>>,
+    pub(super) star: Option<Parsed<StarSelection>>,
 }
 
 impl SubSelection {
-    pub(crate) fn parse(input: &str) -> IResult<&str, Self> {
+    pub(crate) fn parse(input: &str) -> IResult<&str, Parsed<Self>> {
         delimited(
             tuple((spaces_or_comments, char('{'))),
             Self::parse_naked,
@@ -496,7 +563,7 @@ impl SubSelection {
         )(input)
     }
 
-    fn parse_naked(input: &str) -> IResult<&str, Self> {
+    fn parse_naked(input: &str) -> IResult<&str, Parsed<Self>> {
         tuple((
             spaces_or_comments,
             many0(NamedSelection::parse),
@@ -507,11 +574,17 @@ impl SubSelection {
             opt(StarSelection::parse),
             spaces_or_comments,
         ))(input)
-        .map(|(input, (_, selections, star, _))| (input, Self { selections, star }))
+        .map(|(input, (_, selections, star, _))| {
+            (input, Parsed::new(Self { selections, star }, None))
+        })
+    }
+
+    fn into_parsed(self) -> Parsed<Self> {
+        Parsed::new(self, None)
     }
 
     pub fn selections_iter(&self) -> impl Iterator<Item = &NamedSelection> {
-        self.selections.iter()
+        self.selections.iter().map(|parsed| parsed.as_ref())
     }
 
     pub fn has_star(&self) -> bool {
@@ -519,15 +592,15 @@ impl SubSelection {
     }
 
     pub fn set_star(&mut self, star: Option<StarSelection>) {
-        self.star = star;
+        self.star = star.map(|star| Parsed::new(star, None));
     }
 
     pub fn append_selection(&mut self, selection: NamedSelection) {
-        self.selections.push(selection);
+        self.selections.push(Parsed::new(selection, None));
     }
 
     pub fn last_selection_mut(&mut self) -> Option<&mut NamedSelection> {
-        self.selections.last_mut()
+        self.selections.last_mut().map(|parsed| parsed.as_mut())
     }
 
     // Since we enforce that new selections may only be appended to
@@ -575,16 +648,19 @@ impl ExternalVarPaths for SubSelection {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct StarSelection(
-    pub(super) Option<Alias>,
-    pub(super) Option<Box<SubSelection>>,
+    pub(super) Option<Parsed<Alias>>,
+    pub(super) Option<Parsed<SubSelection>>,
 );
 
 impl StarSelection {
     pub(crate) fn new(alias: Option<Alias>, sub: Option<SubSelection>) -> Self {
-        Self(alias, sub.map(Box::new))
+        Self(
+            alias.map(|a| Parsed::new(a, None)),
+            sub.map(|s| Parsed::new(s, None)),
+        )
     }
 
-    pub(crate) fn parse(input: &str) -> IResult<&str, Self> {
+    pub(crate) fn parse(input: &str) -> IResult<&str, Parsed<Self>> {
         tuple((
             // The spaces_or_comments separators are necessary here because
             // Alias::parse and SubSelection::parse only consume surrounding
@@ -596,8 +672,12 @@ impl StarSelection {
             opt(SubSelection::parse),
         ))(input)
         .map(|(remainder, (alias, _, _, _, selection))| {
-            (remainder, Self(alias, selection.map(Box::new)))
+            (remainder, Parsed::new(Self(alias, selection), None))
         })
+    }
+
+    fn into_parsed(self) -> Parsed<Self> {
+        Parsed::new(self, None)
     }
 }
 
@@ -605,25 +685,29 @@ impl StarSelection {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Alias {
-    pub(super) name: Key,
+    pub(super) name: Parsed<Key>,
 }
 
 impl Alias {
     pub fn new(name: &str) -> Self {
         Self {
-            name: Key::field(name),
+            name: Parsed::new(Key::field(name), None),
         }
     }
 
     pub fn quoted(name: &str) -> Self {
         Self {
-            name: Key::quoted(name),
+            name: Parsed::new(Key::quoted(name), None),
         }
     }
 
-    fn parse(input: &str) -> IResult<&str, Self> {
+    fn parse(input: &str) -> IResult<&str, Parsed<Self>> {
         tuple((Key::parse, char(':'), spaces_or_comments))(input)
-            .map(|(input, (name, _, _))| (input, Self { name }))
+            .map(|(input, (name, _, _))| (input, Parsed::new(Self { name }, None)))
+    }
+
+    fn into_parsed(self) -> Parsed<Self> {
+        Parsed::new(self, None)
     }
 
     pub fn name(&self) -> &str {
@@ -633,17 +717,17 @@ impl Alias {
 
 // Key ::= Identifier | LitString
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub enum Key {
     Field(String),
     Quoted(String),
 }
 
 impl Key {
-    pub fn parse(input: &str) -> IResult<&str, Self> {
+    pub fn parse(input: &str) -> IResult<&str, Parsed<Self>> {
         alt((
-            map(parse_identifier, Self::Field),
-            map(parse_string_literal, Self::Quoted),
+            map(parse_identifier, |id| id.take_as(Key::Field)),
+            map(parse_string_literal, |s| s.take_as(Key::Quoted)),
         ))(input)
     }
 
@@ -653,6 +737,10 @@ impl Key {
 
     pub fn quoted(name: &str) -> Self {
         Self::Quoted(name.to_string())
+    }
+
+    pub fn into_parsed(self) -> Parsed<Self> {
+        Parsed::new(self, None)
     }
 
     pub fn is_quoted(&self) -> bool {
@@ -711,30 +799,30 @@ impl Display for Key {
 
 // Identifier ::= [a-zA-Z_] NO_SPACE [0-9a-zA-Z_]*
 
-fn parse_identifier(input: &str) -> IResult<&str, String> {
+fn parse_identifier(input: &str) -> IResult<&str, Parsed<String>> {
     delimited(
         spaces_or_comments,
         parse_identifier_no_space,
         spaces_or_comments,
     )(input)
-    .map(|(input, name)| (input, name.to_string()))
+    .map(|(input, name)| (input, Parsed::new(name.to_string(), None)))
 }
 
-fn parse_identifier_no_space(input: &str) -> IResult<&str, String> {
+fn parse_identifier_no_space(input: &str) -> IResult<&str, Parsed<String>> {
     recognize(pair(
         one_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_"),
         many0(one_of(
             "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789",
         )),
     ))(input)
-    .map(|(input, name)| (input, name.to_string()))
+    .map(|(input, name)| (input, Parsed::new(name.to_string(), None)))
 }
 
 // LitString ::=
 //   | "'" ("\\'" | [^'])* "'"
 //   | '"' ('\\"' | [^"])* '"'
 
-pub fn parse_string_literal(input: &str) -> IResult<&str, String> {
+pub fn parse_string_literal(input: &str) -> IResult<&str, Parsed<String>> {
     let input = spaces_or_comments(input).map(|(input, _)| input)?;
     let mut input_char_indices = input.char_indices();
 
@@ -765,7 +853,10 @@ pub fn parse_string_literal(input: &str) -> IResult<&str, String> {
             }
 
             if let Some(remainder) = remainder {
-                Ok((remainder, chars.iter().collect::<String>()))
+                Ok((
+                    remainder,
+                    Parsed::new(chars.iter().collect::<String>(), None),
+                ))
             } else {
                 Err(nom::Err::Error(nom::error::Error::new(
                     input,
@@ -782,14 +873,14 @@ pub fn parse_string_literal(input: &str) -> IResult<&str, String> {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct MethodArgs(pub(super) Vec<LitExpr>);
+pub struct MethodArgs(pub(super) Vec<Parsed<LitExpr>>);
 
 // Comma-separated positional arguments for a method, surrounded by parentheses.
 // When an arrow method is used without arguments, the Option<MethodArgs> for
 // the PathSelection::Method will be None, so we can safely define MethodArgs
 // using a Vec<LitExpr> in all cases (possibly empty but never missing).
 impl MethodArgs {
-    fn parse(input: &str) -> IResult<&str, Self> {
+    fn parse(input: &str) -> IResult<&str, Parsed<Self>> {
         delimited(
             tuple((spaces_or_comments, char('('), spaces_or_comments)),
             opt(map(
@@ -806,7 +897,11 @@ impl MethodArgs {
             )),
             tuple((spaces_or_comments, char(')'), spaces_or_comments)),
         )(input)
-        .map(|(input, args)| (input, Self(args.unwrap_or_default())))
+        .map(|(input, args)| (input, Parsed::new(Self(args.unwrap_or_default()), None)))
+    }
+
+    fn into_parsed(self) -> Parsed<Self> {
+        Parsed::new(self, None)
     }
 }
 
@@ -817,29 +912,25 @@ mod tests {
 
     #[test]
     fn test_identifier() {
-        assert_eq!(parse_identifier("hello"), Ok(("", "hello".to_string())));
+        fn check(input: &str, expected_name: &str) {
+            let (remainder, name) = parse_identifier(input).unwrap();
+            assert_eq!(remainder, "");
+            assert_eq!(name.node(), expected_name);
+        }
 
-        assert_eq!(
-            parse_identifier("hello_world"),
-            Ok(("", "hello_world".to_string())),
-        );
+        check("hello", "hello");
+        check("hello_world", "hello_world");
+        check("  hello_world ", "hello_world");
+        check("hello_world_123", "hello_world_123");
+        check(" hello ", "hello");
 
-        assert_eq!(
-            parse_identifier("hello_world_123"),
-            Ok(("", "hello_world_123".to_string())),
-        );
+        fn check_no_space(input: &str, expected_name: &str) {
+            let name = parse_identifier_no_space(input).unwrap().1;
+            assert_eq!(name.node(), expected_name);
+        }
 
-        assert_eq!(parse_identifier(" hello "), Ok(("", "hello".to_string())));
-
-        assert_eq!(
-            parse_identifier_no_space("oyez"),
-            Ok(("", "oyez".to_string())),
-        );
-
-        assert_eq!(
-            parse_identifier_no_space("oyez   "),
-            Ok(("   ", "oyez".to_string())),
-        );
+        check_no_space("oyez", "oyez");
+        check_no_space("oyez   ", "oyez");
 
         assert_eq!(
             parse_identifier_no_space("  oyez   "),
@@ -852,71 +943,70 @@ mod tests {
 
     #[test]
     fn test_string_literal() {
-        assert_eq!(
-            parse_string_literal("'hello world'"),
-            Ok(("", "hello world".to_string())),
-        );
-        assert_eq!(
-            parse_string_literal("\"hello world\""),
-            Ok(("", "hello world".to_string())),
-        );
-        assert_eq!(
-            parse_string_literal("'hello \"world\"'"),
-            Ok(("", "hello \"world\"".to_string())),
-        );
-        assert_eq!(
-            parse_string_literal("\"hello \\\"world\\\"\""),
-            Ok(("", "hello \"world\"".to_string())),
-        );
-        assert_eq!(
-            parse_string_literal("'hello \\'world\\''"),
-            Ok(("", "hello 'world'".to_string())),
-        );
+        fn check(input: &str, expected: &str) {
+            let (remainder, lit) = parse_string_literal(input).unwrap();
+            assert_eq!(remainder, "");
+            assert_eq!(lit.node(), expected);
+        }
+        check("'hello world'", "hello world");
+        check("\"hello world\"", "hello world");
+        check("'hello \"world\"'", "hello \"world\"");
+        check("\"hello \\\"world\\\"\"", "hello \"world\"");
+        check("'hello \\'world\\''", "hello 'world'");
     }
+
     #[test]
     fn test_key() {
-        assert_eq!(
-            Key::parse("hello"),
-            Ok(("", Key::Field("hello".to_string()))),
-        );
+        fn check(input: &str, expected: &Key) {
+            let (remainder, key) = Key::parse(input).unwrap();
+            assert_eq!(remainder, "");
+            assert_eq!(key.node(), expected);
+        }
 
-        assert_eq!(
-            Key::parse("'hello'"),
-            Ok(("", Key::Quoted("hello".to_string()))),
-        );
+        check("hello", &Key::field("hello"));
+        check("'hello'", &Key::quoted("hello"));
+        check("  hello ", &Key::field("hello"));
+        check("\"hello\"", &Key::quoted("hello"));
+        check("  \"hello\" ", &Key::quoted("hello"));
     }
 
     #[test]
     fn test_alias() {
-        assert_eq!(Alias::parse("hello:"), Ok(("", Alias::new("hello"))));
+        fn check(input: &str, alias: &str) {
+            let (remainder, parsed) = Alias::parse(input).unwrap();
+            assert_eq!(remainder, "");
+            assert_eq!(parsed.node().name(), alias);
+        }
 
-        assert_eq!(Alias::parse("hello :"), Ok(("", Alias::new("hello"))));
-
-        assert_eq!(Alias::parse("hello : "), Ok(("", Alias::new("hello"))));
-
-        assert_eq!(Alias::parse("  hello :"), Ok(("", Alias::new("hello"))));
-
-        assert_eq!(Alias::parse("hello: "), Ok(("", Alias::new("hello"))));
+        check("hello:", "hello");
+        check("hello :", "hello");
+        check("hello : ", "hello");
+        check("  hello :", "hello");
+        check("hello: ", "hello");
     }
 
     #[test]
     fn test_named_selection() {
         fn assert_result_and_name(input: &str, expected: NamedSelection, name: &str) {
-            let actual = NamedSelection::parse(input);
-            assert_eq!(actual, Ok(("", expected.clone())));
-            assert_eq!(actual.unwrap().1.name(), name);
+            let (remainder, selection) = NamedSelection::parse(input).unwrap();
+            assert_eq!(remainder, "");
+            assert_eq!(selection.node(), &expected);
+            assert_eq!(selection.node().name(), name);
             assert_eq!(
                 selection!(input),
-                JSONSelection::Named(SubSelection {
-                    selections: vec![expected],
-                    star: None,
-                }),
+                JSONSelection::Named(Parsed::new(
+                    SubSelection {
+                        selections: vec![Parsed::new(expected, None)],
+                        star: None,
+                    },
+                    None
+                )),
             );
         }
 
         assert_result_and_name(
             "hello",
-            NamedSelection::Field(None, Key::field("hello"), None),
+            NamedSelection::Field(None, Key::field("hello").into_parsed(), None),
             "hello",
         );
 
@@ -924,36 +1014,60 @@ mod tests {
             "hello { world }",
             NamedSelection::Field(
                 None,
-                Key::field("hello"),
-                Some(SubSelection {
-                    selections: vec![NamedSelection::Field(None, Key::field("world"), None)],
-                    star: None,
-                }),
+                Key::field("hello").into_parsed(),
+                Some(
+                    SubSelection {
+                        selections: vec![NamedSelection::Field(
+                            None,
+                            Key::field("world").into_parsed(),
+                            None,
+                        )
+                        .into_parsed()],
+                        star: None,
+                    }
+                    .into_parsed(),
+                ),
             ),
             "hello",
         );
 
         assert_result_and_name(
             "hi: hello",
-            NamedSelection::Field(Some(Alias::new("hi")), Key::field("hello"), None),
+            NamedSelection::Field(
+                Some(Alias::new("hi").into_parsed()),
+                Key::field("hello").into_parsed(),
+                None,
+            ),
             "hi",
         );
 
         assert_result_and_name(
             "hi: 'hello world'",
-            NamedSelection::Field(Some(Alias::new("hi")), Key::quoted("hello world"), None),
+            NamedSelection::Field(
+                Some(Alias::new("hi").into_parsed()),
+                Key::quoted("hello world").into_parsed(),
+                None,
+            ),
             "hi",
         );
 
         assert_result_and_name(
             "hi: hello { world }",
             NamedSelection::Field(
-                Some(Alias::new("hi")),
-                Key::field("hello"),
-                Some(SubSelection {
-                    selections: vec![NamedSelection::Field(None, Key::field("world"), None)],
-                    star: None,
-                }),
+                Some(Alias::new("hi").into_parsed()),
+                Key::field("hello").into_parsed(),
+                Some(
+                    SubSelection {
+                        selections: vec![NamedSelection::Field(
+                            None,
+                            Key::field("world").into_parsed(),
+                            None,
+                        )
+                        .into_parsed()],
+                        star: None,
+                    }
+                    .into_parsed(),
+                ),
             ),
             "hi",
         );
@@ -961,15 +1075,20 @@ mod tests {
         assert_result_and_name(
             "hey: hello { world again }",
             NamedSelection::Field(
-                Some(Alias::new("hey")),
-                Key::field("hello"),
-                Some(SubSelection {
-                    selections: vec![
-                        NamedSelection::Field(None, Key::field("world"), None),
-                        NamedSelection::Field(None, Key::field("again"), None),
-                    ],
-                    star: None,
-                }),
+                Some(Alias::new("hey").into_parsed()),
+                Key::field("hello").into_parsed(),
+                Some(
+                    SubSelection {
+                        selections: vec![
+                            NamedSelection::Field(None, Key::field("world").into_parsed(), None)
+                                .into_parsed(),
+                            NamedSelection::Field(None, Key::field("again").into_parsed(), None)
+                                .into_parsed(),
+                        ],
+                        star: None,
+                    }
+                    .into_parsed(),
+                ),
             ),
             "hey",
         );
@@ -977,25 +1096,41 @@ mod tests {
         assert_result_and_name(
             "hey: 'hello world' { again }",
             NamedSelection::Field(
-                Some(Alias::new("hey")),
-                Key::quoted("hello world"),
-                Some(SubSelection {
-                    selections: vec![NamedSelection::Field(None, Key::field("again"), None)],
-                    star: None,
-                }),
+                Some(Alias::new("hey").into_parsed()),
+                Key::quoted("hello world").into_parsed(),
+                Some(
+                    SubSelection {
+                        selections: vec![NamedSelection::Field(
+                            None,
+                            Key::field("again").into_parsed(),
+                            None,
+                        )
+                        .into_parsed()],
+                        star: None,
+                    }
+                    .into_parsed(),
+                ),
             ),
             "hey",
         );
 
         assert_result_and_name(
             "leggo: 'my ego'",
-            NamedSelection::Field(Some(Alias::new("leggo")), Key::quoted("my ego"), None),
+            NamedSelection::Field(
+                Some(Alias::new("leggo").into_parsed()),
+                Key::quoted("my ego").into_parsed(),
+                None,
+            ),
             "leggo",
         );
 
         assert_result_and_name(
             "'let go': 'my ego'",
-            NamedSelection::Field(Some(Alias::quoted("let go")), Key::quoted("my ego"), None),
+            NamedSelection::Field(
+                Some(Alias::quoted("let go").into_parsed()),
+                Key::quoted("my ego").into_parsed(),
+                None,
+            ),
             "let go",
         );
     }
@@ -1004,50 +1139,68 @@ mod tests {
     fn test_selection() {
         assert_eq!(
             selection!(""),
-            JSONSelection::Named(SubSelection {
-                selections: vec![],
-                star: None,
-            }),
+            JSONSelection::Named(
+                SubSelection {
+                    selections: vec![],
+                    star: None,
+                }
+                .into_parsed()
+            ),
         );
 
         assert_eq!(
             selection!("   "),
-            JSONSelection::Named(SubSelection {
-                selections: vec![],
-                star: None,
-            }),
+            JSONSelection::Named(
+                SubSelection {
+                    selections: vec![],
+                    star: None,
+                }
+                .into_parsed()
+            ),
         );
 
         assert_eq!(
             selection!("hello"),
-            JSONSelection::Named(SubSelection {
-                selections: vec![NamedSelection::Field(None, Key::field("hello"), None),],
-                star: None,
-            }),
+            JSONSelection::Named(
+                SubSelection {
+                    selections: vec![NamedSelection::Field(
+                        None,
+                        Key::field("hello").into_parsed(),
+                        None
+                    )
+                    .into_parsed()],
+                    star: None,
+                }
+                .into_parsed()
+            ),
         );
 
         assert_eq!(
             selection!(".hello"),
-            JSONSelection::Path(PathSelection::from_slice(
-                &[Key::Field("hello".to_string()),],
-                None
-            )),
+            JSONSelection::Path(
+                PathSelection::from_slice(&[Key::Field("hello".to_string())], None).into_parsed()
+            ),
         );
 
         {
-            let expected = JSONSelection::Named(SubSelection {
-                selections: vec![NamedSelection::Path(
-                    Alias::new("hi"),
-                    PathSelection::from_slice(
-                        &[
-                            Key::Field("hello".to_string()),
-                            Key::Field("world".to_string()),
-                        ],
-                        None,
-                    ),
-                )],
-                star: None,
-            });
+            let expected = JSONSelection::Named(
+                SubSelection {
+                    selections: vec![NamedSelection::Path(
+                        Alias::new("hi").into_parsed(),
+                        PathSelection::from_slice(
+                            &[
+                                Key::Field("hello".to_string()),
+                                Key::Field("world".to_string()),
+                            ],
+                            None,
+                        )
+                        .into_parsed(),
+                    )
+                    .into_parsed()],
+                    star: None,
+                }
+                .into_parsed(),
+            );
 
             assert_eq!(selection!("hi: .hello.world"), expected);
             assert_eq!(selection!("hi: .hello .world"), expected);
@@ -1060,23 +1213,30 @@ mod tests {
         }
 
         {
-            let expected = JSONSelection::Named(SubSelection {
-                selections: vec![
-                    NamedSelection::Field(None, Key::field("before"), None),
-                    NamedSelection::Path(
-                        Alias::new("hi"),
-                        PathSelection::from_slice(
-                            &[
-                                Key::Field("hello".to_string()),
-                                Key::Field("world".to_string()),
-                            ],
-                            None,
-                        ),
-                    ),
-                    NamedSelection::Field(None, Key::field("after"), None),
-                ],
-                star: None,
-            });
+            let expected = JSONSelection::Named(
+                SubSelection {
+                    selections: vec![
+                        NamedSelection::Field(None, Key::field("before").into_parsed(), None)
+                            .into_parsed(),
+                        NamedSelection::Path(
+                            Alias::new("hi").into_parsed(),
+                            PathSelection::from_slice(
+                                &[
+                                    Key::Field("hello".to_string()),
+                                    Key::Field("world".to_string()),
+                                ],
+                                None,
+                            )
+                            .into_parsed(),
+                        )
+                        .into_parsed(),
+                        NamedSelection::Field(None, Key::field("after").into_parsed(), None)
+                            .into_parsed(),
+                    ],
+                    star: None,
+                }
+                .into_parsed(),
+            );
 
             assert_eq!(selection!("before hi: .hello.world after"), expected);
             assert_eq!(selection!("before hi: .hello .world after"), expected);
@@ -1093,29 +1253,46 @@ mod tests {
         }
 
         {
-            let expected = JSONSelection::Named(SubSelection {
-                selections: vec![
-                    NamedSelection::Field(None, Key::field("before"), None),
-                    NamedSelection::Path(
-                        Alias::new("hi"),
-                        PathSelection::from_slice(
-                            &[
-                                Key::Field("hello".to_string()),
-                                Key::Field("world".to_string()),
-                            ],
-                            Some(SubSelection {
-                                selections: vec![
-                                    NamedSelection::Field(None, Key::field("nested"), None),
-                                    NamedSelection::Field(None, Key::field("names"), None),
+            let expected = JSONSelection::Named(
+                SubSelection {
+                    selections: vec![
+                        NamedSelection::Field(None, Key::field("before").into_parsed(), None)
+                            .into_parsed(),
+                        NamedSelection::Path(
+                            Alias::new("hi").into_parsed(),
+                            PathSelection::from_slice(
+                                &[
+                                    Key::Field("hello".to_string()),
+                                    Key::Field("world".to_string()),
                                 ],
-                                star: None,
-                            }),
-                        ),
-                    ),
-                    NamedSelection::Field(None, Key::field("after"), None),
-                ],
-                star: None,
-            });
+                                Some(SubSelection {
+                                    selections: vec![
+                                        NamedSelection::Field(
+                                            None,
+                                            Key::field("nested").into_parsed(),
+                                            None,
+                                        )
+                                        .into_parsed(),
+                                        NamedSelection::Field(
+                                            None,
+                                            Key::field("names").into_parsed(),
+                                            None,
+                                        )
+                                        .into_parsed(),
+                                    ],
+                                    star: None,
+                                }),
+                            )
+                            .into_parsed(),
+                        )
+                        .into_parsed(),
+                        NamedSelection::Field(None, Key::field("after").into_parsed(), None)
+                            .into_parsed(),
+                    ],
+                    star: None,
+                }
+                .into_parsed(),
+            );
 
             assert_eq!(
                 selection!("before hi: .hello.world { nested names } after"),
@@ -1157,75 +1334,112 @@ mod tests {
                 siblingGroup: { brother sister }
             }"
             ),
-            JSONSelection::Named(SubSelection {
-                selections: vec![NamedSelection::Field(
-                    Some(Alias::new("topLevelAlias")),
-                    Key::field("topLevelField"),
-                    Some(SubSelection {
-                        selections: vec![
-                            NamedSelection::Field(
-                                Some(Alias::new("identifier")),
-                                Key::quoted("property name with spaces"),
-                                None,
-                            ),
-                            NamedSelection::Field(
-                                None,
-                                Key::quoted("unaliased non-identifier property"),
-                                None,
-                            ),
-                            NamedSelection::Field(
-                                Some(Alias::quoted("non-identifier alias")),
-                                Key::field("identifier"),
-                                None,
-                            ),
-                            NamedSelection::Path(
-                                Alias::new("pathSelection"),
-                                PathSelection::from_slice(
-                                    &[
-                                        Key::Field("some".to_string()),
-                                        Key::Field("nested".to_string()),
-                                        Key::Field("path".to_string()),
-                                    ],
-                                    Some(SubSelection {
-                                        selections: vec![
-                                            NamedSelection::Field(
-                                                Some(Alias::new("still")),
-                                                Key::field("yet"),
-                                                None,
-                                            ),
-                                            NamedSelection::Field(None, Key::field("more"), None,),
-                                            NamedSelection::Field(
-                                                None,
-                                                Key::field("properties"),
-                                                None,
-                                            ),
-                                        ],
-                                        star: None,
-                                    })
-                                ),
-                            ),
-                            NamedSelection::Group(
-                                Alias::new("siblingGroup"),
-                                SubSelection {
-                                    selections: vec![
-                                        NamedSelection::Field(None, Key::field("brother"), None,),
-                                        NamedSelection::Field(None, Key::field("sister"), None,),
-                                    ],
-                                    star: None,
-                                },
-                            ),
-                        ],
-                        star: None,
-                    }),
-                )],
-                star: None,
-            }),
+            JSONSelection::Named(
+                SubSelection {
+                    selections: vec![NamedSelection::Field(
+                        Some(Alias::new("topLevelAlias").into_parsed()),
+                        Key::field("topLevelField").into_parsed(),
+                        Some(
+                            SubSelection {
+                                selections: vec![
+                                    NamedSelection::Field(
+                                        Some(Alias::new("identifier").into_parsed()),
+                                        Key::quoted("property name with spaces").into_parsed(),
+                                        None,
+                                    )
+                                    .into_parsed(),
+                                    NamedSelection::Field(
+                                        None,
+                                        Key::quoted("unaliased non-identifier property")
+                                            .into_parsed(),
+                                        None,
+                                    )
+                                    .into_parsed(),
+                                    NamedSelection::Field(
+                                        Some(Alias::quoted("non-identifier alias").into_parsed()),
+                                        Key::field("identifier").into_parsed(),
+                                        None,
+                                    )
+                                    .into_parsed(),
+                                    NamedSelection::Path(
+                                        Alias::new("pathSelection").into_parsed(),
+                                        PathSelection::from_slice(
+                                            &[
+                                                Key::Field("some".to_string()),
+                                                Key::Field("nested".to_string()),
+                                                Key::Field("path".to_string()),
+                                            ],
+                                            Some(SubSelection {
+                                                selections: vec![
+                                                    NamedSelection::Field(
+                                                        Some(Alias::new("still").into_parsed()),
+                                                        Key::field("yet").into_parsed(),
+                                                        None,
+                                                    )
+                                                    .into_parsed(),
+                                                    NamedSelection::Field(
+                                                        None,
+                                                        Key::field("more").into_parsed(),
+                                                        None,
+                                                    )
+                                                    .into_parsed(),
+                                                    NamedSelection::Field(
+                                                        None,
+                                                        Key::field("properties").into_parsed(),
+                                                        None,
+                                                    )
+                                                    .into_parsed(),
+                                                ],
+                                                star: None,
+                                            })
+                                        )
+                                        .into_parsed(),
+                                    )
+                                    .into_parsed(),
+                                    NamedSelection::Group(
+                                        Alias::new("siblingGroup").into_parsed(),
+                                        SubSelection {
+                                            selections: vec![
+                                                NamedSelection::Field(
+                                                    None,
+                                                    Key::field("brother").into_parsed(),
+                                                    None
+                                                )
+                                                .into_parsed(),
+                                                NamedSelection::Field(
+                                                    None,
+                                                    Key::field("sister").into_parsed(),
+                                                    None
+                                                )
+                                                .into_parsed(),
+                                            ],
+                                            star: None,
+                                        }
+                                        .into_parsed(),
+                                    )
+                                    .into_parsed(),
+                                ],
+                                star: None,
+                            }
+                            .into_parsed()
+                        ),
+                    )
+                    .into_parsed()],
+                    star: None,
+                }
+                .into_parsed()
+            ),
         );
     }
 
     fn check_path_selection(input: &str, expected: PathSelection) {
-        assert_eq!(PathSelection::parse(input), Ok(("", expected.clone())));
-        assert_eq!(selection!(input), JSONSelection::Path(expected.clone()));
+        let (remainder, selection) = PathSelection::parse(input).unwrap();
+        assert_eq!(remainder, "");
+        assert_eq!(selection.node(), &expected);
+        assert_eq!(
+            selection!(input),
+            JSONSelection::Path(expected.into_parsed())
+        );
     }
 
     #[test]
@@ -1260,7 +1474,12 @@ mod tests {
                     Key::Field("world".to_string()),
                 ],
                 Some(SubSelection {
-                    selections: vec![NamedSelection::Field(None, Key::field("hello"), None)],
+                    selections: vec![NamedSelection::Field(
+                        None,
+                        Key::field("hello").into_parsed(),
+                        None,
+                    )
+                    .into_parsed()],
                     star: None,
                 }),
             );
@@ -1322,10 +1541,11 @@ mod tests {
                 ],
                 Some(SubSelection {
                     selections: vec![NamedSelection::Field(
-                        Some(Alias::new("leggo")),
-                        Key::quoted("my ego"),
+                        Some(Alias::new("leggo").into_parsed()),
+                        Key::quoted("my ego").into_parsed(),
                         None,
-                    )],
+                    )
+                    .into_parsed()],
                     star: None,
                 }),
             );
@@ -1354,22 +1574,41 @@ mod tests {
         {
             let expected = PathSelection {
                 path: PathList::Key(
-                    Key::field("results"),
-                    Box::new(PathList::Selection(SubSelection {
-                        selections: vec![NamedSelection::Field(
-                            None,
-                            Key::quoted("quoted without alias"),
-                            Some(SubSelection {
-                                selections: vec![
-                                    NamedSelection::Field(None, Key::field("id"), None),
-                                    NamedSelection::Field(None, Key::quoted("n a m e"), None),
-                                ],
-                                star: None,
-                            }),
-                        )],
-                        star: None,
-                    })),
-                ),
+                    Key::field("results").into_parsed(),
+                    PathList::Selection(
+                        SubSelection {
+                            selections: vec![NamedSelection::Field(
+                                None,
+                                Key::quoted("quoted without alias").into_parsed(),
+                                Some(
+                                    SubSelection {
+                                        selections: vec![
+                                            NamedSelection::Field(
+                                                None,
+                                                Key::field("id").into_parsed(),
+                                                None,
+                                            )
+                                            .into_parsed(),
+                                            NamedSelection::Field(
+                                                None,
+                                                Key::quoted("n a m e").into_parsed(),
+                                                None,
+                                            )
+                                            .into_parsed(),
+                                        ],
+                                        star: None,
+                                    }
+                                    .into_parsed(),
+                                ),
+                            )
+                            .into_parsed()],
+                            star: None,
+                        }
+                        .into_parsed(),
+                    )
+                    .into_parsed(),
+                )
+                .into_parsed(),
             };
             check_path_selection(
                 ".results { 'quoted without alias' { id 'n a m e' } }",
@@ -1384,26 +1623,41 @@ mod tests {
         {
             let expected = PathSelection {
                 path: PathList::Key(
-                    Key::field("results"),
-                    Box::new(PathList::Selection(SubSelection {
-                        selections: vec![NamedSelection::Field(
-                            Some(Alias::quoted("non-identifier alias")),
-                            Key::quoted("quoted with alias"),
-                            Some(SubSelection {
-                                selections: vec![
-                                    NamedSelection::Field(None, Key::field("id"), None),
-                                    NamedSelection::Field(
-                                        Some(Alias::quoted("n a m e")),
-                                        Key::field("name"),
-                                        None,
-                                    ),
-                                ],
-                                star: None,
-                            }),
-                        )],
-                        star: None,
-                    })),
-                ),
+                    Key::field("results").into_parsed(),
+                    PathList::Selection(
+                        SubSelection {
+                            selections: vec![NamedSelection::Field(
+                                Some(Alias::quoted("non-identifier alias").into_parsed()),
+                                Key::quoted("quoted with alias").into_parsed(),
+                                Some(
+                                    SubSelection {
+                                        selections: vec![
+                                            NamedSelection::Field(
+                                                None,
+                                                Key::field("id").into_parsed(),
+                                                None,
+                                            )
+                                            .into_parsed(),
+                                            NamedSelection::Field(
+                                                Some(Alias::quoted("n a m e").into_parsed()),
+                                                Key::field("name").into_parsed(),
+                                                None,
+                                            )
+                                            .into_parsed(),
+                                        ],
+                                        star: None,
+                                    }
+                                    .into_parsed(),
+                                ),
+                            )
+                            .into_parsed()],
+                            star: None,
+                        }
+                        .into_parsed(),
+                    )
+                    .into_parsed(),
+                )
+                .into_parsed(),
             };
             check_path_selection(
                 ".results { 'non-identifier alias': 'quoted with alias' { id 'n a m e': name } }",
@@ -1420,106 +1674,171 @@ mod tests {
     fn test_path_selection_vars() {
         check_path_selection(
             "$this",
-            PathList::Var(KnownVariable::This, Box::new(PathList::Empty)).into(),
+            PathSelection {
+                path: PathList::Var(
+                    KnownVariable::This.into_parsed(),
+                    PathList::Empty.into_parsed(),
+                )
+                .into_parsed(),
+            },
         );
 
         check_path_selection(
             "$",
-            PathList::Var(KnownVariable::Dollar, Box::new(PathList::Empty)).into(),
+            PathSelection {
+                path: PathList::Var(
+                    KnownVariable::Dollar.into_parsed(),
+                    PathList::Empty.into_parsed(),
+                )
+                .into_parsed(),
+            },
         );
 
         check_path_selection(
             "$this { hello }",
-            PathList::Var(
-                KnownVariable::This,
-                Box::new(PathList::Selection(SubSelection {
-                    selections: vec![NamedSelection::Field(None, Key::field("hello"), None)],
-                    star: None,
-                })),
-            )
-            .into(),
+            PathSelection {
+                path: PathList::Var(
+                    KnownVariable::This.into_parsed(),
+                    PathList::Selection(
+                        SubSelection {
+                            selections: vec![NamedSelection::Field(
+                                None,
+                                Key::field("hello").into_parsed(),
+                                None,
+                            )
+                            .into_parsed()],
+                            star: None,
+                        }
+                        .into_parsed(),
+                    )
+                    .into_parsed(),
+                )
+                .into_parsed(),
+            },
         );
 
         check_path_selection(
             "$ { hello }",
-            PathList::Var(
-                KnownVariable::Dollar,
-                Box::new(PathList::Selection(SubSelection {
-                    selections: vec![NamedSelection::Field(None, Key::field("hello"), None)],
-                    star: None,
-                })),
-            )
-            .into(),
+            PathSelection {
+                path: PathList::Var(
+                    KnownVariable::Dollar.into_parsed(),
+                    PathList::Selection(
+                        SubSelection {
+                            selections: vec![NamedSelection::Field(
+                                None,
+                                Key::field("hello").into_parsed(),
+                                None,
+                            )
+                            .into_parsed()],
+                            star: None,
+                        }
+                        .into_parsed(),
+                    )
+                    .into_parsed(),
+                )
+                .into_parsed(),
+            },
         );
 
         check_path_selection(
             "$this { before alias: $args.arg after }",
             PathList::Var(
-                KnownVariable::This,
-                Box::new(PathList::Selection(SubSelection {
-                    selections: vec![
-                        NamedSelection::Field(None, Key::field("before"), None),
-                        NamedSelection::Path(
-                            Alias::new("alias"),
-                            PathList::Var(
-                                KnownVariable::Args,
-                                Box::new(PathList::Key(
-                                    Key::Field("arg".to_string()),
-                                    Box::new(PathList::Empty),
-                                )),
+                KnownVariable::This.into_parsed(),
+                PathList::Selection(
+                    SubSelection {
+                        selections: vec![
+                            NamedSelection::Field(None, Key::field("before").into_parsed(), None)
+                                .into_parsed(),
+                            NamedSelection::Path(
+                                Alias::new("alias").into_parsed(),
+                                PathSelection {
+                                    path: PathList::Var(
+                                        KnownVariable::Args.into_parsed(),
+                                        PathList::Key(
+                                            Key::field("arg").into_parsed(),
+                                            PathList::Empty.into_parsed(),
+                                        )
+                                        .into_parsed(),
+                                    )
+                                    .into_parsed(),
+                                }
+                                .into_parsed(),
                             )
-                            .into(),
-                        ),
-                        NamedSelection::Field(None, Key::field("after"), None),
-                    ],
-                    star: None,
-                })),
+                            .into_parsed(),
+                            NamedSelection::Field(None, Key::field("after").into_parsed(), None)
+                                .into_parsed(),
+                        ],
+                        star: None,
+                    }
+                    .into_parsed(),
+                )
+                .into_parsed(),
             )
             .into(),
         );
 
         check_path_selection(
             "$.nested { key injected: $args.arg }",
-            PathList::Var(
-                KnownVariable::Dollar,
-                Box::new(PathList::Key(
-                    Key::Field("nested".to_string()),
-                    Box::new(PathList::Selection(SubSelection {
-                        selections: vec![
-                            NamedSelection::Field(None, Key::field("key"), None),
-                            NamedSelection::Path(
-                                Alias::new("injected"),
-                                PathList::Var(
-                                    KnownVariable::Args,
-                                    Box::new(PathList::Key(
-                                        Key::Field("arg".to_string()),
-                                        Box::new(PathList::Empty),
-                                    )),
-                                )
-                                .into(),
-                            ),
-                        ],
-                        star: None,
-                    })),
-                )),
-            )
-            .into(),
+            PathSelection {
+                path: PathList::Var(
+                    KnownVariable::Dollar.into_parsed(),
+                    PathList::Key(
+                        Key::field("nested").into_parsed(),
+                        PathList::Selection(
+                            SubSelection {
+                                selections: vec![
+                                    NamedSelection::Field(
+                                        None,
+                                        Key::field("key").into_parsed(),
+                                        None,
+                                    )
+                                    .into_parsed(),
+                                    NamedSelection::Path(
+                                        Alias::new("injected").into_parsed(),
+                                        PathSelection {
+                                            path: PathList::Var(
+                                                KnownVariable::Args.into_parsed(),
+                                                PathList::Key(
+                                                    Key::field("arg").into_parsed(),
+                                                    PathList::Empty.into_parsed(),
+                                                )
+                                                .into_parsed(),
+                                            )
+                                            .into_parsed(),
+                                        }
+                                        .into_parsed(),
+                                    )
+                                    .into_parsed(),
+                                ],
+                                star: None,
+                            }
+                            .into_parsed(),
+                        )
+                        .into_parsed(),
+                    )
+                    .into_parsed(),
+                )
+                .into_parsed(),
+            },
         );
 
         check_path_selection(
             "$args.a.b.c",
-            PathList::Var(
-                KnownVariable::Args,
-                Box::new(PathList::from_slice(
-                    &[
-                        Key::Field("a".to_string()),
-                        Key::Field("b".to_string()),
-                        Key::Field("c".to_string()),
-                    ],
-                    None,
-                )),
-            )
-            .into(),
+            PathSelection {
+                path: PathList::Var(
+                    KnownVariable::Args.into_parsed(),
+                    PathList::from_slice(
+                        &[
+                            Key::Field("a".to_string()),
+                            Key::Field("b".to_string()),
+                            Key::Field("c".to_string()),
+                        ],
+                        None,
+                    )
+                    .into_parsed(),
+                )
+                .into_parsed(),
+            },
         );
 
         check_path_selection(
@@ -1550,32 +1869,40 @@ mod tests {
 
         check_path_selection(
             "$.data",
-            PathList::Var(
-                KnownVariable::Dollar,
-                Box::new(PathList::Key(
-                    Key::Field("data".to_string()),
-                    Box::new(PathList::Empty),
-                )),
-            )
-            .into(),
+            PathSelection {
+                path: PathList::Var(
+                    KnownVariable::Dollar.into_parsed(),
+                    PathList::Key(
+                        Key::field("data").into_parsed(),
+                        PathList::Empty.into_parsed(),
+                    )
+                    .into_parsed(),
+                )
+                .into_parsed(),
+            },
         );
 
         check_path_selection(
             "$.data.'quoted property'.nested",
-            PathList::Var(
-                KnownVariable::Dollar,
-                Box::new(PathList::Key(
-                    Key::Field("data".to_string()),
-                    Box::new(PathList::Key(
-                        Key::Quoted("quoted property".to_string()),
-                        Box::new(PathList::Key(
-                            Key::Field("nested".to_string()),
-                            Box::new(PathList::Empty),
-                        )),
-                    )),
-                )),
-            )
-            .into(),
+            PathSelection {
+                path: PathList::Var(
+                    KnownVariable::Dollar.into_parsed(),
+                    PathList::Key(
+                        Key::field("data").into_parsed(),
+                        PathList::Key(
+                            Key::quoted("quoted property").into_parsed(),
+                            PathList::Key(
+                                Key::field("nested").into_parsed(),
+                                PathList::Empty.into_parsed(),
+                            )
+                            .into_parsed(),
+                        )
+                        .into_parsed(),
+                    )
+                    .into_parsed(),
+                )
+                .into_parsed(),
+            },
         );
 
         assert_eq!(
@@ -1605,62 +1932,119 @@ mod tests {
         assert_eq!(
             selection!("$"),
             JSONSelection::Path(
-                PathList::Var(KnownVariable::Dollar, Box::new(PathList::Empty)).into()
+                PathSelection {
+                    path: PathList::Var(
+                        KnownVariable::Dollar.into_parsed(),
+                        PathList::Empty.into_parsed()
+                    )
+                    .into_parsed(),
+                }
+                .into_parsed()
             ),
         );
 
         assert_eq!(
             selection!("$this"),
             JSONSelection::Path(
-                PathList::Var(KnownVariable::This, Box::new(PathList::Empty)).into()
+                PathSelection {
+                    path: PathList::Var(
+                        KnownVariable::This.into_parsed(),
+                        PathList::Empty.into_parsed()
+                    )
+                    .into_parsed(),
+                }
+                .into_parsed()
             ),
         );
 
         assert_eq!(
             selection!("value: $ a { b c }"),
-            JSONSelection::Named(SubSelection {
-                selections: vec![
-                    NamedSelection::Path(
-                        Alias::new("value"),
-                        PathSelection {
-                            path: PathList::Var(KnownVariable::Dollar, Box::new(PathList::Empty)),
-                        },
-                    ),
-                    NamedSelection::Field(
-                        None,
-                        Key::field("a"),
-                        Some(SubSelection {
-                            selections: vec![
-                                NamedSelection::Field(None, Key::field("b"), None),
-                                NamedSelection::Field(None, Key::field("c"), None),
-                            ],
-                            star: None,
-                        }),
-                    ),
-                ],
-                star: None,
-            }),
+            JSONSelection::Named(
+                SubSelection {
+                    selections: vec![
+                        NamedSelection::Path(
+                            Alias::new("value").into_parsed(),
+                            PathSelection {
+                                path: PathList::Var(
+                                    KnownVariable::Dollar.into_parsed(),
+                                    PathList::Empty.into_parsed()
+                                )
+                                .into_parsed(),
+                            }
+                            .into_parsed(),
+                        )
+                        .into_parsed(),
+                        NamedSelection::Field(
+                            None,
+                            Key::field("a").into_parsed(),
+                            Some(
+                                SubSelection {
+                                    selections: vec![
+                                        NamedSelection::Field(
+                                            None,
+                                            Key::field("b").into_parsed(),
+                                            None
+                                        )
+                                        .into_parsed(),
+                                        NamedSelection::Field(
+                                            None,
+                                            Key::field("c").into_parsed(),
+                                            None
+                                        )
+                                        .into_parsed(),
+                                    ],
+                                    star: None,
+                                }
+                                .into_parsed()
+                            ),
+                        )
+                        .into_parsed(),
+                    ],
+                    star: None,
+                }
+                .into_parsed()
+            ),
         );
         assert_eq!(
             selection!("value: $this { b c }"),
-            JSONSelection::Named(SubSelection {
-                selections: vec![NamedSelection::Path(
-                    Alias::new("value"),
-                    PathSelection {
-                        path: PathList::Var(
-                            KnownVariable::This,
-                            Box::new(PathList::Selection(SubSelection {
-                                selections: vec![
-                                    NamedSelection::Field(None, Key::field("b"), None),
-                                    NamedSelection::Field(None, Key::field("c"), None),
-                                ],
-                                star: None,
-                            })),
-                        ),
-                    },
-                ),],
-                star: None,
-            }),
+            JSONSelection::Named(
+                SubSelection {
+                    selections: vec![NamedSelection::Path(
+                        Alias::new("value").into_parsed(),
+                        PathSelection {
+                            path: PathList::Var(
+                                KnownVariable::This.into_parsed(),
+                                PathList::Selection(
+                                    SubSelection {
+                                        selections: vec![
+                                            NamedSelection::Field(
+                                                None,
+                                                Key::field("b").into_parsed(),
+                                                None
+                                            )
+                                            .into_parsed(),
+                                            NamedSelection::Field(
+                                                None,
+                                                Key::field("c").into_parsed(),
+                                                None
+                                            )
+                                            .into_parsed(),
+                                        ],
+                                        star: None,
+                                    }
+                                    .into_parsed()
+                                )
+                                .into_parsed(),
+                            )
+                            .into_parsed(),
+                        }
+                        .into_parsed(),
+                    )
+                    .into_parsed()],
+                    star: None,
+                }
+                .into_parsed()
+            ),
         );
     }
 
@@ -1669,7 +2053,11 @@ mod tests {
         check_path_selection(
             "@",
             PathSelection {
-                path: PathList::Var(KnownVariable::AtSign, Box::new(PathList::Empty)),
+                path: PathList::Var(
+                    KnownVariable::AtSign.into_parsed(),
+                    PathList::Empty.into_parsed(),
+                )
+                .into_parsed(),
             },
         );
 
@@ -1677,16 +2065,18 @@ mod tests {
             "@.a.b.c",
             PathSelection {
                 path: PathList::Var(
-                    KnownVariable::AtSign,
-                    Box::new(PathList::from_slice(
+                    KnownVariable::AtSign.into_parsed(),
+                    PathList::from_slice(
                         &[
                             Key::Field("a".to_string()),
                             Key::Field("b".to_string()),
                             Key::Field("c".to_string()),
                         ],
                         None,
-                    )),
-                ),
+                    )
+                    .into_parsed(),
+                )
+                .into_parsed(),
             },
         );
 
@@ -1694,16 +2084,19 @@ mod tests {
             "@.items->first",
             PathSelection {
                 path: PathList::Var(
-                    KnownVariable::AtSign,
-                    Box::new(PathList::Key(
-                        Key::Field("items".to_string()),
-                        Box::new(PathList::Method(
-                            "first".to_string(),
+                    KnownVariable::AtSign.into_parsed(),
+                    PathList::Key(
+                        Key::field("items").into_parsed(),
+                        PathList::Method(
+                            Parsed::new("first".to_string(), None),
                             None,
-                            Box::new(PathList::Empty),
-                        )),
-                    )),
-                ),
+                            PathList::Empty.into_parsed(),
+                        )
+                        .into_parsed(),
+                    )
+                    .into_parsed(),
+                )
+                .into_parsed(),
             },
         );
     }
@@ -1714,45 +2107,51 @@ mod tests {
             "data.x->or(data.y)",
             PathSelection {
                 path: PathList::Key(
-                    Key::Field("data".to_string()),
-                    Box::new(PathList::Key(
-                        Key::Field("x".to_string()),
-                        Box::new(PathList::Method(
-                            "or".to_string(),
-                            Some(MethodArgs(vec![LitExpr::Path(PathSelection::from_slice(
-                                &[Key::Field("data".to_string()), Key::Field("y".to_string())],
-                                None,
-                            ))])),
-                            Box::new(PathList::Empty),
-                        )),
-                    )),
-                ),
+                    Key::field("data").into_parsed(),
+                    PathList::Key(
+                        Key::field("x").into_parsed(),
+                        PathList::Method(
+                            Parsed::new("or".to_string(), None),
+                            Some(
+                                MethodArgs(vec![LitExpr::Path(PathSelection::from_slice(
+                                    &[Key::field("data"), Key::field("y")],
+                                    None,
+                                ))
+                                .into_parsed()])
+                                .into_parsed(),
+                            ),
+                            PathList::Empty.into_parsed(),
+                        )
+                        .into_parsed(),
+                    )
+                    .into_parsed(),
+                )
+                .into_parsed(),
             },
         );
 
         {
             let expected = PathSelection {
                 path: PathList::Key(
-                    Key::Field("data".to_string()),
-                    Box::new(PathList::Method(
-                        "query".to_string(),
-                        Some(MethodArgs(vec![
-                            LitExpr::Path(PathSelection::from_slice(
-                                &[Key::Field("a".to_string())],
-                                None,
-                            )),
-                            LitExpr::Path(PathSelection::from_slice(
-                                &[Key::Field("b".to_string())],
-                                None,
-                            )),
-                            LitExpr::Path(PathSelection::from_slice(
-                                &[Key::Field("c".to_string())],
-                                None,
-                            )),
-                        ])),
-                        Box::new(PathList::Empty),
-                    )),
-                ),
+                    Key::field("data").into_parsed(),
+                    PathList::Method(
+                        Parsed::new("query".to_string(), None),
+                        Some(
+                            MethodArgs(vec![
+                                LitExpr::Path(PathSelection::from_slice(&[Key::field("a")], None))
+                                    .into_parsed(),
+                                LitExpr::Path(PathSelection::from_slice(&[Key::field("b")], None))
+                                    .into_parsed(),
+                                LitExpr::Path(PathSelection::from_slice(&[Key::field("c")], None))
+                                    .into_parsed(),
+                            ])
+                            .into_parsed(),
+                        ),
+                        PathList::Empty.into_parsed(),
+                    )
+                    .into_parsed(),
+                )
+                .into_parsed(),
             };
             check_path_selection("data->query(.a, .b, .c)", expected.clone());
             check_path_selection("data->query(.a, .b, .c )", expected.clone());
@@ -1764,25 +2163,34 @@ mod tests {
         {
             let expected = PathSelection {
                 path: PathList::Key(
-                    Key::Field("data".to_string()),
-                    Box::new(PathList::Key(
-                        Key::Field("x".to_string()),
-                        Box::new(PathList::Method(
-                            "concat".to_string(),
-                            Some(MethodArgs(vec![LitExpr::Array(vec![
-                                LitExpr::Path(PathSelection::from_slice(
-                                    &[Key::Field("data".to_string()), Key::Field("y".to_string())],
-                                    None,
-                                )),
-                                LitExpr::Path(PathSelection::from_slice(
-                                    &[Key::Field("data".to_string()), Key::Field("z".to_string())],
-                                    None,
-                                )),
-                            ])])),
-                            Box::new(PathList::Empty),
-                        )),
-                    )),
-                ),
+                    Key::field("data").into_parsed(),
+                    PathList::Key(
+                        Key::field("x").into_parsed(),
+                        PathList::Method(
+                            Parsed::new("concat".to_string(), None),
+                            Some(
+                                MethodArgs(vec![LitExpr::Array(vec![
+                                    LitExpr::Path(PathSelection::from_slice(
+                                        &[Key::field("data"), Key::field("y")],
+                                        None,
+                                    ))
+                                    .into_parsed(),
+                                    LitExpr::Path(PathSelection::from_slice(
+                                        &[Key::field("data"), Key::field("z")],
+                                        None,
+                                    ))
+                                    .into_parsed(),
+                                ])
+                                .into_parsed()])
+                                .into_parsed(),
+                            ),
+                            PathList::Empty.into_parsed(),
+                        )
+                        .into_parsed(),
+                    )
+                    .into_parsed(),
+                )
+                .into_parsed(),
             };
             check_path_selection("data.x->concat([data.y, data.z])", expected.clone());
             check_path_selection("data.x->concat([ data.y, data.z ])", expected.clone());
@@ -1796,64 +2204,106 @@ mod tests {
             "data->method([$ { x2: x->times(2) }, $ { y2: y->times(2) }])",
             PathSelection {
                 path: PathList::Key(
-                    Key::Field("data".to_string()),
-                    Box::new(PathList::Method(
-                        "method".to_string(),
-                        Some(MethodArgs(vec![LitExpr::Array(vec![
-                            LitExpr::Path(PathSelection {
-                                path: PathList::Var(
-                                    KnownVariable::Dollar,
-                                    Box::new(PathList::Selection(SubSelection {
-                                        selections: vec![NamedSelection::Path(
-                                            Alias::new("x2"),
-                                            PathSelection {
-                                                path: PathList::Key(
-                                                    Key::Field("x".to_string()),
-                                                    Box::new(PathList::Method(
-                                                        "times".to_string(),
-                                                        Some(MethodArgs(vec![LitExpr::Number(
+                    Key::field("data").into_parsed(),
+                    PathList::Method(
+                        Parsed::new("method".to_string(), None),
+                        Some(
+                            MethodArgs(vec![LitExpr::Array(vec![
+                                LitExpr::Path(PathSelection {
+                                    path: PathList::Var(
+                                        KnownVariable::Dollar.into_parsed(),
+                                        PathList::Selection(
+                                            SubSelection {
+                                                selections: vec![NamedSelection::Path(
+                                                    Alias::new("x2").into_parsed(),
+                                                    PathSelection {
+                                                        path: PathList::Key(
+                                                            Key::field("x").into_parsed(),
+                                                            PathList::Method(
+                                                                Parsed::new(
+                                                                    "times".to_string(),
+                                                                    None,
+                                                                ),
+                                                                Some(
+                                                                    MethodArgs(
+                                                                        vec![LitExpr::Number(
                                                             "2".parse().expect(
                                                                 "serde_json::Number parse error",
                                                             ),
-                                                        )])),
-                                                        Box::new(PathList::Empty),
-                                                    )),
-                                                ),
-                                            },
-                                        )],
-                                        star: None,
-                                    })),
-                                ),
-                            }),
-                            LitExpr::Path(PathSelection {
-                                path: PathList::Var(
-                                    KnownVariable::Dollar,
-                                    Box::new(PathList::Selection(SubSelection {
-                                        selections: vec![NamedSelection::Path(
-                                            Alias::new("y2"),
-                                            PathSelection {
-                                                path: PathList::Key(
-                                                    Key::Field("y".to_string()),
-                                                    Box::new(PathList::Method(
-                                                        "times".to_string(),
-                                                        Some(MethodArgs(vec![LitExpr::Number(
+                                                        ).into_parsed()],
+                                                                    )
+                                                                    .into_parsed(),
+                                                                ),
+                                                                PathList::Empty.into_parsed(),
+                                                            )
+                                                            .into_parsed(),
+                                                        )
+                                                        .into_parsed(),
+                                                    }
+                                                    .into_parsed(),
+                                                )
+                                                .into_parsed()],
+                                                star: None,
+                                            }
+                                            .into_parsed(),
+                                        )
+                                        .into_parsed(),
+                                    )
+                                    .into_parsed(),
+                                })
+                                .into_parsed(),
+                                LitExpr::Path(PathSelection {
+                                    path: PathList::Var(
+                                        KnownVariable::Dollar.into_parsed(),
+                                        PathList::Selection(
+                                            SubSelection {
+                                                selections: vec![NamedSelection::Path(
+                                                    Alias::new("y2").into_parsed(),
+                                                    PathSelection {
+                                                        path: PathList::Key(
+                                                            Key::field("y").into_parsed(),
+                                                            PathList::Method(
+                                                                Parsed::new(
+                                                                    "times".to_string(),
+                                                                    None,
+                                                                ),
+                                                                Some(
+                                                                    MethodArgs(
+                                                                        vec![LitExpr::Number(
                                                             "2".parse().expect(
                                                                 "serde_json::Number parse error",
                                                             ),
-                                                        )])),
-                                                        Box::new(PathList::Empty),
-                                                    )),
-                                                ),
-                                            },
-                                        )],
-                                        star: None,
-                                    })),
-                                ),
-                            }),
-                        ])])),
-                        Box::new(PathList::Empty),
-                    )),
-                ),
+                                                        ).into_parsed()],
+                                                                    )
+                                                                    .into_parsed(),
+                                                                ),
+                                                                PathList::Empty.into_parsed(),
+                                                            )
+                                                            .into_parsed(),
+                                                        )
+                                                        .into_parsed(),
+                                                    }
+                                                    .into_parsed(),
+                                                )
+                                                .into_parsed()],
+                                                star: None,
+                                            }
+                                            .into_parsed(),
+                                        )
+                                        .into_parsed(),
+                                    )
+                                    .into_parsed(),
+                                })
+                                .into_parsed(),
+                            ])
+                            .into_parsed()])
+                            .into_parsed(),
+                        ),
+                        PathList::Empty.into_parsed(),
+                    )
+                    .into_parsed(),
+                )
+                .into_parsed(),
             },
         );
     }
@@ -1867,7 +2317,8 @@ mod tests {
                 SubSelection {
                     selections: vec![],
                     star: None,
-                },
+                }
+                .into_parsed(),
             )),
         );
 
@@ -1876,9 +2327,15 @@ mod tests {
             Ok((
                 "",
                 SubSelection {
-                    selections: vec![NamedSelection::Field(None, Key::field("hello"), None)],
+                    selections: vec![NamedSelection::Field(
+                        None,
+                        Key::field("hello").into_parsed(),
+                        None
+                    )
+                    .into_parsed()],
                     star: None,
-                },
+                }
+                .into_parsed(),
             )),
         );
 
@@ -1887,9 +2344,15 @@ mod tests {
             Ok((
                 "",
                 SubSelection {
-                    selections: vec![NamedSelection::Field(None, Key::field("hello"), None)],
+                    selections: vec![NamedSelection::Field(
+                        None,
+                        Key::field("hello").into_parsed(),
+                        None
+                    )
+                    .into_parsed()],
                     star: None,
-                },
+                }
+                .into_parsed(),
             )),
         );
 
@@ -1898,9 +2361,15 @@ mod tests {
             Ok((
                 "",
                 SubSelection {
-                    selections: vec![NamedSelection::Field(None, Key::field("padded"), None)],
+                    selections: vec![NamedSelection::Field(
+                        None,
+                        Key::field("padded").into_parsed(),
+                        None
+                    )
+                    .into_parsed()],
                     star: None,
-                },
+                }
+                .into_parsed(),
             )),
         );
 
@@ -1910,11 +2379,14 @@ mod tests {
                 "",
                 SubSelection {
                     selections: vec![
-                        NamedSelection::Field(None, Key::field("hello"), None),
-                        NamedSelection::Field(None, Key::field("world"), None),
+                        NamedSelection::Field(None, Key::field("hello").into_parsed(), None)
+                            .into_parsed(),
+                        NamedSelection::Field(None, Key::field("world").into_parsed(), None)
+                            .into_parsed(),
                     ],
                     star: None,
-                },
+                }
+                .into_parsed(),
             )),
         );
 
@@ -1925,18 +2397,24 @@ mod tests {
                 SubSelection {
                     selections: vec![NamedSelection::Field(
                         None,
-                        Key::field("hello"),
-                        Some(SubSelection {
-                            selections: vec![NamedSelection::Field(
-                                None,
-                                Key::field("world"),
-                                None
-                            ),],
-                            star: None,
-                        })
-                    ),],
+                        Key::field("hello").into_parsed(),
+                        Some(
+                            SubSelection {
+                                selections: vec![NamedSelection::Field(
+                                    None,
+                                    Key::field("world").into_parsed(),
+                                    None
+                                )
+                                .into_parsed()],
+                                star: None,
+                            }
+                            .into_parsed()
+                        )
+                    )
+                    .into_parsed()],
                     star: None,
-                },
+                }
+                .into_parsed(),
             )),
         );
     }
@@ -1945,17 +2423,20 @@ mod tests {
     fn test_star_selection() {
         assert_eq!(
             StarSelection::parse("rest: *"),
-            Ok(("", StarSelection(Some(Alias::new("rest")), None),)),
+            Ok((
+                "",
+                StarSelection(Some(Alias::new("rest").into_parsed()), None).into_parsed()
+            )),
         );
 
         assert_eq!(
             StarSelection::parse("*"),
-            Ok(("", StarSelection(None, None),)),
+            Ok(("", StarSelection(None, None).into_parsed())),
         );
 
         assert_eq!(
             StarSelection::parse(" * "),
-            Ok(("", StarSelection(None, None),)),
+            Ok(("", StarSelection(None, None).into_parsed())),
         );
 
         assert_eq!(
@@ -1964,11 +2445,20 @@ mod tests {
                 "",
                 StarSelection(
                     None,
-                    Some(Box::new(SubSelection {
-                        selections: vec![NamedSelection::Field(None, Key::field("hello"), None),],
-                        star: None,
-                    }))
-                ),
+                    Some(
+                        SubSelection {
+                            selections: vec![NamedSelection::Field(
+                                None,
+                                Key::field("hello").into_parsed(),
+                                None
+                            )
+                            .into_parsed()],
+                            star: None,
+                        }
+                        .into_parsed()
+                    )
+                )
+                .into_parsed(),
             )),
         );
 
@@ -1977,12 +2467,21 @@ mod tests {
             Ok((
                 "",
                 StarSelection(
-                    Some(Alias::new("hi")),
-                    Some(Box::new(SubSelection {
-                        selections: vec![NamedSelection::Field(None, Key::field("hello"), None),],
-                        star: None,
-                    }))
-                ),
+                    Some(Alias::new("hi").into_parsed()),
+                    Some(
+                        SubSelection {
+                            selections: vec![NamedSelection::Field(
+                                None,
+                                Key::field("hello").into_parsed(),
+                                None
+                            )
+                            .into_parsed()],
+                            star: None,
+                        }
+                        .into_parsed()
+                    )
+                )
+                .into_parsed(),
             )),
         );
 
@@ -1991,69 +2490,142 @@ mod tests {
             Ok((
                 "",
                 StarSelection(
-                    Some(Alias::new("alias")),
-                    Some(Box::new(SubSelection {
-                        selections: vec![
-                            NamedSelection::Field(None, Key::field("x"), None),
-                            NamedSelection::Field(None, Key::field("y"), None),
-                            NamedSelection::Field(None, Key::field("z"), None),
-                        ],
-                        star: Some(StarSelection(Some(Alias::new("rest")), None)),
-                    })),
-                ),
+                    Some(Alias::new("alias").into_parsed()),
+                    Some(
+                        SubSelection {
+                            selections: vec![
+                                NamedSelection::Field(None, Key::field("x").into_parsed(), None)
+                                    .into_parsed(),
+                                NamedSelection::Field(None, Key::field("y").into_parsed(), None)
+                                    .into_parsed(),
+                                NamedSelection::Field(None, Key::field("z").into_parsed(), None)
+                                    .into_parsed(),
+                            ],
+                            star: Some(
+                                StarSelection(Some(Alias::new("rest").into_parsed()), None)
+                                    .into_parsed()
+                            ),
+                        }
+                        .into_parsed()
+                    ),
+                )
+                .into_parsed(),
             )),
         );
 
         assert_eq!(
             selection!(" before alias: * { * { a b c } } "),
-            JSONSelection::Named(SubSelection {
-                selections: vec![NamedSelection::Field(None, Key::field("before"), None),],
-                star: Some(StarSelection(
-                    Some(Alias::new("alias")),
-                    Some(Box::new(SubSelection {
-                        selections: vec![],
-                        star: Some(StarSelection(
-                            None,
-                            Some(Box::new(SubSelection {
-                                selections: vec![
-                                    NamedSelection::Field(None, Key::field("a"), None),
-                                    NamedSelection::Field(None, Key::field("b"), None),
-                                    NamedSelection::Field(None, Key::field("c"), None),
-                                ],
-                                star: None,
-                            }))
-                        )),
-                    })),
-                )),
-            }),
+            JSONSelection::Named(
+                SubSelection {
+                    selections: vec![NamedSelection::Field(
+                        None,
+                        Key::field("before").into_parsed(),
+                        None
+                    )
+                    .into_parsed()],
+                    star: Some(
+                        StarSelection(
+                            Some(Alias::new("alias").into_parsed()),
+                            Some(
+                                SubSelection {
+                                    selections: vec![],
+                                    star: Some(
+                                        StarSelection(
+                                            None,
+                                            Some(
+                                                SubSelection {
+                                                    selections: vec![
+                                                        NamedSelection::Field(
+                                                            None,
+                                                            Key::field("a").into_parsed(),
+                                                            None
+                                                        )
+                                                        .into_parsed(),
+                                                        NamedSelection::Field(
+                                                            None,
+                                                            Key::field("b").into_parsed(),
+                                                            None
+                                                        )
+                                                        .into_parsed(),
+                                                        NamedSelection::Field(
+                                                            None,
+                                                            Key::field("c").into_parsed(),
+                                                            None
+                                                        )
+                                                        .into_parsed(),
+                                                    ],
+                                                    star: None,
+                                                }
+                                                .into_parsed()
+                                            ),
+                                        )
+                                        .into_parsed()
+                                    ),
+                                }
+                                .into_parsed()
+                            ),
+                        )
+                        .into_parsed()
+                    ),
+                }
+                .into_parsed()
+            ),
         );
 
         assert_eq!(
             selection!(" before group: { * { a b c } } after "),
-            JSONSelection::Named(SubSelection {
-                selections: vec![
-                    NamedSelection::Field(None, Key::field("before"), None),
-                    NamedSelection::Group(
-                        Alias::new("group"),
-                        SubSelection {
-                            selections: vec![],
-                            star: Some(StarSelection(
-                                None,
-                                Some(Box::new(SubSelection {
-                                    selections: vec![
-                                        NamedSelection::Field(None, Key::field("a"), None),
-                                        NamedSelection::Field(None, Key::field("b"), None),
-                                        NamedSelection::Field(None, Key::field("c"), None),
-                                    ],
-                                    star: None,
-                                }))
-                            )),
-                        },
-                    ),
-                    NamedSelection::Field(None, Key::field("after"), None),
-                ],
-                star: None,
-            }),
+            JSONSelection::Named(
+                SubSelection {
+                    selections: vec![
+                        NamedSelection::Field(None, Key::field("before").into_parsed(), None)
+                            .into_parsed(),
+                        NamedSelection::Group(
+                            Alias::new("group").into_parsed(),
+                            SubSelection {
+                                selections: vec![],
+                                star: Some(
+                                    StarSelection(
+                                        None,
+                                        Some(
+                                            SubSelection {
+                                                selections: vec![
+                                                    NamedSelection::Field(
+                                                        None,
+                                                        Key::field("a").into_parsed(),
+                                                        None
+                                                    )
+                                                    .into_parsed(),
+                                                    NamedSelection::Field(
+                                                        None,
+                                                        Key::field("b").into_parsed(),
+                                                        None
+                                                    )
+                                                    .into_parsed(),
+                                                    NamedSelection::Field(
+                                                        None,
+                                                        Key::field("c").into_parsed(),
+                                                        None
+                                                    )
+                                                    .into_parsed(),
+                                                ],
+                                                star: None,
+                                            }
+                                            .into_parsed()
+                                        ),
+                                    )
+                                    .into_parsed()
+                                ),
+                            }
+                            .into_parsed(),
+                        )
+                        .into_parsed(),
+                        NamedSelection::Field(None, Key::field("after").into_parsed(), None)
+                            .into_parsed(),
+                    ],
+                    star: None,
+                }
+                .into_parsed()
+            ),
         );
     }
 
@@ -2065,11 +2637,11 @@ mod tests {
                 $->echo([$args.arg1, $args.arg2, @.items->first])
             "#
             );
-            let args_arg1_path = PathSelection::parse("$args.arg1").unwrap().1;
-            let args_arg2_path = PathSelection::parse("$args.arg2").unwrap().1;
+            let args_arg1_path = PathSelection::parse("$args.arg1").unwrap().1.take();
+            let args_arg2_path = PathSelection::parse("$args.arg2").unwrap().1.take();
             assert_eq!(
                 sel.external_var_paths(),
-                vec![&args_arg1_path, &args_arg2_path,]
+                vec![&args_arg1_path, &args_arg2_path]
             );
         }
         {
@@ -2084,15 +2656,15 @@ mod tests {
             "#
             );
             let this_kind_path = match &sel {
-                JSONSelection::Path(path) => path,
+                JSONSelection::Path(path) => path.node(),
                 _ => panic!("Expected PathSelection"),
             };
-            let this_a_path = PathSelection::parse("$this.a").unwrap().1;
-            let this_b_path = PathSelection::parse("$this.b").unwrap().1;
-            let this_c_path = PathSelection::parse("$this.c").unwrap().1;
+            let this_a_path = PathSelection::parse("$this.a").unwrap().1.take();
+            let this_b_path = PathSelection::parse("$this.b").unwrap().1.take();
+            let this_c_path = PathSelection::parse("$this.c").unwrap().1.take();
             assert_eq!(
                 sel.external_var_paths(),
-                vec![this_kind_path, &this_a_path, &this_b_path, &this_c_path,]
+                vec![this_kind_path, &this_a_path, &this_b_path, &this_c_path]
             );
         }
         {
@@ -2104,9 +2676,9 @@ mod tests {
                 }
             "#
             );
-            let start_path = PathSelection::parse("$args.start").unwrap().1;
-            let end_path = PathSelection::parse("$args.end").unwrap().1;
-            let args_type_path = PathSelection::parse("$args.type").unwrap().1;
+            let start_path = PathSelection::parse("$args.start").unwrap().1.take();
+            let end_path = PathSelection::parse("$args.end").unwrap().1.take();
+            let args_type_path = PathSelection::parse("$args.type").unwrap().1.take();
             assert_eq!(
                 sel.external_var_paths(),
                 vec![&start_path, &end_path, &args_type_path]

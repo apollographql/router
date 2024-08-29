@@ -17,7 +17,7 @@ use crate::sources::connect::json_selection::VarsWithPathsMap;
 
 pub(super) fn typeof_method(
     method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
@@ -38,7 +38,7 @@ pub(super) fn typeof_method(
 
 pub(super) fn eq_method(
     method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
@@ -70,7 +70,7 @@ pub(super) fn eq_method(
 // pair can be [true, <default>].
 pub(super) fn match_if_method(
     method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
@@ -79,7 +79,7 @@ pub(super) fn match_if_method(
 ) -> Option<JSON> {
     if let Some(MethodArgs(args)) = method_args {
         for pair in args {
-            if let LitExpr::Array(pair) = pair {
+            if let LitExpr::Array(pair) = pair.node() {
                 if pair.len() == 2 {
                     if let Some(JSON::Bool(true)) =
                         pair[0].apply_to_path(data, vars, input_path, errors)
@@ -106,7 +106,7 @@ pub(super) fn match_if_method(
 
 pub(super) fn arithmetic_method(
     method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_args: Option<&MethodArgs>,
     op: impl Fn(&Number, &Number) -> Option<Number>,
     data: &JSON,
     vars: &VarsWithPathsMap,
@@ -176,7 +176,7 @@ macro_rules! infix_math_method {
     ($name:ident, $op:ident) => {
         pub(super) fn $name(
             method_name: &str,
-            method_args: &Option<MethodArgs>,
+            method_args: Option<&MethodArgs>,
             data: &JSON,
             vars: &VarsWithPathsMap,
             input_path: &InputPath<JSON>,
@@ -207,7 +207,7 @@ infix_math_method!(mod_method, rem_op);
 
 pub(super) fn has_method(
     method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
@@ -290,7 +290,7 @@ pub(super) fn has_method(
 // the index is out of bounds, returns None and reports an error.
 pub(super) fn get_method(
     method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
@@ -420,7 +420,7 @@ pub(super) fn get_method(
 
 pub(super) fn keys_method(
     method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
@@ -456,7 +456,7 @@ pub(super) fn keys_method(
 
 pub(super) fn values_method(
     method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
@@ -492,7 +492,7 @@ pub(super) fn values_method(
 
 pub(super) fn not_method(
     method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
@@ -522,7 +522,7 @@ fn is_truthy(data: &JSON) -> bool {
 
 pub(super) fn or_method(
     method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
@@ -552,7 +552,7 @@ pub(super) fn or_method(
 
 pub(super) fn and_method(
     method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,

@@ -584,24 +584,39 @@ mod tests {
                     },
                 ),
                 selection: Named(
-                    SubSelection {
-                        selections: [
-                            Field(
-                                None,
-                                Field(
-                                    "id",
-                                ),
-                                None,
-                            ),
-                            Field(
-                                None,
-                                Field(
-                                    "name",
-                                ),
-                                None,
-                            ),
-                        ],
-                        star: None,
+                    Parsed {
+                        node: SubSelection {
+                            selections: [
+                                Parsed {
+                                    node: Field(
+                                        None,
+                                        Parsed {
+                                            node: Field(
+                                                "id",
+                                            ),
+                                            loc: None,
+                                        },
+                                        None,
+                                    ),
+                                    loc: None,
+                                },
+                                Parsed {
+                                    node: Field(
+                                        None,
+                                        Parsed {
+                                            node: Field(
+                                                "name",
+                                            ),
+                                            loc: None,
+                                        },
+                                        None,
+                                    ),
+                                    loc: None,
+                                },
+                            ],
+                            star: None,
+                        },
+                        loc: None,
                     },
                 ),
                 entity: false,
@@ -629,31 +644,52 @@ mod tests {
                     },
                 ),
                 selection: Named(
-                    SubSelection {
-                        selections: [
-                            Field(
-                                None,
-                                Field(
-                                    "id",
-                                ),
-                                None,
-                            ),
-                            Field(
-                                None,
-                                Field(
-                                    "title",
-                                ),
-                                None,
-                            ),
-                            Field(
-                                None,
-                                Field(
-                                    "body",
-                                ),
-                                None,
-                            ),
-                        ],
-                        star: None,
+                    Parsed {
+                        node: SubSelection {
+                            selections: [
+                                Parsed {
+                                    node: Field(
+                                        None,
+                                        Parsed {
+                                            node: Field(
+                                                "id",
+                                            ),
+                                            loc: None,
+                                        },
+                                        None,
+                                    ),
+                                    loc: None,
+                                },
+                                Parsed {
+                                    node: Field(
+                                        None,
+                                        Parsed {
+                                            node: Field(
+                                                "title",
+                                            ),
+                                            loc: None,
+                                        },
+                                        None,
+                                    ),
+                                    loc: None,
+                                },
+                                Parsed {
+                                    node: Field(
+                                        None,
+                                        Parsed {
+                                            node: Field(
+                                                "body",
+                                            ),
+                                            loc: None,
+                                        },
+                                        None,
+                                    ),
+                                    loc: None,
+                                },
+                            ],
+                            star: None,
+                        },
+                        loc: None,
                     },
                 ),
                 entity: false,

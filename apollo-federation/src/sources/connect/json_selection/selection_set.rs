@@ -27,6 +27,7 @@ use multimap::MultiMap;
 
 use super::known_var::KnownVariable;
 use super::lit_expr::LitExpr;
+use super::location::Parsed;
 use super::parser::MethodArgs;
 use super::parser::PathList;
 use crate::sources::connect::json_selection::Alias;
@@ -40,8 +41,14 @@ impl JSONSelection {
     /// Apply a selection set to create a new [`JSONSelection`]
     pub fn apply_selection_set(&self, selection_set: &SelectionSet) -> Self {
         match self {
-            Self::Named(sub) => Self::Named(sub.apply_selection_set(selection_set)),
-            Self::Path(path) => Self::Path(path.apply_selection_set(selection_set)),
+            Self::Named(sub) => Self::Named(Parsed::new(
+                sub.apply_selection_set(selection_set),
+                sub.loc(),
+            )),
+            Self::Path(path) => Self::Path(Parsed::new(
+                path.apply_selection_set(selection_set),
+                path.loc(),
+            )),
         }
     }
 }
@@ -63,25 +70,41 @@ impl SubSelection {
         // TODO: when we support abstract types, we'll want to first check if
         // the user defined a __typename mapping.
         if field_map.contains_key("__typename") {
-            new_selections.push(NamedSelection::Path(
-                Alias::new("__typename"),
-                PathSelection {
-                    path: PathList::Var(
-                        KnownVariable::Dollar,
-                        Box::new(PathList::Method(
-                            "echo".to_string(),
-                            Some(MethodArgs(vec![LitExpr::String(
-                                selection_set.ty.to_string(),
-                            )])),
-                            Box::new(PathList::Empty),
-                        )),
+            new_selections.push(Parsed::new(
+                NamedSelection::Path(
+                    Parsed::new(Alias::new("__typename"), None),
+                    Parsed::new(
+                        PathSelection {
+                            path: Parsed::new(
+                                PathList::Var(
+                                    Parsed::new(KnownVariable::Dollar, None),
+                                    Parsed::new(
+                                        PathList::Method(
+                                            Parsed::new("echo".to_string(), None),
+                                            Some(Parsed::new(
+                                                MethodArgs(vec![Parsed::new(
+                                                    LitExpr::String(selection_set.ty.to_string()),
+                                                    None,
+                                                )]),
+                                                None,
+                                            )),
+                                            Parsed::new(PathList::Empty, None),
+                                        ),
+                                        None,
+                                    ),
+                                ),
+                                None,
+                            ),
+                        },
+                        None,
                     ),
-                },
+                ),
+                None,
             ));
         }
 
         for selection in &self.selections {
-            match selection {
+            match selection.as_ref() {
                 NamedSelection::Field(alias, name, sub) => {
                     let key = alias
                         .as_ref()
@@ -93,16 +116,22 @@ impl SubSelection {
                         }
                         for field in fields {
                             let field_response_key = field.response_key().as_str();
-                            let alias = if field_response_key == name.as_str() {
-                                None
-                            } else {
-                                Some(Alias::new(field_response_key))
-                            };
-                            new_selections.push(NamedSelection::Field(
-                                alias,
-                                name.clone(),
-                                sub.as_ref()
-                                    .map(|sub| sub.apply_selection_set(&field.selection_set)),
+                            new_selections.push(Parsed::new(
+                                NamedSelection::Field(
+                                    if field_response_key == name.as_str() {
+                                        None
+                                    } else {
+                                        Some(Parsed::new(Alias::new(field_response_key), None))
+                                    },
+                                    name.clone(),
+                                    sub.as_ref().map(|sub| {
+                                        Parsed::new(
+                                            sub.apply_selection_set(&field.selection_set),
+                                            sub.loc(),
+                                        )
+                                    }),
+                                ),
+                                None,
                             ));
                         }
                     } else if self.star.is_some() {
@@ -118,9 +147,15 @@ impl SubSelection {
                             }
                         }
                         for field in fields {
-                            new_selections.push(NamedSelection::Path(
-                                Alias::new(field.response_key().as_str()),
-                                path_selection.apply_selection_set(&field.selection_set),
+                            new_selections.push(Parsed::new(
+                                NamedSelection::Path(
+                                    Parsed::new(Alias::new(field.response_key().as_str()), None),
+                                    Parsed::new(
+                                        path_selection.apply_selection_set(&field.selection_set),
+                                        path_selection.loc(),
+                                    ),
+                                ),
+                                None,
                             ));
                         }
                     } else if self.star.is_some() {
@@ -133,9 +168,15 @@ impl SubSelection {
                     let key = alias.name.as_str();
                     if let Some(fields) = field_map.get_vec(key) {
                         for field in fields {
-                            new_selections.push(NamedSelection::Group(
-                                Alias::new(field.response_key().as_str()),
-                                sub.apply_selection_set(&field.selection_set),
+                            new_selections.push(Parsed::new(
+                                NamedSelection::Group(
+                                    Parsed::new(Alias::new(field.response_key().as_str()), None),
+                                    Parsed::new(
+                                        sub.apply_selection_set(&field.selection_set),
+                                        sub.loc(),
+                                    ),
+                                ),
+                                None,
                             ));
                         }
                     }
@@ -149,9 +190,12 @@ impl SubSelection {
             dropped_fields.retain(|key, _| !referenced_fields.contains(key));
             for (dropped, _) in dropped_fields {
                 let name = format!("__unused__{dropped}");
-                new_selections.push(NamedSelection::Field(
-                    Some(Alias::new(name.as_str())),
-                    Key::field(dropped),
+                new_selections.push(Parsed::new(
+                    NamedSelection::Field(
+                        Some(Parsed::new(Alias::new(name.as_str()), None)),
+                        Parsed::new(Key::field(dropped), None),
+                        None,
+                    ),
                     None,
                 ));
             }
@@ -168,7 +212,10 @@ impl PathSelection {
     /// Apply a selection set to create a new [`PathSelection`]
     pub fn apply_selection_set(&self, selection_set: &SelectionSet) -> Self {
         Self {
-            path: self.path.apply_selection_set(selection_set),
+            path: Parsed::new(
+                self.path.apply_selection_set(selection_set),
+                self.path.loc(),
+            ),
         }
     }
 }
@@ -178,18 +225,21 @@ impl PathList {
         match self {
             Self::Var(name, path) => Self::Var(
                 name.clone(),
-                Box::new(path.apply_selection_set(selection_set)),
+                Parsed::new(path.apply_selection_set(selection_set), path.loc()),
             ),
             Self::Key(key, path) => Self::Key(
                 key.clone(),
-                Box::new(path.apply_selection_set(selection_set)),
+                Parsed::new(path.apply_selection_set(selection_set), path.loc()),
             ),
             Self::Method(method_name, args, path) => Self::Method(
                 method_name.clone(),
                 args.clone(),
-                Box::new(path.apply_selection_set(selection_set)),
+                Parsed::new(path.apply_selection_set(selection_set), path.loc()),
             ),
-            Self::Selection(sub) => Self::Selection(sub.apply_selection_set(selection_set)),
+            Self::Selection(sub) => Self::Selection(Parsed::new(
+                sub.apply_selection_set(selection_set),
+                sub.loc(),
+            )),
             Self::Empty => Self::Empty,
         }
     }
@@ -197,9 +247,8 @@ impl PathList {
 
 #[inline]
 fn key_name(path_selection: &PathSelection) -> Option<&str> {
-    match &path_selection.path {
-        PathList::Key(Key::Field(name), _) => Some(name),
-        PathList::Key(Key::Quoted(name), _) => Some(name),
+    match path_selection.path.as_ref() {
+        PathList::Key(key, _) => Some(key.as_str()),
         _ => None,
     }
 }

@@ -45,24 +45,39 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/no
             body: None,
         },
         selection: Named(
-            SubSelection {
-                selections: [
-                    Field(
-                        None,
-                        Field(
-                            "id",
-                        ),
-                        None,
-                    ),
-                    Field(
-                        None,
-                        Field(
-                            "a",
-                        ),
-                        None,
-                    ),
-                ],
-                star: None,
+            Parsed {
+                node: SubSelection {
+                    selections: [
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "id",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "a",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                    ],
+                    star: None,
+                },
+                loc: None,
             },
         ),
         config: None,
@@ -122,31 +137,52 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/no
             body: None,
         },
         selection: Named(
-            SubSelection {
-                selections: [
-                    Field(
-                        None,
-                        Field(
-                            "id",
-                        ),
-                        None,
-                    ),
-                    Field(
-                        None,
-                        Field(
-                            "a",
-                        ),
-                        None,
-                    ),
-                    Field(
-                        None,
-                        Field(
-                            "b",
-                        ),
-                        None,
-                    ),
-                ],
-                star: None,
+            Parsed {
+                node: SubSelection {
+                    selections: [
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "id",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "a",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "b",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                    ],
+                    star: None,
+                },
+                loc: None,
             },
         ),
         config: None,

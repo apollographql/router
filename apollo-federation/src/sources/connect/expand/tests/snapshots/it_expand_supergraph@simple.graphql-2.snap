@@ -45,24 +45,39 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
             body: None,
         },
         selection: Named(
-            SubSelection {
-                selections: [
-                    Field(
-                        None,
-                        Field(
-                            "id",
-                        ),
-                        None,
-                    ),
-                    Field(
-                        None,
-                        Field(
-                            "a",
-                        ),
-                        None,
-                    ),
-                ],
-                star: None,
+            Parsed {
+                node: SubSelection {
+                    selections: [
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "id",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "a",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                    ],
+                    star: None,
+                },
+                loc: None,
             },
         ),
         config: None,
@@ -122,31 +137,52 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
             body: None,
         },
         selection: Named(
-            SubSelection {
-                selections: [
-                    Field(
-                        None,
-                        Field(
-                            "id",
-                        ),
-                        None,
-                    ),
-                    Field(
-                        None,
-                        Field(
-                            "a",
-                        ),
-                        None,
-                    ),
-                    Field(
-                        None,
-                        Field(
-                            "b",
-                        ),
-                        None,
-                    ),
-                ],
-                star: None,
+            Parsed {
+                node: SubSelection {
+                    selections: [
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "id",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "a",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "b",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                    ],
+                    star: None,
+                },
+                loc: None,
             },
         ),
         config: None,
@@ -214,38 +250,80 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
             headers: {},
             body: Some(
                 Named(
-                    SubSelection {
-                        selections: [
-                            Path(
-                                Alias {
-                                    name: Field(
-                                        "with_b",
+                    Parsed {
+                        node: SubSelection {
+                            selections: [
+                                Parsed {
+                                    node: Path(
+                                        Parsed {
+                                            node: Alias {
+                                                name: Parsed {
+                                                    node: Field(
+                                                        "with_b",
+                                                    ),
+                                                    loc: None,
+                                                },
+                                            },
+                                            loc: None,
+                                        },
+                                        Parsed {
+                                            node: PathSelection {
+                                                path: Parsed {
+                                                    node: Var(
+                                                        Parsed {
+                                                            node: $this,
+                                                            loc: None,
+                                                        },
+                                                        Parsed {
+                                                            node: Key(
+                                                                Parsed {
+                                                                    node: Field(
+                                                                        "b",
+                                                                    ),
+                                                                    loc: None,
+                                                                },
+                                                                Parsed {
+                                                                    node: Empty,
+                                                                    loc: None,
+                                                                },
+                                                            ),
+                                                            loc: None,
+                                                        },
+                                                    ),
+                                                    loc: None,
+                                                },
+                                            },
+                                            loc: None,
+                                        },
                                     ),
+                                    loc: None,
                                 },
-                                PathSelection {
-                                    path: Var(
-                                        $this,
-                                        Key(
-                                            Field(
-                                                "b",
-                                            ),
-                                            Empty,
-                                        ),
-                                    ),
-                                },
-                            ),
-                        ],
-                        star: None,
+                            ],
+                            star: None,
+                        },
+                        loc: None,
                     },
                 ),
             ),
         },
         selection: Path(
-            PathSelection {
-                path: Var(
-                    $,
-                    Empty,
-                ),
+            Parsed {
+                node: PathSelection {
+                    path: Parsed {
+                        node: Var(
+                            Parsed {
+                                node: $,
+                                loc: None,
+                            },
+                            Parsed {
+                                node: Empty,
+                                loc: None,
+                            },
+                        ),
+                        loc: None,
+                    },
+                },
+                loc: None,
             },
         ),
         config: None,

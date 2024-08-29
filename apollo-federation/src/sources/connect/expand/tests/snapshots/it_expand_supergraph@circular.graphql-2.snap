@@ -64,17 +64,26 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ci
             body: None,
         },
         selection: Named(
-            SubSelection {
-                selections: [
-                    Field(
-                        None,
-                        Field(
-                            "id",
-                        ),
-                        None,
-                    ),
-                ],
-                star: None,
+            Parsed {
+                node: SubSelection {
+                    selections: [
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "id",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                    ],
+                    star: None,
+                },
+                loc: None,
             },
         ),
         config: None,
@@ -148,17 +157,26 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ci
             body: None,
         },
         selection: Named(
-            SubSelection {
-                selections: [
-                    Field(
-                        None,
-                        Field(
-                            "id",
-                        ),
-                        None,
-                    ),
-                ],
-                star: None,
+            Parsed {
+                node: SubSelection {
+                    selections: [
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "id",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                    ],
+                    star: None,
+                },
+                loc: None,
             },
         ),
         config: None,

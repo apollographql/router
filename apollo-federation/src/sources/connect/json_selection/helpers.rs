@@ -2,6 +2,8 @@ use nom::character::complete::multispace0;
 use nom::IResult;
 use serde_json_bytes::Value as JSON;
 
+use super::location::Parsed;
+
 // This macro is handy for tests, but it absolutely should never be used with
 // dynamic input at runtime, since it panics if the selection string fails to
 // parse for any reason.
@@ -22,7 +24,7 @@ macro_rules! selection {
 
 // Consumes any amount of whitespace and/or comments starting with # until the
 // end of the line.
-pub fn spaces_or_comments(input: &str) -> IResult<&str, &str> {
+pub fn spaces_or_comments(input: &str) -> IResult<&str, Parsed<&str>> {
     let mut suffix = input;
     loop {
         (suffix, _) = multispace0(suffix)?;
@@ -35,7 +37,10 @@ pub fn spaces_or_comments(input: &str) -> IResult<&str, &str> {
             }
             suffix = chars.as_str();
         } else {
-            return Ok((suffix, &input[0..input.len() - suffix.len()]));
+            return Ok((
+                suffix,
+                Parsed::new(&input[0..input.len() - suffix.len()], None),
+            ));
         }
     }
 }
@@ -57,95 +62,93 @@ mod tests {
 
     #[test]
     fn test_spaces_or_comments() {
-        assert_eq!(spaces_or_comments(""), Ok(("", "")));
-        assert_eq!(spaces_or_comments(" "), Ok(("", " ")));
-        assert_eq!(spaces_or_comments("  "), Ok(("", "  ")));
+        fn check(input: &str, (exp_remainder, exp_spaces): (&str, &str)) {
+            match spaces_or_comments(input) {
+                Ok((remainder, parsed)) => {
+                    assert_eq!(remainder, exp_remainder);
+                    assert_eq!(*parsed.node(), exp_spaces);
+                }
+                Err(e) => panic!("error: {:?}", e),
+            }
+        }
 
-        assert_eq!(spaces_or_comments("#"), Ok(("", "#")));
-        assert_eq!(spaces_or_comments("# "), Ok(("", "# ")));
-        assert_eq!(spaces_or_comments(" # "), Ok(("", " # ")));
-        assert_eq!(spaces_or_comments(" #"), Ok(("", " #")));
+        check("", ("", ""));
+        check(" ", ("", " "));
+        check("  ", ("", "  "));
 
-        assert_eq!(spaces_or_comments("#\n"), Ok(("", "#\n")));
-        assert_eq!(spaces_or_comments("# \n"), Ok(("", "# \n")));
-        assert_eq!(spaces_or_comments(" # \n"), Ok(("", " # \n")));
-        assert_eq!(spaces_or_comments(" #\n"), Ok(("", " #\n")));
-        assert_eq!(spaces_or_comments(" # \n "), Ok(("", " # \n ")));
+        check("#", ("", "#"));
+        check("# ", ("", "# "));
+        check(" # ", ("", " # "));
+        check(" #", ("", " #"));
 
-        assert_eq!(spaces_or_comments("hello"), Ok(("hello", "")));
-        assert_eq!(spaces_or_comments(" hello"), Ok(("hello", " ")));
-        assert_eq!(spaces_or_comments("hello "), Ok(("hello ", "")));
-        assert_eq!(spaces_or_comments("hello#"), Ok(("hello#", "")));
-        assert_eq!(spaces_or_comments("hello #"), Ok(("hello #", "")));
-        assert_eq!(spaces_or_comments("hello # "), Ok(("hello # ", "")));
-        assert_eq!(spaces_or_comments("   hello # "), Ok(("hello # ", "   ")));
-        assert_eq!(
-            spaces_or_comments("  hello # world "),
-            Ok(("hello # world ", "  "))
-        );
+        check("#\n", ("", "#\n"));
+        check("# \n", ("", "# \n"));
+        check(" # \n", ("", " # \n"));
+        check(" #\n", ("", " #\n"));
+        check(" # \n ", ("", " # \n "));
 
-        assert_eq!(spaces_or_comments("#comment"), Ok(("", "#comment")));
-        assert_eq!(spaces_or_comments(" #comment"), Ok(("", " #comment")));
-        assert_eq!(spaces_or_comments("#comment "), Ok(("", "#comment ")));
-        assert_eq!(spaces_or_comments("#comment#"), Ok(("", "#comment#")));
-        assert_eq!(spaces_or_comments("#comment #"), Ok(("", "#comment #")));
-        assert_eq!(spaces_or_comments("#comment # "), Ok(("", "#comment # ")));
-        assert_eq!(
-            spaces_or_comments("  #comment # world "),
-            Ok(("", "  #comment # world "))
-        );
-        assert_eq!(
-            spaces_or_comments("  # comment # world "),
-            Ok(("", "  # comment # world "))
-        );
+        check("hello", ("hello", ""));
+        check(" hello", ("hello", " "));
+        check("hello ", ("hello ", ""));
+        check("hello#", ("hello#", ""));
+        check("hello #", ("hello #", ""));
+        check("hello # ", ("hello # ", ""));
+        check("   hello # ", ("hello # ", "   "));
+        check("  hello # world ", ("hello # world ", "  "));
 
-        assert_eq!(
-            spaces_or_comments("  # comment\nnot a comment"),
-            Ok(("not a comment", "  # comment\n"))
+        check("#comment", ("", "#comment"));
+        check(" #comment", ("", " #comment"));
+        check("#comment ", ("", "#comment "));
+        check("#comment#", ("", "#comment#"));
+        check("#comment #", ("", "#comment #"));
+        check("#comment # ", ("", "#comment # "));
+        check("  #comment # world ", ("", "  #comment # world "));
+        check("  # comment # world ", ("", "  # comment # world "));
+
+        check(
+            "  # comment\nnot a comment",
+            ("not a comment", "  # comment\n"),
         );
-        assert_eq!(
-            spaces_or_comments("  # comment\nnot a comment\n"),
-            Ok(("not a comment\n", "  # comment\n"))
+        check(
+            "  # comment\nnot a comment\n",
+            ("not a comment\n", "  # comment\n"),
         );
-        assert_eq!(
-            spaces_or_comments("not a comment\n  # comment\nasdf"),
-            Ok(("not a comment\n  # comment\nasdf", ""))
+        check(
+            "not a comment\n  # comment\nasdf",
+            ("not a comment\n  # comment\nasdf", ""),
         );
 
         #[rustfmt::skip]
-        assert_eq!(spaces_or_comments("
+        check("
             # This is a comment
             # And so is this
             not a comment
-        "),
-        Ok(("not a comment
+        ", ("not a comment
         ", "
             # This is a comment
             # And so is this
-            ")));
+            "));
 
         #[rustfmt::skip]
-        assert_eq!(spaces_or_comments("
+        check("
             # This is a comment
             not a comment
             # Another comment
-        "),
-        Ok(("not a comment
+        ", ("not a comment
             # Another comment
         ", "
             # This is a comment
-            ")));
+            "));
 
         #[rustfmt::skip]
-        assert_eq!(spaces_or_comments("
+        check("
             not a comment
             # This is a comment
             # Another comment
-        "),
-        Ok(("not a comment
+        ", ("not a comment
             # This is a comment
             # Another comment
         ", "
-            ")));
+            "));
     }
 }

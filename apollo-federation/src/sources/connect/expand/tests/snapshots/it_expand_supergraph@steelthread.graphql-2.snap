@@ -53,24 +53,39 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
             body: None,
         },
         selection: Named(
-            SubSelection {
-                selections: [
-                    Field(
-                        None,
-                        Field(
-                            "id",
-                        ),
-                        None,
-                    ),
-                    Field(
-                        None,
-                        Field(
-                            "name",
-                        ),
-                        None,
-                    ),
-                ],
-                star: None,
+            Parsed {
+                node: SubSelection {
+                    selections: [
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "id",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "name",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                    ],
+                    star: None,
+                },
+                loc: None,
             },
         ),
         config: None,
@@ -137,31 +152,52 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
             body: None,
         },
         selection: Named(
-            SubSelection {
-                selections: [
-                    Field(
-                        None,
-                        Field(
-                            "id",
-                        ),
-                        None,
-                    ),
-                    Field(
-                        None,
-                        Field(
-                            "name",
-                        ),
-                        None,
-                    ),
-                    Field(
-                        None,
-                        Field(
-                            "username",
-                        ),
-                        None,
-                    ),
-                ],
-                star: None,
+            Parsed {
+                node: SubSelection {
+                    selections: [
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "id",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "name",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "username",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                    ],
+                    star: None,
+                },
+                loc: None,
             },
         ),
         config: None,
@@ -230,16 +266,34 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
             body: None,
         },
         selection: Path(
-            PathSelection {
-                path: Var(
-                    $,
-                    Key(
-                        Field(
-                            "phone",
+            Parsed {
+                node: PathSelection {
+                    path: Parsed {
+                        node: Var(
+                            Parsed {
+                                node: $,
+                                loc: None,
+                            },
+                            Parsed {
+                                node: Key(
+                                    Parsed {
+                                        node: Field(
+                                            "phone",
+                                        ),
+                                        loc: None,
+                                    },
+                                    Parsed {
+                                        node: Empty,
+                                        loc: None,
+                                    },
+                                ),
+                                loc: None,
+                            },
                         ),
-                        Empty,
-                    ),
-                ),
+                        loc: None,
+                    },
+                },
+                loc: None,
             },
         ),
         config: None,

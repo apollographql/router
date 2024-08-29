@@ -53,66 +53,117 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
             body: None,
         },
         selection: Named(
-            SubSelection {
-                selections: [
-                    Field(
-                        None,
-                        Field(
-                            "id",
-                        ),
-                        None,
-                    ),
-                    Field(
-                        None,
-                        Field(
-                            "tagged",
-                        ),
-                        None,
-                    ),
-                    Field(
-                        None,
-                        Field(
-                            "hidden",
-                        ),
-                        None,
-                    ),
-                    Field(
-                        None,
-                        Field(
-                            "custom",
-                        ),
-                        None,
-                    ),
-                    Field(
-                        None,
-                        Field(
-                            "authenticated",
-                        ),
-                        None,
-                    ),
-                    Field(
-                        None,
-                        Field(
-                            "requiresScopes",
-                        ),
-                        None,
-                    ),
-                    Field(
-                        None,
-                        Field(
-                            "policy",
-                        ),
-                        None,
-                    ),
-                    Field(
-                        None,
-                        Field(
-                            "overridden",
-                        ),
-                        None,
-                    ),
-                ],
-                star: None,
+            Parsed {
+                node: SubSelection {
+                    selections: [
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "id",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "tagged",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "hidden",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "custom",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "authenticated",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "requiresScopes",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "policy",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "overridden",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                    ],
+                    star: None,
+                },
+                loc: None,
             },
         ),
         config: None,
@@ -179,66 +230,117 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
             body: None,
         },
         selection: Named(
-            SubSelection {
-                selections: [
-                    Field(
-                        None,
-                        Field(
-                            "id",
-                        ),
-                        None,
-                    ),
-                    Field(
-                        None,
-                        Field(
-                            "tagged",
-                        ),
-                        None,
-                    ),
-                    Field(
-                        None,
-                        Field(
-                            "hidden",
-                        ),
-                        None,
-                    ),
-                    Field(
-                        None,
-                        Field(
-                            "custom",
-                        ),
-                        None,
-                    ),
-                    Field(
-                        None,
-                        Field(
-                            "authenticated",
-                        ),
-                        None,
-                    ),
-                    Field(
-                        None,
-                        Field(
-                            "requiresScopes",
-                        ),
-                        None,
-                    ),
-                    Field(
-                        None,
-                        Field(
-                            "policy",
-                        ),
-                        None,
-                    ),
-                    Field(
-                        None,
-                        Field(
-                            "overridden",
-                        ),
-                        None,
-                    ),
-                ],
-                star: None,
+            Parsed {
+                node: SubSelection {
+                    selections: [
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "id",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "tagged",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "hidden",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "custom",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "authenticated",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "requiresScopes",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "policy",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "overridden",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                    ],
+                    star: None,
+                },
+                loc: None,
             },
         ),
         config: None,
@@ -314,17 +416,26 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
             body: None,
         },
         selection: Named(
-            SubSelection {
-                selections: [
-                    Field(
-                        None,
-                        Field(
-                            "id",
-                        ),
-                        None,
-                    ),
-                ],
-                star: None,
+            Parsed {
+                node: SubSelection {
+                    selections: [
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "id",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                    ],
+                    star: None,
+                },
+                loc: None,
             },
         ),
         config: None,

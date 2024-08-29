@@ -3,6 +3,7 @@ mod helpers;
 mod immutable;
 mod known_var;
 mod lit_expr;
+mod location;
 mod methods;
 mod parser;
 mod pretty;

@@ -1,3 +1,5 @@
+use super::location::Parsed;
+
 #[derive(PartialEq, Eq, Clone, Hash)]
 pub(crate) enum KnownVariable {
     This,
@@ -27,6 +29,10 @@ impl KnownVariable {
             Self::Dollar => "$",
             Self::AtSign => "@",
         }
+    }
+
+    pub(super) fn into_parsed(self) -> Parsed<Self> {
+        Parsed::new(self, None)
     }
 }
 

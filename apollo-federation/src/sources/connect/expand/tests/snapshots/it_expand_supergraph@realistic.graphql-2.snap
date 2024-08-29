@@ -59,134 +59,242 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
             headers: {},
             body: Some(
                 Path(
-                    PathSelection {
-                        path: Var(
-                            $args,
-                            Key(
-                                Field(
-                                    "input",
-                                ),
-                                Selection(
-                                    SubSelection {
-                                        selections: [
-                                            Field(
-                                                None,
-                                                Field(
-                                                    "name",
+                    Parsed {
+                        node: PathSelection {
+                            path: Parsed {
+                                node: Var(
+                                    Parsed {
+                                        node: $args,
+                                        loc: None,
+                                    },
+                                    Parsed {
+                                        node: Key(
+                                            Parsed {
+                                                node: Field(
+                                                    "input",
                                                 ),
-                                                None,
-                                            ),
-                                            Field(
-                                                None,
-                                                Field(
-                                                    "username",
-                                                ),
-                                                None,
-                                            ),
-                                            Field(
-                                                None,
-                                                Field(
-                                                    "email",
-                                                ),
-                                                None,
-                                            ),
-                                            Field(
-                                                None,
-                                                Field(
-                                                    "status",
-                                                ),
-                                                None,
-                                            ),
-                                            Field(
-                                                None,
-                                                Field(
-                                                    "address",
-                                                ),
-                                                Some(
-                                                    SubSelection {
-                                                        selections: [
-                                                            Field(
-                                                                None,
-                                                                Field(
-                                                                    "street",
-                                                                ),
-                                                                None,
-                                                            ),
-                                                            Field(
-                                                                None,
-                                                                Field(
-                                                                    "suite",
-                                                                ),
-                                                                None,
-                                                            ),
-                                                            Field(
-                                                                None,
-                                                                Field(
-                                                                    "city",
-                                                                ),
-                                                                None,
-                                                            ),
-                                                            Field(
-                                                                None,
-                                                                Field(
-                                                                    "zipcode",
-                                                                ),
-                                                                None,
-                                                            ),
-                                                            Field(
-                                                                None,
-                                                                Field(
-                                                                    "geo",
-                                                                ),
-                                                                Some(
-                                                                    SubSelection {
-                                                                        selections: [
-                                                                            Field(
-                                                                                None,
-                                                                                Field(
-                                                                                    "lat",
-                                                                                ),
-                                                                                None,
+                                                loc: None,
+                                            },
+                                            Parsed {
+                                                node: Selection(
+                                                    Parsed {
+                                                        node: SubSelection {
+                                                            selections: [
+                                                                Parsed {
+                                                                    node: Field(
+                                                                        None,
+                                                                        Parsed {
+                                                                            node: Field(
+                                                                                "name",
                                                                             ),
-                                                                            Field(
-                                                                                None,
-                                                                                Field(
-                                                                                    "lng",
-                                                                                ),
-                                                                                None,
+                                                                            loc: None,
+                                                                        },
+                                                                        None,
+                                                                    ),
+                                                                    loc: None,
+                                                                },
+                                                                Parsed {
+                                                                    node: Field(
+                                                                        None,
+                                                                        Parsed {
+                                                                            node: Field(
+                                                                                "username",
                                                                             ),
-                                                                        ],
-                                                                        star: None,
-                                                                    },
-                                                                ),
-                                                            ),
-                                                        ],
-                                                        star: None,
+                                                                            loc: None,
+                                                                        },
+                                                                        None,
+                                                                    ),
+                                                                    loc: None,
+                                                                },
+                                                                Parsed {
+                                                                    node: Field(
+                                                                        None,
+                                                                        Parsed {
+                                                                            node: Field(
+                                                                                "email",
+                                                                            ),
+                                                                            loc: None,
+                                                                        },
+                                                                        None,
+                                                                    ),
+                                                                    loc: None,
+                                                                },
+                                                                Parsed {
+                                                                    node: Field(
+                                                                        None,
+                                                                        Parsed {
+                                                                            node: Field(
+                                                                                "status",
+                                                                            ),
+                                                                            loc: None,
+                                                                        },
+                                                                        None,
+                                                                    ),
+                                                                    loc: None,
+                                                                },
+                                                                Parsed {
+                                                                    node: Field(
+                                                                        None,
+                                                                        Parsed {
+                                                                            node: Field(
+                                                                                "address",
+                                                                            ),
+                                                                            loc: None,
+                                                                        },
+                                                                        Some(
+                                                                            Parsed {
+                                                                                node: SubSelection {
+                                                                                    selections: [
+                                                                                        Parsed {
+                                                                                            node: Field(
+                                                                                                None,
+                                                                                                Parsed {
+                                                                                                    node: Field(
+                                                                                                        "street",
+                                                                                                    ),
+                                                                                                    loc: None,
+                                                                                                },
+                                                                                                None,
+                                                                                            ),
+                                                                                            loc: None,
+                                                                                        },
+                                                                                        Parsed {
+                                                                                            node: Field(
+                                                                                                None,
+                                                                                                Parsed {
+                                                                                                    node: Field(
+                                                                                                        "suite",
+                                                                                                    ),
+                                                                                                    loc: None,
+                                                                                                },
+                                                                                                None,
+                                                                                            ),
+                                                                                            loc: None,
+                                                                                        },
+                                                                                        Parsed {
+                                                                                            node: Field(
+                                                                                                None,
+                                                                                                Parsed {
+                                                                                                    node: Field(
+                                                                                                        "city",
+                                                                                                    ),
+                                                                                                    loc: None,
+                                                                                                },
+                                                                                                None,
+                                                                                            ),
+                                                                                            loc: None,
+                                                                                        },
+                                                                                        Parsed {
+                                                                                            node: Field(
+                                                                                                None,
+                                                                                                Parsed {
+                                                                                                    node: Field(
+                                                                                                        "zipcode",
+                                                                                                    ),
+                                                                                                    loc: None,
+                                                                                                },
+                                                                                                None,
+                                                                                            ),
+                                                                                            loc: None,
+                                                                                        },
+                                                                                        Parsed {
+                                                                                            node: Field(
+                                                                                                None,
+                                                                                                Parsed {
+                                                                                                    node: Field(
+                                                                                                        "geo",
+                                                                                                    ),
+                                                                                                    loc: None,
+                                                                                                },
+                                                                                                Some(
+                                                                                                    Parsed {
+                                                                                                        node: SubSelection {
+                                                                                                            selections: [
+                                                                                                                Parsed {
+                                                                                                                    node: Field(
+                                                                                                                        None,
+                                                                                                                        Parsed {
+                                                                                                                            node: Field(
+                                                                                                                                "lat",
+                                                                                                                            ),
+                                                                                                                            loc: None,
+                                                                                                                        },
+                                                                                                                        None,
+                                                                                                                    ),
+                                                                                                                    loc: None,
+                                                                                                                },
+                                                                                                                Parsed {
+                                                                                                                    node: Field(
+                                                                                                                        None,
+                                                                                                                        Parsed {
+                                                                                                                            node: Field(
+                                                                                                                                "lng",
+                                                                                                                            ),
+                                                                                                                            loc: None,
+                                                                                                                        },
+                                                                                                                        None,
+                                                                                                                    ),
+                                                                                                                    loc: None,
+                                                                                                                },
+                                                                                                            ],
+                                                                                                            star: None,
+                                                                                                        },
+                                                                                                        loc: None,
+                                                                                                    },
+                                                                                                ),
+                                                                                            ),
+                                                                                            loc: None,
+                                                                                        },
+                                                                                    ],
+                                                                                    star: None,
+                                                                                },
+                                                                                loc: None,
+                                                                            },
+                                                                        ),
+                                                                    ),
+                                                                    loc: None,
+                                                                },
+                                                            ],
+                                                            star: None,
+                                                        },
+                                                        loc: None,
                                                     },
                                                 ),
-                                            ),
-                                        ],
-                                        star: None,
+                                                loc: None,
+                                            },
+                                        ),
+                                        loc: None,
                                     },
                                 ),
-                            ),
-                        ),
+                                loc: None,
+                            },
+                        },
+                        loc: None,
                     },
                 ),
             ),
         },
         selection: Named(
-            SubSelection {
-                selections: [
-                    Field(
-                        None,
-                        Field(
-                            "id",
-                        ),
-                        None,
-                    ),
-                ],
-                star: None,
+            Parsed {
+                node: SubSelection {
+                    selections: [
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "id",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                    ],
+                    star: None,
+                },
+                loc: None,
             },
         ),
         config: None,
@@ -248,51 +356,96 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
             headers: {},
             body: Some(
                 Named(
-                    SubSelection {
-                        selections: [
-                            Path(
-                                Alias {
-                                    name: Field(
-                                        "emailDomain",
+                    Parsed {
+                        node: SubSelection {
+                            selections: [
+                                Parsed {
+                                    node: Path(
+                                        Parsed {
+                                            node: Alias {
+                                                name: Parsed {
+                                                    node: Field(
+                                                        "emailDomain",
+                                                    ),
+                                                    loc: None,
+                                                },
+                                            },
+                                            loc: None,
+                                        },
+                                        Parsed {
+                                            node: PathSelection {
+                                                path: Parsed {
+                                                    node: Var(
+                                                        Parsed {
+                                                            node: $args,
+                                                            loc: None,
+                                                        },
+                                                        Parsed {
+                                                            node: Key(
+                                                                Parsed {
+                                                                    node: Field(
+                                                                        "email",
+                                                                    ),
+                                                                    loc: None,
+                                                                },
+                                                                Parsed {
+                                                                    node: Empty,
+                                                                    loc: None,
+                                                                },
+                                                            ),
+                                                            loc: None,
+                                                        },
+                                                    ),
+                                                    loc: None,
+                                                },
+                                            },
+                                            loc: None,
+                                        },
                                     ),
+                                    loc: None,
                                 },
-                                PathSelection {
-                                    path: Var(
-                                        $args,
-                                        Key(
-                                            Field(
-                                                "email",
-                                            ),
-                                            Empty,
-                                        ),
-                                    ),
-                                },
-                            ),
-                        ],
-                        star: None,
+                            ],
+                            star: None,
+                        },
+                        loc: None,
                     },
                 ),
             ),
         },
         selection: Named(
-            SubSelection {
-                selections: [
-                    Field(
-                        None,
-                        Field(
-                            "id",
-                        ),
-                        None,
-                    ),
-                    Field(
-                        None,
-                        Field(
-                            "name",
-                        ),
-                        None,
-                    ),
-                ],
-                star: None,
+            Parsed {
+                node: SubSelection {
+                    selections: [
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "id",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "name",
+                                    ),
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                    ],
+                    star: None,
+                },
+                loc: None,
             },
         ),
         config: None,
@@ -359,58 +512,100 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
             body: None,
         },
         selection: Named(
-            SubSelection {
-                selections: [
-                    Field(
-                        None,
-                        Field(
-                            "id",
-                        ),
-                        None,
-                    ),
-                    Field(
-                        None,
-                        Field(
-                            "name",
-                        ),
-                        None,
-                    ),
-                    Field(
-                        None,
-                        Field(
-                            "company",
-                        ),
-                        Some(
-                            SubSelection {
-                                selections: [
-                                    Field(
-                                        None,
-                                        Field(
-                                            "name",
-                                        ),
-                                        None,
+            Parsed {
+                node: SubSelection {
+                    selections: [
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "id",
                                     ),
-                                    Field(
-                                        None,
-                                        Field(
-                                            "catchPhrase",
-                                        ),
-                                        None,
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "name",
                                     ),
-                                    Field(
-                                        None,
-                                        Field(
-                                            "bs",
-                                        ),
-                                        None,
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "company",
                                     ),
-                                ],
-                                star: None,
-                            },
-                        ),
-                    ),
-                ],
-                star: None,
+                                    loc: None,
+                                },
+                                Some(
+                                    Parsed {
+                                        node: SubSelection {
+                                            selections: [
+                                                Parsed {
+                                                    node: Field(
+                                                        None,
+                                                        Parsed {
+                                                            node: Field(
+                                                                "name",
+                                                            ),
+                                                            loc: None,
+                                                        },
+                                                        None,
+                                                    ),
+                                                    loc: None,
+                                                },
+                                                Parsed {
+                                                    node: Field(
+                                                        None,
+                                                        Parsed {
+                                                            node: Field(
+                                                                "catchPhrase",
+                                                            ),
+                                                            loc: None,
+                                                        },
+                                                        None,
+                                                    ),
+                                                    loc: None,
+                                                },
+                                                Parsed {
+                                                    node: Field(
+                                                        None,
+                                                        Parsed {
+                                                            node: Field(
+                                                                "bs",
+                                                            ),
+                                                            loc: None,
+                                                        },
+                                                        None,
+                                                    ),
+                                                    loc: None,
+                                                },
+                                            ],
+                                            star: None,
+                                        },
+                                        loc: None,
+                                    },
+                                ),
+                            ),
+                            loc: None,
+                        },
+                    ],
+                    star: None,
+                },
+                loc: None,
             },
         ),
         config: None,
@@ -470,161 +665,287 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
             body: None,
         },
         selection: Named(
-            SubSelection {
-                selections: [
-                    Field(
-                        None,
-                        Field(
-                            "id",
-                        ),
-                        None,
-                    ),
-                    Field(
-                        None,
-                        Field(
-                            "name",
-                        ),
-                        None,
-                    ),
-                    Field(
-                        None,
-                        Field(
-                            "username",
-                        ),
-                        None,
-                    ),
-                    Field(
-                        None,
-                        Field(
-                            "email",
-                        ),
-                        None,
-                    ),
-                    Field(
-                        None,
-                        Field(
-                            "address",
-                        ),
-                        Some(
-                            SubSelection {
-                                selections: [
-                                    Field(
-                                        None,
-                                        Field(
-                                            "street",
-                                        ),
-                                        None,
+            Parsed {
+                node: SubSelection {
+                    selections: [
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "id",
                                     ),
-                                    Field(
-                                        None,
-                                        Field(
-                                            "suite",
-                                        ),
-                                        None,
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "name",
                                     ),
-                                    Field(
-                                        None,
-                                        Field(
-                                            "city",
-                                        ),
-                                        None,
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "username",
                                     ),
-                                    Field(
-                                        None,
-                                        Field(
-                                            "zipcode",
-                                        ),
-                                        None,
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "email",
                                     ),
-                                    Field(
-                                        None,
-                                        Field(
-                                            "geo",
-                                        ),
-                                        Some(
-                                            SubSelection {
-                                                selections: [
-                                                    Field(
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "address",
+                                    ),
+                                    loc: None,
+                                },
+                                Some(
+                                    Parsed {
+                                        node: SubSelection {
+                                            selections: [
+                                                Parsed {
+                                                    node: Field(
                                                         None,
-                                                        Field(
-                                                            "lat",
-                                                        ),
+                                                        Parsed {
+                                                            node: Field(
+                                                                "street",
+                                                            ),
+                                                            loc: None,
+                                                        },
                                                         None,
                                                     ),
-                                                    Field(
+                                                    loc: None,
+                                                },
+                                                Parsed {
+                                                    node: Field(
                                                         None,
-                                                        Field(
-                                                            "lng",
-                                                        ),
+                                                        Parsed {
+                                                            node: Field(
+                                                                "suite",
+                                                            ),
+                                                            loc: None,
+                                                        },
                                                         None,
                                                     ),
-                                                ],
-                                                star: None,
-                                            },
-                                        ),
+                                                    loc: None,
+                                                },
+                                                Parsed {
+                                                    node: Field(
+                                                        None,
+                                                        Parsed {
+                                                            node: Field(
+                                                                "city",
+                                                            ),
+                                                            loc: None,
+                                                        },
+                                                        None,
+                                                    ),
+                                                    loc: None,
+                                                },
+                                                Parsed {
+                                                    node: Field(
+                                                        None,
+                                                        Parsed {
+                                                            node: Field(
+                                                                "zipcode",
+                                                            ),
+                                                            loc: None,
+                                                        },
+                                                        None,
+                                                    ),
+                                                    loc: None,
+                                                },
+                                                Parsed {
+                                                    node: Field(
+                                                        None,
+                                                        Parsed {
+                                                            node: Field(
+                                                                "geo",
+                                                            ),
+                                                            loc: None,
+                                                        },
+                                                        Some(
+                                                            Parsed {
+                                                                node: SubSelection {
+                                                                    selections: [
+                                                                        Parsed {
+                                                                            node: Field(
+                                                                                None,
+                                                                                Parsed {
+                                                                                    node: Field(
+                                                                                        "lat",
+                                                                                    ),
+                                                                                    loc: None,
+                                                                                },
+                                                                                None,
+                                                                            ),
+                                                                            loc: None,
+                                                                        },
+                                                                        Parsed {
+                                                                            node: Field(
+                                                                                None,
+                                                                                Parsed {
+                                                                                    node: Field(
+                                                                                        "lng",
+                                                                                    ),
+                                                                                    loc: None,
+                                                                                },
+                                                                                None,
+                                                                            ),
+                                                                            loc: None,
+                                                                        },
+                                                                    ],
+                                                                    star: None,
+                                                                },
+                                                                loc: None,
+                                                            },
+                                                        ),
+                                                    ),
+                                                    loc: None,
+                                                },
+                                            ],
+                                            star: None,
+                                        },
+                                        loc: None,
+                                    },
+                                ),
+                            ),
+                            loc: None,
+                        },
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "phone",
                                     ),
-                                ],
-                                star: None,
-                            },
-                        ),
-                    ),
-                    Field(
-                        None,
-                        Field(
-                            "phone",
-                        ),
-                        None,
-                    ),
-                    Field(
-                        None,
-                        Field(
-                            "website",
-                        ),
-                        None,
-                    ),
-                    Field(
-                        None,
-                        Field(
-                            "company",
-                        ),
-                        Some(
-                            SubSelection {
-                                selections: [
-                                    Field(
-                                        None,
-                                        Field(
-                                            "name",
-                                        ),
-                                        None,
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "website",
                                     ),
-                                    Field(
-                                        None,
-                                        Field(
-                                            "catchPhrase",
-                                        ),
-                                        None,
+                                    loc: None,
+                                },
+                                None,
+                            ),
+                            loc: None,
+                        },
+                        Parsed {
+                            node: Field(
+                                None,
+                                Parsed {
+                                    node: Field(
+                                        "company",
                                     ),
-                                    Field(
-                                        None,
-                                        Field(
-                                            "bs",
-                                        ),
-                                        None,
-                                    ),
-                                    Field(
-                                        None,
-                                        Field(
-                                            "email",
-                                        ),
-                                        None,
-                                    ),
-                                ],
-                                star: None,
-                            },
-                        ),
-                    ),
-                ],
-                star: None,
+                                    loc: None,
+                                },
+                                Some(
+                                    Parsed {
+                                        node: SubSelection {
+                                            selections: [
+                                                Parsed {
+                                                    node: Field(
+                                                        None,
+                                                        Parsed {
+                                                            node: Field(
+                                                                "name",
+                                                            ),
+                                                            loc: None,
+                                                        },
+                                                        None,
+                                                    ),
+                                                    loc: None,
+                                                },
+                                                Parsed {
+                                                    node: Field(
+                                                        None,
+                                                        Parsed {
+                                                            node: Field(
+                                                                "catchPhrase",
+                                                            ),
+                                                            loc: None,
+                                                        },
+                                                        None,
+                                                    ),
+                                                    loc: None,
+                                                },
+                                                Parsed {
+                                                    node: Field(
+                                                        None,
+                                                        Parsed {
+                                                            node: Field(
+                                                                "bs",
+                                                            ),
+                                                            loc: None,
+                                                        },
+                                                        None,
+                                                    ),
+                                                    loc: None,
+                                                },
+                                                Parsed {
+                                                    node: Field(
+                                                        None,
+                                                        Parsed {
+                                                            node: Field(
+                                                                "email",
+                                                            ),
+                                                            loc: None,
+                                                        },
+                                                        None,
+                                                    ),
+                                                    loc: None,
+                                                },
+                                            ],
+                                            star: None,
+                                        },
+                                        loc: None,
+                                    },
+                                ),
+                            ),
+                            loc: None,
+                        },
+                    ],
+                    star: None,
+                },
+                loc: None,
             },
         ),
         config: None,

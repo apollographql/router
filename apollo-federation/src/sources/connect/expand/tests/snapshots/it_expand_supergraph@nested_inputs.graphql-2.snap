@@ -79,11 +79,23 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ne
             body: None,
         },
         selection: Path(
-            PathSelection {
-                path: Var(
-                    $,
-                    Empty,
-                ),
+            Parsed {
+                node: PathSelection {
+                    path: Parsed {
+                        node: Var(
+                            Parsed {
+                                node: $,
+                                loc: None,
+                            },
+                            Parsed {
+                                node: Empty,
+                                loc: None,
+                            },
+                        ),
+                        loc: None,
+                    },
+                },
+                loc: None,
             },
         ),
         config: None,

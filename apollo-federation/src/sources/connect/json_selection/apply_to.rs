@@ -250,7 +250,7 @@ impl ApplyToInternal for PathSelection {
         input_path: &InputPath<JSON>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
-        match &self.path {
+        match self.path.as_ref() {
             // If this is a KeyPath, instead of using data as given, we need to
             // evaluate the path starting from the current value of $. To
             // evaluate the KeyPath against data, prefix it with @. This logic
@@ -292,6 +292,7 @@ impl ApplyToInternal for PathList {
     ) -> Option<JSON> {
         match self {
             Self::Var(var_name, tail) => {
+                let var_name = var_name.as_ref();
                 if var_name == &KnownVariable::AtSign {
                     // We represent @ as a variable name in PathList::Var, but
                     // it is never stored in the vars map, because it is always
@@ -348,7 +349,7 @@ impl ApplyToInternal for PathList {
                 if let Some(method) = lookup_arrow_method(method_name) {
                     method(
                         method_name.as_str(),
-                        method_args,
+                        method_args.as_ref().map(|args| args.as_ref()),
                         data,
                         vars,
                         input_path,
@@ -357,7 +358,7 @@ impl ApplyToInternal for PathList {
                     )
                 } else {
                     errors.insert(ApplyToError::new(
-                        format!("Method ->{} not found", method_name),
+                        format!("Method ->{} not found", method_name.as_ref()),
                         input_path.to_vec(),
                     ));
                     None
@@ -390,7 +391,7 @@ impl ApplyToInternal for LitExpr {
                 let mut output = JSONMap::with_capacity(map.len());
                 for (key, value) in map {
                     if let Some(value_json) = value.apply_to_path(data, vars, input_path, errors) {
-                        output.insert(key.clone(), value_json);
+                        output.insert(key.as_str(), value_json);
                     }
                 }
                 Some(JSON::Object(output))
@@ -437,7 +438,7 @@ impl ApplyToInternal for SubSelection {
         let mut output = JSONMap::new();
         let mut input_names = IndexSet::default();
 
-        for named_selection in &self.selections {
+        for named_selection in self.selections.iter().map(|s| s.as_ref()) {
             let value = named_selection.apply_to_path(data, &vars, input_path, errors);
 
             // If value is an object, extend output with its keys and their values.
@@ -454,7 +455,7 @@ impl ApplyToInternal for SubSelection {
                         input_names.insert(name.as_str());
                     }
                     NamedSelection::Path(_, path_selection) => {
-                        if let PathList::Key(key, _) = &path_selection.path {
+                        if let PathList::Key(key, _) = path_selection.path.as_ref() {
                             input_names.insert(key.as_str());
                         }
                     }
@@ -465,7 +466,7 @@ impl ApplyToInternal for SubSelection {
             }
         }
 
-        match &self.star {
+        match self.star.as_ref().map(|parsed| parsed.as_ref()) {
             // Aliased but not subselected, e.g. "a b c rest: *"
             Some(StarSelection(Some(alias), None)) => {
                 let mut star_output = JSONMap::new();
