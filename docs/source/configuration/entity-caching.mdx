@@ -130,22 +130,22 @@ This entry contains an object with the `all` field to affect all subgraph reques
 }
 ```
 
-### Invalidation
+### Entity cache invalidation
 
-Entity caching provides multiple ways to invalidate data:
-- an invalidation endpoint exposed by the router, that can receive invalidation requests from any authorized service out of band. This can be used by the subgraph to asynchronously trigger invalidation events, or by the platform operator to maintain the caching levels
-- invalidation requests can be sent through subgraph response extensions, allowing the subgraph to invalidate cached data right after a mutation
+When existing cache entries need to be replaced, the router supports a couple of ways for you to invalidate entity cache entries:
+- **Invalidation endpoint** - the router exposes an invalidation endpoint that can receive invalidation requests from any authorized service out-of-band. A subgraph can use this endpoint to asynchronously trigger invalidation events, or a platform operator can use it to maintain the caching levels.
+- **Subgraph response extensions** - you can send invalidation requests via subgraph response extensions, allowing a subgraph to invalidate cached data right after a mutation.
 
-Invalidation requests can be used to invalidate a large number of cached entries at once, matching either:
-- all cached entries for a specific subgraph
-- all cached entries for a specific type in a specific subgraph
-- all cached entries for a specific entity in a specific subgraph
+One invalidation request can invalidate multiple cached entries at once. It can invalidate:
+- All cached entries for a specific subgraph
+- All cached entries for a specific type in a specific subgraph
+- All cached entries for a specific entity in a specific subgraph
 
-An invalidation request is processed first by sending a `SCAN` command to Redis to find all the keys that match the invalidation request. Upon iterating over the scan cursor, the router will send a `DEL` command to Redis to remove the matching keys.
+To process an invalidation request, the router first sends a `SCAN` command to Redis to find all the keys that match the invalidation request. After iterating over the scan cursor, the router sends a `DEL` command to Redis to remove the matching keys.
 
 #### Configuration
 
-Invalidation can be configured both globally, and overriden per subgraph.
+You can configure entity cache invalidation both globally (`preview_entity_cache.subgraph.all.invalidation`) and per subgraph (`preview_entity_cache.subgraph.subgraphs.invalidation`). 
 
 ```yaml title="router.yaml"
 preview_entity_cache:
@@ -210,11 +210,16 @@ Invalidation requests are sent as JSON objects with the following format:
 }
 ```
 
+<Note>
+
 This is the same key format used by the router in the `representations` field for `_entities` queries.
+
+</Note>
+
 
 #### Invalidation HTTP endpoint
 
-The invalidation endpoint exposed by the router can receive multiple invalidation requests at once and will process them in sequence. A shared key can be provided in the request as authorization. As an example, with the precedent configuration, we could send the following request:
+The invalidation endpoint exposed by the router can receive multiple invalidation requests at once and will process them in sequence. For authorization, you can provide a shared key in the request. For example, with the previous configuration you can send the following request:
 
 ```
 POST http://127.0.0.1:3000/invalidation
@@ -266,18 +271,18 @@ A subgraph can return an `invalidation` array with invalidation requests in its 
 #### Observability
 
 Invalidation requests are instrumented with the following metrics:
-- `apollo.router.operations.entity.invalidation.event`, counter triggered when a batch of invalidation requests is received. It has a label `origin` that can be either `endpoint` or `extensions`
-- `apollo.router.operations.entity.invalidation.entry`, counter measuring how many entries are removed per `DEL` call. It has a label `origin` that can be either `endpoint` or `extensions`, and a label `subgraph.name` with the name of the subgraph that the request is for
-- `apollo.router.cache.invalidation.keys`, histogram measuring the number of keys that were removed from Redis per invalidation request
-- `apollo.router.cache.invalidation.duration`, histogram measuring the time spent handling one invalidation requestt
+- `apollo.router.operations.entity.invalidation.event` - counter triggered when a batch of invalidation requests is received. It has a label `origin` that can be either `endpoint` or `extensions`.
+- `apollo.router.operations.entity.invalidation.entry` - counter measuring how many entries are removed per `DEL` call. It has a label `origin` that can be either `endpoint` or `extensions`, and a label `subgraph.name` with the name of the receiving subgraph.
+- `apollo.router.cache.invalidation.keys` - histogram measuring the number of keys that were removed from Redis per invalidation request.
+- `apollo.router.cache.invalidation.duration` - histogram measuring the time spent handling one invalidation request.
 
-It is also reported under the following spans:
-- `cache.invalidation.batch`, span covering the processing of a list of invalidation requests. It has a label `origin` that can be either `endpoint` or `extensions`
-- `cache.invalidation.request`, span covering the processing of a single invalidation request
+Invalidation requests are also reported under the following spans:
+- `cache.invalidation.batch` - span covering the processing of a list of invalidation requests. It has a label `origin` that can be either `endpoint` or `extensions`.
+- `cache.invalidation.request` - span covering the processing of a single invalidation request.
 
 ### Failure cases
 
-Entity caching will greatly reduce traffic to subgraphs, resulting in smaller infrastructure needed to serve more client traffic. In the rare cases where Redis is unavailable, the router should be configured with rate limiting for subgraph requests, to avoid overwhelming the subgraphs. It can also be paired with subgraph query deduplication to further reduce traffic.
+Entity caching will greatly reduce traffic to subgraphs, resulting in less infrastructure to serve more client traffic. In the rare case where Redis is unavailable, the router should be configured with [rate limiting for subgraph requests](/router/configuration/traffic-shaping/#rate-limiting-1) to avoid overwhelming the subgraphs. It can also be paired with [subgraph query deduplication](/router/configuration/traffic-shaping/#query-deduplication) to further reduce traffic.
 
 ## Implementation notes
 
