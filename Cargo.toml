@@ -57,7 +57,7 @@ hex = { version = "0.4.3", features = ["serde"] }
 http = "0.2.11"
 insta = { version = "1.38.0", features = ["json", "redactions", "yaml"] }
 once_cell = "1.19.0"
-reqwest = { version = "0.11.24", default-features = false, features = [
+reqwest = { version = "0.12.0", default-features = false, features = [
     "rustls-tls",
     "rustls-native-certs",
     "gzip",
@@ -75,4 +75,4 @@ serde_json_bytes = { version = "0.2.4", features = ["preserve_order"] }
 sha1 = "0.10.6"
 tempfile = "3.10.1"
 tokio = { version = "1.36.0", features = ["full"] }
-tower = { version = "0.4.13", features = ["full"] }
+tower = { version = "0.5.0", features = ["full"] }
