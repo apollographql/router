@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "2.0.0-alpha.3"
+version = "2.0.0-alpha.4"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 repository = "https://github.com/apollographql/router/"
 documentation = "https://docs.rs/apollo-router"
@@ -68,7 +68,7 @@ askama = "0.12.1"
 access-json = "0.1.0"
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
-apollo-federation = { path = "../apollo-federation", version = "=2.0.0-alpha.3" }
+apollo-federation = { path = "../apollo-federation", version = "=2.0.0-alpha.4" }
 arc-swap = "1.6.0"
 async-channel = "1.9.0"
 async-compression = { version = "0.4.6", features = [
