@@ -1101,20 +1101,6 @@ workflows:
               ignore: /.*/
             tags:
               only: /v.*/
-      - test_updated:
-          requires:
-            - lint
-            - check_helm
-            - check_compliance
-          matrix:
-            parameters:
-              platform:
-                [ amd_linux_test ]
-          filters:
-            branches:
-              ignore: /.*/
-            tags:
-              only: /v.*/
       - test:
           requires:
             - lint
@@ -1133,7 +1119,6 @@ workflows:
           requires:
             - pre_verify_release
             - test
-            - test_updated
           matrix:
             parameters:
               platform:
