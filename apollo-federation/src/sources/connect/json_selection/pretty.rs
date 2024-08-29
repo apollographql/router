@@ -5,6 +5,8 @@
 //! pretty printing trait which is then implemented on the various sub types
 //! of the JSONSelection tree.
 
+use itertools::Itertools;
+
 use super::lit_expr::LitExpr;
 use crate::sources::connect::json_selection::JSONSelection;
 use crate::sources::connect::json_selection::MethodArgs;
@@ -44,20 +46,11 @@ fn indent_chars(indent: usize) -> String {
 
 impl PrettyPrintable for JSONSelection {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
-        let mut result = String::new();
-
         match self {
-            JSONSelection::Named(named) => {
-                let named = named.pretty_print_with_indentation(inline, indentation);
-                result.push_str(named.as_str());
-            }
-            JSONSelection::Path(path) => {
-                let path = path.pretty_print_with_indentation(inline, indentation);
-                result.push_str(path.as_str());
-            }
-        };
-
-        result
+            // Top-level fields should not be wrapped in {}, so we manually unroll here
+            JSONSelection::Named(named) => named.print_subselections(indentation),
+            JSONSelection::Path(path) => path.pretty_print_with_indentation(inline, indentation),
+        }
     }
 }
 
@@ -72,22 +65,30 @@ impl PrettyPrintable for SubSelection {
 
         result.push_str("{\n");
 
-        for selection in &self.selections {
-            let selection = selection.pretty_print_with_indentation(false, indentation + 1);
-            result.push_str(selection.as_str());
-            result.push('\n');
-        }
+        result.push_str(&self.print_subselections(indentation + 1));
 
-        if let Some(star) = self.star.as_ref() {
-            let star = star.pretty_print_with_indentation(false, indentation + 1);
-            result.push_str(star.as_str());
-            result.push('\n');
-        }
-
+        result.push('\n');
         result.push_str(indent.as_str());
         result.push('}');
 
         result
+    }
+}
+
+impl SubSelection {
+    /// Prints all of the selections in a subselection
+    fn print_subselections(&self, indentation: usize) -> String {
+        let selections = self
+            .selections
+            .iter()
+            .map(|s| s.pretty_print_with_indentation(false, indentation));
+
+        let star = self
+            .star
+            .as_ref()
+            .map(|s| s.pretty_print_with_indentation(false, indentation));
+
+        selections.chain(star).join("\n")
     }
 }
 
@@ -334,6 +335,7 @@ mod tests {
     use crate::sources::connect::json_selection::NamedSelection;
     use crate::sources::connect::json_selection::PrettyPrintable;
     use crate::sources::connect::json_selection::StarSelection;
+    use crate::sources::connect::JSONSelection;
     use crate::sources::connect::PathSelection;
     use crate::sources::connect::SubSelection;
 
@@ -354,7 +356,7 @@ mod tests {
 
         let prettified_inline = selection.pretty_print_with_indentation(true, indentation);
         assert_eq!(
-            prettified_inline,
+            prettified_inline.trim_start(),
             expected_indented.trim_start(),
             "pretty printing inline did not match: {prettified_inline} != {}",
             expected_indented.trim_start()
@@ -482,5 +484,13 @@ mod tests {
             pretty, sub_super_indented,
             "nested inline sub pretty printing did not match: {pretty} != {sub_super_indented}",
         );
+    }
+
+    #[test]
+    fn it_prints_root_selection() {
+        let (unmatched, root_selection) = JSONSelection::parse("id name").unwrap();
+        assert!(unmatched.is_empty());
+
+        test_permutations(root_selection, "id\nname");
     }
 }
