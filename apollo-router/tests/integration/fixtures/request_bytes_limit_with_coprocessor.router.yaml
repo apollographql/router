@@ -1,0 +1,7 @@
+limits:
+  http_max_request_bytes: 60
+coprocessor:
+  url: http://localhost:4005
+  router:
+    request:
+      body: true
