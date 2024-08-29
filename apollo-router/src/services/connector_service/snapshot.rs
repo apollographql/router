@@ -19,18 +19,15 @@
 //! * Snapshots for requests that would modify data (such as POST requests) will obviously
 //!   not have any side effects when replayed. Snapshots are not useful if you rely on those
 //!   side effects.
-//! * The unique key for storing and loading snapshots is the full URL. This means snapshots
-//!   will not work well with APIs running on ephemeral ports, or any other cases where the
-//!   URL might be different for the same request.
-//! * Since headers are not included in the snapshot key, requests that would return
+//! * The unique key for storing and loading snapshots includes the full URL. This means snapshots
+//!   will not work well with APIs running on ephemeral ports, or any other cases where the URL
+//!   might be different for the same request.
+//! * Headers are not included in the snapshot key, so requests that would return
 //!   different data depending on the value of headers will use the same snapshot.
 //! * Since no network request is made, running with snapshots will be unrealistically fast,
 //!   and should not be used with performance or load testing.
 
 use std::borrow::Cow;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::Hash;
-use std::hash::Hasher;
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -41,32 +38,41 @@ use indexmap::IndexMap;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::Value;
+use sha2::Digest;
+use sha2::Sha256;
 use tracing::warn;
 
 use crate::services::router::body::RouterBody;
 
 #[derive(Serialize, Deserialize)]
 pub(crate) struct Snapshot<'a> {
-    url: Cow<'a, str>,
-    headers: IndexMap<String, String>,
+    key: Cow<'a, str>,
+    headers: IndexMap<String, Vec<String>>,
     body: Cow<'a, Value>,
 }
 
 impl<'a> Snapshot<'a> {
-    pub(crate) fn new(url: &'a str, body: &'a Value, headers: &'a HeaderMap<HeaderValue>) -> Self {
-        let headers = headers
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_str().unwrap().to_string()))
-            .collect();
+    /// Create a new snapshot from an HTTP response.
+    pub(crate) fn new(key: &'a str, body: &'a Value, headers: &'a HeaderMap<HeaderValue>) -> Self {
+        let headers = headers.iter().fold(
+            IndexMap::new(),
+            |mut map: IndexMap<String, Vec<String>>, (name, value)| {
+                let name = name.to_string();
+                let value = value.to_str().unwrap_or_default().to_string();
+                map.entry(name).or_default().push(value);
+                map
+            },
+        );
         Snapshot {
-            url: Cow::Borrowed(url),
+            key: Cow::Borrowed(key),
             headers,
             body: Cow::Borrowed(body),
         }
     }
 
+    /// Save the snapshot.
     pub(crate) fn save(&self, base: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
-        let path = snapshot_path(base.clone(), &self.url);
+        let path = snapshot_path(base.clone(), &self.key);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -74,13 +80,14 @@ impl<'a> Snapshot<'a> {
         Ok(())
     }
 
-    pub(crate) fn load(base: PathBuf, url: &'a str) -> Option<Self> {
-        let path = snapshot_path(base, url);
+    /// Load a snapshot from the file system, if it exists.
+    pub(crate) fn load(base: PathBuf, key: &'a str) -> Option<Self> {
+        let path = snapshot_path(base, key);
         let string = std::fs::read_to_string(path).ok()?;
         let snapshot: Snapshot = serde_json::from_str(&string).ok()?;
-        if snapshot.url != url {
-            // TODO: handle URL collisions
-            warn!("Snapshot URL collision: {}, {}", snapshot.url, url);
+        if snapshot.key != key {
+            // TODO: handle collisions
+            warn!("Snapshot collision: {}, {}", snapshot.key, key);
             return None;
         }
         Some(snapshot)
@@ -93,10 +100,12 @@ impl<'a> TryFrom<Snapshot<'a>> for crate::plugins::connectors::http::Result<Rout
     fn try_from(snapshot: Snapshot) -> Result<Self, Self::Error> {
         let mut response = http::Response::builder().status(http::StatusCode::OK);
         if let Some(headers) = response.headers_mut() {
-            for (name, value) in snapshot.headers.into_iter() {
+            for (name, values) in snapshot.headers.into_iter() {
                 if let Ok(name) = HeaderName::from_str(&name.clone()) {
-                    if let Ok(value) = HeaderValue::from_str(&value.clone()) {
-                        headers.insert(name, value);
+                    for value in values {
+                        if let Ok(value) = HeaderValue::from_str(&value.clone()) {
+                            headers.insert(name.clone(), value);
+                        }
                     }
                 }
             }
@@ -112,11 +121,25 @@ impl<'a> TryFrom<Snapshot<'a>> for crate::plugins::connectors::http::Result<Rout
     }
 }
 
-fn snapshot_path(base: PathBuf, url: &str) -> PathBuf {
-    let url_hash = {
-        let mut hasher = DefaultHasher::new();
-        url.hash(&mut hasher);
-        hasher.finish()
+pub(crate) async fn create_snapshot_key<T>(
+    request: &http::Request<T>,
+    body_hash: Option<String>,
+) -> String {
+    let url = request.uri().clone().to_string();
+    let http_method = String::from(request.method().as_str());
+    if let Some(body_hash) = body_hash {
+        [http_method, body_hash, url].join("-")
+    } else {
+        [http_method, url].join("-")
+    }
+}
+
+fn snapshot_path(base: PathBuf, key: &str) -> PathBuf {
+    let mut key_hash = {
+        let mut hasher = Sha256::new();
+        hasher.update(key);
+        hex::encode(hasher.finalize().as_slice())
     };
-    base.join(url_hash.to_string()).with_extension("json")
+    key_hash.truncate(16);
+    base.join(key_hash).with_extension("json")
 }

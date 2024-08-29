@@ -1,7 +1,9 @@
 {
-  "url": "https://jsonplaceholder.typicode.com/posts/1",
+  "key": "GET-https://jsonplaceholder.typicode.com/posts/1",
   "headers": {
-    "content-type": "application/json; charset=utf-8"
+    "content-type": [
+      "application/json; charset=utf-8"
+    ]
   },
   "body": {
     "userId": 1,

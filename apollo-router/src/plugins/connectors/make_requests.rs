@@ -96,10 +96,18 @@ pub(crate) enum ResponseTypeName {
     Omitted,
 }
 
+#[derive(Debug)]
+pub(crate) struct RequestInfo {
+    pub(crate) request: http::Request<RouterBody>,
+    pub(crate) body_hash: Option<String>,
+    pub(crate) response_key: ResponseKey,
+}
+
 pub(crate) fn make_requests(
     request: connect::Request,
     connector: &Connector,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
+    hash_body: bool,
 ) -> Result<Vec<Request>, MakeRequestError> {
     let request_params = match connector.entity_resolver {
         Some(EntityResolver::Explicit) => entities_from_request(connector, &request),
@@ -107,7 +115,7 @@ pub(crate) fn make_requests(
         None => root_fields(connector, &request),
     }?;
 
-    request_params_to_requests(connector, request_params, &request, debug)
+    request_params_to_requests(connector, request_params, &request, debug, hash_body)
 }
 
 fn request_params_to_requests(
@@ -115,6 +123,7 @@ fn request_params_to_requests(
     request_params: Vec<ResponseKey>,
     original_request: &connect::Request,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
+    hash_body: bool,
 ) -> Result<Vec<Request>, MakeRequestError> {
     let mut results = vec![];
     let context: Map<ByteString, Value> = original_request
@@ -123,17 +132,19 @@ fn request_params_to_requests(
         .map(|r| (r.key().as_str().into(), r.value().clone()))
         .collect();
     for response_key in request_params {
-        let (request, debug_request) = make_request(
+        let (request, body_hash, debug_request) = make_request(
             &connector.transport,
             response_key
                 .inputs()
                 .merge(connector.config.as_ref(), Some(context.clone())),
             original_request,
             debug,
+            hash_body,
         )?;
 
         results.push(Request {
             request,
+            body_hash,
             key: response_key,
             debug_request,
         });
@@ -1694,7 +1705,7 @@ mod tests {
             max_requests: None,
         };
 
-        let requests = super::make_requests(req, &connector, &None).unwrap();
+        let requests = super::make_requests(req, &connector, &None, false).unwrap();
 
         assert_debug_snapshot!(requests, @r###"
         [
@@ -1708,6 +1719,7 @@ mod tests {
                         Empty,
                     ),
                 },
+                body_hash: None,
                 key: RootField {
                     name: "a",
                     typename: Concrete(

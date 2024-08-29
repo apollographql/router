@@ -26,12 +26,14 @@ use crate::plugins::connectors::http::Request;
 use crate::plugins::connectors::http::Response as ConnectorResponse;
 use crate::plugins::connectors::http::Result as ConnectorResult;
 use crate::plugins::connectors::make_requests::make_requests;
+use crate::plugins::connectors::make_requests::RequestInfo;
 use crate::plugins::connectors::plugin::ConnectorContext;
 use crate::plugins::connectors::plugin::SnapshotConfig;
 use crate::plugins::connectors::request_limit::RequestLimits;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
 use crate::plugins::connectors::tracing::CONNECT_SPAN_NAME;
 use crate::plugins::subscription::SubscriptionConfig;
+use crate::services::connector_service::snapshot::create_snapshot_key;
 use crate::services::connector_service::snapshot::Snapshot;
 use crate::services::ConnectRequest;
 use crate::services::ConnectResponse;
@@ -148,13 +150,17 @@ async fn execute(
         (debug, request_limit, snapshot_config)
     });
 
-    let requests = make_requests(request, connector, &debug).map_err(BoxError::from)?;
+    let hash_body = snapshot_config
+        .as_ref()
+        .map(|config| config.enabled)
+        .unwrap_or(false);
+    let requests = make_requests(request, connector, &debug, hash_body).map_err(BoxError::from)?;
 
     let snapshot_config_cloned = snapshot_config.clone();
     let tasks = requests.into_iter().map(
         move |Request {
                   request: req,
-                  key,
+                  body_hash,
                   debug_request,
               }| {
             // Returning an error from this closure causes all tasks to be cancelled and the operation
@@ -169,7 +175,7 @@ async fn execute(
                 if let Some(request_limit) = request_limit {
                     if !request_limit.allow() {
                         return Ok(ConnectorResponse {
-                            url: Some(req.uri().clone()),
+                            snapshot_key: None,
                             result: ConnectorResult::Err(ConnectorError::RequestLimitExceeded),
                             key,
                             debug_request,
@@ -177,26 +183,27 @@ async fn execute(
                     }
                 }
 
-                let url = req.uri().clone();
-
+                let mut snapshot_key = None;
                 if let Some(snapshot_config) = snapshot_config {
                     if snapshot_config.enabled && !snapshot_config.update {
                         let snapshot_path = PathBuf::from(&snapshot_config.path);
-                        if let Some(snapshot) = Snapshot::load(snapshot_path, &url.to_string()) {
+                        let snapshot_key_value = create_snapshot_key(&req, body_hash).await;
+                        snapshot_key = Some(snapshot_key_value.clone());
+                        if let Some(snapshot) =
+                            Snapshot::load(snapshot_path, snapshot_key_value.as_str())
+                        {
                             if let Ok(http_response) = snapshot.try_into() {
                                 return Ok(ConnectorResponse {
-                                    url: Some(url.clone()),
+                                    snapshot_key,
                                     result: http_response,
                                     key,
-                                    debug_request,
                                 });
                             }
                         } else if snapshot_config.offline {
                             return Ok(ConnectorResponse {
-                                url: Some(url.clone()),
+                                snapshot_key,
                                 result: ConnectorResult::Err(ConnectorError::SnapshotNotFound),
                                 key,
-                                debug_request,
                             });
                         }
                     }
@@ -227,6 +234,7 @@ async fn execute(
                 })?;
 
                 Ok::<_, BoxError>(ConnectorResponse {
+                    snapshot_key,
                     result: ConnectorResult::HttpResponse(res.http_response),
                     key,
                     debug_request,
