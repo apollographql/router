@@ -127,13 +127,15 @@ pub fn validate(schema: Schema) -> Vec<Message> {
     });
     messages.extend(connect_errors);
 
-    messages.extend(check_seen_fields(
-        &schema,
-        &seen_fields,
-        source_map,
-        &connect_directive_name,
-        &external_directive_name,
-    ));
+    if should_check_seen_fields(&messages) {
+        messages.extend(check_seen_fields(
+            &schema,
+            &seen_fields,
+            source_map,
+            &connect_directive_name,
+            &external_directive_name,
+        ));
+    }
 
     if source_directive_name == DEFAULT_SOURCE_DIRECTIVE_NAME
         && messages
@@ -149,6 +151,23 @@ pub fn validate(schema: Schema) -> Vec<Message> {
         });
     }
     messages
+}
+
+/// We'll avoid doing this work if there are bigger issues with the schema.
+/// Otherwise we might emit a large number of diagnostics that will
+/// distract from the main problems.
+fn should_check_seen_fields(messages: &Vec<Message>) -> bool {
+    !messages.iter().any(|error| {
+        // some invariant is violated, so let's just stop here
+        error.code == Code::GraphQLError
+            // the selection visitor emits these errors and stops visiting, so there will probably be fields we haven't visited
+            || error.code == Code::SelectedFieldNotFound
+            || error.code == Code::GroupSelectionIsNotObject
+            || error.code == Code::GroupSelectionRequiredForObject
+            // if we encounter unsupported definitions, there are probably related definitions that we won't be able to resolve
+            || error.code == Code::UnsupportedAbstractType
+            || error.code == Code::UnsupportedFederationDirective
+    })
 }
 
 /// Check that all fields defined in the schema are resolved by a connector.
