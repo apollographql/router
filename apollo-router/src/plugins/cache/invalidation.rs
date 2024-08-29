@@ -3,7 +3,6 @@ use std::time::Instant;
 
 use fred::error::RedisError;
 use fred::types::Scanner;
-use futures::SinkExt;
 use futures::StreamExt;
 use itertools::Itertools;
 use serde::Deserialize;
@@ -17,23 +16,17 @@ use tracing::Instrument;
 use super::entity::Storage as EntityStorage;
 use crate::cache::redis::RedisCacheStorage;
 use crate::cache::redis::RedisKey;
-use crate::notification::Handle;
-use crate::notification::HandleStream;
 use crate::plugins::cache::entity::hash_entity_key;
 use crate::plugins::cache::entity::ENTITY_CACHE_VERSION;
-use crate::Notify;
 
 #[derive(Clone)]
 pub(crate) struct Invalidation {
     #[allow(clippy::type_complexity)]
-    pub(super) handle: Handle<
-        InvalidationTopic,
-        (
-            Vec<InvalidationRequest>,
-            InvalidationOrigin,
-            broadcast::Sender<Result<u64, InvalidationError>>,
-        ),
-    >,
+    pub(super) handle: tokio::sync::mpsc::Sender<(
+        Vec<InvalidationRequest>,
+        InvalidationOrigin,
+        broadcast::Sender<Result<u64, InvalidationError>>,
+    )>,
 }
 
 #[derive(Error, Debug, Clone)]
@@ -73,15 +66,12 @@ pub(crate) enum InvalidationOrigin {
 
 impl Invalidation {
     pub(crate) async fn new(storage: Arc<EntityStorage>) -> Result<Self, BoxError> {
-        let mut notify = Notify::new(None, None, None);
-        let (handle, _b) = notify.create_or_subscribe(InvalidationTopic, false).await?;
-
-        let h = handle.clone();
+        let (tx, rx) = tokio::sync::mpsc::channel(128);
 
         tokio::task::spawn(async move {
-            start(storage, h.into_stream()).await;
+            start(storage, rx).await;
         });
-        Ok(Self { handle })
+        Ok(Self { handle: tx })
     }
 
     pub(crate) async fn invalidate(
@@ -89,11 +79,11 @@ impl Invalidation {
         origin: InvalidationOrigin,
         requests: Vec<InvalidationRequest>,
     ) -> Result<u64, BoxError> {
-        let mut sink = self.handle.clone().into_sink();
         let (response_tx, mut response_rx) = broadcast::channel(2);
-        sink.send((requests, origin, response_tx.clone()))
+        self.handle
+            .send((requests, origin, response_tx.clone()))
             .await
-            .map_err(|e| format!("cannot send invalidation request: {}", e.message))?;
+            .map_err(|e| format!("cannot send invalidation request: {e}"))?;
 
         let result = response_rx
             .recv()
@@ -114,16 +104,13 @@ impl Invalidation {
 #[allow(clippy::type_complexity)]
 async fn start(
     storage: Arc<EntityStorage>,
-    mut handle: HandleStream<
-        InvalidationTopic,
-        (
-            Vec<InvalidationRequest>,
-            InvalidationOrigin,
-            broadcast::Sender<Result<u64, InvalidationError>>,
-        ),
-    >,
+    mut handle: tokio::sync::mpsc::Receiver<(
+        Vec<InvalidationRequest>,
+        InvalidationOrigin,
+        broadcast::Sender<Result<u64, InvalidationError>>,
+    )>,
 ) {
-    while let Some((requests, origin, response_tx)) = handle.next().await {
+    while let Some((requests, origin, response_tx)) = handle.recv().await {
         let origin = match origin {
             InvalidationOrigin::Endpoint => "endpoint",
             InvalidationOrigin::Extensions => "extensions",
