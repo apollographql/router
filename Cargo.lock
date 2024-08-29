@@ -183,7 +183,6 @@ dependencies = [
  "apollo-compiler",
  "derive_more",
  "either",
- "enum_dispatch",
  "hex",
  "http 0.2.12",
  "indexmap 2.2.6",
@@ -406,7 +405,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "1.52.0"
+version = "1.53.0"
 dependencies = [
  "apollo-parser",
  "apollo-router",
@@ -2463,18 +2462,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5ffccbb6966c05b32ef8fbac435df276c4ae4d3dc55a8cd0eb9745e6c12f546a"
 dependencies = [
  "heck 0.4.1",
- "proc-macro2",
- "quote",
- "syn 2.0.71",
-]
-
-[[package]]
-name = "enum_dispatch"
-version = "0.3.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa18ce2bc66555b3218614519ac839ddb759a7d6720732f979ef8d13be147ecd"
-dependencies = [
- "once_cell",
  "proc-macro2",
  "quote",
  "syn 2.0.71",
@@ -5670,9 +5657,9 @@ dependencies = [
 
 [[package]]
 name = "router-bridge"
-version = "0.5.31+v2.8.5"
+version = "0.6.0+v2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "672901b1ec6fd110ac41d61ca5e1754319d0edf39546a089a114ab865d42ae97"
+checksum = "96ef4910ade6753863c8437a76e88e236ab91688dcfe739d73417ae7848f3b92"
 dependencies = [
  "anyhow",
  "async-channel 1.9.0",
