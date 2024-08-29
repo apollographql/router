@@ -156,7 +156,7 @@ pub fn validate(schema: Schema) -> Vec<Message> {
 /// We'll avoid doing this work if there are bigger issues with the schema.
 /// Otherwise we might emit a large number of diagnostics that will
 /// distract from the main problems.
-fn should_check_seen_fields(messages: &Vec<Message>) -> bool {
+fn should_check_seen_fields(messages: &[Message]) -> bool {
     !messages.iter().any(|error| {
         // some invariant is violated, so let's just stop here
         error.code == Code::GraphQLError
@@ -165,8 +165,8 @@ fn should_check_seen_fields(messages: &Vec<Message>) -> bool {
             || error.code == Code::GroupSelectionIsNotObject
             || error.code == Code::GroupSelectionRequiredForObject
             // if we encounter unsupported definitions, there are probably related definitions that we won't be able to resolve
+            || error.code == Code::SubscriptionInConnectors
             || error.code == Code::UnsupportedAbstractType
-            || error.code == Code::UnsupportedFederationDirective
     })
 }
 
