@@ -25,6 +25,10 @@ pub(crate) struct ConnectorsConfig {
     /// The maximum number of requests for a connector source
     #[serde(default)]
     pub(crate) max_requests_per_operation_per_source: Option<usize>,
+
+    /// Configuration for HTTP response snapshots
+    #[serde(default)]
+    pub(crate) snapshot: SnapshotConfiguration,
 }
 
 /// Configuration for a connector subgraph
@@ -48,6 +52,26 @@ pub(crate) struct SourceConfiguration {
 
     /// The maximum number of requests for this source
     pub(crate) max_requests_per_operation: Option<usize>,
+}
+
+/// Configuration for HTTP response snapshots
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema, Serialize)]
+pub(crate) struct SnapshotConfiguration {
+    /// Whether snapshots are enabled
+    pub(crate) enabled: Option<bool>,
+
+    /// When true, the backend REST API will never be called. Requests with no available snapshot
+    /// will fail. This is useful for tests, where after the initial snapshot is taken, the test
+    /// should never attempt to make a network connection to the backend.
+    pub(crate) offline: Option<bool>,
+
+    /// When true, any existing snapshots will be overwritten with new data by calling the
+    /// backend REST service. This overrides the offline option to allow updating snapshot
+    /// data.
+    pub(crate) update: Option<bool>,
+
+    /// The path to the directory where snapshots will be stored to and loaded from
+    pub(crate) path: String,
 }
 
 /// Modifies connectors with values from the configuration

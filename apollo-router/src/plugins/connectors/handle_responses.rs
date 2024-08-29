@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use apollo_federation::sources::connect::Connector;
@@ -5,6 +6,7 @@ use http_body::Body as HttpBody;
 use parking_lot::Mutex;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
+use tracing::warn;
 
 use crate::error::FetchError;
 use crate::graphql;
@@ -14,7 +16,9 @@ use crate::plugins::connectors::make_requests::ResponseKey;
 use crate::plugins::connectors::make_requests::ResponseTypeName;
 use crate::plugins::connectors::plugin::ConnectorContext;
 use crate::plugins::connectors::plugin::SelectionData;
+use crate::plugins::connectors::plugin::SnapshotConfig;
 use crate::services::connect::Response;
+use crate::services::connector_service::snapshot::Snapshot;
 use crate::services::fetch::AddSubgraphNameExt;
 
 const ENTITIES: &str = "_entities";
@@ -37,6 +41,7 @@ pub(crate) async fn handle_responses<T: HttpBody>(
     responses: Vec<ConnectorResponse<T>>,
     connector: &Connector,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
+    snapshot_config: &Option<Arc<SnapshotConfig>>,
 ) -> Result<Response, HandleResponseError> {
     use HandleResponseError::*;
 
@@ -47,7 +52,7 @@ pub(crate) async fn handle_responses<T: HttpBody>(
         let mut error = None;
         let response_key = response.key;
         let debug_request = response.debug_request;
-
+        let url = response.url;
         match response.result {
             ConnectorResult::Err(e) => {
                 error = Some(e.to_graphql_error(connector, None));
@@ -73,6 +78,20 @@ pub(crate) async fn handle_responses<T: HttpBody>(
                             )));
                         }
                     };
+
+                    if let Some(snapshot_config) = snapshot_config {
+                        if snapshot_config.enabled {
+                            if let Some(url) = url {
+                                let snapshot_path = PathBuf::from(&snapshot_config.path);
+                                if let Err(e) =
+                                    Snapshot::new(&url.to_string(), &json_data, &parts.headers)
+                                        .save(snapshot_path)
+                                {
+                                    warn!("Failed to save snapshot for {} - {:?}", url, e);
+                                }
+                            }
+                        }
+                    }
 
                     let mut res_data = {
                         let (res, apply_to_errors) = response_key.selection().apply_with_vars(
@@ -312,17 +331,20 @@ mod tests {
         let res = super::handle_responses(
             vec![
                 ConnectorResponse {
+                    url: None,
                     result: response1.into(),
                     key: response_key1,
                     debug_request: None,
                 },
                 ConnectorResponse {
+                    url: None,
                     result: response2.into(),
                     key: response_key2,
                     debug_request: None,
                 },
             ],
             &connector,
+            &None,
             &None,
         )
         .await
@@ -406,17 +428,20 @@ mod tests {
         let res = super::handle_responses(
             vec![
                 ConnectorResponse {
+                    url: None,
                     result: response1.into(),
                     key: response_key1,
                     debug_request: None,
                 },
                 ConnectorResponse {
+                    url: None,
                     result: response2.into(),
                     key: response_key2,
                     debug_request: None,
                 },
             ],
             &connector,
+            &None,
             &None,
         )
         .await
@@ -514,17 +539,20 @@ mod tests {
         let res = super::handle_responses(
             vec![
                 ConnectorResponse {
+                    url: None,
                     result: response1.into(),
                     key: response_key1,
                     debug_request: None,
                 },
                 ConnectorResponse {
+                    url: None,
                     result: response2.into(),
                     key: response_key2,
                     debug_request: None,
                 },
             ],
             &connector,
+            &None,
             &None,
         )
         .await
@@ -632,22 +660,26 @@ mod tests {
         let res = super::handle_responses(
             vec![
                 ConnectorResponse {
+                    url: None,
                     result: response1.into(),
                     key: response_key1,
                     debug_request: None,
                 },
                 ConnectorResponse {
+                    url: None,
                     result: response2.into(),
                     key: response_key2,
                     debug_request: None,
                 },
                 ConnectorResponse {
+                    url: None,
                     result: response3.into(),
                     key: response_key3,
                     debug_request: None,
                 },
             ],
             &connector,
+            &None,
             &None,
         )
         .await

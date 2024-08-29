@@ -12,6 +12,9 @@ use crate::json_ext::Path;
 pub(crate) enum Error {
     /// Request limit exceeded
     RequestLimitExceeded,
+
+    /// Offline snapshots are in use, but no snapshot was found
+    SnapshotNotFound,
 }
 
 impl Error {
@@ -38,6 +41,7 @@ impl ErrorExtension for Error {
     fn extension_code(&self) -> String {
         match self {
             Self::RequestLimitExceeded => "REQUEST_LIMIT_EXCEEDED",
+            Self::SnapshotNotFound => "SNAPSHOT_NOT_FOUND",
         }
         .to_string()
     }

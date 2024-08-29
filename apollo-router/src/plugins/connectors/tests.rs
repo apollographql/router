@@ -1298,6 +1298,26 @@ mod quickstart_tests {
         (res, mock_server)
     }
 
+    async fn execute_with_snapshot(query: &str, variables: JsonMap) -> serde_json::Value {
+        super::execute(
+            QUICKSTART_SCHEMA,
+            "https://jsonplaceholder.typicode.com",
+            query,
+            variables,
+            Some(json!({
+                "preview_connectors": {
+                    "snapshot": {
+                        "enabled": true,
+                        "offline": true,
+                        "path": "./src/plugins/connectors/testdata/rest_api_snapshots"
+                    }
+                }
+            })),
+            |_| {},
+        )
+        .await
+    }
+
     #[tokio::test]
     async fn query_1() {
         let query = r#"
@@ -1472,6 +1492,41 @@ mod quickstart_tests {
                 Matcher::new().method("GET").path("/users/1").build(),
             ],
         );
+    }
+
+    #[tokio::test]
+    async fn query_3_with_snapshot() {
+        let query = r#"
+          query PostWithAuthor($postId: ID!) {
+            post(id: $postId) {
+              id
+              title
+              body
+              author {
+                id
+                name
+              }
+            }
+          }
+      "#;
+
+        let response = execute_with_snapshot(query, map!({ "postId": "1" })).await;
+
+        insta::assert_json_snapshot!(response, @r###"
+        {
+          "data": {
+            "post": {
+              "id": 1,
+              "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
+              "body": "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto",
+              "author": {
+                "id": 1,
+                "name": "Leanne Graham"
+              }
+            }
+          }
+        }
+        "###);
     }
 }
 

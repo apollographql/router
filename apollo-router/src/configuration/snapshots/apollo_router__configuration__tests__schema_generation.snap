@@ -1796,6 +1796,10 @@ expression: "&schema"
           "nullable": true,
           "type": "integer"
         },
+        "snapshot": {
+          "$ref": "#/definitions/SnapshotConfiguration",
+          "description": "#/definitions/SnapshotConfiguration"
+        },
         "subgraphs": {
           "additionalProperties": {
             "$ref": "#/definitions/SubgraphConnectorConfiguration",
@@ -5354,6 +5358,34 @@ expression: "&schema"
           "description": "#/definitions/SupergraphSelector"
         }
       ]
+    },
+    "SnapshotConfiguration": {
+      "description": "Configuration for HTTP response snapshots",
+      "properties": {
+        "enabled": {
+          "description": "Whether snapshots are enabled",
+          "nullable": true,
+          "type": "boolean"
+        },
+        "offline": {
+          "description": "When true, the backend REST API will never be called. Requests with no available snapshot will fail. This is useful for tests, where after the initial snapshot is taken, the test should never attempt to make a network connection to the backend.",
+          "nullable": true,
+          "type": "boolean"
+        },
+        "path": {
+          "description": "The path to the directory where snapshots will be stored to and loaded from",
+          "type": "string"
+        },
+        "update": {
+          "description": "When true, any existing snapshots will be overwritten with new data by calling the backend REST service. This overrides the offline option to allow updating snapshot data.",
+          "nullable": true,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
     },
     "SocketEndpoint": {
       "type": "string"

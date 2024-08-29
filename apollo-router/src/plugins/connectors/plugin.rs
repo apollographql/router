@@ -31,6 +31,15 @@ const CONNECTORS_MAX_REQUESTS_ENV: &str = "APOLLO_CONNECTORS_MAX_REQUESTS_PER_OP
 struct Connectors {
     debug_extensions: bool,
     max_requests: Option<usize>,
+    snapshot_config: SnapshotConfig,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct SnapshotConfig {
+    pub(crate) enabled: bool,
+    pub(crate) offline: bool,
+    pub(crate) update: bool,
+    pub(crate) path: String,
 }
 
 #[async_trait::async_trait]
@@ -54,15 +63,29 @@ impl Plugin for Connectors {
                 .ok()
                 .and_then(|v| v.parse().ok()));
 
+        let snapshot_config = SnapshotConfig {
+            enabled: init.config.snapshot.enabled.unwrap_or(false),
+            offline: init.config.snapshot.offline.unwrap_or(false),
+            update: init.config.snapshot.update.unwrap_or(false),
+            path: init.config.snapshot.path,
+        };
+        if snapshot_config.enabled {
+            tracing::warn!(
+                "⚠️ Connector snapshots are enabled - this may store sensitive information to the file system ⚠️"
+            );
+        }
+
         Ok(Connectors {
             debug_extensions,
             max_requests,
+            snapshot_config,
         })
     }
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         let conf_enabled = self.debug_extensions;
         let max_requests = self.max_requests;
+        let snapshot_config = self.snapshot_config.clone();
         service
             .map_future_with_request_data(
                 move |req: &supergraph::Request| {
@@ -82,6 +105,7 @@ impl Plugin for Connectors {
                                 ConnectorContext::default(),
                             )));
                         }
+                        lock.insert::<Arc<SnapshotConfig>>(Arc::new(snapshot_config.clone()));
                     });
 
                     is_debug_enabled

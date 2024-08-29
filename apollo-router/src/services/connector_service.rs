@@ -1,6 +1,7 @@
 //! Tower service for connectors.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::task::Poll;
 
@@ -26,13 +27,17 @@ use crate::plugins::connectors::http::Response as ConnectorResponse;
 use crate::plugins::connectors::http::Result as ConnectorResult;
 use crate::plugins::connectors::make_requests::make_requests;
 use crate::plugins::connectors::plugin::ConnectorContext;
+use crate::plugins::connectors::plugin::SnapshotConfig;
 use crate::plugins::connectors::request_limit::RequestLimits;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
 use crate::plugins::connectors::tracing::CONNECT_SPAN_NAME;
 use crate::plugins::subscription::SubscriptionConfig;
+use crate::services::connector_service::snapshot::Snapshot;
 use crate::services::ConnectRequest;
 use crate::services::ConnectResponse;
 use crate::spec::Schema;
+
+pub(crate) mod snapshot;
 
 pub(crate) const APOLLO_CONNECTOR_TYPE: Key = Key::from_static_str("apollo.connector.type");
 pub(crate) const APOLLO_CONNECTOR_DETAIL: Key = Key::from_static_str("apollo.connector.detail");
@@ -133,17 +138,19 @@ async fn execute(
     let context = request.context.clone();
     let original_subgraph_name = connector.id.subgraph_name.to_string();
 
-    let (debug, request_limit) = context.extensions().with_lock(|lock| {
+    let (debug, request_limit, snapshot_config) = context.extensions().with_lock(|lock| {
         let debug = lock.get::<Arc<Mutex<ConnectorContext>>>().cloned();
         let request_limit = lock
             .get::<Arc<RequestLimits>>()
             .map(|limits| limits.get((&connector.id).into(), connector.max_requests))
             .unwrap_or(None);
-        (debug, request_limit)
+        let snapshot_config = lock.get::<Arc<SnapshotConfig>>().cloned();
+        (debug, request_limit, snapshot_config)
     });
 
     let requests = make_requests(request, connector, &debug).map_err(BoxError::from)?;
 
+    let snapshot_config_cloned = snapshot_config.clone();
     let tasks = requests.into_iter().map(
         move |Request {
                   request: req,
@@ -157,16 +164,44 @@ async fn execute(
             let context = context.clone();
             let original_subgraph_name = original_subgraph_name.clone();
             let request_limit = request_limit.clone();
+            let snapshot_config = snapshot_config.clone();
             async move {
                 if let Some(request_limit) = request_limit {
                     if !request_limit.allow() {
                         return Ok(ConnectorResponse {
+                            url: Some(req.uri().clone()),
                             result: ConnectorResult::Err(ConnectorError::RequestLimitExceeded),
                             key,
                             debug_request,
                         });
                     }
                 }
+
+                let url = req.uri().clone();
+
+                if let Some(snapshot_config) = snapshot_config {
+                    if snapshot_config.enabled && !snapshot_config.update {
+                        let snapshot_path = PathBuf::from(&snapshot_config.path);
+                        if let Some(snapshot) = Snapshot::load(snapshot_path, &url.to_string()) {
+                            if let Ok(http_response) = snapshot.try_into() {
+                                return Ok(ConnectorResponse {
+                                    url: Some(url.clone()),
+                                    result: http_response,
+                                    key,
+                                    debug_request,
+                                });
+                            }
+                        } else if snapshot_config.offline {
+                            return Ok(ConnectorResponse {
+                                url: Some(url.clone()),
+                                result: ConnectorResult::Err(ConnectorError::SnapshotNotFound),
+                                key,
+                                debug_request,
+                            });
+                        }
+                    }
+                }
+
                 let client = http_client_factory.create(&original_subgraph_name);
                 let req = HttpRequest {
                     http_request: req,
@@ -204,7 +239,7 @@ async fn execute(
         .await
         .map_err(BoxError::from)?;
 
-    handle_responses(responses, connector, &debug)
+    handle_responses(responses, connector, &debug, &snapshot_config_cloned)
         .await
         .map_err(BoxError::from)
 }
