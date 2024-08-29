@@ -154,9 +154,12 @@ impl<'a> QueryHashVisitor<'a> {
     ) -> Result<(), BoxError> {
         "^DIRECTIVE_DEFINITION".hash(self);
         directive_definition.name.as_str().hash(self);
+        "^ARGUMENT_LIST".hash(self);
         for argument in &directive_definition.arguments {
             self.hash_input_value_definition(argument)?;
         }
+        "^ARGUMENT_LIST_END".hash(self);
+
         "^DIRECTIVE_DEFINITION-END".hash(self);
 
         Ok(())
@@ -165,9 +168,12 @@ impl<'a> QueryHashVisitor<'a> {
     fn hash_directive(&mut self, directive: &Node<ast::Directive>) {
         "^DIRECTIVE".hash(self);
         directive.name.as_str().hash(self);
+        "^ARGUMENT_LIST".hash(self);
         for argument in &directive.arguments {
-            self.hash_argument(argument)
+            self.hash_argument(argument);
         }
+        "^ARGUMENT_END".hash(self);
+
         "^DIRECTIVE-END".hash(self);
     }
 
@@ -220,7 +226,7 @@ impl<'a> QueryHashVisitor<'a> {
                     "^key".hash(self);
 
                     k.hash(self);
-                    "^:".hash(self);
+                    "^value:".hash(self);
                     self.hash_value(v);
                 }
                 "^}".hash(self);
@@ -256,18 +262,22 @@ impl<'a> QueryHashVisitor<'a> {
             ExtendedType::Scalar(s) => {
                 "^SCALAR".hash(self);
 
+                "^DIRECTIVE_LIST".hash(self);
                 for directive in &s.directives {
                     self.hash_directive(&directive.node);
                 }
+                "^DIRECTIVE_LIST_END".hash(self);
             }
             // this only hashes the type level info, not the fields, because those will be taken from the query
             // we will still hash the fields using for the key
             ExtendedType::Object(o) => {
                 "^OBJECT".hash(self);
 
+                "^DIRECTIVE_LIST".hash(self);
                 for directive in &o.directives {
                     self.hash_directive(&directive.node);
                 }
+                "^DIRECTIVE_LIST_END".hash(self);
 
                 self.hash_join_type(&o.name, &o.directives)?;
                 //FIXME: hash implemented interfaces?
@@ -275,30 +285,40 @@ impl<'a> QueryHashVisitor<'a> {
             ExtendedType::Interface(i) => {
                 "^INTERFACE".hash(self);
 
+                "^DIRECTIVE_LIST".hash(self);
                 for directive in &i.directives {
                     self.hash_directive(&directive.node);
                 }
+                "^DIRECTIVE_LIST_END".hash(self);
+
                 self.hash_join_type(&i.name, &i.directives)?;
                 //FIXME: hash implemented interfaces?
             }
             ExtendedType::Union(u) => {
                 "^UNION".hash(self);
 
+                "^DIRECTIVE_LIST".hash(self);
                 for directive in &u.directives {
                     self.hash_directive(&directive.node);
                 }
+                "^DIRECTIVE_LIS_END".hash(self);
 
+                "^MEMBER_LIST".hash(self);
                 for member in &u.members {
                     self.hash_type_by_name(member.as_str())?;
                 }
+                "^MEMBER_LIST_END".hash(self);
             }
             ExtendedType::Enum(e) => {
                 "^ENUM".hash(self);
 
+                "^DIRECTIVE_LIST".hash(self);
                 for directive in &e.directives {
                     self.hash_directive(&directive.node);
                 }
+                "^DIRECTIVE_LIST_END".hash(self);
 
+                "^ENUM_VALUE_LIST".hash(self);
                 for (value, def) in &e.values {
                     "^VALUE".hash(self);
 
@@ -307,14 +327,18 @@ impl<'a> QueryHashVisitor<'a> {
                         self.hash_directive(directive);
                     }
                 }
+                "^ENUM_VALUE_LIST_END".hash(self);
             }
             ExtendedType::InputObject(o) => {
                 "^INPUT_OBJECT".hash(self);
 
+                "^DIRECTIVE_LIST".hash(self);
                 for directive in &o.directives {
                     self.hash_directive(&directive.node);
                 }
+                "^DIRECTIVE_LIST_END".hash(self);
 
+                "^FIELD_LIST".hash(self);
                 for (name, ty) in &o.fields {
                     "^NAME".hash(self);
 
@@ -323,6 +347,7 @@ impl<'a> QueryHashVisitor<'a> {
                     "^ARGUMENT".hash(self);
                     self.hash_input_value_definition(&ty.node)?;
                 }
+                "^FIELD_LIST_END".hash(self);
             }
         }
         "^EXTENDED_TYPE-END".hash(self);
@@ -365,27 +390,33 @@ impl<'a> QueryHashVisitor<'a> {
         field_def.name.hash(self);
         self.hash_type(&field_def.ty)?;
 
-        for argument in &field_def.arguments {
-            self.hash_input_value_definition(argument)?;
-        }
-
-        for argument in &node.arguments {
-            self.hash_argument(argument);
-        }
-
-        self.hash_type(&field_def.ty)?;
-
-        for directive in &field_def.directives {
-            self.hash_directive(directive);
-        }
-
         // for every field, we also need to look at fields defined in `@requires` because
         // they will affect the query plan
         self.hash_join_field(&parent_type, &field_def.directives)?;
 
+        "^FIELD_DEF_DIRECTIVE_LIST".hash(self);
+        for directive in &field_def.directives {
+            self.hash_directive(directive);
+        }
+        "^FIELD_DEF_DIRECTIVE_LIST_END".hash(self);
+
+        "^ARGUMENT_DEF_LIST".hash(self);
+        for argument in &field_def.arguments {
+            self.hash_input_value_definition(argument)?;
+        }
+        "^ARGUMENT_DEF_LIST_END".hash(self);
+
+        "^ARGUMENT_LIST".hash(self);
+        for argument in &node.arguments {
+            self.hash_argument(argument);
+        }
+        "^ARGUMENT_LIST_END".hash(self);
+
+        "^DIRECTIVE_LIST".hash(self);
         for directive in &node.directives {
             self.hash_directive(directive);
         }
+        "^DIRECTIVE_LIST_END".hash(self);
 
         node.alias.hash(self);
         "^FIELD-END".hash(self);
@@ -400,9 +431,11 @@ impl<'a> QueryHashVisitor<'a> {
         "^INPUT_VALUE".hash(self);
 
         self.hash_type(&t.ty)?;
+        "^DIRECTIVE_LIST".hash(self);
         for directive in &t.directives {
             self.hash_directive(directive);
         }
+        "^DIRECTIVE_LIST_END".hash(self);
         if let Some(value) = t.default_value.as_ref() {
             self.hash_value(value);
         } else {
@@ -484,10 +517,12 @@ impl<'a> QueryHashVisitor<'a> {
         "^INTERFACE_IMPL".hash(self);
 
         if let Some(implementers) = self.schema.implementers_map().get(&intf.name) {
+            "^IMPLEMENTER_LIST".hash(self);
             for object in &implementers.objects {
                 self.hash_type_by_name(object)?;
                 traverse::selection_set(self, object, &node.selection_set.selections)?;
             }
+            "^IMPLEMENTER_LIST_END".hash(self);
         }
 
         "^INTERFACE_IMPL-END".hash(self);
@@ -515,6 +550,8 @@ impl<'a> Visitor for QueryHashVisitor<'a> {
         self.hash_type_by_name(root_type)?;
         node.operation_type.hash(self);
         node.name.hash(self);
+
+        "^VARIABLE_LIST".hash(self);
         for variable in &node.variables {
             variable.name.hash(self);
             self.hash_type(&variable.ty)?;
@@ -525,13 +562,19 @@ impl<'a> Visitor for QueryHashVisitor<'a> {
                 "^VISIT_OPERATION-NO_DEFAULT".hash(self);
             }
 
+            "^DIRECTIVE_LIST".hash(self);
             for directive in &variable.directives {
                 self.hash_directive(directive);
             }
+            "^DIRECTIVE_LIST_END".hash(self);
         }
+        "^VARIABLE_LIST_END".hash(self);
+
+        "^DIRECTIVE_LIST".hash(self);
         for directive in &node.directives {
             self.hash_directive(directive);
         }
+        "^DIRECTIVE_LIST_END".hash(self);
 
         traverse::operation(self, root_type, node)?;
         "^VISIT_OPERATION-END".hash(self);
@@ -570,9 +613,11 @@ impl<'a> Visitor for QueryHashVisitor<'a> {
 
         node.name.hash(self);
         self.hash_type_by_name(node.type_condition())?;
+        "^DIRECTIVE_LIST".hash(self);
         for directive in &node.directives {
             self.hash_directive(directive);
         }
+        "^DIRECTIVE_LIST_END".hash(self);
 
         traverse::fragment(self, node)?;
         "^VISIT_FRAGMENT-END".hash(self);
@@ -591,9 +636,11 @@ impl<'a> Visitor for QueryHashVisitor<'a> {
             .type_condition();
         self.hash_type_by_name(type_condition)?;
 
+        "^DIRECTIVE_LIST".hash(self);
         for directive in &node.directives {
             self.hash_directive(directive);
         }
+        "^DIRECTIVE_LIST_END".hash(self);
 
         traverse::fragment_spread(self, node)?;
         "^VISIT_FRAGMENT_SPREAD-END".hash(self);
@@ -2104,6 +2151,37 @@ mod tests {
 
         fragment test on Query {
           id
+        }
+        "#;
+
+        assert_ne!(
+            hash(schema, query_one).from_hash_query,
+            hash(schema, query_two).from_hash_query
+        );
+        assert_ne!(
+            hash(schema, query_one).from_visitor,
+            hash(schema, query_two).from_visitor
+        );
+    }
+
+    #[test]
+    fn it_change_directive_location() {
+        let schema: &str = r#"
+        directive @foo on QUERY | VARIABLE_DEFINITION
+
+        type Query {
+          field(arg: String): String
+        }
+        "#;
+
+        let query_one = r#"
+        query Test ($arg: String @foo) {
+          field(arg: $arg)
+        }
+        "#;
+        let query_two = r#"
+        query Test ($arg: String) @foo {
+          field(arg: $arg)
         }
         "#;
 
