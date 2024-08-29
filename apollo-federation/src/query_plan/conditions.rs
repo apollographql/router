@@ -262,14 +262,12 @@ pub(crate) fn remove_unneeded_top_level_fragment_directives(
                     // if there is no type condition we should preserve the directive info
                     selection_map.insert(selection.clone());
                 } else {
-                    let mut needed_directives: Vec<Node<Directive>> = Vec::new();
-                    if fragment.directives.len() > 0 {
-                        for directive in fragment.directives.iter() {
-                            if !unneded_directives.contains(directive) {
-                                needed_directives.push(directive.clone());
-                            }
-                        }
-                    }
+                    let needed_directives: Vec<Node<Directive>> = fragment
+                        .directives
+                        .iter()
+                        .filter(|directive| !unneded_directives.contains(directive))
+                        .cloned()
+                        .collect();
 
                     // We recurse, knowing that we'll stop as soon as we hit field selections, so this only cover the fragments
                     // at the "top-level" of the set.

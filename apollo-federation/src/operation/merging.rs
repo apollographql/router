@@ -8,7 +8,6 @@ use super::FieldSelection;
 use super::FieldSelectionValue;
 use super::FragmentSpreadSelection;
 use super::FragmentSpreadSelectionValue;
-use super::HasSelectionKey as _;
 use super::InlineFragmentSelection;
 use super::InlineFragmentSelectionValue;
 use super::NamedFragments;
@@ -16,6 +15,9 @@ use super::Selection;
 use super::SelectionSet;
 use super::SelectionValue;
 use crate::error::FederationError;
+use crate::operation::HasSelectionKey;
+use crate::operation::SelectionKey;
+use crate::schema::position::CompositeTypeDefinitionPosition;
 
 impl<'a> FieldSelectionValue<'a> {
     /// Merges the given field selections into this one.
@@ -173,116 +175,153 @@ impl SelectionSet {
             }
             selections_to_merge.extend(other.selections.values());
         }
-        self.merge_selections_into(selections_to_merge.into_iter())
+        self.merge_selections_into(selections_to_merge.into_iter(), false)
     }
 
     /// NOTE: This is a private API and should be used with care, use `add_selection` instead.
     ///
     /// A helper function for merging the given selections into this one.
     ///
+    /// If the `directives_of_parent_selection` flag is `Some`, the subselections of inline
+    /// fragments will be merged into the selection set if possible. This happens when the
+    /// selection set's type position matches the inline fragment's type condition or the fragment
+    /// has no type condition as well as the fragment has no directives or the same list of
+    /// directives as the given list of directives. Note that this happens recursely.
+    ///
     /// # Errors
     /// Returns an error if the parent type or schema of any selection does not match `self`'s.
     ///
     /// Returns an error if any selection contains invalid GraphQL that prevents the merge.
+    #[allow(unreachable_code)]
     pub(super) fn merge_selections_into<'op>(
         &mut self,
-        others: impl Iterator<Item = &'op Selection>,
+        mut others: impl Iterator<Item = &'op Selection>,
+        allow_inline_optimization: bool,
     ) -> Result<(), FederationError> {
-        let mut fields = IndexMap::default();
-        let mut fragment_spreads = IndexMap::default();
-        let mut inline_fragments = IndexMap::default();
-        let target = Arc::make_mut(&mut self.selections);
-        for other_selection in others {
-            let other_key = other_selection.key();
-            match target.entry(other_key.clone()) {
-                selection_map::Entry::Occupied(existing) => match existing.get() {
-                    Selection::Field(self_field_selection) => {
-                        let Selection::Field(other_field_selection) = other_selection else {
-                            return Err(FederationError::internal(
-                                format!(
-                                    "Field selection key for field \"{}\" references non-field selection",
-                                    self_field_selection.field.field_position,
-                                ),
-                            ));
-                        };
-                        fields
-                            .entry(other_key)
-                            .or_insert_with(Vec::new)
-                            .push(other_field_selection);
-                    }
-                    Selection::FragmentSpread(self_fragment_spread_selection) => {
-                        let Selection::FragmentSpread(other_fragment_spread_selection) =
-                            other_selection
-                        else {
-                            return Err(FederationError::internal(
-                                format!(
-                                    "Fragment spread selection key for fragment \"{}\" references non-field selection",
-                                    self_fragment_spread_selection.spread.fragment_name,
-                                ),
-                            ));
-                        };
-                        fragment_spreads
-                            .entry(other_key)
-                            .or_insert_with(Vec::new)
-                            .push(other_fragment_spread_selection);
-                    }
-                    Selection::InlineFragment(self_inline_fragment_selection) => {
-                        let Selection::InlineFragment(other_inline_fragment_selection) =
-                            other_selection
-                        else {
-                            return Err(FederationError::internal(
-                                format!(
-                                    "Inline fragment selection key under parent type \"{}\" {}references non-field selection",
-                                    self_inline_fragment_selection.inline_fragment.parent_type_position,
-                                    self_inline_fragment_selection.inline_fragment.type_condition_position.clone()
-                                        .map_or_else(
-                                            String::new,
-                                            |cond| format!("(type condition: {}) ", cond),
-                                        ),
-                                ),
-                            ));
-                        };
-                        inline_fragments
-                            .entry(other_key)
-                            .or_insert_with(Vec::new)
-                            .push(other_inline_fragment_selection);
-                    }
-                },
-                selection_map::Entry::Vacant(vacant) => {
-                    vacant.insert(other_selection.clone())?;
-                }
-            }
+        // As we iterate through the given selections, we buffer selections with matching keys. We
+        // use these buffers to merge sub selections together, so we can only buffer things that
+        // are the same variant as them in.
+        enum MatchedSelectionBuffer<'a> {
+            Field(Vec<&'a Arc<FieldSelection>>),
+            FragmentSpread(Vec<&'a Arc<FragmentSpreadSelection>>),
+            InlineFragment(Vec<&'a Arc<InlineFragmentSelection>>),
         }
 
-        for (key, self_selection) in target.iter_mut() {
-            match self_selection {
-                SelectionValue::Field(mut self_field_selection) => {
-                    if let Some(other_field_selections) = fields.shift_remove(key) {
-                        self_field_selection.merge_into(
-                            other_field_selections.iter().map(|selection| &***selection),
-                        )?;
+        struct SelectionBuffer<'a>(IndexMap<SelectionKey, MatchedSelectionBuffer<'a>>);
+
+        if allow_inline_optimization {
+            fn recurse_on_inline_fragment<'a>(
+                buffer: &mut SelectionBuffer<'a>,
+                directives: &DirectiveList,
+                type_pos: &CompositeTypeDefinitionPosition,
+                others: impl Iterator<Item = &'a Selection>,
+            ) -> Result<(), FederationError> {
+                for selection in others {
+                    if let Selection::InlineFragment(inline) = selection {
+                        if inline.is_unnecessary(&type_pos) {
+                            recurse_on_inline_fragment(
+                                buffer,
+                                directives,
+                                type_pos,
+                                inline.selection_set.selections.values(),
+                            )?;
+                            continue;
+                        }
+                    }
+                    buffer.insert(other_selection)?;
+                }
+                Ok(())
+            }
+            let type_pos = &self.type_position;
+            recurse_on_inline_fragment(target, type_pos, others)?;
+        } else {
+            others.try_for_each(|selection| buffer.insert(selection))?;
+        }
+
+        let target = Arc::make_mut(&mut self.selections);
+
+        for (key, other_selections) in buffer.0 {
+            match other_selections {
+                MatchedSelectionBuffer::Field(fields) => {
+                    match target.entry(key) {
+                        selection_map::Entry::Occupied(mut entry) => {
+                            let SelectionValue::Field(mut self_field_selection) = entry.get_mut()
+                            else {
+                                return Err(FederationError::internal(
+                                    format!(
+                                        "Field selection key for field \"{}\" references non-field selection",
+                                        fields[0].field.field_position,
+                                    ),
+                                ));
+                            };
+                            self_field_selection
+                                .merge_into(fields.into_iter().map(|field| &**field))?;
+                        }
+                        selection_map::Entry::Vacant(vacant) => {
+                            let mut iter = fields.into_iter();
+                            // There should never be an empty `Vec` in the map.
+                            let mut first = iter.next().unwrap().clone();
+                            FieldSelectionValue::new(&mut first)
+                                .merge_into(iter.map(|spread| &**spread))?;
+                            vacant.insert(Selection::Field(first))?;
+                        }
                     }
                 }
-                SelectionValue::FragmentSpread(mut self_fragment_spread_selection) => {
-                    if let Some(other_fragment_spread_selections) =
-                        fragment_spreads.shift_remove(key)
-                    {
-                        self_fragment_spread_selection.merge_into(
-                            other_fragment_spread_selections
-                                .iter()
-                                .map(|selection| &***selection),
-                        )?;
+                MatchedSelectionBuffer::FragmentSpread(spreads) => {
+                    match target.entry(key) {
+                        selection_map::Entry::Occupied(mut entry) => {
+                            let SelectionValue::FragmentSpread(mut self_spread_selection) =
+                                entry.get_mut()
+                            else {
+                                return Err(FederationError::internal(
+                                    format!(
+                                        "Fragment spread selection key for fragment \"{}\" references non-field selection",
+                                        spreads[0].spread.fragment_name,
+                                    ),
+                                ));
+                            };
+                            self_spread_selection
+                                .merge_into(spreads.into_iter().map(|spread| &**spread))?;
+                        }
+                        selection_map::Entry::Vacant(vacant) => {
+                            let mut iter = spreads.into_iter();
+                            // There should never be an empty `Vec` in the map.
+                            let mut first = iter.next().unwrap().clone();
+                            FragmentSpreadSelectionValue::new(&mut first)
+                                .merge_into(iter.map(|spread| &**spread))?;
+                            vacant.insert(Selection::FragmentSpread(first))?;
+                        }
                     }
                 }
-                SelectionValue::InlineFragment(mut self_inline_fragment_selection) => {
-                    if let Some(other_inline_fragment_selections) =
-                        inline_fragments.shift_remove(key)
-                    {
-                        self_inline_fragment_selection.merge_into(
-                            other_inline_fragment_selections
-                                .iter()
-                                .map(|selection| &***selection),
-                        )?;
+                MatchedSelectionBuffer::InlineFragment(inlines) => {
+                    match target.entry(key) {
+                        selection_map::Entry::Occupied(mut entry) => {
+                            let SelectionValue::InlineFragment(mut self_inline_selection) =
+                                entry.get_mut()
+                            else {
+                                return Err(FederationError::internal(
+                                    format!(
+                                        "Inline fragment selection key under parent type \"{}\" {}references non-field selection",
+                                        inlines[0].inline_fragment.parent_type_position,
+                                        inlines[0].inline_fragment.type_condition_position.clone()
+                                            .map_or_else(
+                                                String::new,
+                                                |cond| format!("(type condition: {}) ", cond),
+                                            ),
+                                    ),
+                                ));
+                            };
+                            self_inline_selection
+                                .merge_into(inlines.into_iter().map(|inline| &**inline))?;
+                        }
+                        selection_map::Entry::Vacant(vacant) => {
+                            let mut iter = inlines.into_iter();
+                            // There should never be an empty `Vec` in the map.
+                            let mut first = iter.next().unwrap().clone();
+                            InlineFragmentSelectionValue::new(&mut first)
+                                .merge_into(iter.map(|inline| &**inline))?;
+                            vacant.insert(Selection::InlineFragment(first))?;
+                        }
                     }
                 }
             }
@@ -305,13 +344,14 @@ impl SelectionSet {
     pub(crate) fn add_local_selection(
         &mut self,
         selection: &Selection,
+        allow_inline_optimization: bool,
     ) -> Result<(), FederationError> {
         debug_assert_eq!(
             &self.schema,
             selection.schema(),
             "In order to add selection it needs to point to the same schema"
         );
-        self.merge_selections_into(std::iter::once(selection))
+        self.merge_selections_into(std::iter::once(selection), allow_inline_optimization)
     }
 
     /// Inserts a `SelectionSet` into the inner map. Should any sub selection with the same key already
