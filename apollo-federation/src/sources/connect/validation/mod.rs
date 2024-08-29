@@ -151,7 +151,7 @@ pub fn validate(schema: Schema) -> Vec<Message> {
     messages
 }
 
-/// Check that all fields that are selected in the schema are resolved by a connector.
+/// Check that all fields defined in the schema are resolved by a connector.
 fn check_seen_fields(
     schema: &Schema,
     seen_fields: &IndexSet<(Name, Name)>,
