@@ -305,13 +305,13 @@ impl<'a> QueryHashVisitor<'a> {
                     "^IMPLEMENTER_OBJECT_LIST".hash(self);
 
                     for object in &implementers.objects {
-                        self.hash_type_by_name(&object)?;
+                        self.hash_type_by_name(object)?;
                     }
                     "^IMPLEMENTER_OBJECT_LIST_END".hash(self);
 
                     "^IMPLEMENTER_INTERFACE_LIST".hash(self);
                     for interface in &implementers.interfaces {
-                        self.hash_type_by_name(&interface)?;
+                        self.hash_type_by_name(interface)?;
                     }
                     "^IMPLEMENTER_INTERFACE_LIST_END".hash(self);
                 }
