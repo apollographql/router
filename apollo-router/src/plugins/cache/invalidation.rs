@@ -19,6 +19,8 @@ use crate::cache::redis::RedisKey;
 use crate::plugins::cache::entity::hash_entity_key;
 use crate::plugins::cache::entity::ENTITY_CACHE_VERSION;
 
+const CHANNEL_SIZE: usize = 1024;
+
 #[derive(Clone)]
 pub(crate) struct Invalidation {
     #[allow(clippy::type_complexity)]
@@ -66,7 +68,7 @@ pub(crate) enum InvalidationOrigin {
 
 impl Invalidation {
     pub(crate) async fn new(storage: Arc<EntityStorage>) -> Result<Self, BoxError> {
-        let (tx, rx) = tokio::sync::mpsc::channel(128);
+        let (tx, rx) = tokio::sync::mpsc::channel(CHANNEL_SIZE);
 
         tokio::task::spawn(async move {
             start(storage, rx).await;
