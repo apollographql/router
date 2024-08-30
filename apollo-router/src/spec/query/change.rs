@@ -282,7 +282,11 @@ impl<'a> QueryHashVisitor<'a> {
                 self.hash_join_type(&o.name, &o.directives)?;
                 "^OBJECT_END".hash(self);
 
-                //FIXME: hash implemented interfaces?
+                "^IMPLEMENTED_INTERFACES_LIST".hash(self);
+                for interface in &o.implements_interfaces {
+                    self.hash_type_by_name(&interface.name)?;
+                }
+                "^IMPLEMENTED_INTERFACES_LIST_END".hash(self);
             }
             ExtendedType::Interface(i) => {
                 "^INTERFACE".hash(self);
@@ -957,7 +961,7 @@ mod tests {
         "#;
 
         let query = "query { me { id name } }";
-        assert!(hash(schema1, query).equals(&hash(schema2, query)));
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
 
         let query = "query { customer { id } }";
         assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
