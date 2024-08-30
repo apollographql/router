@@ -34,7 +34,6 @@ use crate::plugins::connectors::request_limit::RequestLimits;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
 use crate::plugins::connectors::tracing::CONNECT_SPAN_NAME;
 use crate::plugins::subscription::SubscriptionConfig;
-use crate::services::connector_service::snapshot::create_snapshot_key;
 use crate::services::connector_service::snapshot::snapshot_path;
 use crate::services::connector_service::snapshot::Snapshot;
 use crate::services::ConnectRequest;
@@ -189,7 +188,7 @@ async fn execute(
                 if let Some(snapshot_config) = snapshot_config {
                     if snapshot_config.enabled {
                         let snapshot_dir = PathBuf::from(&snapshot_config.path);
-                        let snapshot_key_value = create_snapshot_key(&req, body_hash).await;
+                        let snapshot_key_value = snapshot::snapshot_key(&req, body_hash);
                         snapshot_key = Some(snapshot_key_value.clone());
                         if !snapshot_config.update {
                             if let Some(snapshot) =

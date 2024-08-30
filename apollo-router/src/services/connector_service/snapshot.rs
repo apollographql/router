@@ -9,6 +9,7 @@
 //! * Development and debugging without repeatedly hitting the backend REST service
 //! * Development and debugging where short-lived auth tokens are required by the REST API
 //! * Creating tests that capture output from a real REST API to replay as a mock
+//! * Mocking up a REST API to use with connectors without having to stand up a server
 //!
 //! A few things to be aware of:
 //! * Saving REST responses to the file system could potentially result in saving sensitive
@@ -87,7 +88,10 @@ impl<'a> Snapshot<'a> {
         let string = std::fs::read_to_string(path).ok()?;
         let snapshot: Snapshot = serde_json::from_str(&string).ok()?;
         if snapshot.key != key {
-            // TODO: handle collisions
+            // Hash collisions are extremely unlikely, and avoiding them would require parsing on
+            // save to compare the stored key. Just warn if one ever occurs - the snapshot will be
+            // overwritten by each request. This would only result in failure in offline mode,
+            // where only one of the snapshots could be successfully loaded.
             warn!("Snapshot collision: {}, {}", snapshot.key, key);
             return None;
         }
@@ -122,10 +126,9 @@ impl<'a> TryFrom<Snapshot<'a>> for crate::plugins::connectors::http::Result<Rout
     }
 }
 
-pub(crate) async fn create_snapshot_key<T>(
-    request: &http::Request<T>,
-    body_hash: Option<String>,
-) -> String {
+/// Get the snapshot key for an HTTP request. If there is a request body, its hash should be
+/// included in the key.
+pub(crate) fn snapshot_key<T>(request: &http::Request<T>, body_hash: Option<String>) -> String {
     let url = request.uri().clone().to_string();
     let http_method = String::from(request.method().as_str());
     if let Some(body_hash) = body_hash {
@@ -135,6 +138,7 @@ pub(crate) async fn create_snapshot_key<T>(
     }
 }
 
+/// Get the snapshot path for a key, given a snapshot directory base path.
 pub(crate) fn snapshot_path<P: AsRef<Path>>(base: P, key: &str) -> PathBuf {
     let mut key_hash = {
         let mut hasher = Sha256::new();
