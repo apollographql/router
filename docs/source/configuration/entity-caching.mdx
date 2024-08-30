@@ -176,7 +176,7 @@ preview_entity_cache:
 
 #### Invalidation request format
 
-Invalidation requests are sent as JSON objects with the following format:
+Invalidation requests are defined as JSON objects with the following format:
 
 - Subgraph invalidation request:
 
@@ -212,14 +212,14 @@ Invalidation requests are sent as JSON objects with the following format:
 
 <Note>
 
-This is the same key format used by the router in the `representations` field for `_entities` queries.
+The key field is the same argument as defined in the subgraph's `@key` directive. If a subgraph has multiple keys defined and the entity is being invalidated, it is likely you'll need to send a request for each key definition. 
 
 </Note>
 
 
 #### Invalidation HTTP endpoint
 
-The invalidation endpoint exposed by the router can receive multiple invalidation requests at once and will process them in sequence. For authorization, you can provide a shared key in the request. For example, with the previous configuration you can send the following request:
+The invalidation endpoint exposed by the router expects to receive an array of invalidation requests and will process them in sequence. For authorization, you must provide a shared key in the request header. For example, with the previous configuration you should send the following request:
 
 ```
 POST http://127.0.0.1:3000/invalidation
@@ -235,7 +235,7 @@ Accept: application/json
 }]
 ```
 
-We would expect the following response:
+The router would send the following response:
 
 ```
 HTTP/1.1 200 OK
@@ -282,7 +282,7 @@ Invalidation requests are also reported under the following spans:
 
 ### Failure cases
 
-Entity caching will greatly reduce traffic to subgraphs, resulting in less infrastructure to serve more client traffic. In the rare case where Redis is unavailable, the router should be configured with [rate limiting for subgraph requests](/router/configuration/traffic-shaping/#rate-limiting-1) to avoid overwhelming the subgraphs. It can also be paired with [subgraph query deduplication](/router/configuration/traffic-shaping/#query-deduplication) to further reduce traffic.
+Entity caching will greatly reduce traffic to subgraphs. Should there be an availability issue with a Redis cache, this could cause traffic to subgraphs to increase to a level where infrastructure becomes overwhelmed. To avoid such issues, the router should be configured with [rate limiting for subgraph requests](/router/configuration/traffic-shaping/#rate-limiting-1) to avoid overwhelming the subgraphs. It could also be paired with [subgraph query deduplication](/router/configuration/traffic-shaping/#query-deduplication) to further reduce traffic.
 
 ### Private information caching
 
