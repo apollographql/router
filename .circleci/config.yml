@@ -87,6 +87,10 @@ parameters:
   nightly:
     type: boolean
     default: false
+  # quick_nightly will skip testing and only build the release artifacts.
+  quick_nightly:
+    type: boolean
+    default: false
 
 # These are common environment variables that we want to set on on all jobs.
 # While these could conceivably be set on the CircleCI project settings'
@@ -626,6 +630,7 @@ jobs:
       RELEASE_BIN: router
       APPLE_TEAM_ID: "YQK948L752"
       APPLE_USERNAME: "opensource@apollographql.com"
+      REPO_URL: << pipeline.project.git_url >>
     steps:
       - checkout
       - setup_environment:
@@ -724,18 +729,34 @@ jobs:
             and:
               - equal: [ *amd_linux_build_executor, << parameters.platform >> ]
               - equal: [ true, << parameters.nightly >> ]
-              - equal: [ "https://github.com/apollographql/router", << pipeline.project.git_url >> ]
+              - matches:
+                  pattern: "^https:\\/\\/github\\.com\\/apollographql\\/router.*$"
+                  value: << pipeline.project.git_url >>
           steps:
             - setup_remote_docker:
-                version: 20.10.11
+                # CircleCI Image Policy
+                #   https://circleci.com/docs/remote-docker-images-support-policy/
+                version: 24.0.9
                 docker_layer_caching: true
             - run:
                 name: Docker build
                 command: |
+                  # Source of the new image will be ser to the repo URL.
+                  # This will have the effect of setting org.opencontainers.image.source and org.opencontainers.image.author to the originating pipeline
+                  # Therefore the docker image will have the same permissions as the originating project. 
+                  # See: https://docs.github.com/en/packages/learn-github-packages/connecting-a-repository-to-a-package#connecting-a-repository-to-a-container-image-using-the-command-line
+                  
                   BASE_VERSION=$(cargo metadata --format-version=1 --no-deps | jq --raw-output '.packages[0].version')
                   ARTIFACT_URL="https://output.circle-artifacts.com/output/job/${CIRCLE_WORKFLOW_JOB_ID}/artifacts/0/artifacts/router-v${BASE_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
                   VERSION="v$(echo "${BASE_VERSION}" | tr "+" "-")"
                   ROUTER_TAG=ghcr.io/apollographql/nightly/router
+                  
+                  echo "REPO_URL: ${REPO_URL}"
+                  echo "BASE_VERSION: ${BASE_VERSION}"
+                  echo "ARTIFACT_URL: ${ARTIFACT_URL}"
+                  echo "VERSION: ${VERSION}"
+                  echo "ROUTER_TAG: ${ROUTER_TAG}"
+                  
                   # Create a multi-arch builder which works properly under qemu
                   docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
                   docker context create buildx-build
@@ -745,10 +766,10 @@ jobs:
                   echo ${GITHUB_OCI_TOKEN} | docker login ghcr.io -u apollo-bot2 --password-stdin
                   # TODO: Can't figure out how to build multi-arch image from ARTIFACT_URL right now. Figure out later...
                   # Build and push debug image
-                  docker buildx build --load --platform linux/amd64 --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug .
+                  docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug .
                   docker push ${ROUTER_TAG}:${VERSION}-debug
                   # Build and push release image
-                  docker buildx build --load --platform linux/amd64 --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} .
+                  docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} .
                   docker push ${ROUTER_TAG}:${VERSION}
                   # save containers for analysis
                   mkdir built-containers
@@ -853,7 +874,9 @@ jobs:
           steps:
             - checkout
             - setup_remote_docker:
-                version: 20.10.11
+                # CircleCI Image Policy
+                #   https://circleci.com/docs/remote-docker-images-support-policy/
+                version: 20.10.24
                 docker_layer_caching: true
             - attach_workspace:
                 at: artifacts
@@ -920,7 +943,10 @@ jobs:
 workflows:
   ci_checks:
     when:
-      not: << pipeline.parameters.nightly >>
+      not:
+        or:
+          - << pipeline.parameters.nightly >>
+          - << pipeline.parameters.quick_nightly >>
     jobs:
       - lint:
           matrix:
@@ -954,6 +980,18 @@ workflows:
               platform:
                 [ macos_test, windows_test, amd_linux_test, arm_linux_test ]
 
+  quick-nightly:
+    when: << pipeline.parameters.quick_nightly >>
+    jobs:
+      - build_release:
+          nightly: true
+          context:
+            - router
+            - orb-publishing
+          matrix:
+            parameters:
+              platform:
+                [ macos_build, windows_build, amd_linux_build, arm_linux_build ]
   nightly:
     when: << pipeline.parameters.nightly >>
     jobs:
@@ -993,7 +1031,9 @@ workflows:
             - test
             - test_updated
           nightly: true
-          context: router
+          context:
+            - router
+            - orb-publishing
           matrix:
             parameters:
               platform:
@@ -1020,7 +1060,10 @@ workflows:
 
   release:
     when:
-      not: << pipeline.parameters.nightly >>
+      not:
+        or:
+          - << pipeline.parameters.nightly >>
+          - << pipeline.parameters.quick_nightly >>
     jobs:
       - pre_verify_release:
           matrix:
@@ -1110,7 +1153,10 @@ workflows:
 
   security-scans:
     when:
-      not: << pipeline.parameters.nightly >>
+      not:
+        or:
+          - << pipeline.parameters.nightly >>
+          - << pipeline.parameters.quick_nightly >>
     jobs:
       - secops/gitleaks:
           context:
