@@ -2,6 +2,7 @@ use std::iter::once;
 use std::ops::Range;
 
 use apollo_compiler::ast::FieldDefinition;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::parser::LineColumn;
 use apollo_compiler::parser::SourceMap;
 use apollo_compiler::schema::Component;
@@ -31,6 +32,7 @@ pub(super) fn validate_selection(
     connect_directive: &Node<Directive>,
     parent_type: &Node<ObjectType>,
     schema: &Schema,
+    seen_fields: &mut IndexSet<(Name, Name)>,
 ) -> Option<Message> {
     let (selection_value, json_selection) =
         match get_json_selection(connect_directive, parent_type, &field.name, &schema.sources) {
@@ -63,6 +65,7 @@ pub(super) fn validate_selection(
             &field.name,
         ),
         selection_location: selection_value.line_column_range(&schema.sources),
+        seen_fields,
     }
     .walk(group)
     .err()
@@ -171,15 +174,16 @@ fn get_json_selection<'a>(
     Ok((&selection_arg.value, selection))
 }
 
-struct SelectionValidator<'schema> {
+struct SelectionValidator<'schema, 'a> {
     schema: &'schema Schema,
     root: PathPart<'schema>,
     path: Vec<PathPart<'schema>>,
     selection_location: Option<Range<LineColumn>>,
     selection_coordinate: String,
+    seen_fields: &'a mut IndexSet<(Name, Name)>,
 }
 
-impl SelectionValidator<'_> {
+impl SelectionValidator<'_, '_> {
     fn check_for_circular_reference(
         &self,
         field: Field,
@@ -247,7 +251,7 @@ struct Group<'schema> {
 
 // TODO: Once there is location data for JSONSelection, return multiple errors instead of stopping
 //  at the first
-impl<'schema> GroupVisitor<Group<'schema>, Field<'schema>> for SelectionValidator<'schema> {
+impl<'schema> GroupVisitor<Group<'schema>, Field<'schema>> for SelectionValidator<'schema, '_> {
     /// If the both the selection and the schema agree that this field is an object, then we
     /// provide it back to the visitor to be walked.
     ///
@@ -305,7 +309,7 @@ impl<'schema> GroupVisitor<Group<'schema>, Field<'schema>> for SelectionValidato
     }
 }
 
-impl<'schema> FieldVisitor<Field<'schema>> for SelectionValidator<'schema> {
+impl<'schema> FieldVisitor<Field<'schema>> for SelectionValidator<'schema, '_> {
     type Error = Message;
 
     fn visit(&mut self, field: Field<'schema>) -> Result<(), Self::Error> {
@@ -320,6 +324,11 @@ impl<'schema> FieldVisitor<Field<'schema>> for SelectionValidator<'schema> {
             locations: self.selection_location.iter().cloned().collect(),
         })?;
         let is_group = field.selection.next_subselection().is_some();
+
+        self.seen_fields.insert((
+            self.last_field().ty().name.clone(),
+            field.definition.name.clone(),
+        ));
 
         match (field_type, is_group) {
             (ExtendedType::Object(object), true) => {
@@ -340,8 +349,9 @@ impl<'schema> FieldVisitor<Field<'schema>> for SelectionValidator<'schema> {
                 Err(Message {
                     code: Code::GroupSelectionRequiredForObject,
                     message: format!(
-                        "`{type_name}.{field_name}` is an object, so `{coordinate}` must select a group `{field_name}{{}}`.",
+                        "`{parent_type}.{field_name}` is an object, so `{coordinate}` must select a group `{field_name}{{}}`.",
                         coordinate = &self.selection_coordinate,
+                        parent_type = self.last_field().ty().name,
                     ),
                     locations: self.selection_location.iter().cloned().chain(field.definition.line_column_range(&self.schema.sources)).collect(),
                 })
@@ -351,7 +361,7 @@ impl<'schema> FieldVisitor<Field<'schema>> for SelectionValidator<'schema> {
     }
 }
 
-impl SelectionValidator<'_> {
+impl SelectionValidator<'_, '_> {
     fn path_with_root(&self) -> impl Iterator<Item = PathPart> {
         once(self.root).chain(self.path.iter().copied())
     }

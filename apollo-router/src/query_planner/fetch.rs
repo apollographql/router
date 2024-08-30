@@ -280,11 +280,12 @@ impl Variables {
         variable_usages: &[Arc<str>],
         data: &Value,
         current_dir: &Path,
-        body: &Request,
+        request: &Arc<http::Request<Request>>,
         schema: &Schema,
         input_rewrites: &Option<Vec<rewrites::DataRewrite>>,
         context_rewrites: &Option<Vec<rewrites::DataRewrite>>,
     ) -> Option<Variables> {
+        let body = request.body();
         let mut subgraph_context = SubgraphContext::new(data, schema, context_rewrites);
         if !requires.is_empty() {
             let mut variables = Object::with_capacity(1 + variable_usages.len());

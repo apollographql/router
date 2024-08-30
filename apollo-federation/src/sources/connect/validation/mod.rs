@@ -25,12 +25,15 @@ mod source_name;
 use std::collections::HashMap;
 use std::ops::Range;
 
+use apollo_compiler::ast::OperationType;
 use apollo_compiler::ast::Value;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
 use apollo_compiler::parser::LineColumn;
 use apollo_compiler::parser::SourceMap;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
+use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
@@ -52,6 +55,7 @@ use crate::sources::connect::spec::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
 use crate::sources::connect::spec::schema::SOURCE_NAME_ARGUMENT_NAME;
 use crate::sources::connect::ConnectSpecDefinition;
 use crate::subgraph::spec::CONTEXT_DIRECTIVE_NAME;
+use crate::subgraph::spec::EXTERNAL_DIRECTIVE_NAME;
 use crate::subgraph::spec::FROM_CONTEXT_DIRECTIVE_NAME;
 use crate::subgraph::spec::INTF_OBJECT_DIRECTIVE_NAME;
 
@@ -64,6 +68,11 @@ pub fn validate(schema: Schema) -> Vec<Message> {
     let Some((link, link_directive)) = Link::for_identity(&schema, &connect_identity) else {
         return Vec::new(); // There are no connectors-related directives to validate
     };
+
+    let federation = Link::for_identity(&schema, &Identity::federation_identity());
+    let external_directive_name = federation
+        .map(|(link, _)| link.directive_name_in_schema(&EXTERNAL_DIRECTIVE_NAME))
+        .unwrap_or(EXTERNAL_DIRECTIVE_NAME.clone());
 
     let mut messages = check_conflicting_directives(&schema);
 
@@ -103,6 +112,8 @@ pub fn validate(schema: Schema) -> Vec<Message> {
         }
     }
 
+    let mut seen_fields = IndexSet::default();
+
     let connect_errors = schema.types.values().flat_map(|extended_type| {
         validate_extended_type(
             extended_type,
@@ -111,9 +122,20 @@ pub fn validate(schema: Schema) -> Vec<Message> {
             &source_directive_name,
             &all_source_names,
             source_map,
+            &mut seen_fields,
         )
     });
     messages.extend(connect_errors);
+
+    if should_check_seen_fields(&messages) {
+        messages.extend(check_seen_fields(
+            &schema,
+            &seen_fields,
+            source_map,
+            &connect_directive_name,
+            &external_directive_name,
+        ));
+    }
 
     if source_directive_name == DEFAULT_SOURCE_DIRECTIVE_NAME
         && messages
@@ -129,6 +151,87 @@ pub fn validate(schema: Schema) -> Vec<Message> {
         });
     }
     messages
+}
+
+/// We'll avoid doing this work if there are bigger issues with the schema.
+/// Otherwise we might emit a large number of diagnostics that will
+/// distract from the main problems.
+fn should_check_seen_fields(messages: &[Message]) -> bool {
+    !messages.iter().any(|error| {
+        // some invariant is violated, so let's just stop here
+        error.code == Code::GraphQLError
+            // the selection visitor emits these errors and stops visiting, so there will probably be fields we haven't visited
+            || error.code == Code::SelectedFieldNotFound
+            || error.code == Code::GroupSelectionIsNotObject
+            || error.code == Code::GroupSelectionRequiredForObject
+            // if we encounter unsupported definitions, there are probably related definitions that we won't be able to resolve
+            || error.code == Code::SubscriptionInConnectors
+            || error.code == Code::UnsupportedAbstractType
+    })
+}
+
+/// Check that all fields defined in the schema are resolved by a connector.
+fn check_seen_fields(
+    schema: &Schema,
+    seen_fields: &IndexSet<(Name, Name)>,
+    source_map: &SourceMap,
+    connect_directive_name: &Name,
+    external_directive_name: &Name,
+) -> Vec<Message> {
+    let all_fields: IndexSet<_> = schema
+        .types
+        .values()
+        .filter_map(|extended_type| {
+            if extended_type.is_built_in() {
+                return None;
+            }
+            // ignore root fields, we have different validations for them
+            if schema.root_operation(OperationType::Query) == Some(extended_type.name())
+                || schema.root_operation(OperationType::Mutation) == Some(extended_type.name())
+                || schema.root_operation(OperationType::Subscription) == Some(extended_type.name())
+            {
+                return None;
+            }
+            let coord = |(name, _): (&Name, _)| (extended_type.name().clone(), name.clone());
+            match extended_type {
+                ExtendedType::Object(object) => Some(
+                    // ignore @external fields
+                    object
+                        .fields
+                        .iter()
+                        .filter(|(_, def)| {
+                            !def.directives
+                                .iter()
+                                .any(|dir| &dir.name == external_directive_name)
+                        })
+                        .map(coord),
+                ),
+                ExtendedType::Interface(_) => None, // TODO: when interfaces are supported (probably should include fields from implementing/member types as well)
+                _ => None,
+            }
+        })
+        .flatten()
+        .collect();
+
+    (&all_fields - seen_fields).iter().map(move |(parent_type, field_name)| {
+        let Ok(field_def) = schema.type_field(parent_type, field_name) else {
+            // This should never happen, but if it does, we don't want to panic
+            return Message {
+                code: Code::GraphQLError,
+                message: format!(
+                    "Field `{parent_type}.{field_name}` is missing from the schema.",
+                ),
+                locations: Vec::new(),
+            };
+        };
+        Message {
+            code: Code::UnresolvedField,
+            message: format!(
+                "No connector resolves field `{parent_type}.{field_name}`. It must have a `@{connect_directive_name}` directive or appear in `@{connect_directive_name}(selection:)`.",
+            ),
+            locations: field_def.line_column_range(source_map).into_iter().collect(),
+        }
+    }).collect()
 }
 
 fn check_conflicting_directives(schema: &Schema) -> Vec<Message> {
@@ -350,6 +453,8 @@ pub enum Code {
     MissingHeaderSource,
     /// Fields that return an object type must use a group JSONSelection `{}`
     GroupSelectionRequiredForObject,
+    /// Fields in the schema that aren't resolved by a connector
+    UnresolvedField,
 }
 
 impl Code {
