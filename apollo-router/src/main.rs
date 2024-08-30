@@ -1,4 +1,5 @@
 fn main() {
+    println!("testing");
     match apollo_router::main() {
         Ok(_) => {}
         Err(e) => {
