@@ -145,25 +145,26 @@ To process an invalidation request, the router first sends a `SCAN` command to R
 
 #### Configuration
 
-You can configure entity cache invalidation both globally (`preview_entity_cache.subgraph.all.invalidation`) and per subgraph (`preview_entity_cache.subgraph.subgraphs.invalidation`). 
+You can configure entity cache invalidation both globally (`preview_entity_cache.invalidation`) and per subgraph (`preview_entity_cache.subgraph.subgraphs.invalidation`).
 
 ```yaml title="router.yaml"
 preview_entity_cache:
   enabled: true
-  redis:
-    urls: ["redis://..."]
+
+  # global invalidation configuration
+  invalidation:
+    # address of the invalidation endpoint
+    # this should only be exposed to internal networks
+    listen: "127.0.0.1:3000"
+    path: "/invalidation"
+    # base64 string that will be provided in the `Authorization: Basic` header value
+    shared_key: "agm3ipv7egb78dmxzv0gr5q0t5l6qs37"
 
   subgraph:
     all:
       enabled: true
-      # global invalidation configuration
-      invalidation:
-        # address of the invalidation endpoint
-        # this should only be exposed to internal networks
-        listen: "127.0.0.1:3000"
-        path: "/invalidation"
-        # base64 string that will be provided in the `Authorization: Basic` header value
-        shared_key: "agm3ipv7egb78dmxzv0gr5q0t5l6qs37"
+      redis:
+        urls: ["redis://..."]
     subgraphs:
       products:
         # per subgraph invalidation configuration
