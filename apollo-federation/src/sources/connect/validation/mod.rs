@@ -227,7 +227,7 @@ fn check_seen_fields(
         Message {
             code: Code::UnresolvedField,
             message: format!(
-                "No connector resolves `{parent_type}.{field_name}`. Make sure it appears in a `selection:` for a `{connect_directive_name}` directive.",
+                "No connector resolves field `{parent_type}.{field_name}`. It must have a `@{connect_directive_name}` directive or appear in `@{connect_directive_name}(selection:)`.",
             ),
             locations: field_def.line_column_range(source_map).into_iter().collect(),
         }
