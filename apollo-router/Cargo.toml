@@ -130,7 +130,7 @@ mediatype = "0.19.18"
 mockall = "0.13.0"
 mime = "0.3.17"
 multer = "2.1.0"
-multimap = "0.10.0"
+multimap = "0.9.1" # Warning: part of the public API
 # To avoid tokio issues
 notify = { version = "6.1.1", default-features = false, features = [
     "macos_kqueue",

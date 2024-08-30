@@ -306,7 +306,7 @@ dependencies = [
  "mime",
  "mockall",
  "multer",
- "multimap 0.10.0",
+ "multimap 0.9.1",
  "notify",
  "nu-ansi-term 0.50.1",
  "num-traits",
