@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-axum = "0.7.0"
+axum = "0.6.20"
 async-graphql = "6"
 async-graphql-axum = "6"
 env_logger = "0.11"

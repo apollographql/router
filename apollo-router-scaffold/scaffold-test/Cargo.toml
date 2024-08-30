@@ -17,7 +17,7 @@ schemars = "0.8.10"
 serde = "1.0.149"
 serde_json = "1.0.79"
 tokio = { version = "1.17.0", features = ["full"] }
-tower = { version = "0.5.0", features = ["full"] }
+tower = { version = "0.4.0", features = ["full"] }
 tracing = "0.1.37"
 
 # this makes build scripts and proc macros faster to compile
