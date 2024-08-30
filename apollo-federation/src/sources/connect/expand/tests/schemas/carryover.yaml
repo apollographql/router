@@ -1,5 +1,5 @@
 # rover supergraph compose --config apollo-federation/src/sources/connect/expand/tests/schemas/carryover.yaml > apollo-federation/src/sources/connect/expand/tests/schemas/carryover.graphql
-federation_version: =2.9.0-connectors.9
+federation_version: =2.10.0-alpha.0
 subgraphs:
   one:
     routing_url: none
@@ -15,9 +15,9 @@ subgraphs:
           )
           @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom"])
           @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"])
-          # @composeDirective(name: "@custom")
+          @composeDirective(name: "@custom")
           @source(name: "json" http: { baseURL: "http://example/" })
-        # directive @custom on OBJECT | FIELD_DEFINITION
+        directive @custom on OBJECT | FIELD_DEFINITION
         type Query {
           ts: [T] @connect(
             source: "json"
@@ -26,10 +26,10 @@ subgraphs:
               id
               tagged
               hidden
-              # custom
-              # authenticated
-              # requiresScopes
-              # policy
+              custom
+              authenticated
+              requiresScopes
+              policy
               overridden
             """
           )
@@ -40,10 +40,10 @@ subgraphs:
               id
               tagged
               hidden
-              # custom
-              # authenticated
-              # requiresScopes
-              # policy
+              custom
+              authenticated
+              requiresScopes
+              policy
               overridden
             """
             entity: true
@@ -54,10 +54,10 @@ subgraphs:
           id: ID!
           tagged: String @tag(name: "tag")
           hidden: String @inaccessible
-          # custom: String @custom
-          # authenticated: String @authenticated
-          # requiresScopes: String @requiresScopes(scopes: ["scope"])
-          # policy: String @policy(policies: [["admin"]])
+          custom: String @custom
+          authenticated: String @authenticated
+          requiresScopes: String @requiresScopes(scopes: ["scope"])
+          policy: String @policy(policies: [["admin"]])
           overridden: String @override(from: "two", label: "label")
           r: R @connect(
             source: "json"

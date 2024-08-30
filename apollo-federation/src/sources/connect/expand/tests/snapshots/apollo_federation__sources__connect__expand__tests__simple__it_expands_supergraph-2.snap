@@ -209,15 +209,17 @@ expression: connectors.by_service_name
                                 Alias {
                                     name: "with_b",
                                 },
-                                Var(
-                                    "$this",
-                                    Key(
-                                        Field(
-                                            "b",
+                                PathSelection {
+                                    path: Var(
+                                        $this,
+                                        Key(
+                                            Field(
+                                                "b",
+                                            ),
+                                            Empty,
                                         ),
-                                        Empty,
                                     ),
-                                ),
+                                },
                             ),
                         ],
                         star: None,
@@ -226,10 +228,12 @@ expression: connectors.by_service_name
             ),
         },
         selection: Path(
-            Var(
-                "$",
-                Empty,
-            ),
+            PathSelection {
+                path: Var(
+                    $,
+                    Empty,
+                ),
+            },
         ),
         config: None,
         max_requests: None,

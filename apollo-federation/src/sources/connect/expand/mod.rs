@@ -210,8 +210,7 @@ mod helpers {
     use crate::schema::position::TypeDefinitionPosition;
     use crate::schema::FederationSchema;
     use crate::schema::ValidFederationSchema;
-    use crate::sources::connect::json_selection::ExtractParameters;
-    use crate::sources::connect::json_selection::StaticParameter;
+    use crate::sources::connect::json_selection::KnownVariable;
     use crate::sources::connect::url_template::Parameter;
     use crate::sources::connect::ConnectSpec;
     use crate::sources::connect::Connector;
@@ -312,7 +311,7 @@ mod helpers {
 
             // We'll need to make sure that we always process the inputs first, since they need to be present
             // before any dependent types
-            self.process_inputs(&mut schema, connector, &field_def.arguments)?;
+            self.process_inputs(&mut schema, &field_def.arguments)?;
 
             // Actually process the type annotated with the connector, making sure to walk nested types
             match field_type {
@@ -394,62 +393,28 @@ mod helpers {
         fn process_inputs(
             &self,
             to_schema: &mut FederationSchema,
-            connector: &Connector,
             arguments: &[Node<InputValueDefinition>],
         ) -> Result<(), FederationError> {
-            // The body of the request might include references to input arguments / sibling fields
-            // that will need to be handled, so we extract any referenced variables now
-            let body_parameters = extract_params_from_body(connector)?;
+            // All inputs to a connector's field need to be carried over in order to always generate
+            // valid subgraphs
+            for arg in arguments {
+                let arg_type_name = arg.ty.inner_named_type();
+                let arg_type = self.original_schema.get_type(arg_type_name.clone())?;
+                let arg_extended_type = arg_type.get(self.original_schema.schema())?;
 
-            let parameters = connector
-                .transport
-                .connect_template
-                .parameters()
-                .map_err(|e| {
-                    FederationError::internal(format!(
-                        "could not extract path template parameters: {e}"
-                    ))
-                })?;
-            for parameter in Iterator::chain(body_parameters.iter(), &parameters) {
-                match parameter {
-                    // Ensure that input arguments are carried over to the new schema, including
-                    // any types associated with them.
-                    Parameter::Argument { argument, .. } => {
-                        // Get the argument type
-                        let arg = arguments
-                            .iter()
-                            .find(|a| a.name.as_str() == *argument)
-                            .ok_or(FederationError::internal(format!(
-                                "could not find argument: {argument}"
-                            )))?;
-                        let arg_type_name = arg.ty.inner_named_type();
-                        let arg_type = self.original_schema.get_type(arg_type_name.clone())?;
-                        let arg_extended_type = arg_type.get(self.original_schema.schema())?;
+                // If the input type isn't built in, then we need to carry it over, making sure to only walk
+                // if we have a complex input since leaf types can just be copied over.
+                if !arg_extended_type.is_built_in() {
+                    match arg_type {
+                        TypeDefinitionPosition::InputObject(input) => SchemaVisitor::new(
+                            self.original_schema,
+                            to_schema,
+                            &self.directive_deny_list,
+                        )
+                        .walk(input)?,
 
-                        // If the input type isn't built in (and hasn't been copied over yet), then we
-                        // need to carry it over.
-                        if !arg_extended_type.is_built_in()
-                            && to_schema.try_get_type(arg_type_name.clone()).is_none()
-                        {
-                            let visitor = SchemaVisitor::new(
-                                self.original_schema,
-                                to_schema,
-                                &self.directive_deny_list,
-                            );
-
-                            // Only walk if we have an input, making sure to simply insert the type otherwise
-                            match arg_type {
-                                TypeDefinitionPosition::InputObject(input) => {
-                                    visitor.walk(input)?
-                                }
-
-                                other => self.insert_custom_leaf(to_schema, &other)?,
-                            };
-                        }
-                    }
-
-                    // Any other parameter type is not from an input
-                    _ => continue,
+                        other => self.insert_custom_leaf(to_schema, &other)?,
+                    };
                 }
             }
 
@@ -516,6 +481,10 @@ mod helpers {
 
                             keys.push(key);
                         }
+                    }
+
+                    Parameter::Config { item: _, paths: _ } => {
+                        // TODO Implement $config handling
                     }
 
                     // All sibling fields marked by $this in a transport must be carried over to the output type
@@ -803,36 +772,69 @@ mod helpers {
     fn extract_params_from_body(
         connector: &Connector,
     ) -> Result<HashSet<Parameter>, FederationError> {
-        let body_parameters = connector
-            .transport
-            .body
-            .as_ref()
-            .and_then(JSONSelection::extract_parameters)
-            .unwrap_or_default();
+        let Some(body) = &connector.transport.body else {
+            return Ok(HashSet::default());
+        };
 
-        body_parameters
-            .iter()
-            .map(|StaticParameter { name, paths }| {
-                let mut parts = paths.iter();
-                let field = parts.next().ok_or(FederationError::internal(
-                    "expected parameter in JSONSelection to contain a field",
-                ))?;
+        use crate::sources::connect::json_selection::ExternalVarPaths;
+        let var_paths = body.external_var_paths();
 
-                match *name {
-                    "$args" => Ok(Parameter::Argument {
-                        argument: field,
-                        paths: parts.copied().collect(),
-                    }),
-                    "$this" => Ok(Parameter::Sibling {
-                        field,
-                        paths: parts.copied().collect(),
-                    }),
-                    other => Err(FederationError::internal(format!(
-                        "got unsupported parameter: {other}"
-                    ))),
+        let mut results = HashSet::with_capacity_and_hasher(var_paths.len(), Default::default());
+
+        for var_path in var_paths {
+            match var_path.var_name_and_nested_keys() {
+                Some((KnownVariable::Args, keys)) => {
+                    let mut keys_iter = keys.into_iter();
+                    let first_key = keys_iter.next().ok_or(FederationError::internal(
+                        "expected at least one key in $args",
+                    ))?;
+                    results.insert(Parameter::Argument {
+                        argument: first_key,
+                        paths: keys_iter.collect(),
+                    });
                 }
-            })
-            .collect::<Result<HashSet<_>, _>>()
+                Some((KnownVariable::This, keys)) => {
+                    let mut keys_iter = keys.into_iter();
+                    let first_key = keys_iter.next().ok_or(FederationError::internal(
+                        "expected at least one key in $this",
+                    ))?;
+                    results.insert(Parameter::Sibling {
+                        field: first_key,
+                        paths: keys_iter.collect(),
+                    });
+                }
+                Some((KnownVariable::Config, keys)) => {
+                    let mut keys_iter = keys.into_iter();
+                    let first_key = keys_iter.next().ok_or(FederationError::internal(
+                        "expected at least one key in $config",
+                    ))?;
+                    results.insert(Parameter::Config {
+                        item: first_key,
+                        paths: keys_iter.collect(),
+                    });
+                }
+                // To get the safety benefits of the KnownVariable enum, we need
+                // to enumerate all the cases explicitly, without wildcard
+                // matches. However, body.external_var_paths() only returns free
+                // (externally-provided) variables like $this, $args, and
+                // $config. The $ and @ variables, by contrast, are always bound
+                // to something within the input data.
+                Some((kv @ KnownVariable::Dollar, _)) | Some((kv @ KnownVariable::AtSign, _)) => {
+                    return Err(FederationError::internal(format!(
+                        "got unexpected non-external variable: {:?}",
+                        kv,
+                    )));
+                }
+                None => {
+                    return Err(FederationError::internal(format!(
+                        "could not extract variable from path: {:?}",
+                        var_path,
+                    )));
+                }
+            };
+        }
+
+        Ok(results)
     }
 }
 

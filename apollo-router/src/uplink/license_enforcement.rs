@@ -461,7 +461,7 @@ impl LicenseEnforcementReport {
                 .name("Batching support")
                 .build(),
             ConfigurationRestriction::builder()
-                .path("$.preview_demand_control")
+                .path("$.demand_control")
                 .name("Demand control plugin")
                 .build(),
             ConfigurationRestriction::builder()

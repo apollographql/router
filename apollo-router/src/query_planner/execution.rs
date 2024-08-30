@@ -17,7 +17,6 @@ use super::PlanNode;
 use super::QueryPlan;
 use crate::axum_factory::CanceledRequest;
 use crate::error::Error;
-use crate::error::FetchError;
 use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::json_ext::Object;
@@ -38,7 +37,9 @@ use crate::query_planner::DEFER_SPAN_NAME;
 use crate::query_planner::FLATTEN_SPAN_NAME;
 use crate::query_planner::PARALLEL_SPAN_NAME;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
-use crate::query_planner::SUBSCRIBE_SPAN_NAME;
+use crate::services::fetch;
+use crate::services::fetch::ErrorMapping;
+use crate::services::fetch::SubscriptionRequest;
 use crate::services::fetch_service::FetchServiceFactory;
 use crate::services::new_service::ServiceFactory;
 use crate::services::FetchRequest;
@@ -202,28 +203,61 @@ impl PlanNode {
                     value = v;
                     errors = err;
                 }
-                PlanNode::Subscription { primary, .. } => {
-                    if parameters.subscription_handle.is_some() {
-                        let fetch_time_offset =
-                            parameters.context.created_at.elapsed().as_nanos() as i64;
-                        errors = primary
-                            .execute_recursively(parameters, current_dir, parent_value, sender)
-                            .instrument(tracing::info_span!(
-                                SUBSCRIBE_SPAN_NAME,
-                                "otel.kind" = "INTERNAL",
-                                "apollo.subgraph.name" = primary.service_name.as_ref(),
-                                "apollo_private.sent_time_offset" = fetch_time_offset
-                            ))
-                            .await;
-                    } else {
+                PlanNode::Subscription {
+                    primary: subscription_node,
+                    ..
+                } => {
+                    if parameters.subscription_handle.is_none() {
                         tracing::error!("No subscription handle provided for a subscription");
+                        value = Value::default();
                         errors = vec![Error::builder()
                             .message("no subscription handle provided for a subscription")
                             .extension_code("NO_SUBSCRIPTION_HANDLE")
                             .build()];
-                    };
-
-                    value = Value::default();
+                    } else {
+                        match Variables::new(
+                            &[],
+                            &subscription_node.variable_usages,
+                            parent_value,
+                            current_dir,
+                            parameters.supergraph_request,
+                            parameters.schema,
+                            &subscription_node.input_rewrites,
+                            &None,
+                        ) {
+                            Some(variables) => {
+                                let service = parameters.service_factory.create();
+                                let request = fetch::Request::Subscription(
+                                    SubscriptionRequest::builder()
+                                        .context(parameters.context.clone())
+                                        .subscription_node(subscription_node.clone())
+                                        .supergraph_request(parameters.supergraph_request.clone())
+                                        .variables(variables)
+                                        .current_dir(current_dir.clone())
+                                        .sender(sender)
+                                        .and_subscription_handle(
+                                            parameters.subscription_handle.clone(),
+                                        )
+                                        .and_subscription_config(
+                                            parameters.subscription_config.clone(),
+                                        )
+                                        .build(),
+                                );
+                                (value, errors) =
+                                    match service.oneshot(request).await.map_to_graphql_error(
+                                        subscription_node.service_name.to_string(),
+                                        current_dir,
+                                    ) {
+                                        Ok(r) => r,
+                                        Err(e) => (Value::default(), vec![e]),
+                                    };
+                            }
+                            None => {
+                                value = Value::Object(Object::default());
+                                errors = Vec::new();
+                            }
+                        };
+                    }
                 }
                 PlanNode::Fetch(fetch_node) => {
                     // The client closed the connection, we are still executing the request pipeline,
@@ -241,33 +275,29 @@ impl PlanNode {
                             &fetch_node.variable_usages,
                             parent_value,
                             current_dir,
-                            parameters.supergraph_request.body(),
+                            parameters.supergraph_request,
                             parameters.schema.as_ref(),
                             &fetch_node.input_rewrites,
                             &fetch_node.context_rewrites,
                         ) {
                             Some(variables) => {
                                 let service = parameters.service_factory.create();
-                                let request = FetchRequest::builder()
-                                    .context(parameters.context.clone())
-                                    .fetch_node(fetch_node.clone())
-                                    .supergraph_request(parameters.supergraph_request.clone())
-                                    .variables(variables)
-                                    .current_dir(current_dir.clone())
-                                    .build();
+                                let request = fetch::Request::Fetch(
+                                    FetchRequest::builder()
+                                        .context(parameters.context.clone())
+                                        .fetch_node(fetch_node.clone())
+                                        .supergraph_request(parameters.supergraph_request.clone())
+                                        .variables(variables)
+                                        .current_dir(current_dir.clone())
+                                        .build(),
+                                );
                                 (value, errors) =
-                                    match service.oneshot(request).await.map_err(|e| {
-                                        FetchError::SubrequestHttpError {
-                                            status_code: None,
-                                            service: fetch_node.service_name.to_string(),
-                                            reason: e.to_string(),
-                                        }
-                                    }) {
+                                    match service.oneshot(request).await.map_to_graphql_error(
+                                        fetch_node.service_name.to_string(),
+                                        current_dir,
+                                    ) {
                                         Ok(r) => r,
-                                        Err(e) => (
-                                            Value::default(),
-                                            vec![e.to_graphql_error(Some(current_dir.to_owned()))],
-                                        ),
+                                        Err(e) => (Value::default(), vec![e]),
                                     };
                                 FetchNode::deferred_fetches(
                                     current_dir,

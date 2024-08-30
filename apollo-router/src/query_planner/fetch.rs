@@ -32,6 +32,7 @@ use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::services::fetch::ErrorMapping;
 use crate::services::subgraph::BoxService;
 use crate::services::SubgraphRequest;
 use crate::spec::query::change::QueryHashVisitor;
@@ -279,11 +280,12 @@ impl Variables {
         variable_usages: &[Arc<str>],
         data: &Value,
         current_dir: &Path,
-        body: &Request,
+        request: &Arc<http::Request<Request>>,
         schema: &Schema,
         input_rewrites: &Option<Vec<rewrites::DataRewrite>>,
         context_rewrites: &Option<Vec<rewrites::DataRewrite>>,
     ) -> Option<Variables> {
+        let body = request.body();
         let mut subgraph_context = SubgraphContext::new(data, schema, context_rewrites);
         if !requires.is_empty() {
             let mut variables = Object::with_capacity(1 + variable_usages.len());
@@ -381,30 +383,10 @@ impl FetchNode {
             .oneshot(subgraph_request)
             .instrument(tracing::trace_span!("subfetch_stream"))
             .await
-            // TODO this is a problem since it restores details about failed service
-            // when errors have been redacted in the include_subgraph_errors module.
-            // Unfortunately, not easy to fix here, because at this point we don't
-            // know if we should be redacting errors for this subgraph...
-            .map_err(|e| match e.downcast::<FetchError>() {
-                Ok(inner) => match *inner {
-                    FetchError::SubrequestHttpError { .. } => *inner,
-                    _ => FetchError::SubrequestHttpError {
-                        status_code: None,
-                        service: self.service_name.to_string(),
-                        reason: inner.to_string(),
-                    },
-                },
-                Err(e) => FetchError::SubrequestHttpError {
-                    status_code: None,
-                    service: self.service_name.to_string(),
-                    reason: e.to_string(),
-                },
-            }) {
+            .map_to_graphql_error(self.service_name.to_string(), current_dir)
+        {
             Err(e) => {
-                return (
-                    Value::default(),
-                    vec![e.to_graphql_error(Some(current_dir.to_owned()))],
-                );
+                return (Value::default(), vec![e]);
             }
             Ok(res) => res.response.into_parts(),
         };

@@ -411,7 +411,7 @@ impl Plugin for DemandControl {
     }
 }
 
-register_plugin!("apollo", "preview_demand_control", DemandControl);
+register_plugin!("apollo", "demand_control", DemandControl);
 
 #[cfg(test)]
 mod test {

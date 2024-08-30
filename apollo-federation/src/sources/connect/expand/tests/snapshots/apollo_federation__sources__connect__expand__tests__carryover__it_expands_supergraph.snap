@@ -16,6 +16,10 @@ type R {
 type T {
   id: ID!
   tagged: String
+  custom: String
+  authenticated: String
+  requiresScopes: String
+  policy: String
   overridden: String
   r: R
 }

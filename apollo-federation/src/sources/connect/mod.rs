@@ -14,12 +14,10 @@ mod url_template;
 pub mod validation;
 
 use apollo_compiler::name;
-pub use json_selection::ApplyTo;
 pub use json_selection::ApplyToError;
 pub use json_selection::JSONSelection;
 pub use json_selection::Key;
 pub use json_selection::PathSelection;
-pub use json_selection::StaticParameter;
 pub use json_selection::SubSelection;
 pub use models::CustomConfiguration;
 pub use spec::ConnectSpec;
