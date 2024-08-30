@@ -33,7 +33,7 @@ dependencies = [
  "http 0.2.12",
  "serde_json",
  "tokio",
- "tower 0.4.13",
+ "tower",
 ]
 
 [[package]]
@@ -372,7 +372,7 @@ dependencies = [
  "tokio-util",
  "tonic 0.9.2",
  "tonic-build",
- "tower 0.4.13",
+ "tower",
  "tower-http",
  "tower-service",
  "tower-test",
@@ -409,7 +409,7 @@ dependencies = [
  "once_cell",
  "serde_json",
  "tokio",
- "tower 0.4.13",
+ "tower",
 ]
 
 [[package]]
@@ -440,7 +440,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
- "tower 0.4.13",
+ "tower",
  "tracing",
 ]
 
@@ -563,7 +563,7 @@ dependencies = [
  "serde_json",
  "serde_json_bytes",
  "tokio",
- "tower 0.4.13",
+ "tower",
 ]
 
 [[package]]
@@ -1233,7 +1233,7 @@ dependencies = [
  "sync_wrapper",
  "tokio",
  "tokio-tungstenite",
- "tower 0.4.13",
+ "tower",
  "tower-layer",
  "tower-service",
 ]
@@ -1510,7 +1510,7 @@ dependencies = [
  "http 0.2.12",
  "serde_json",
  "tokio",
- "tower 0.4.13",
+ "tower",
 ]
 
 [[package]]
@@ -1776,7 +1776,7 @@ dependencies = [
  "apollo-router",
  "async-trait",
  "http 0.2.12",
- "tower 0.4.13",
+ "tower",
  "tracing",
 ]
 
@@ -1814,7 +1814,7 @@ dependencies = [
  "http 0.2.12",
  "serde_json",
  "tokio",
- "tower 0.4.13",
+ "tower",
 ]
 
 [[package]]
@@ -2570,7 +2570,7 @@ dependencies = [
  "rand 0.8.5",
  "serde_json",
  "tokio",
- "tower 0.5.0",
+ "tower",
 ]
 
 [[package]]
@@ -2588,7 +2588,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
- "tower 0.4.13",
+ "tower",
  "tracing",
 ]
 
@@ -2690,7 +2690,7 @@ dependencies = [
  "http 0.2.12",
  "serde_json",
  "tokio",
- "tower 0.4.13",
+ "tower",
  "tracing",
 ]
 
@@ -2703,7 +2703,7 @@ dependencies = [
  "http 0.2.12",
  "serde_json",
  "tokio",
- "tower 0.4.13",
+ "tower",
 ]
 
 [[package]]
@@ -3248,7 +3248,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
- "tower 0.4.13",
+ "tower",
  "tracing",
 ]
 
@@ -3811,7 +3811,7 @@ dependencies = [
  "http 0.2.12",
  "serde_json",
  "tokio",
- "tower 0.4.13",
+ "tower",
 ]
 
 [[package]]
@@ -4414,7 +4414,7 @@ dependencies = [
  "http 0.2.12",
  "serde_json",
  "tokio",
- "tower 0.4.13",
+ "tower",
 ]
 
 [[package]]
@@ -5107,7 +5107,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
- "tower 0.4.13",
+ "tower",
 ]
 
 [[package]]
@@ -5514,7 +5514,7 @@ dependencies = [
  "http 0.2.12",
  "serde_json",
  "tokio",
- "tower 0.4.13",
+ "tower",
 ]
 
 [[package]]
@@ -5526,7 +5526,7 @@ dependencies = [
  "http 0.2.12",
  "serde_json",
  "tokio",
- "tower 0.4.13",
+ "tower",
 ]
 
 [[package]]
@@ -5538,7 +5538,7 @@ dependencies = [
  "http 0.2.12",
  "serde_json",
  "tokio",
- "tower 0.4.13",
+ "tower",
 ]
 
 [[package]]
@@ -5550,7 +5550,7 @@ dependencies = [
  "http 0.2.12",
  "serde_json",
  "tokio",
- "tower 0.4.13",
+ "tower",
 ]
 
 [[package]]
@@ -5562,7 +5562,7 @@ dependencies = [
  "http 0.2.12",
  "serde_json",
  "tokio",
- "tower 0.4.13",
+ "tower",
 ]
 
 [[package]]
@@ -5632,7 +5632,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
- "tower 0.4.13",
+ "tower",
  "tower-service",
  "tracing",
  "which",
@@ -5659,7 +5659,7 @@ dependencies = [
  "serde_json",
  "serde_json_bytes",
  "tokio",
- "tower 0.4.13",
+ "tower",
 ]
 
 [[package]]
@@ -6396,7 +6396,7 @@ dependencies = [
  "apollo-compiler",
  "apollo-router",
  "async-trait",
- "tower 0.4.13",
+ "tower",
  "tracing",
 ]
 
@@ -6632,7 +6632,7 @@ dependencies = [
  "hyper",
  "serde_json",
  "tokio",
- "tower 0.4.13",
+ "tower",
 ]
 
 [[package]]
@@ -6900,7 +6900,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tokio-stream",
- "tower 0.4.13",
+ "tower",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -6927,7 +6927,7 @@ dependencies = [
  "prost 0.12.6",
  "tokio",
  "tokio-stream",
- "tower 0.4.13",
+ "tower",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -6986,16 +6986,6 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
-]
-
-[[package]]
-name = "tower"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36b837f86b25d7c0d7988f00a54e74739be6477f2aac6201b8f429a7569991b7"
-dependencies = [
- "tower-layer",
- "tower-service",
 ]
 
 [[package]]
