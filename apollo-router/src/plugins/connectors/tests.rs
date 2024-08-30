@@ -212,7 +212,7 @@ async fn value_from_config() {
 
     let response = execute(
         STEEL_THREAD_SCHEMA,
-        &mock_server.uri(),
+        Some(&mock_server.uri()),
         "query { me { id name username} }",
         Default::default(),
         Some(json!({
@@ -257,7 +257,7 @@ async fn max_requests() {
 
     let response = execute(
         STEEL_THREAD_SCHEMA,
-        &mock_server.uri(),
+        Some(&mock_server.uri()),
         "query { users { id name username } }",
         Default::default(),
         Some(json!({
@@ -319,7 +319,7 @@ async fn source_max_requests() {
 
     let response = execute(
         STEEL_THREAD_SCHEMA,
-        &mock_server.uri(),
+        Some(&mock_server.uri()),
         "query { users { id name username } }",
         Default::default(),
         Some(json!({
@@ -389,7 +389,7 @@ async fn test_root_field_plus_entity() {
 
     let response = execute(
         STEEL_THREAD_SCHEMA,
-        &mock_server.uri(),
+        Some(&mock_server.uri()),
         "query { users { id name username } }",
         Default::default(),
         None,
@@ -436,7 +436,7 @@ async fn test_root_field_plus_entity_plus_requires() {
 
     let response = execute(
         STEEL_THREAD_SCHEMA,
-        &mock_server.uri(),
+        Some(&mock_server.uri()),
         "query { users { id name username d } }",
         Default::default(),
         None,
@@ -488,7 +488,7 @@ async fn test_entity_references() {
 
     let response = execute(
         STEEL_THREAD_SCHEMA,
-        &mock_server.uri(),
+        Some(&mock_server.uri()),
         "query { posts { title user { name } } }",
         Default::default(),
         None,
@@ -540,7 +540,7 @@ async fn basic_errors() {
 
     let response = execute(
         STEEL_THREAD_SCHEMA,
-        &mock_server.uri(),
+        Some(&mock_server.uri()),
         "{ users { id } }",
         Default::default(),
         None,
@@ -581,7 +581,7 @@ async fn test_headers() {
 
     execute(
         STEEL_THREAD_SCHEMA,
-        &mock_server.uri(),
+        Some(&mock_server.uri()),
         "query { users { id } }",
         Default::default(),
         Some(json!({
@@ -728,7 +728,7 @@ async fn test_tracing_connect_span() {
 
     execute(
         STEEL_THREAD_SCHEMA,
-        &mock_server.uri(),
+        Some(&mock_server.uri()),
         "query { users { id } }",
         Default::default(),
         None,
@@ -744,7 +744,7 @@ async fn test_mutation() {
 
     let response = execute(
         MUTATION_SCHEMA,
-        &mock_server.uri(),
+        Some(&mock_server.uri()),
         "mutation CreateUser($name: String!) {
             createUser(name: $name) {
                 id
@@ -788,7 +788,7 @@ async fn test_selection_set() {
 
     let response = execute(
         SELECTION_SCHEMA,
-        &mock_server.uri(),
+        Some(&mock_server.uri()),
         "query Commits($owner: String!, $repo: String!, $skipInlineFragment: Boolean!,
                              $skipNamedFragment: Boolean!, $skipField: Boolean!) {
               commits(owner: $owner, repo: $repo) {
@@ -868,7 +868,7 @@ async fn test_nullability() {
 
     let response = execute(
         NULLABILITY_SCHEMA,
-        &mock_server.uri(),
+        Some(&mock_server.uri()),
         "query { user(id: 1) { id name occupation address { zip } pet { species } } }",
         Default::default(),
         None,
@@ -909,7 +909,7 @@ async fn test_default_argument_values() {
 
     let response = execute(
         NULLABILITY_SCHEMA,
-        &mock_server.uri(),
+        Some(&mock_server.uri()),
         "query { defaultArgs }",
         Default::default(),
         None,
@@ -952,7 +952,7 @@ async fn test_default_argument_overrides() {
 
     let response = execute(
         NULLABILITY_SCHEMA,
-        &mock_server.uri(),
+        Some(&mock_server.uri()),
         "query { defaultArgs(str: \"hi\" int: 108 float: 9.87 bool: false arr: [\"hi again\"]) }",
         Default::default(),
         None,
@@ -996,7 +996,7 @@ async fn test_form_encoding() {
 
     let response = execute(
         include_str!("./testdata/form-encoding.graphql"),
-        &uri,
+        Some(&uri),
         "mutation {
           post(
             input: {
@@ -1080,7 +1080,7 @@ async fn test_no_source() {
 
     let response = execute(
         &NO_SOURCES_SCHEMA.replace("http://localhost", &uri),
-        &uri,
+        Some(&uri),
         "query { user(id: 1) { id name }}",
         Default::default(),
         None,
@@ -1204,111 +1204,17 @@ mod quickstart_tests {
         };
     }
 
-    async fn execute(query: &str, variables: JsonMap) -> (serde_json::Value, MockServer) {
-        let mock_server = MockServer::start().await;
-        Mock::given(method("GET")).and(path("/posts")).respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!([
-                {
-                  "userId": 1,
-                  "id": 1,
-                  "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
-                  "body": "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto"
-                },
-                {
-                  "userId": 1,
-                  "id": 2,
-                  "title": "qui est esse",
-                  "body": "est rerum tempore vitae\nsequi sint nihil reprehenderit dolor beatae ea dolores neque\nfugiat blanditiis voluptate porro vel nihil molestiae ut reiciendis\nqui aperiam non debitis possimus qui neque nisi nulla"
-                }]
-            )),
-        ).mount(&mock_server).await;
-        Mock::given(method("GET")).and(path("/posts/1")).respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!(
-                {
-                  "userId": 1,
-                  "id": 1,
-                  "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
-                  "body": "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto"
-                }
-            )),
-        ).mount(&mock_server).await;
-        Mock::given(method("GET")).and(path("/posts/2")).respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                  "userId": 1,
-                  "id": 2,
-                  "title": "qui est esse",
-                  "body": "est rerum tempore vitae\nsequi sint nihil reprehenderit dolor beatae ea dolores neque\nfugiat blanditiis voluptate porro vel nihil molestiae ut reiciendis\nqui aperiam non debitis possimus qui neque nisi nulla"
-                }
-            )),
-        ).mount(&mock_server).await;
-        Mock::given(method("GET"))
-            .and(path("/users/1"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-              "id": 1,
-              "name": "Leanne Graham",
-              "username": "Bret",
-              "email": "Sincere@april.biz",
-              "address": {
-                "street": "Kulas Light",
-                "suite": "Apt. 556",
-                "city": "Gwenborough",
-                "zipcode": "92998-3874",
-                "geo": {
-                  "lat": "-37.3159",
-                  "lng": "81.1496"
-                }
-              },
-              "phone": "1-770-736-8031 x56442",
-              "website": "hildegard.org",
-              "company": {
-                "name": "Romaguera-Crona",
-                "catchPhrase": "Multi-layered client-server neural-net",
-                "bs": "harness real-time e-markets"
-              }
-            })))
-            .mount(&mock_server)
-            .await;
-        Mock::given(method("GET")).and(path("/users/1/posts")).respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!([
-                {
-                  "userId": 1,
-                  "id": 1,
-                  "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
-                  "body": "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto"
-                },
-                {
-                  "userId": 1,
-                  "id": 2,
-                  "title": "qui est esse",
-                  "body": "est rerum tempore vitae\nsequi sint nihil reprehenderit dolor beatae ea dolores neque\nfugiat blanditiis voluptate porro vel nihil molestiae ut reiciendis\nqui aperiam non debitis possimus qui neque nisi nulla"
-                }]
-            )),
-        ).mount(&mock_server).await;
-
-        let res = super::execute(
-            &QUICKSTART_SCHEMA.replace("https://jsonplaceholder.typicode.com", &mock_server.uri()),
-            &mock_server.uri(),
-            query,
-            variables,
-            None,
-            |_| {},
-        )
-        .await;
-
-        (res, mock_server)
-    }
-
     async fn execute_with_snapshot(query: &str, variables: JsonMap) -> serde_json::Value {
         super::execute(
             QUICKSTART_SCHEMA,
-            "https://jsonplaceholder.typicode.com",
+            None,
             query,
             variables,
             Some(json!({
                 "preview_connectors": {
                     "snapshot": {
                         "enabled": true,
-                        "offline": true,
+                        "offline": true, // Setting this to false will update REST API responses
                         "path": "./src/plugins/connectors/testdata/rest_api_snapshots"
                     }
                 }
@@ -1330,7 +1236,7 @@ mod quickstart_tests {
           }
         "#;
 
-        let (response, server) = execute(query, Default::default()).await;
+        let response = execute_with_snapshot(query, Default::default()).await;
 
         insta::assert_json_snapshot!(response, @r###"
         {
@@ -1350,11 +1256,6 @@ mod quickstart_tests {
           }
         }
         "###);
-
-        req_asserts::matches(
-            &server.received_requests().await.unwrap(),
-            vec![Matcher::new().method("GET").path("/posts").build()],
-        );
     }
 
     #[tokio::test]
@@ -1369,7 +1270,7 @@ mod quickstart_tests {
           }
         "#;
 
-        let (response, server) = execute(query, map!({ "postId": "1" })).await;
+        let response = execute_with_snapshot(query, map!({ "postId": "1" })).await;
 
         insta::assert_json_snapshot!(response, @r###"
         {
@@ -1382,120 +1283,10 @@ mod quickstart_tests {
           }
         }
         "###);
-
-        req_asserts::matches(
-            &server.received_requests().await.unwrap(),
-            vec![Matcher::new().method("GET").path("/posts/1").build()],
-        );
     }
 
     #[tokio::test]
     async fn query_3() {
-        let query = r#"
-          query PostWithAuthor($postId: ID!) {
-            post(id: $postId) {
-              id
-              title
-              body
-              author {
-                id
-                name
-              }
-            }
-          }
-      "#;
-
-        let (response, server) = execute(query, map!({ "postId": "1" })).await;
-
-        insta::assert_json_snapshot!(response, @r###"
-        {
-          "data": {
-            "post": {
-              "id": 1,
-              "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
-              "body": "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto",
-              "author": {
-                "id": 1,
-                "name": "Leanne Graham"
-              }
-            }
-          }
-        }
-        "###);
-
-        req_asserts::matches(
-            &server.received_requests().await.unwrap(),
-            vec![
-                Matcher::new().method("GET").path("/posts/1").build(),
-                Matcher::new().method("GET").path("/users/1").build(),
-            ],
-        );
-    }
-
-    #[tokio::test]
-    async fn query_4() {
-        let query = r#"
-          query PostsForUser($userId: ID!) {
-            user(id: $userId) {
-              id
-              name
-              posts {
-                id
-                title
-                author {
-                  id
-                  name
-                }
-              }
-            }
-          }
-      "#;
-
-        let (response, server) = execute(query, map!({ "userId": "1" })).await;
-
-        insta::assert_json_snapshot!(response, @r###"
-        {
-          "data": {
-            "user": {
-              "id": 1,
-              "name": "Leanne Graham",
-              "posts": [
-                {
-                  "id": 1,
-                  "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
-                  "author": {
-                    "id": 1,
-                    "name": "Leanne Graham"
-                  }
-                },
-                {
-                  "id": 2,
-                  "title": "qui est esse",
-                  "author": {
-                    "id": 1,
-                    "name": "Leanne Graham"
-                  }
-                }
-              ]
-            }
-          }
-        }
-        "###);
-
-        req_asserts::matches(
-            &server.received_requests().await.unwrap(),
-            vec![
-                Matcher::new().method("GET").path("/users/1").build(),
-                Matcher::new().method("GET").path("/users/1/posts").build(),
-                Matcher::new().method("GET").path("/posts/1").build(),
-                Matcher::new().method("GET").path("/posts/2").build(),
-                Matcher::new().method("GET").path("/users/1").build(),
-            ],
-        );
-    }
-
-    #[tokio::test]
-    async fn query_3_with_snapshot() {
         let query = r#"
           query PostWithAuthor($postId: ID!) {
             post(id: $postId) {
@@ -1528,6 +1319,121 @@ mod quickstart_tests {
         }
         "###);
     }
+
+    #[tokio::test]
+    async fn query_4() {
+        let query = r#"
+          query PostsForUser($userId: ID!) {
+            user(id: $userId) {
+              id
+              name
+              posts {
+                id
+                title
+                author {
+                  id
+                  name
+                }
+              }
+            }
+          }
+      "#;
+
+        let response = execute_with_snapshot(query, map!({ "userId": "1" })).await;
+
+        insta::assert_json_snapshot!(response, @r###"
+        {
+          "data": {
+            "user": {
+              "id": 1,
+              "name": "Leanne Graham",
+              "posts": [
+                {
+                  "id": 1,
+                  "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
+                  "author": {
+                    "id": 1,
+                    "name": "Leanne Graham"
+                  }
+                },
+                {
+                  "id": 2,
+                  "title": "qui est esse",
+                  "author": {
+                    "id": 1,
+                    "name": "Leanne Graham"
+                  }
+                },
+                {
+                  "id": 3,
+                  "title": "ea molestias quasi exercitationem repellat qui ipsa sit aut",
+                  "author": {
+                    "id": 1,
+                    "name": "Leanne Graham"
+                  }
+                },
+                {
+                  "id": 4,
+                  "title": "eum et est occaecati",
+                  "author": {
+                    "id": 1,
+                    "name": "Leanne Graham"
+                  }
+                },
+                {
+                  "id": 5,
+                  "title": "nesciunt quas odio",
+                  "author": {
+                    "id": 1,
+                    "name": "Leanne Graham"
+                  }
+                },
+                {
+                  "id": 6,
+                  "title": "dolorem eum magni eos aperiam quia",
+                  "author": {
+                    "id": 1,
+                    "name": "Leanne Graham"
+                  }
+                },
+                {
+                  "id": 7,
+                  "title": "magnam facilis autem",
+                  "author": {
+                    "id": 1,
+                    "name": "Leanne Graham"
+                  }
+                },
+                {
+                  "id": 8,
+                  "title": "dolorem dolore est ipsam",
+                  "author": {
+                    "id": 1,
+                    "name": "Leanne Graham"
+                  }
+                },
+                {
+                  "id": 9,
+                  "title": "nesciunt iure omnis dolorem tempora et accusantium",
+                  "author": {
+                    "id": 1,
+                    "name": "Leanne Graham"
+                  }
+                },
+                {
+                  "id": 10,
+                  "title": "optio molestias id quia eum",
+                  "author": {
+                    "id": 1,
+                    "name": "Leanne Graham"
+                  }
+                }
+              ]
+            }
+          }
+        }
+        "###);
+    }
 }
 
 const STEEL_THREAD_SCHEMA: &str = include_str!("./testdata/steelthread.graphql");
@@ -1539,33 +1445,38 @@ const QUICKSTART_SCHEMA: &str = include_str!("./testdata/quickstart.graphql");
 
 async fn execute(
     schema: &str,
-    uri: &str,
+    override_uri: Option<&str>,
     query: &str,
     variables: JsonMap,
     config: Option<serde_json_bytes::Value>,
     mut request_mutator: impl FnMut(&mut Request),
 ) -> serde_json::Value {
-    let connector_uri = format!("{}/", uri);
-    let subgraph_uri = format!("{}/graphql", uri);
-
     // we cannot use Testharness because the subgraph connectors are actually extracted in YamlRouterFactory
     let mut factory = YamlRouterFactory;
 
-    let common_config = json!({
-        "include_subgraph_errors": { "all": true },
-        "override_subgraph_url": {"graphql": subgraph_uri},
-        "preview_connectors": {
-            "subgraphs": {
-                "connectors": {
-                    "sources": {
-                        "json": {
-                            "override_url": connector_uri
+    let common_config = if let Some(uri) = override_uri {
+        let connector_uri = format!("{}/", uri);
+        let subgraph_uri = format!("{}/graphql", uri);
+        json!({
+            "include_subgraph_errors": { "all": true },
+            "override_subgraph_url": {"graphql": subgraph_uri},
+            "preview_connectors": {
+                "subgraphs": {
+                    "connectors": {
+                        "sources": {
+                            "json": {
+                                "override_url": connector_uri
+                            }
                         }
                     }
                 }
             }
-        }
-    });
+        })
+    } else {
+        json!({
+            "include_subgraph_errors": { "all": true },
+        })
+    };
     let config = if let Some(mut config) = config {
         config.deep_merge(common_config);
         config

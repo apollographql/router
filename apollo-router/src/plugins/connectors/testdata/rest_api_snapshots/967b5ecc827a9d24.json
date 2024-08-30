@@ -1,0 +1,14 @@
+{
+  "key": "GET-https://jsonplaceholder.typicode.com/posts/4",
+  "headers": {
+    "content-type": [
+      "application/json; charset=utf-8"
+    ]
+  },
+  "body": {
+    "userId": 1,
+    "id": 4,
+    "title": "eum et est occaecati",
+    "body": "ullam et saepe reiciendis voluptatem adipisci\nsit amet autem assumenda provident rerum culpa\nquis hic commodi nesciunt rem tenetur doloremque ipsam iure\nquis sunt voluptatem rerum illo velit"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "key": "GET-https://jsonplaceholder.typicode.com/posts/7",
+  "headers": {
+    "content-type": [
+      "application/json; charset=utf-8"
+    ]
+  },
+  "body": {
+    "userId": 1,
+    "id": 7,
+    "title": "magnam facilis autem",
+    "body": "dolore placeat quibusdam ea quo vitae\nmagni quis enim qui quis quo nemo aut saepe\nquidem repellat excepturi ut quia\nsunt ut sequi eos ea sed quas"
+  }
+}

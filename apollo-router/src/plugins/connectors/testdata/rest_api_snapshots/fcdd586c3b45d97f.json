@@ -1,0 +1,14 @@
+{
+  "key": "GET-https://jsonplaceholder.typicode.com/posts/8",
+  "headers": {
+    "content-type": [
+      "application/json; charset=utf-8"
+    ]
+  },
+  "body": {
+    "userId": 1,
+    "id": 8,
+    "title": "dolorem dolore est ipsam",
+    "body": "dignissimos aperiam dolorem qui eum\nfacilis quibusdam animi sint suscipit qui sint possimus cum\nquaerat magni maiores excepturi\nipsam ut commodi dolor voluptatum modi aut vitae"
+  }
+}

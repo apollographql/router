@@ -1,0 +1,14 @@
+{
+  "key": "GET-https://jsonplaceholder.typicode.com/posts/10",
+  "headers": {
+    "content-type": [
+      "application/json; charset=utf-8"
+    ]
+  },
+  "body": {
+    "userId": 1,
+    "id": 10,
+    "title": "optio molestias id quia eum",
+    "body": "quo et expedita modi cum officia vel magni\ndoloribus qui repudiandae\nvero nisi sit\nquos veniam quod sed accusamus veritatis error"
+  }
+}
