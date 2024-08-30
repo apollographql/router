@@ -185,8 +185,7 @@ async fn handle_request(
                         .collect::<Vec<_>>();
                     if !keys.is_empty() {
                         let len = keys.len() as u64;
-                        count += len;
-                        storage.delete(keys).await;
+                        count += storage.delete(keys).await.unwrap_or(0) as u64;
 
                         u64_counter!(
                             "apollo.router.operations.entity.invalidation.entry",
