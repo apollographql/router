@@ -26,7 +26,7 @@ async fn query_planner_cache() -> Result<(), BoxError> {
     // 2. run `docker compose up -d` and connect to the redis container by running `docker-compose exec redis /bin/bash`.
     // 3. Run the `redis-cli` command from the shell and start the redis `monitor` command.
     // 4. Run this test and yank the updated cache key from the redis logs.
-    let known_cache_key = "plan:cache:1:federation:v2.9.0:schema:5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76:query:ff7e3b6ae2b7bd28b00641b22ff94aab8d18b6201a2d4598811d56d23a472460:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:58a9ebbc752cb56c9111dbb7b81570c6abb7526837480cd205788a85c4de263f";
+    let known_cache_key = "plan:cache:1:federation:v2.9.0:schema:5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76:query:c8d18ca3ab45646df6a2e0b53dfecfc37b587e1e6822bc51f31e50e9c54c3826:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:58a9ebbc752cb56c9111dbb7b81570c6abb7526837480cd205788a85c4de263f";
     let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
     let client = RedisClient::new(config, None, None, None);
     let connection_task = client.connect();
@@ -409,7 +409,7 @@ async fn entity_cache() -> Result<(), BoxError> {
         .unwrap();
     insta::assert_json_snapshot!(response);
 
-    let cache_key = "version:1.0:subgraph:products:type:Query:hash:90f4e43ccdeeec2f9d76d5b80e90a267a1144c672c7358838de1b1526041abbe:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c";
+    let cache_key = "version:1.0:subgraph:products:type:Query:hash:064e2e457222ec3bb7d1ef1680844bcd8cd5e488aab8f8fbb5b0723b3845a860:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c";
     let s: String = match client.get(cache_key).await {
         Ok(s) => s,
         Err(e) => {
@@ -425,7 +425,7 @@ async fn entity_cache() -> Result<(), BoxError> {
     let v: Value = serde_json::from_str(&s).unwrap();
     insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
-    let cache_key = "version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:9dc4223318b8aedd77cfb2fdec641bbc873bab8617bc85d4c4424cc824e6f777:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c";
+    let cache_key = "version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:bb499c8657caa4b40cb8af57582628f9f4cfbd2ba00050f41d1d7354f4857388:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c";
     let s: String = match client.get(cache_key).await {
         Ok(s) => s,
         Err(e) => {
@@ -545,7 +545,7 @@ async fn entity_cache() -> Result<(), BoxError> {
         .unwrap();
     insta::assert_json_snapshot!(response);
 
-    let cache_key = "version:1.0:subgraph:reviews:type:Product:entity:d9a4cd73308dd13ca136390c10340823f94c335b9da198d2339c886c738abf0d:hash:9dc4223318b8aedd77cfb2fdec641bbc873bab8617bc85d4c4424cc824e6f777:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c";
+    let cache_key = "version:1.0:subgraph:reviews:type:Product:entity:d9a4cd73308dd13ca136390c10340823f94c335b9da198d2339c886c738abf0d:hash:bb499c8657caa4b40cb8af57582628f9f4cfbd2ba00050f41d1d7354f4857388:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c";
     let s: String = match client.get(cache_key).await {
         Ok(s) => s,
         Err(e) => {
@@ -776,7 +776,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
         .unwrap();
     insta::assert_json_snapshot!(response);
 
-    let cache_key = "version:1.0:subgraph:products:type:Query:hash:90f4e43ccdeeec2f9d76d5b80e90a267a1144c672c7358838de1b1526041abbe:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c";
+    let cache_key = "version:1.0:subgraph:products:type:Query:hash:064e2e457222ec3bb7d1ef1680844bcd8cd5e488aab8f8fbb5b0723b3845a860:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c";
     let s: String = match client.get(cache_key).await {
         Ok(s) => s,
         Err(e) => {
@@ -808,7 +808,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
     );
 
     let s: String = client
-        .get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:9dc4223318b8aedd77cfb2fdec641bbc873bab8617bc85d4c4424cc824e6f777:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+        .get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:bb499c8657caa4b40cb8af57582628f9f4cfbd2ba00050f41d1d7354f4857388:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
         .await
         .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
@@ -852,7 +852,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
     insta::assert_json_snapshot!(response);
 
     let s:String = client
-          .get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:13b94e7d63d659c9fd457c0ddee5d329d1f4f63de0e9676302aa8fa591e17cce:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:ff4a0b4ccd53e4b868cb74d1928157f1d672f18f51d2c9fbc5f8578996bef062:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
@@ -962,7 +962,7 @@ async fn connection_failure_blocks_startup() {
 async fn query_planner_redis_update_query_fragments() {
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_query_fragments.router.yaml"),
-        "plan:cache:1:federation:v2.9.0:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:ca955be743f0dedae36910f6173d8f3e1076441b20a8e9d3466c320d39d83062:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:56fcacc8de2e085d1f46a0dfcdf3b1e8c0a2549975388c8d2b8ecb64d522c14f"
+        "plan:cache:1:federation:v2.9.0:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:bf61634007a26128b577c88fd1d520da4d87791658df6cb3d7295e2fba30e5dd:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:56fcacc8de2e085d1f46a0dfcdf3b1e8c0a2549975388c8d2b8ecb64d522c14f"
     )
     .await;
 }
@@ -981,7 +981,7 @@ async fn query_planner_redis_update_planner_mode() {
 async fn query_planner_redis_update_introspection() {
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_introspection.router.yaml"),
-        "plan:cache:1:federation:v2.9.0:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:ca955be743f0dedae36910f6173d8f3e1076441b20a8e9d3466c320d39d83062:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:214819cece87efcdd3ae25c19de048154c403b0a98a2f09047e3416a1aefca36"    )
+        "plan:cache:1:federation:v2.9.0:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:bf61634007a26128b577c88fd1d520da4d87791658df6cb3d7295e2fba30e5dd:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:214819cece87efcdd3ae25c19de048154c403b0a98a2f09047e3416a1aefca36"    )
     .await;
 }
 
@@ -989,7 +989,7 @@ async fn query_planner_redis_update_introspection() {
 async fn query_planner_redis_update_defer() {
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_defer.router.yaml"),
-        "plan:cache:1:federation:v2.9.0:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:ca955be743f0dedae36910f6173d8f3e1076441b20a8e9d3466c320d39d83062:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:58a9ebbc752cb56c9111dbb7b81570c6abb7526837480cd205788a85c4de263f"    )
+        "plan:cache:1:federation:v2.9.0:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:bf61634007a26128b577c88fd1d520da4d87791658df6cb3d7295e2fba30e5dd:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:e3f21779503e898c8798a568e10416162670e2c29fced43cb9a71dbf60a31beb"    )
     .await;
 }
 
@@ -999,7 +999,7 @@ async fn query_planner_redis_update_type_conditional_fetching() {
         include_str!(
             "fixtures/query_planner_redis_config_update_type_conditional_fetching.router.yaml"
         ),
-        "plan:cache:1:federation:v2.9.0:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:ca955be743f0dedae36910f6173d8f3e1076441b20a8e9d3466c320d39d83062:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:334396bce746bff275068c97e126891f7b867edb88bf32d707169016ae0bf220"
+        "plan:cache:1:federation:v2.9.0:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:bf61634007a26128b577c88fd1d520da4d87791658df6cb3d7295e2fba30e5dd:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:334396bce746bff275068c97e126891f7b867edb88bf32d707169016ae0bf220"
     )
     .await;
 }
@@ -1010,7 +1010,7 @@ async fn query_planner_redis_update_reuse_query_fragments() {
         include_str!(
             "fixtures/query_planner_redis_config_update_reuse_query_fragments.router.yaml"
         ),
-        "plan:cache:1:federation:v2.9.0:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:ca955be743f0dedae36910f6173d8f3e1076441b20a8e9d3466c320d39d83062:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:f92d99f543f3911c0bae7edcccd4d5bf76de37ac1f2f6c0b4deb44cb62ed9e35"
+        "plan:cache:1:federation:v2.9.0:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:bf61634007a26128b577c88fd1d520da4d87791658df6cb3d7295e2fba30e5dd:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:f92d99f543f3911c0bae7edcccd4d5bf76de37ac1f2f6c0b4deb44cb62ed9e35"
     )
     .await;
 }
@@ -1033,7 +1033,7 @@ async fn test_redis_query_plan_config_update(updated_config: &str, new_cache_key
     router.assert_started().await;
     router.clear_redis_cache().await;
 
-    let starting_key = "plan:cache:1:federation:v2.9.0:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:ca955be743f0dedae36910f6173d8f3e1076441b20a8e9d3466c320d39d83062:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:58a9ebbc752cb56c9111dbb7b81570c6abb7526837480cd205788a85c4de263f";
+    let starting_key = "plan:cache:1:federation:v2.9.0:schema:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:bf61634007a26128b577c88fd1d520da4d87791658df6cb3d7295e2fba30e5dd:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:58a9ebbc752cb56c9111dbb7b81570c6abb7526837480cd205788a85c4de263f";
     router.execute_default_query().await;
     router.assert_redis_cache_contains(starting_key, None).await;
     router.update_config(updated_config).await;
