@@ -157,14 +157,15 @@ preview_entity_cache:
     # this should only be exposed to internal networks
     listen: "127.0.0.1:3000"
     path: "/invalidation"
-    # base64 string that will be provided in the `Authorization: Basic` header value
-    shared_key: "agm3ipv7egb78dmxzv0gr5q0t5l6qs37"
 
   subgraph:
     all:
       enabled: true
       redis:
         urls: ["redis://..."]
+      invalidation:
+        # base64 string that will be provided in the `Authorization: Basic` header value
+        shared_key: "agm3ipv7egb78dmxzv0gr5q0t5l6qs37"
     subgraphs:
       products:
         # per subgraph invalidation configuration
