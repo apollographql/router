@@ -27,11 +27,10 @@ memorable-wordlist = "0.1.7"
 nu-ansi-term = "0.50"
 once_cell = "1"
 regex = "1.10.3"
-reqwest = { version = "0.12", default-features = false, features = [
+reqwest = { version = "0.11", default-features = false, features = [
     "blocking",
     "rustls-tls",
-    "rustls-tls-native-roots",
-    "json"
+    "rustls-tls-native-roots"
 ] }
 serde = { version = "1.0.197", features = ["derive"] }
 serde_json = "1"
