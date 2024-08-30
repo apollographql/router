@@ -13,6 +13,7 @@ use opentelemetry::Key;
 use parking_lot::Mutex;
 use tower::BoxError;
 use tower::ServiceExt;
+use tracing::warn;
 use tracing::Instrument;
 
 use super::connect::BoxService;
@@ -34,6 +35,7 @@ use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
 use crate::plugins::connectors::tracing::CONNECT_SPAN_NAME;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::services::connector_service::snapshot::create_snapshot_key;
+use crate::services::connector_service::snapshot::snapshot_path;
 use crate::services::connector_service::snapshot::Snapshot;
 use crate::services::ConnectRequest;
 use crate::services::ConnectResponse;
@@ -185,26 +187,30 @@ async fn execute(
 
                 let mut snapshot_key = None;
                 if let Some(snapshot_config) = snapshot_config {
-                    if snapshot_config.enabled && !snapshot_config.update {
-                        let snapshot_path = PathBuf::from(&snapshot_config.path);
+                    if snapshot_config.enabled {
+                        let snapshot_dir = PathBuf::from(&snapshot_config.path);
                         let snapshot_key_value = create_snapshot_key(&req, body_hash).await;
                         snapshot_key = Some(snapshot_key_value.clone());
-                        if let Some(snapshot) =
-                            Snapshot::load(snapshot_path, snapshot_key_value.as_str())
-                        {
-                            if let Ok(http_response) = snapshot.try_into() {
+                        if !snapshot_config.update {
+                            if let Some(snapshot) =
+                                Snapshot::load(snapshot_dir.clone(), snapshot_key_value.as_str())
+                            {
+                                if let Ok(http_response) = snapshot.try_into() {
+                                    return Ok(ConnectorResponse {
+                                        snapshot_key: None,
+                                        result: http_response,
+                                        key,
+                                    });
+                                }
+                            } else if snapshot_config.offline {
+                                warn!("Offline snapshots are in use, and no snapshot found for key {:?} at path {:?}",
+                                    snapshot_key_value, snapshot_path(&snapshot_dir, snapshot_key_value.as_str()));
                                 return Ok(ConnectorResponse {
                                     snapshot_key,
-                                    result: http_response,
+                                    result: ConnectorResult::Err(ConnectorError::SnapshotNotFound),
                                     key,
                                 });
                             }
-                        } else if snapshot_config.offline {
-                            return Ok(ConnectorResponse {
-                                snapshot_key,
-                                result: ConnectorResult::Err(ConnectorError::SnapshotNotFound),
-                                key,
-                            });
                         }
                     }
                 }

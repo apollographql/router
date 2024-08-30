@@ -1204,7 +1204,7 @@ mod quickstart_tests {
         };
     }
 
-    async fn execute_with_snapshot(query: &str, variables: JsonMap) -> serde_json::Value {
+    async fn execute(query: &str, variables: JsonMap) -> serde_json::Value {
         super::execute(
             QUICKSTART_SCHEMA,
             None,
@@ -1236,7 +1236,7 @@ mod quickstart_tests {
           }
         "#;
 
-        let response = execute_with_snapshot(query, Default::default()).await;
+        let response = execute(query, Default::default()).await;
 
         insta::assert_json_snapshot!(response, @r###"
         {
@@ -1270,7 +1270,7 @@ mod quickstart_tests {
           }
         "#;
 
-        let response = execute_with_snapshot(query, map!({ "postId": "1" })).await;
+        let response = execute(query, map!({ "postId": "1" })).await;
 
         insta::assert_json_snapshot!(response, @r###"
         {
@@ -1301,7 +1301,7 @@ mod quickstart_tests {
           }
       "#;
 
-        let response = execute_with_snapshot(query, map!({ "postId": "1" })).await;
+        let response = execute(query, map!({ "postId": "1" })).await;
 
         insta::assert_json_snapshot!(response, @r###"
         {
@@ -1339,7 +1339,7 @@ mod quickstart_tests {
           }
       "#;
 
-        let response = execute_with_snapshot(query, map!({ "userId": "1" })).await;
+        let response = execute(query, map!({ "userId": "1" })).await;
 
         insta::assert_json_snapshot!(response, @r###"
         {

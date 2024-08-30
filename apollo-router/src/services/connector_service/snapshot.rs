@@ -28,6 +28,7 @@
 //!   and should not be used with performance or load testing.
 
 use std::borrow::Cow;
+use std::path::Path;
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -71,8 +72,8 @@ impl<'a> Snapshot<'a> {
     }
 
     /// Save the snapshot.
-    pub(crate) fn save(&self, base: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
-        let path = snapshot_path(base.clone(), &self.key);
+    pub(crate) fn save<P: AsRef<Path>>(&self, base: P) -> Result<(), Box<dyn std::error::Error>> {
+        let path = snapshot_path(base, &self.key);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -81,7 +82,7 @@ impl<'a> Snapshot<'a> {
     }
 
     /// Load a snapshot from the file system, if it exists.
-    pub(crate) fn load(base: PathBuf, key: &'a str) -> Option<Self> {
+    pub(crate) fn load<P: AsRef<Path>>(base: P, key: &'a str) -> Option<Self> {
         let path = snapshot_path(base, key);
         let string = std::fs::read_to_string(path).ok()?;
         let snapshot: Snapshot = serde_json::from_str(&string).ok()?;
@@ -134,12 +135,12 @@ pub(crate) async fn create_snapshot_key<T>(
     }
 }
 
-fn snapshot_path(base: PathBuf, key: &str) -> PathBuf {
+pub(crate) fn snapshot_path<P: AsRef<Path>>(base: P, key: &str) -> PathBuf {
     let mut key_hash = {
         let mut hasher = Sha256::new();
         hasher.update(key);
         hex::encode(hasher.finalize().as_slice())
     };
     key_hash.truncate(16);
-    base.join(key_hash).with_extension("json")
+    base.as_ref().join(key_hash).with_extension("json")
 }
