@@ -2,6 +2,7 @@
 source: apollo-router/src/configuration/tests.rs
 expression: new_config
 ---
+---
 batching:
   enabled: true
   mode: batch_http_link
