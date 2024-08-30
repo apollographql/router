@@ -1,0 +1,8 @@
+# This coprocessor doesn't point to anything
+coprocessor:
+  url: "<replace>"
+  router:
+    request:
+      body: true
+limits:
+  http_max_request_bytes: 100
