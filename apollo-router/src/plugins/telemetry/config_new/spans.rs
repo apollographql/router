@@ -53,6 +53,26 @@ impl Spans {
             TelemetryDataKind::Traces,
         );
     }
+
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        for (name, custom) in &self.router.attributes.custom {
+            custom
+                .validate()
+                .map_err(|err| format!("error for router span attribute {name:?}: {err}"))?;
+        }
+        for (name, custom) in &self.supergraph.attributes.custom {
+            custom
+                .validate()
+                .map_err(|err| format!("error for supergraph span attribute {name:?}: {err}"))?;
+        }
+        for (name, custom) in &self.subgraph.attributes.custom {
+            custom
+                .validate()
+                .map_err(|err| format!("error for subgraph span attribute {name:?}: {err}"))?;
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug, Default)]
@@ -107,6 +127,7 @@ impl DefaultForLevel for SubgraphSpans {
 
 #[cfg(test)]
 mod test {
+    use std::str::FromStr;
     use std::sync::Arc;
 
     use http::header::USER_AGENT;
@@ -116,6 +137,7 @@ mod test {
     use opentelemetry_semantic_conventions::trace::URL_PATH;
     use opentelemetry_semantic_conventions::trace::USER_AGENT_ORIGINAL;
     use parking_lot::Mutex;
+    use serde_json_bytes::path::JsonPathInst;
 
     use crate::context::CONTAINS_GRAPHQL_ERROR;
     use crate::graphql;
@@ -135,6 +157,7 @@ mod test {
     use crate::plugins::telemetry::config_new::DefaultForLevel;
     use crate::plugins::telemetry::config_new::Selectors;
     use crate::plugins::telemetry::otlp::TelemetryDataKind;
+    use crate::plugins::telemetry::OTEL_NAME;
     use crate::services::router;
     use crate::services::subgraph;
     use crate::services::supergraph;
@@ -347,7 +370,7 @@ mod test {
             "test".to_string(),
             Conditional {
                 selector: RouterSelector::StaticField {
-                    r#static: "my-static-value".to_string(),
+                    r#static: "my-static-value".to_string().into(),
                 },
                 condition: Some(Arc::new(Mutex::new(Condition::Eq([
                     SelectorOrValue::Value(AttributeValue::Bool(true)),
@@ -545,6 +568,16 @@ mod test {
                 value: Arc::new(Default::default()),
             },
         );
+        spans.attributes.custom.insert(
+            OTEL_NAME.to_string(),
+            Conditional {
+                selector: RouterSelector::StaticField {
+                    r#static: String::from("new_name").into(),
+                },
+                condition: None,
+                value: Arc::new(Default::default()),
+            },
+        );
         let values = spans.attributes.on_response(
             &router::Response::fake_builder()
                 .header("my-header", "test_val")
@@ -554,6 +587,10 @@ mod test {
         assert!(values
             .iter()
             .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test")));
+
+        assert!(values.iter().any(|key_val| key_val.key
+            == opentelemetry::Key::from_static_str(OTEL_NAME)
+            && key_val.value == opentelemetry::Value::String(String::from("new_name").into())));
     }
 
     #[test]
@@ -581,6 +618,41 @@ mod test {
         assert!(values
             .iter()
             .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test")));
+    }
+
+    #[test]
+    fn test_supergraph_response_event_custom_attribute() {
+        let mut spans = SupergraphSpans::default();
+        spans.attributes.custom.insert(
+            "otel.status_code".to_string(),
+            Conditional {
+                selector: SupergraphSelector::StaticField {
+                    r#static: String::from("error").into(),
+                },
+                condition: Some(Arc::new(Mutex::new(Condition::Exists(
+                    SupergraphSelector::ResponseErrors {
+                        response_errors: JsonPathInst::from_str("$[0].extensions.code").unwrap(),
+                        redact: None,
+                        default: None,
+                    },
+                )))),
+                value: Arc::new(Default::default()),
+            },
+        );
+        let values = spans.attributes.on_response_event(
+            &graphql::Response::builder()
+                .error(
+                    graphql::Error::builder()
+                        .message("foo")
+                        .extension_code("MY_EXTENSION_CODE")
+                        .build(),
+                )
+                .build(),
+            &Context::new(),
+        );
+        assert!(values.iter().any(|key_val| key_val.key
+            == opentelemetry::Key::from_static_str("otel.status_code")
+            && key_val.value == opentelemetry::Value::String(String::from("error").into())));
     }
 
     #[test]

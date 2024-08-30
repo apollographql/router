@@ -1,13 +1,11 @@
 ---
 title: Selectors
 subtitle: Select data from the router pipeline to extract
-description: Extract and select data from the Apollo Router's pipeline services to attach to telemetry.
+description: Extract and select data from the Apollo GraphOS Router's pipeline services to attach to telemetry.
 ---
 import RouterServices from '../../../../shared/router-lifecycle-services.mdx';
 
-A _selector_ is used to extract data from the Apollo Router's request lifecycle (pipeline) services and attach them to telemetry, specifically [spans](./spans), [instruments](./instruments), [conditions](./conditions) and [events](./events).
-
-Each service of the router pipeline (`router`, `supergraph`, `subgraph`) has its own available selectors.
+A _selector_ is used to extract data from the GraphOS Router's request lifecycle (pipeline) services and attach them to telemetry. Specifically [spans](./spans), [instruments](./instruments), [conditions](./conditions) and [events](./events).
 
 An example of a selector, `request_header`, of the router service on a custom span attribute:
 
@@ -22,66 +20,91 @@ telemetry:
             request_header: "x-my-header" #highlight-line
 ```
 
-### Selector configuration reference
+## Selector configuration reference
 
 Each service of the router pipeline (`router`, `supergraph`, `subgraph`) has its own available selectors.
+You can also extract GraphQL metrics from the response data the router returns to clients.
 
-#### Router
+### Router
 
 The router service is the initial entrypoint for all requests. It is HTTP centric and deals with opaque bytes.
 
-| Selector           | Defaultable | Values                      | Description                          |
-|--------------------|-------------|-----------------------------|--------------------------------------|
-| `trace_id`         | Yes         | `open_telemetry`\|`datadog` | The trace ID                         |
-| `request_header`   | Yes         |                             | The name of the request header       |
-| `response_header`  | Yes         |                             | The name of a response header        |
-| `response_status`  | Yes         | `code`\|`reason`            | The response status                  |
-| `response_context` | Yes         |                             | The name of a response context key   |
-| `baggage`          | Yes         |                             | The name of a baggage item           |
-| `env`              | Yes         |                             | The name of an environment variable  |
-| `on_graphql_error` | No          | `true`|`false`              | Boolean set to true if the response payload contains a graphql error  |
-| `static`           | No          |                             | A static string value                |
+| Selector              | Defaultable | Values                      | Description                                                          |
+|-----------------------|-------------|-----------------------------|----------------------------------------------------------------------|
+| `trace_id`            | Yes         | `open_telemetry`\|`datadog` | The trace ID                                                         |
+| `operation_name`      | Yes         | `string`\|`hash`            | The operation name from the query                                    |
+| `studio_operation_id` | Yes         | `true`\|`false`             | The Apollo Studio operation id                                       |
+| `request_header`      | Yes         |                             | The name of the request header                                       |
+| `response_header`     | Yes         |                             | The name of a response header                                        |
+| `response_status`     | Yes         | `code`\|`reason`            | The response status                                                  |
+| `response_context`    | Yes         |                             | The name of a response context key                                   |
+| `baggage`             | Yes         |                             | The name of a baggage item                                           |
+| `env`                 | Yes         |                             | The name of an environment variable                                  |
+| `on_graphql_error`    | No          | `true`\|`false`             | Boolean set to true if the response payload contains a GraphQL error |
+| `static`              | No          |                             | A static string value                                                |
+| `error`               | No          | `reason`                    | a string value containing error reason when it's a critical error    |
 
-#### Supergraph
+### Supergraph
 
 The supergraph service is executed after query parsing but before query execution. It is GraphQL centric and deals with GraphQL queries and responses.
 
-| Selector           | Defaultable | Values                              | Description                          |
-|--------------------|-------------|-------------------------------------|--------------------------------------|
-| `operation_name`   | Yes         | `string`|`hash`                     | The operation name from the query    |
-| `operation_kind`   | No          | `string`                            | The operation kind from the query    |
-| `query`            | Yes         | `string`                            | The graphql query                    |
-| `query_variable`   | Yes         |                                     | The name of a graphql query variable |
-| `request_header`   | Yes         |                                     | The name of a request header         |
-| `response_header`  | Yes         |                                     | The name of a response header        |
-| `request_context`  | Yes         |                                     | The name of a request context key    |
-| `response_context` | Yes         |                                     | The name of a response context key   |
-| `baggage`          | Yes         |                                     | The name of a baggage item           |
-| `env`              | Yes         |                                     | The name of an environment variable  |
-| `static`           | No          |                                     | A static string value                |
+| Selector           | Defaultable | Values                                                                           | Description                                            |
+|--------------------|-------------|-------------------------------------------------------|-----------------------------------------------------------------------------------|
+| `operation_name`   | Yes         | `string`\|`hash`                                      | The operation name from the query                                                 |
+| `operation_kind`   | No          | `string`                                              | The operation kind from the query                                                 |
+| `query`            | Yes         | `string`\|`aliases`\|`depth`\|`height`\|`root_fields` | The GraphQL query                                                                 |
+| `query_variable`   | Yes         |                                                       | The name of a GraphQL query variable                                              |
+| `request_header`   | Yes         |                                                       | The name of a request header                                                      |
+| `response_header`  | Yes         |                                                       | The name of a response header                                                     |
+| `is_primary_response` | No       | `true`\|`false`                                       | Boolean returning true if it's the primary response and not events like subscription events or deferred responses |
+| `response_data`    | Yes         |                                                       | JSON Path into the supergraph response body data (it might impact performance)   |
+| `response_errors`  | Yes         |                                                       | JSON Path into the supergraph response body errors (it might impact performance) |
+| `request_context`  | Yes         |                                                       | The name of a request context key                                                 |
+| `response_context` | Yes         |                                                       | The name of a response context key                                                |
+| `on_graphql_error` | No          | `true`\|`false`                                       | Boolean set to true if the response payload contains a GraphQL error              |
+| `baggage`          | Yes         |                                                       | The name of a baggage item                                                        |
+| `env`              | Yes         |                                                       | The name of an environment variable                                               |
+| `static`           | No          |                                                       | A static string value                                                             |
+| `error`            | No          | `reason`                                              | A string value containing error reason when it's a critical error                 |
 
-
-#### Subgraph
+### Subgraph
 
 The subgraph service executes multiple times during query execution, with each execution representing a call to a single subgraph. It is GraphQL centric and deals with GraphQL queries and responses.
 
-| Selector                    | Defaultable | Values                              | Description                                                                     |
-|-----------------------------|-------------|-------------------------------------|---------------------------------------------------------------------------------|
-| `subgraph_operation_name`   | Yes         | `string`|`hash`                     | The operation name from the subgraph query                                      |
-| `subgraph_operation_kind`   | No          | `string`                            | The operation kind from the subgraph query                                      |
-| `subgraph_query`            | Yes         | `string`                            | The graphql query to the subgraph                                               |
-| `subgraph_query_variable`   | Yes         |                                     | The name of a subgraph query variable                                           |
-| `subgraph_response_data`    | Yes         |                                     | Json Path into the subgraph response body data (it might impact performances)   |
-| `subgraph_response_errors`  | Yes         |                                     | Json Path into the subgraph response body errors (it might impact performances) |
-| `subgraph_request_header`   | Yes         |                                     | The name of a subgraph request header                                           |
-| `subgraph_response_header`  | Yes         |                                     | The name of a subgraph response header                                          |
-| `subgraph_response_status`  | Yes         | `code`\|`reason`                    | The status of a subgraph response                                               |
-| `supergraph_operation_name` | Yes         | `string`|`hash`                     | The operation name from the supergraph query                                    |
-| `supergraph_operation_kind` | Yes         | `string`                            | The operation kind from the supergraph query                                    |
-| `supergraph_query`          | Yes         | `string`                            | The graphql query to the supergraph                                             |
-| `supergraph_query_variable` | Yes         |                                     | The name of a supergraph query variable                                         |
-| `request_context`           | Yes         |                                     | The name of a request context key                                               |
-| `response_context`          | Yes         |                                     | The name of a response context key                                              |
-| `baggage`                   | Yes         |                                     | The name of a baggage item                                                      |
-| `env`                       | Yes         |                                     | The name of an environment variable                                             |
-| `static`                    | No          |                                     | A static string value                                                           |
+| Selector                    | Defaultable | Values           | Description                                                                    |
+|-----------------------------|-------------|------------------|--------------------------------------------------------------------------------|
+| `subgraph_operation_name`   | Yes         | `string`\|`hash` | The operation name from the subgraph query                                     |
+| `subgraph_operation_kind`   | No          | `string`         | The operation kind from the subgraph query                                     |
+| `subgraph_query`            | Yes         | `string`         | The GraphQL query to the subgraph                                              |
+| `subgraph_name`             | No          | `true`\|`false`  | The subgraph name                                                              |
+| `subgraph_query_variable`   | Yes         |                  | The name of a subgraph query variable                                          |
+| `subgraph_response_data`    | Yes         |                  | JSON Path into the subgraph response body data (it might impact performance)   |
+| `subgraph_response_errors`  | Yes         |                  | JSON Path into the subgraph response body errors (it might impact performance) |
+| `subgraph_request_header`   | Yes         |                  | The name of a subgraph request header                                          |
+| `subgraph_response_header`  | Yes         |                  | The name of a subgraph response header                                         |
+| `subgraph_response_status`  | Yes         | `code`\|`reason` | The status of a subgraph response                                              |
+| `subgraph_on_graphql_error` | No          | `true`\|`false`  | Boolean set to true if the subgraph response payload contains a GraphQL error |
+| `supergraph_operation_name` | Yes         | `string`\|`hash` | The operation name from the supergraph query                                   |
+| `supergraph_operation_kind` | Yes         | `string`         | The operation kind from the supergraph query                                   |
+| `supergraph_query`          | Yes         | `string`         | The graphql query to the supergraph                                            |
+| `supergraph_query_variable` | Yes         |                  | The name of a supergraph query variable                                        |
+| `request_context`           | Yes         |                  | The name of a request context key                                              |
+| `response_context`          | Yes         |                  | The name of a response context key                                             |
+| `baggage`                   | Yes         |                  | The name of a baggage item                                                     |
+| `env`                       | Yes         |                  | The name of an environment variable                                            |
+| `static`                    | No          |                  | A static string value                                                          |
+| `error`                     | No          | `reason`         | A string value containing error reason when it's a critical error              |
+| `cache`                     | No          | `hit`\|`miss`    | Returns the number of cache hit or miss for this subgraph request              |
+
+### GraphQL
+
+GraphQL metrics are extracted from the response data the router returns to client requests.
+
+| Selector         | Defaultable | Values           | Description                                 |
+|------------------|-------------|------------------|---------------------------------------------|
+| `list_length`    | No          | `value`          | The length of a list from the response data |
+| `field_name`     | No          | `string`         | The name of a field from the response data  |
+| `field_type`     | No          | `string`         | The type of a field from the response data  |
+| `type_name`      | No          |                  | The GraphQL type from the response data     |
+| `operation_name` | Yes         | `string`\|`hash` | The operation name of the query             |
+| `static`         | No          |                  | A static string value                       |

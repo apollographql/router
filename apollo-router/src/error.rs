@@ -233,8 +233,8 @@ pub(crate) enum ServiceBuildError {
     /// couldn't build Query Planner Service: {0}
     QueryPlannerError(QueryPlannerError),
 
-    /// The supergraph schema failed to produce a valid API schema: {0}
-    ApiSchemaError(FederationError),
+    /// failed to initialize the query planner: {0}
+    QpInitError(FederationError),
 
     /// schema error: {0}
     Schema(SchemaError),
@@ -246,12 +246,6 @@ pub(crate) enum ServiceBuildError {
 impl From<SchemaError> for ServiceBuildError {
     fn from(err: SchemaError) -> Self {
         ServiceBuildError::Schema(err)
-    }
-}
-
-impl From<FederationError> for ServiceBuildError {
-    fn from(err: FederationError) -> Self {
-        ServiceBuildError::ApiSchemaError(err)
     }
 }
 
@@ -529,16 +523,21 @@ impl std::fmt::Display for PlanErrors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!(
             "query validation errors: {}",
-            self.errors
-                .iter()
-                .map(|e| e
-                    .message
-                    .clone()
-                    .unwrap_or_else(|| "UNKNWON ERROR".to_string()))
-                .collect::<Vec<String>>()
-                .join(", ")
+            format_bridge_errors(&self.errors)
         ))
     }
+}
+
+pub(crate) fn format_bridge_errors(errors: &[router_bridge::planner::PlanError]) -> String {
+    errors
+        .iter()
+        .map(|e| {
+            e.message
+                .clone()
+                .unwrap_or_else(|| "UNKNWON ERROR".to_string())
+        })
+        .collect::<Vec<String>>()
+        .join(", ")
 }
 
 /// Error in the schema.
@@ -594,11 +593,11 @@ impl IntoGraphQLErrors for ParseErrors {
                     .message(diagnostic.error.to_string())
                     .locations(
                         diagnostic
-                            .get_line_column()
+                            .line_column_range()
                             .map(|location| {
                                 vec![ErrorLocation {
-                                    line: location.line as u32,
-                                    column: location.column as u32,
+                                    line: location.start.line as u32,
+                                    column: location.start.column as u32,
                                 }]
                             })
                             .unwrap_or_default(),

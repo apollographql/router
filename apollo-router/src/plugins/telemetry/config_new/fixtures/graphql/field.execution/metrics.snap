@@ -1,0 +1,25 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
+description: Field execution
+expression: "&metrics.all()"
+info:
+  telemetry:
+    instrumentation:
+      instruments:
+        graphql:
+          field.execution: true
+---
+- name: graphql.field.execution
+  description: Number of times a field is used.
+  data:
+    datapoints:
+      - value: 1
+        attributes:
+          graphql.field.name: name
+          graphql.field.type: String
+          graphql.type.name: Product
+      - value: 1
+        attributes:
+          graphql.field.name: products
+          graphql.field.type: String
+          graphql.type.name: Query

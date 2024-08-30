@@ -2,10 +2,10 @@ use std::fmt::Display;
 
 use apollo_compiler::ast::Value;
 use apollo_compiler::executable::Directive;
-use apollo_compiler::executable::Name;
 use apollo_compiler::name;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::NodeStr;
+use serde::Serialize;
 
 use crate::error::FederationError;
 use crate::link::argument::directive_optional_string_argument;
@@ -13,21 +13,16 @@ use crate::link::argument::directive_optional_variable_boolean_argument;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct DeferDirectiveArguments {
-    label: Option<NodeStr>,
-    if_: Option<BooleanOrVariable>,
-}
-
-impl DeferDirectiveArguments {
-    pub(crate) fn label(&self) -> Option<&NodeStr> {
-        self.label.as_ref()
-    }
+    pub(crate) label: Option<String>,
+    pub(crate) if_: Option<BooleanOrVariable>,
 }
 
 pub(crate) fn defer_directive_arguments(
     application: &Node<Directive>,
 ) -> Result<DeferDirectiveArguments, FederationError> {
     Ok(DeferDirectiveArguments {
-        label: directive_optional_string_argument(application, &name!("label"))?,
+        label: directive_optional_string_argument(application, &name!("label"))?
+            .map(|s| s.to_owned()),
         if_: directive_optional_variable_boolean_argument(application, &name!("if"))?,
     })
 }
@@ -37,7 +32,7 @@ pub(crate) fn defer_directive_arguments(
 /// a `Vec`, and superfluous struct instances aren't elided; `Conditions` is the more appropriate
 /// struct when trying to evaluate `@skip`/`@include` conditions (e.g. merging and short-circuiting
 /// logic).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub(crate) struct OperationConditional {
     pub(crate) kind: OperationConditionalKind,
     pub(crate) value: BooleanOrVariable,
@@ -52,6 +47,7 @@ pub(crate) struct OperationConditional {
     strum_macros::Display,
     strum_macros::EnumIter,
     strum_macros::IntoStaticStr,
+    Serialize,
 )]
 pub(crate) enum OperationConditionalKind {
     #[strum(to_string = "include")]
@@ -69,7 +65,7 @@ impl OperationConditionalKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub(crate) enum BooleanOrVariable {
     Boolean(bool),
     Variable(Name),

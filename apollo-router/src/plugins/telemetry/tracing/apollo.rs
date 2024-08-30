@@ -26,6 +26,9 @@ impl TracingConfigurator for Config {
         tracing::debug!("configuring Apollo tracing");
         let exporter = apollo_telemetry::Exporter::builder()
             .endpoint(&self.endpoint)
+            .otlp_endpoint(&self.experimental_otlp_endpoint)
+            .otlp_tracing_protocol(&self.experimental_otlp_tracing_protocol)
+            .otlp_tracing_sampler(&self.experimental_otlp_tracing_sampler)
             .apollo_key(
                 self.apollo_key
                     .as_ref()
@@ -42,6 +45,7 @@ impl TracingConfigurator for Config {
             .batch_config(&self.batch_processor)
             .errors_configuration(&self.errors)
             .use_legacy_request_span(matches!(spans_config.mode, SpanMode::Deprecated))
+            .metrics_reference_mode(self.experimental_apollo_metrics_reference_mode)
             .build()?;
         Ok(builder.with_span_processor(
             BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)

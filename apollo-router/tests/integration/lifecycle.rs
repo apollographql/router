@@ -86,23 +86,21 @@ async fn test_reload_config_with_broken_plugin() -> Result<(), BoxError> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_reload_config_with_broken_plugin_recovery() -> Result<(), BoxError> {
-    for i in 0..3 {
-        println!("iteration {i}");
-        let mut router = IntegrationTest::builder()
-            .config(HAPPY_CONFIG)
-            .build()
-            .await;
-        router.start().await;
-        router.assert_started().await;
-        router.execute_default_query().await;
-        router.update_config(BROKEN_PLUGIN_CONFIG).await;
-        router.assert_not_reloaded().await;
-        router.execute_default_query().await;
-        router.update_config(HAPPY_CONFIG).await;
-        router.assert_reloaded().await;
-        router.execute_default_query().await;
-        router.graceful_shutdown().await;
-    }
+    let mut router = IntegrationTest::builder()
+        .config(HAPPY_CONFIG)
+        .build()
+        .await;
+    router.start().await;
+    router.assert_started().await;
+    router.execute_default_query().await;
+    router.update_config(BROKEN_PLUGIN_CONFIG).await;
+    router.assert_not_reloaded().await;
+    router.execute_default_query().await;
+    router.update_config(HAPPY_CONFIG).await;
+    router.assert_reloaded().await;
+    router.execute_default_query().await;
+    router.graceful_shutdown().await;
+
     Ok(())
 }
 
@@ -257,8 +255,8 @@ const TEST_PLUGIN_ORDERING_CONTEXT_KEY: &str = "ordering-trace";
 #[tokio::test(flavor = "multi_thread")]
 async fn test_plugin_ordering() {
     async fn coprocessor(
-        request: hyper::Request<hyper::Body>,
-    ) -> Result<hyper::Response<hyper::Body>, BoxError> {
+        request: http::Request<hyper::Body>,
+    ) -> Result<http::Response<hyper::Body>, BoxError> {
         let body = hyper::body::to_bytes(request.into_body()).await?;
         let mut json: serde_json::Value = serde_json::from_slice(&body)?;
         let stage = json["stage"].as_str().unwrap().to_owned();
@@ -270,7 +268,7 @@ async fn test_plugin_ordering() {
             .as_array_mut()
             .unwrap()
             .push(format!("coprocessor {stage}").into());
-        Ok(hyper::Response::new(hyper::Body::from(
+        Ok(http::Response::new(hyper::Body::from(
             serde_json::to_string(&json)?,
         )))
     }

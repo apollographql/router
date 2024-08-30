@@ -1,13 +1,13 @@
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
-use indexmap::IndexSet;
 
 use crate::error::FederationError;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
-use crate::query_plan::operation::Selection;
-use crate::query_plan::operation::SelectionSet;
+use crate::operation::Selection;
+use crate::operation::SelectionSet;
 use crate::schema::field_set::add_interface_field_implementations;
 use crate::schema::field_set::collect_target_fields_from_field_set;
 use crate::schema::position::CompositeTypeDefinitionPosition;
@@ -120,7 +120,7 @@ impl ExternalMetadata {
             .referencers
             .get_directive(&external_directive_definition.name)?;
 
-        let mut external_fields = IndexSet::new();
+        let mut external_fields = IndexSet::default();
 
         external_fields.extend(
             external_directive_referencers
@@ -143,7 +143,7 @@ impl ExternalMetadata {
         federation_spec_definition: &'static FederationSpecDefinition,
         schema: &Valid<FederationSchema>,
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
-        let mut fake_external_fields = IndexSet::new();
+        let mut fake_external_fields = IndexSet::default();
         let extends_directive_definition =
             federation_spec_definition.extends_directive_definition(schema)?;
         let key_directive_definition =
@@ -192,7 +192,7 @@ impl ExternalMetadata {
         federation_spec_definition: &'static FederationSpecDefinition,
         schema: &Valid<FederationSchema>,
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
-        let mut provided_fields = IndexSet::new();
+        let mut provided_fields = IndexSet::default();
         let provides_directive_definition =
             federation_spec_definition.provides_directive_definition(schema)?;
         let provides_directive_referencers = schema
@@ -241,7 +241,7 @@ impl ExternalMetadata {
             .referencers
             .get_directive(&external_directive_definition.name)?;
 
-        let mut fields_on_external_types = IndexSet::new();
+        let mut fields_on_external_types = IndexSet::default();
         for object_type_position in &external_directive_referencers.object_types {
             let object_type = object_type_position.get(schema.schema())?;
             // PORT_NOTE: The JS codebase does not differentiate fields at a definition/extension
@@ -256,15 +256,12 @@ impl ExternalMetadata {
         Ok(fields_on_external_types)
     }
 
-    pub(crate) fn is_external(
-        &self,
-        field_definition_position: &FieldDefinitionPosition,
-    ) -> Result<bool, FederationError> {
-        Ok((self.external_fields.contains(field_definition_position)
+    pub(crate) fn is_external(&self, field_definition_position: &FieldDefinitionPosition) -> bool {
+        (self.external_fields.contains(field_definition_position)
             || self
                 .fields_on_external_types
                 .contains(field_definition_position))
-            && !self.is_fake_external(field_definition_position))
+            && !self.is_fake_external(field_definition_position)
     }
 
     pub(crate) fn is_fake_external(
@@ -275,38 +272,35 @@ impl ExternalMetadata {
             .contains(field_definition_position)
     }
 
-    pub(crate) fn selects_any_external_field(
-        &self,
-        selection_set: &SelectionSet,
-    ) -> Result<bool, FederationError> {
+    pub(crate) fn selects_any_external_field(&self, selection_set: &SelectionSet) -> bool {
         for selection in selection_set.selections.values() {
             if let Selection::Field(field_selection) = selection {
-                if self.is_external(&field_selection.field.data().field_position)? {
-                    return Ok(true);
+                if self.is_external(&field_selection.field.field_position) {
+                    return true;
                 }
             }
-            if let Some(selection_set) = selection.selection_set()? {
-                if self.selects_any_external_field(selection_set)? {
-                    return Ok(true);
+            if let Some(selection_set) = selection.selection_set() {
+                if self.selects_any_external_field(selection_set) {
+                    return true;
                 }
             }
         }
-        Ok(false)
+        false
     }
 
     pub(crate) fn is_partially_external(
         &self,
         field_definition_position: &FieldDefinitionPosition,
-    ) -> Result<bool, FederationError> {
-        Ok(self.is_external(field_definition_position)?
-            && self.provided_fields.contains(field_definition_position))
+    ) -> bool {
+        self.is_external(field_definition_position)
+            && self.provided_fields.contains(field_definition_position)
     }
 
     pub(crate) fn is_fully_external(
         &self,
         field_definition_position: &FieldDefinitionPosition,
-    ) -> Result<bool, FederationError> {
-        Ok(self.is_external(field_definition_position)?
-            && !self.provided_fields.contains(field_definition_position))
+    ) -> bool {
+        self.is_external(field_definition_position)
+            && !self.provided_fields.contains(field_definition_position)
     }
 }

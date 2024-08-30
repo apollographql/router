@@ -1,9 +1,10 @@
 ---
-title: Rhai scripts for the Apollo Router
-description: Add custom functionality directly to your router
+title: Rhai Scripts to customize routers
+subtitle: Add custom functionality directly to your router
+description: Customize your Apollo Router Core or GraphOS Router functionality with Rhai scripts. Manipulate strings, process headers and more for enhanced performance.
 ---
 
-You can customize the Apollo Router's behavior with scripts that use the [Rhai scripting language](https://rhai.rs/book/). In a Rust-based project, Rhai is ideal for performing common scripting tasks such as manipulating strings and processing headers. Your Rhai scripts can also hook into multiple stages of the router's [request handling lifecycle](#router-request-lifecycle).
+You can customize your GraphOS Router or Apollo Router Core's behavior with scripts that use the [Rhai scripting language](https://rhai.rs/book/). In a Rust-based project, Rhai is ideal for performing common scripting tasks such as manipulating strings and processing headers. Your Rhai scripts can also hook into multiple stages of the router's [request handling lifecycle](#router-request-lifecycle).
 
 ## Rhai language reference
 
@@ -11,7 +12,7 @@ To learn about Rhai, see the [Rhai language reference](https://rhai.rs/book/lang
 
 ## Use cases
 
-Common use cases for Rhai scripts in Apollo Router include:
+Common use cases for Rhai scripts in routers include:
 
 * Modifying the details of HTTP requests and responses. This includes requests sent from clients to your router, along with requests sent from your router to your subgraphs. You can modify any combination of the following:
     * Request and response bodies
@@ -41,11 +42,11 @@ rhai:
 1. Add the `rhai` top-level key to your router's [YAML config file](../configuration/overview/#yaml-config-file).
     * This key **must** contain at least one of a `scripts` key or a `main` key (see the example above). 
 2. Place all of your Rhai script files in a specific directory.
-    * By default, the Apollo Router looks in the `./rhai` directory (relative to the directory the `router` command is executed from).
+    * By default, the router looks in the `./rhai` directory (relative to the directory the `router` command is executed from).
     * You can override this default with the `scripts` key (see above).
 3. Define a ["main" Rhai file](#the-main-file) in your router project.
-    * This file defines all of the "entry point" hooks that the Apollo Router uses to call into your script.
-    * By default, the Apollo Router looks for `main.rhai` in your Rhai script directory.
+    * This file defines all of the "entry point" hooks that the router uses to call into your script.
+    * By default, the router looks for `main.rhai` in your Rhai script directory.
     * You can override this default with the `main` key (see above).
 
 ## The main file
@@ -101,7 +102,7 @@ fn subgraph_service(service, subgraph) {
 
 </ExpansionPanel>
 
-You can provide _exactly one_ main Rhai file to the Apollo Router. This means that all of your customization's functionality must originate from these hook definitions.
+You can provide _exactly one_ main Rhai file to the router. This means that all of your customization's functionality must originate from these hook definitions.
 
 To organize unrelated functionality within your Rhai customization, your main file can import and use symbols from any number of _other_ Rhai files (known as **modules**) in your script directory:
 
@@ -137,7 +138,7 @@ fn supergraph_service(service) {
 
 ## Router request lifecycle
 
-Before you build your Rhai script, it helps to understand how the Apollo Router handles each incoming GraphQL request. During each request's execution, different **services** in the router communicate with each other as shown:
+Before you build your Rhai script, it helps to understand how the router handles each incoming GraphQL request. During each request's execution, different **services** in the router communicate with each other as shown:
 
 ```mermaid
 sequenceDiagram
@@ -167,11 +168,11 @@ sequenceDiagram
 
 As execution proceeds "left to right" from the `RouterService` to individual `SubgraphService`s, each service passes the client's original request along to the _next_ service. Similarly, as execution continues "right to left" from `SubgraphService`s to the `RouterService`, each service passes the generated response for the client.
 
-Your Rhai scripts can hook into any combination of the above services (if you are using the Apollo Router v1.30.0 and later). The scripts can modify the request, response, and/or related metadata as they're passed along.
+Your Rhai scripts can hook into any combination of the above services (if you are using the Apollo Router Core v1.30.0 and later). The scripts can modify the request, response, and/or related metadata as they're passed along.
 
 ### Service descriptions
 
-Each Apollo Router service has a corresponding function that a Rhai script can define to hook into that service:
+Each service of the router has a corresponding function that a Rhai script can define to hook into that service:
 
 <table class="field-table">
   <thead>
@@ -241,7 +242,7 @@ Define `execution_service` if your customization includes logic to govern execut
 </td>
 <td>
 
-Handles communication between the Apollo Router and your subgraphs.
+Handles communication between the router and your subgraphs.
 
 Define `subgraph_service` to configure this communication (for example, to dynamically add HTTP headers to pass to a subgraph).
 
@@ -270,7 +271,7 @@ Each hook in your Rhai script's [main file](#main-file) is passed a `service` ob
     graph LR;
       client(Client);
       client --> router(router_service);
-      subgraph Apollo Router
+      subgraph Router
       router --> supergraph(supergraph_service);
       supergraph --> execution(execution_service);
       execution --> subs_a(subgraph_service);
@@ -292,7 +293,7 @@ Each hook in your Rhai script's [main file](#main-file) is passed a `service` ob
     ```mermaid
     graph RL;
       client(Client);
-      subgraph Apollo Router
+      subgraph Router
       execution(execution_service);
       supergraph(supergraph_service);
       router(router_service);
@@ -319,7 +320,7 @@ Each hook in your Rhai script's [main file](#main-file) is passed a `service` ob
 
 ## Example scripts
 
-In addition to the examples below, see more examples in the Router repo's [examples directory](https://github.com/apollographql/router/tree/main/examples). Rhai-specific examples are listed in `README.md`.
+In addition to the examples below, see more examples in the router repo's [examples directory](https://github.com/apollographql/router/tree/main/examples). Rhai-specific examples are listed in `README.md`.
 
 ### Handling incoming requests
 
@@ -524,7 +525,7 @@ fn process_request(request) {
 
 ### Avoiding deadlocks
 
-The Apollo Router requires that its Rhai engine implements the [sync feature](https://rhai.rs/book/start/features.html) to guarantee data integrity within the router's multi-threading execution environment. This means that [shared values](https://rhai.rs/book/language/fn-closure.html?highlight=deadlock#data-races-in-sync-builds-can-become-deadlocks) within Rhai might cause a deadlock.
+The router requires its Rhai engine to implement the [sync feature](https://rhai.rs/book/start/features.html) to guarantee data integrity within the router's multi-threading execution environment. This means that [shared values](https://rhai.rs/book/language/fn-closure.html?highlight=deadlock#data-races-in-sync-builds-can-become-deadlocks) within Rhai might cause a deadlock.
 
 This is particularly risky when using closures within callbacks while referencing external data. Take particular care to avoid this kind of situation by making copies of data when required. The [examples/surrogate-cache-key directory](https://github.com/apollographql/router/tree/main/examples/surrogate-cache-key) contains an example of this, where "closing over" `response.headers` would cause a deadlock. To avoid this, a local copy of the required data is obtained and used in the closure.
 

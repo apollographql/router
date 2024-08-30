@@ -13,6 +13,7 @@ expression: "&metrics.non_zero()"
           opt.events.supergraph: true
           opt.instruments: true
           opt.instruments.default_attribute_requirement_level: false
+          opt.instruments.graphql: true
           opt.instruments.router: true
           opt.instruments.subgraph: true
           opt.instruments.supergraph: true

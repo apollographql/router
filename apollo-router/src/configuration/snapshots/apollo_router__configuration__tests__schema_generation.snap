@@ -107,8 +107,14 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "ApiSchemaMode": {
-      "description": "API schema generation modes.",
+    "All": {
+      "enum": [
+        "all"
+      ],
+      "type": "string"
+    },
+    "ApolloMetricsGenerationMode": {
+      "description": "Apollo usage report signature and referenced field generation modes.",
       "oneOf": [
         {
           "description": "Use the new Rust-based implementation.",
@@ -133,27 +139,39 @@ expression: "&schema"
         }
       ]
     },
-    "ApolloMetricsGenerationMode": {
-      "description": "Apollo usage report signature and referenced field generation modes.",
+    "ApolloMetricsReferenceMode": {
+      "description": "Apollo usage report reference generation modes.",
       "oneOf": [
         {
-          "description": "Use the new Rust-based implementation.",
+          "description": "Use the extended mode to report input object fields and enum value references as well as object fields.",
           "enum": [
-            "new"
+            "extended"
           ],
           "type": "string"
         },
         {
-          "description": "Use the old JavaScript-based implementation.",
+          "description": "Use the standard mode that only reports referenced object fields.",
+          "enum": [
+            "standard"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "ApolloSignatureNormalizationAlgorithm": {
+      "description": "Apollo usage report signature normalization algorithm",
+      "oneOf": [
+        {
+          "description": "Use the algorithm that matches the JavaScript-based implementation.",
           "enum": [
             "legacy"
           ],
           "type": "string"
         },
         {
-          "description": "Use Rust-based and Javascript-based implementations side by side, logging warnings if the implementations disagree.",
+          "description": "Use a new algorithm that includes input object forms, normalized aliases and variable names, and removes some edge cases from the JS implementation that affected normalization.",
           "enum": [
-            "both"
+            "enhanced"
           ],
           "type": "string"
         }
@@ -475,6 +493,35 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "CacheAttributes": {
+      "additionalProperties": false,
+      "properties": {
+        "entity.type": {
+          "default": null,
+          "description": "Entity type",
+          "nullable": true,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "CacheInstrumentsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "apollo.router.operations.entity.cache": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector"
+        }
+      },
+      "type": "object"
+    },
+    "CacheKind": {
+      "enum": [
+        "hit",
+        "miss"
+      ],
+      "type": "string"
+    },
     "CallbackMode": {
       "additionalProperties": false,
       "description": "Using a callback url",
@@ -518,9 +565,21 @@ expression: "&schema"
       "description": "Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions. You probably don’t want this in production!",
       "properties": {
         "force_reload": {
+          "default": null,
           "description": "Force a hot reload of the Router (as if the schema or configuration had changed) at a regular time interval.",
           "nullable": true,
           "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "Client": {
+      "additionalProperties": false,
+      "properties": {
+        "experimental_http2": {
+          "$ref": "#/definitions/Http2Config",
+          "description": "#/definitions/Http2Config",
+          "nullable": true
         }
       },
       "type": "object"
@@ -533,11 +592,13 @@ expression: "&schema"
           "description": "#/definitions/UriEndpoint"
         },
         "password": {
+          "default": null,
           "description": "The optional password",
           "nullable": true,
           "type": "string"
         },
         "username": {
+          "default": null,
           "description": "The optional username",
           "nullable": true,
           "type": "string"
@@ -585,6 +646,143 @@ expression: "&schema"
           "description": "identity",
           "enum": [
             "identity"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "Condition_for_GraphQLSelector": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "A condition to check a selection against a value.",
+          "properties": {
+            "eq": {
+              "items": {
+                "$ref": "#/definitions/SelectorOrValue_for_GraphQLSelector",
+                "description": "#/definitions/SelectorOrValue_for_GraphQLSelector"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "eq"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The first selection must be greater than the second selection.",
+          "properties": {
+            "gt": {
+              "items": {
+                "$ref": "#/definitions/SelectorOrValue_for_GraphQLSelector",
+                "description": "#/definitions/SelectorOrValue_for_GraphQLSelector"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "gt"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The first selection must be less than the second selection.",
+          "properties": {
+            "lt": {
+              "items": {
+                "$ref": "#/definitions/SelectorOrValue_for_GraphQLSelector",
+                "description": "#/definitions/SelectorOrValue_for_GraphQLSelector"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "lt"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A condition to check a selection against a selector.",
+          "properties": {
+            "exists": {
+              "$ref": "#/definitions/GraphQLSelector",
+              "description": "#/definitions/GraphQLSelector"
+            }
+          },
+          "required": [
+            "exists"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "All sub-conditions must be true.",
+          "properties": {
+            "all": {
+              "items": {
+                "$ref": "#/definitions/Condition_for_GraphQLSelector",
+                "description": "#/definitions/Condition_for_GraphQLSelector"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "all"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "At least one sub-conditions must be true.",
+          "properties": {
+            "any": {
+              "items": {
+                "$ref": "#/definitions/Condition_for_GraphQLSelector",
+                "description": "#/definitions/Condition_for_GraphQLSelector"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "any"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The sub-condition must not be true",
+          "properties": {
+            "not": {
+              "$ref": "#/definitions/Condition_for_GraphQLSelector",
+              "description": "#/definitions/Condition_for_GraphQLSelector"
+            }
+          },
+          "required": [
+            "not"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Static true condition",
+          "enum": [
+            "true"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Static false condition",
+          "enum": [
+            "false"
           ],
           "type": "string"
         }
@@ -1024,8 +1222,8 @@ expression: "&schema"
           "nullable": true
         },
         "subgraph": {
-          "$ref": "#/definitions/Config3",
-          "description": "#/definitions/Config3",
+          "$ref": "#/definitions/Config4",
+          "description": "#/definitions/Config4",
           "nullable": true
         }
       },
@@ -1050,6 +1248,11 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Configures the externalization plugin",
       "properties": {
+        "client": {
+          "$ref": "#/definitions/Client",
+          "description": "#/definitions/Client",
+          "nullable": true
+        },
         "execution": {
           "$ref": "#/definitions/ExecutionStage",
           "description": "#/definitions/ExecutionStage"
@@ -1118,8 +1321,8 @@ expression: "&schema"
       "description": "Telemetry configuration",
       "properties": {
         "apollo": {
-          "$ref": "#/definitions/Config8",
-          "description": "#/definitions/Config8"
+          "$ref": "#/definitions/Config9",
+          "description": "#/definitions/Config9"
         },
         "exporters": {
           "$ref": "#/definitions/Exporters",
@@ -1133,11 +1336,100 @@ expression: "&schema"
       "type": "object"
     },
     "Config": {
-      "description": "This is a broken plugin for testing purposes only.",
+      "additionalProperties": false,
+      "description": "Configuration for operation limits, parser limits, HTTP limits, etc.",
       "properties": {
-        "enabled": {
-          "description": "Enable the broken plugin.",
+        "http_max_request_bytes": {
+          "default": 2000000,
+          "description": "Limit the size of incoming HTTP requests read from the network, to protect against running out of memory. Default: 2000000 (2 MB)",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "max_aliases": {
+          "default": null,
+          "description": "If set, requests with operations with more aliases than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_ALIASES_LIMIT\"}`",
+          "format": "uint32",
+          "minimum": 0.0,
+          "nullable": true,
+          "type": "integer"
+        },
+        "max_depth": {
+          "default": null,
+          "description": "If set, requests with operations deeper than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_DEPTH_LIMIT\"}`\n\nCounts depth of an operation, looking at its selection sets,˛ including fields in fragments and inline fragments. The following example has a depth of 3.\n\n```graphql query getProduct { book { # 1 ...bookDetails } }\n\nfragment bookDetails on Book { details { # 2 ... on ProductDetailsBook { country # 3 } } } ```",
+          "format": "uint32",
+          "minimum": 0.0,
+          "nullable": true,
+          "type": "integer"
+        },
+        "max_height": {
+          "default": null,
+          "description": "If set, requests with operations higher than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_DEPTH_LIMIT\"}`\n\nHeight is based on simple merging of fields using the same name or alias, but only within the same selection set. For example `name` here is only counted once and the query has height 3, not 4:\n\n```graphql query { name { first } name { last } } ```\n\nThis may change in a future version of Apollo Router to do [full field merging across fragments][merging] instead.\n\n[merging]: https://spec.graphql.org/October2021/#sec-Field-Selection-Merging]",
+          "format": "uint32",
+          "minimum": 0.0,
+          "nullable": true,
+          "type": "integer"
+        },
+        "max_root_fields": {
+          "default": null,
+          "description": "If set, requests with operations with more root fields than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_ROOT_FIELDS_LIMIT\"}`\n\nThis limit counts only the top level fields in a selection set, including fragments and inline fragments.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "nullable": true,
+          "type": "integer"
+        },
+        "parser_max_recursion": {
+          "default": 500,
+          "description": "Limit recursion in the GraphQL parser to protect against stack overflow. default: 500",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "parser_max_tokens": {
+          "default": 15000,
+          "description": "Limit the number of tokens the GraphQL parser processes before aborting.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "warn_only": {
+          "default": false,
+          "description": "If set to true (which is the default is dev mode), requests that exceed a `max_*` limit are *not* rejected. Instead they are executed normally, and a warning is logged.",
           "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "Config10": {
+      "additionalProperties": false,
+      "properties": {
+        "batch_processor": {
+          "$ref": "#/definitions/BatchProcessorConfig",
+          "description": "#/definitions/BatchProcessorConfig"
+        },
+        "enabled": {
+          "description": "Enable otlp",
+          "type": "boolean"
+        },
+        "endpoint": {
+          "$ref": "#/definitions/UriEndpoint",
+          "description": "#/definitions/UriEndpoint"
+        },
+        "grpc": {
+          "$ref": "#/definitions/GrpcExporter",
+          "description": "#/definitions/GrpcExporter"
+        },
+        "http": {
+          "$ref": "#/definitions/HttpExporter",
+          "description": "#/definitions/HttpExporter"
+        },
+        "protocol": {
+          "$ref": "#/definitions/Protocol",
+          "description": "#/definitions/Protocol"
+        },
+        "temporality": {
+          "$ref": "#/definitions/Temporality",
+          "description": "#/definitions/Temporality"
         }
       },
       "required": [
@@ -1145,7 +1437,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config10": {
+    "Config11": {
       "additionalProperties": false,
       "description": "Prometheus configuration",
       "properties": {
@@ -1166,7 +1458,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Config11": {
+    "Config12": {
       "anyOf": [
         {
           "additionalProperties": false,
@@ -1212,7 +1504,7 @@ expression: "&schema"
         }
       ]
     },
-    "Config12": {
+    "Config13": {
       "additionalProperties": false,
       "properties": {
         "batch_processor": {
@@ -1233,7 +1525,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config13": {
+    "Config14": {
       "additionalProperties": false,
       "properties": {
         "batch_processor": {
@@ -1241,7 +1533,7 @@ expression: "&schema"
           "description": "#/definitions/BatchProcessorConfig"
         },
         "enable_span_mapping": {
-          "default": false,
+          "default": true,
           "description": "Enable datadog span mapping for span name and resource name.",
           "type": "boolean"
         },
@@ -1252,6 +1544,37 @@ expression: "&schema"
         "endpoint": {
           "$ref": "#/definitions/UriEndpoint",
           "description": "#/definitions/UriEndpoint"
+        },
+        "fixed_span_names": {
+          "default": true,
+          "description": "Fixes the span names, this means that the APM view will show the original span names in the operation dropdown.",
+          "type": "boolean"
+        },
+        "resource_mapping": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Custom mapping to be used as the resource field in spans, defaults to: router -> http.route supergraph -> graphql.operation.name query_planning -> graphql.operation.name subgraph -> subgraph.name subgraph_request -> subgraph.name http_request -> http.route",
+          "type": "object"
+        },
+        "span_metrics": {
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "default": {
+            "execution": true,
+            "http_request": true,
+            "parse_query": true,
+            "query_planning": true,
+            "request": true,
+            "router": true,
+            "subgraph": true,
+            "subgraph_request": true,
+            "supergraph": true
+          },
+          "description": "Which spans will be eligible for span stats to be collected for viewing in the APM view. Defaults to true for `request`, `router`, `query_parsing`, `supergraph`, `execution`, `query_planning`, `subgraph`, `subgraph_request` and `http_request`.",
+          "type": "object"
         }
       },
       "required": [
@@ -1259,7 +1582,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config14": {
+    "Config15": {
       "additionalProperties": false,
       "description": "Configuration for the experimental traffic shaping plugin",
       "properties": {
@@ -1269,6 +1592,7 @@ expression: "&schema"
           "nullable": true
         },
         "deduplicate_variables": {
+          "default": null,
           "description": "DEPRECATED, now always enabled: Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)",
           "nullable": true,
           "type": "boolean"
@@ -1290,6 +1614,19 @@ expression: "&schema"
       "type": "object"
     },
     "Config2": {
+      "description": "This is a broken plugin for testing purposes only.",
+      "properties": {
+        "enabled": {
+          "description": "Enable the broken plugin.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "Config3": {
       "description": "Restricted plugin (for testing purposes only)",
       "properties": {
         "enabled": {
@@ -1302,7 +1639,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config3": {
+    "Config4": {
       "additionalProperties": false,
       "description": "Configure subgraph authentication",
       "properties": {
@@ -1322,7 +1659,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Config4": {
+    "Config5": {
       "additionalProperties": false,
       "description": "Configuration for header propagation",
       "properties": {
@@ -1342,7 +1679,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Config5": {
+    "Config6": {
       "additionalProperties": false,
       "description": "Configuration for exposing errors that originate from subgraphs",
       "properties": {
@@ -1362,42 +1699,39 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Config6": {
+    "Config7": {
       "additionalProperties": false,
       "description": "Configuration for entity caching",
       "properties": {
         "enabled": {
-          "description": "activates caching for all subgraphs, unless overriden in subgraph specific configuration",
-          "nullable": true,
+          "default": false,
+          "description": "Enable or disable the entity caching feature",
           "type": "boolean"
+        },
+        "invalidation": {
+          "$ref": "#/definitions/InvalidationEndpointConfig",
+          "description": "#/definitions/InvalidationEndpointConfig",
+          "nullable": true
         },
         "metrics": {
           "$ref": "#/definitions/Metrics",
           "description": "#/definitions/Metrics"
         },
-        "redis": {
-          "$ref": "#/definitions/RedisCache",
-          "description": "#/definitions/RedisCache"
-        },
-        "subgraphs": {
-          "additionalProperties": {
-            "$ref": "#/definitions/Subgraph",
-            "description": "#/definitions/Subgraph"
-          },
-          "description": "Per subgraph configuration",
-          "type": "object"
+        "subgraph": {
+          "$ref": "#/definitions/SubgraphConfiguration_for_Subgraph",
+          "description": "#/definitions/SubgraphConfiguration_for_Subgraph"
         }
       },
       "required": [
-        "redis"
+        "subgraph"
       ],
       "type": "object"
     },
-    "Config7": {
+    "Config8": {
       "description": "Configuration for the progressive override plugin",
       "type": "object"
     },
-    "Config8": {
+    "Config9": {
       "additionalProperties": false,
       "properties": {
         "batch_processor": {
@@ -1432,10 +1766,31 @@ expression: "&schema"
           "$ref": "#/definitions/ErrorsConfiguration",
           "description": "#/definitions/ErrorsConfiguration"
         },
+        "experimental_apollo_metrics_reference_mode": {
+          "$ref": "#/definitions/ApolloMetricsReferenceMode",
+          "description": "#/definitions/ApolloMetricsReferenceMode"
+        },
+        "experimental_apollo_signature_normalization_algorithm": {
+          "$ref": "#/definitions/ApolloSignatureNormalizationAlgorithm",
+          "description": "#/definitions/ApolloSignatureNormalizationAlgorithm"
+        },
+        "experimental_local_field_metrics": {
+          "default": false,
+          "description": "Enable field metrics that are generated without FTV1 to be sent to Apollo Studio.",
+          "type": "boolean"
+        },
         "experimental_otlp_endpoint": {
           "default": "https://usage-reporting.api.apollographql.com/",
           "description": "The Apollo Studio endpoint for exporting traces and metrics.",
           "type": "string"
+        },
+        "experimental_otlp_tracing_protocol": {
+          "$ref": "#/definitions/Protocol",
+          "description": "#/definitions/Protocol"
+        },
+        "experimental_otlp_tracing_sampler": {
+          "$ref": "#/definitions/SamplerOption",
+          "description": "#/definitions/SamplerOption"
         },
         "field_level_instrumentation_sampler": {
           "$ref": "#/definitions/SamplerOption",
@@ -1450,43 +1805,6 @@ expression: "&schema"
           "description": "#/definitions/ForwardValues"
         }
       },
-      "type": "object"
-    },
-    "Config9": {
-      "additionalProperties": false,
-      "properties": {
-        "batch_processor": {
-          "$ref": "#/definitions/BatchProcessorConfig",
-          "description": "#/definitions/BatchProcessorConfig"
-        },
-        "enabled": {
-          "description": "Enable otlp",
-          "type": "boolean"
-        },
-        "endpoint": {
-          "$ref": "#/definitions/UriEndpoint",
-          "description": "#/definitions/UriEndpoint"
-        },
-        "grpc": {
-          "$ref": "#/definitions/GrpcExporter",
-          "description": "#/definitions/GrpcExporter"
-        },
-        "http": {
-          "$ref": "#/definitions/HttpExporter",
-          "description": "#/definitions/HttpExporter"
-        },
-        "protocol": {
-          "$ref": "#/definitions/Protocol",
-          "description": "#/definitions/Protocol"
-        },
-        "temporality": {
-          "$ref": "#/definitions/Temporality",
-          "description": "#/definitions/Temporality"
-        }
-      },
-      "required": [
-        "enabled"
-      ],
       "type": "object"
     },
     "ContextForward": {
@@ -1536,6 +1854,7 @@ expression: "&schema"
           "type": "array"
         },
         "expose_headers": {
+          "default": null,
           "description": "Which response headers should be made available to scripts running in the browser, in response to a cross-origin request.",
           "items": {
             "type": "string"
@@ -1544,6 +1863,7 @@ expression: "&schema"
           "type": "array"
         },
         "match_origins": {
+          "default": null,
           "description": "`Regex`es you want to match the origins against to determine if they're allowed. Defaults to an empty list. Note that `origins` will be evaluated before `match_origins`",
           "items": {
             "type": "string"
@@ -1552,6 +1872,7 @@ expression: "&schema"
           "type": "array"
         },
         "max_age": {
+          "default": null,
           "description": "The `Access-Control-Max-Age` header value in time units",
           "type": "string"
         },
@@ -1758,6 +2079,52 @@ expression: "&schema"
         }
       ]
     },
+    "DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attributes": {
+              "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector",
+              "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector"
+            }
+          },
+          "required": [
+            "attributes"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attributes": {
+              "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector",
+              "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector"
+            }
+          },
+          "required": [
+            "attributes"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "DemandControlConfig": {
       "additionalProperties": false,
       "description": "Demand control configuration",
@@ -1812,11 +2179,33 @@ expression: "&schema"
       ],
       "type": "string"
     },
+    "DisplayTraceIdFormat": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/TraceIdFormat",
+          "description": "#/definitions/TraceIdFormat"
+        },
+        {
+          "type": "boolean"
+        }
+      ]
+    },
     "Enabled": {
       "enum": [
         "enabled"
       ],
       "type": "string"
+    },
+    "EntityType": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/All",
+          "description": "#/definitions/All"
+        },
+        {
+          "type": "string"
+        }
+      ]
     },
     "ErrorConfig": {
       "properties": {
@@ -1873,6 +2262,17 @@ expression: "&schema"
         }
       ]
     },
+    "ErrorRepr": {
+      "oneOf": [
+        {
+          "description": "The error reason",
+          "enum": [
+            "reason"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "ErrorsConfiguration": {
       "additionalProperties": false,
       "properties": {
@@ -1895,6 +2295,7 @@ expression: "&schema"
           "type": "array"
         },
         "include_messages": {
+          "default": null,
           "description": "Will include the error message in a \"message\" attribute",
           "nullable": true,
           "type": "boolean"
@@ -1925,6 +2326,13 @@ expression: "&schema"
           "description": "Log the event on response",
           "enum": [
             "response"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Log the event on every chunks in the response",
+          "enum": [
+            "event_response"
           ],
           "type": "string"
         },
@@ -2029,6 +2437,38 @@ expression: "&schema"
         "on"
       ],
       "type": "object"
+    },
+    "Event_for_SupergraphSelector": {
+      "oneOf": [
+        {
+          "description": "For every supergraph response payload (including subscription events and defer events)",
+          "enum": [
+            "event_duration"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "For every supergraph response payload (including subscription events and defer events)",
+          "enum": [
+            "event_unit"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "For every supergraph response payload (including subscription events and defer events)",
+          "properties": {
+            "event_custom": {
+              "$ref": "#/definitions/SupergraphSelector",
+              "description": "#/definitions/SupergraphSelector"
+            }
+          },
+          "required": [
+            "event_custom"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "Events": {
       "additionalProperties": false,
@@ -2173,6 +2613,35 @@ expression: "&schema"
         }
       },
       "type": "object"
+    },
+    "FieldName": {
+      "oneOf": [
+        {
+          "description": "The GraphQL field name",
+          "enum": [
+            "string"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "FieldType": {
+      "oneOf": [
+        {
+          "description": "The GraphQL field name",
+          "enum": [
+            "name"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The GraphQL field type - `bool` - `number` - `scalar` - `object` - `list`",
+          "enum": [
+            "type"
+          ],
+          "type": "string"
+        }
+      ]
     },
     "FileUploadProtocols": {
       "additionalProperties": false,
@@ -2340,25 +2809,182 @@ expression: "&schema"
         }
       ]
     },
+    "GraphQLAttributes": {
+      "additionalProperties": false,
+      "properties": {
+        "graphql.field.name": {
+          "default": null,
+          "description": "The GraphQL field name",
+          "nullable": true,
+          "type": "boolean"
+        },
+        "graphql.field.type": {
+          "default": null,
+          "description": "The GraphQL field type",
+          "nullable": true,
+          "type": "boolean"
+        },
+        "graphql.list.length": {
+          "default": null,
+          "description": "If the field is a list, the length of the list",
+          "nullable": true,
+          "type": "boolean"
+        },
+        "graphql.operation.name": {
+          "default": null,
+          "description": "The GraphQL operation name",
+          "nullable": true,
+          "type": "boolean"
+        },
+        "graphql.type.name": {
+          "default": null,
+          "description": "The GraphQL type name",
+          "nullable": true,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "GraphQLInstrumentsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "field.execution": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector"
+        },
+        "list.length": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector"
+        }
+      },
+      "type": "object"
+    },
+    "GraphQLSelector": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "description": "If the field is a list, the length of the list",
+          "properties": {
+            "list_length": {
+              "$ref": "#/definitions/ListLength",
+              "description": "#/definitions/ListLength"
+            }
+          },
+          "required": [
+            "list_length"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The GraphQL field name",
+          "properties": {
+            "field_name": {
+              "$ref": "#/definitions/FieldName",
+              "description": "#/definitions/FieldName"
+            }
+          },
+          "required": [
+            "field_name"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The GraphQL field type",
+          "properties": {
+            "field_type": {
+              "$ref": "#/definitions/FieldType",
+              "description": "#/definitions/FieldType"
+            }
+          },
+          "required": [
+            "field_type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The GraphQL type name",
+          "properties": {
+            "type_name": {
+              "$ref": "#/definitions/TypeName",
+              "description": "#/definitions/TypeName"
+            }
+          },
+          "required": [
+            "type_name"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "default": {
+              "description": "Optional default value.",
+              "nullable": true,
+              "type": "string"
+            },
+            "operation_name": {
+              "$ref": "#/definitions/OperationName",
+              "description": "#/definitions/OperationName"
+            }
+          },
+          "required": [
+            "operation_name"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "static": {
+              "$ref": "#/definitions/AttributeValue",
+              "description": "#/definitions/AttributeValue"
+            }
+          },
+          "required": [
+            "static"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "GraphQLValue": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/StandardUnit",
+          "description": "#/definitions/StandardUnit"
+        },
+        {
+          "$ref": "#/definitions/GraphQLSelector",
+          "description": "#/definitions/GraphQLSelector"
+        }
+      ]
+    },
     "GrpcExporter": {
       "additionalProperties": false,
       "properties": {
         "ca": {
+          "default": null,
           "description": "The optional certificate authority (CA) certificate to be used in TLS configuration.",
           "nullable": true,
           "type": "string"
         },
         "cert": {
+          "default": null,
           "description": "The optional cert for tls config",
           "nullable": true,
           "type": "string"
         },
         "domain_name": {
+          "default": null,
           "description": "The optional domain name for tls config. Note that domain name is will be defaulted to match the endpoint is not explicitly set.",
           "nullable": true,
           "type": "string"
         },
         "key": {
+          "default": null,
           "description": "The optional private key file for TLS configuration.",
           "nullable": true,
           "type": "string"
@@ -2560,6 +3186,7 @@ expression: "&schema"
           "type": "boolean"
         },
         "graph_ref": {
+          "default": null,
           "description": "Graph reference This will allow you to redirect from the Apollo Router landing page back to Apollo Studio Explorer",
           "nullable": true,
           "type": "string"
@@ -2738,43 +3365,79 @@ expression: "&schema"
         }
       ]
     },
-    "InstrumentValue_for_RouterSelector": {
-      "anyOf": [
-        {
-          "$ref": "#/definitions/Standard",
-          "description": "#/definitions/Standard"
+    "Instrument_for_CacheAttributes_and_SubgraphSelector_and_SubgraphValue": {
+      "additionalProperties": false,
+      "properties": {
+        "attributes": {
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector"
         },
-        {
-          "$ref": "#/definitions/RouterSelector",
-          "description": "#/definitions/RouterSelector"
-        }
-      ]
-    },
-    "InstrumentValue_for_SubgraphSelector": {
-      "anyOf": [
-        {
-          "$ref": "#/definitions/Standard",
-          "description": "#/definitions/Standard"
+        "condition": {
+          "$ref": "#/definitions/Condition_for_SubgraphSelector",
+          "description": "#/definitions/Condition_for_SubgraphSelector"
         },
-        {
-          "$ref": "#/definitions/SubgraphSelector",
-          "description": "#/definitions/SubgraphSelector"
-        }
-      ]
-    },
-    "InstrumentValue_for_SupergraphSelector": {
-      "anyOf": [
-        {
-          "$ref": "#/definitions/Standard",
-          "description": "#/definitions/Standard"
+        "description": {
+          "description": "The description of the instrument.",
+          "type": "string"
         },
-        {
-          "$ref": "#/definitions/SupergraphSelector",
-          "description": "#/definitions/SupergraphSelector"
+        "type": {
+          "$ref": "#/definitions/InstrumentType",
+          "description": "#/definitions/InstrumentType"
+        },
+        "unit": {
+          "description": "The units of the instrument, e.g. \"ms\", \"bytes\", \"requests\".",
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/definitions/SubgraphValue",
+          "description": "#/definitions/SubgraphValue"
         }
-      ]
+      },
+      "required": [
+        "description",
+        "type",
+        "unit",
+        "value"
+      ],
+      "type": "object"
     },
-    "Instrument_for_RouterAttributes_and_RouterSelector": {
+    "Instrument_for_GraphQLAttributes_and_GraphQLSelector_and_GraphQLValue": {
+      "additionalProperties": false,
+      "properties": {
+        "attributes": {
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector"
+        },
+        "condition": {
+          "$ref": "#/definitions/Condition_for_GraphQLSelector",
+          "description": "#/definitions/Condition_for_GraphQLSelector"
+        },
+        "description": {
+          "description": "The description of the instrument.",
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/definitions/InstrumentType",
+          "description": "#/definitions/InstrumentType"
+        },
+        "unit": {
+          "description": "The units of the instrument, e.g. \"ms\", \"bytes\", \"requests\".",
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/definitions/GraphQLValue",
+          "description": "#/definitions/GraphQLValue"
+        }
+      },
+      "required": [
+        "description",
+        "type",
+        "unit",
+        "value"
+      ],
+      "type": "object"
+    },
+    "Instrument_for_RouterAttributes_and_RouterSelector_and_RouterValue": {
       "additionalProperties": false,
       "properties": {
         "attributes": {
@@ -2798,8 +3461,8 @@ expression: "&schema"
           "type": "string"
         },
         "value": {
-          "$ref": "#/definitions/InstrumentValue_for_RouterSelector",
-          "description": "#/definitions/InstrumentValue_for_RouterSelector"
+          "$ref": "#/definitions/RouterValue",
+          "description": "#/definitions/RouterValue"
         }
       },
       "required": [
@@ -2810,7 +3473,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Instrument_for_SubgraphAttributes_and_SubgraphSelector": {
+    "Instrument_for_SubgraphAttributes_and_SubgraphSelector_and_SubgraphValue": {
       "additionalProperties": false,
       "properties": {
         "attributes": {
@@ -2834,8 +3497,8 @@ expression: "&schema"
           "type": "string"
         },
         "value": {
-          "$ref": "#/definitions/InstrumentValue_for_SubgraphSelector",
-          "description": "#/definitions/InstrumentValue_for_SubgraphSelector"
+          "$ref": "#/definitions/SubgraphValue",
+          "description": "#/definitions/SubgraphValue"
         }
       },
       "required": [
@@ -2846,7 +3509,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Instrument_for_SupergraphAttributes_and_SupergraphSelector": {
+    "Instrument_for_SupergraphAttributes_and_SupergraphSelector_and_SupergraphValue": {
       "additionalProperties": false,
       "properties": {
         "attributes": {
@@ -2870,8 +3533,8 @@ expression: "&schema"
           "type": "string"
         },
         "value": {
-          "$ref": "#/definitions/InstrumentValue_for_SupergraphSelector",
-          "description": "#/definitions/InstrumentValue_for_SupergraphSelector"
+          "$ref": "#/definitions/SupergraphValue",
+          "description": "#/definitions/SupergraphValue"
         }
       },
       "required": [
@@ -2904,23 +3567,49 @@ expression: "&schema"
     "InstrumentsConfig": {
       "additionalProperties": false,
       "properties": {
+        "cache": {
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::CacheInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes,_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector,_apollo_router::plugins::telemetry::config_new::selectors::SubgraphValue>",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::CacheInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes, apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector, apollo_router::plugins::telemetry::config_new::selectors::SubgraphValue>"
+        },
         "default_requirement_level": {
           "$ref": "#/definitions/DefaultAttributeRequirementLevel",
           "description": "#/definitions/DefaultAttributeRequirementLevel"
         },
+        "graphql": {
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::GraphQLInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes,_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector,_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLValue>",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::GraphQLInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes, apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector, apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLValue>"
+        },
         "router": {
-          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::RouterInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes,_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector>",
-          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::RouterInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes, apollo_router::plugins::telemetry::config_new::selectors::RouterSelector>"
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::RouterInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes,_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector,_apollo_router::plugins::telemetry::config_new::selectors::RouterValue>",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::RouterInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes, apollo_router::plugins::telemetry::config_new::selectors::RouterSelector, apollo_router::plugins::telemetry::config_new::selectors::RouterValue>"
         },
         "subgraph": {
-          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::SubgraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes,_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector>",
-          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::SubgraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes, apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector>"
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::SubgraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes,_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector,_apollo_router::plugins::telemetry::config_new::selectors::SubgraphValue>",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::SubgraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes, apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector, apollo_router::plugins::telemetry::config_new::selectors::SubgraphValue>"
         },
         "supergraph": {
-          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::SupergraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes,_apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector>",
-          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::SupergraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes, apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector>"
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::SupergraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes,_apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector,_apollo_router::plugins::telemetry::config_new::selectors::SupergraphValue>",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::SupergraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes, apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector, apollo_router::plugins::telemetry::config_new::selectors::SupergraphValue>"
         }
       },
+      "type": "object"
+    },
+    "InvalidationEndpointConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "listen": {
+          "$ref": "#/definitions/ListenAddr",
+          "description": "#/definitions/ListenAddr"
+        },
+        "path": {
+          "description": "Specify on which path you want to listen for invalidation endpoint.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "listen",
+        "path"
+      ],
       "type": "object"
     },
     "JWTConf": {
@@ -2967,6 +3656,7 @@ expression: "&schema"
       "additionalProperties": false,
       "properties": {
         "algorithms": {
+          "default": null,
           "description": "List of accepted algorithms. Possible values are `HS256`, `HS384`, `HS512`, `ES256`, `ES384`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `EdDSA`",
           "items": {
             "type": "string"
@@ -3005,66 +3695,16 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Limits": {
-      "additionalProperties": false,
-      "description": "Configuration for operation limits, parser limits, HTTP limits, etc.",
-      "properties": {
-        "http_max_request_bytes": {
-          "default": 2000000,
-          "description": "Limit the size of incoming HTTP requests read from the network, to protect against running out of memory. Default: 2000000 (2 MB)",
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
-        },
-        "max_aliases": {
-          "description": "If set, requests with operations with more aliases than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_ALIASES_LIMIT\"}`",
-          "format": "uint32",
-          "minimum": 0.0,
-          "nullable": true,
-          "type": "integer"
-        },
-        "max_depth": {
-          "description": "If set, requests with operations deeper than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_DEPTH_LIMIT\"}`\n\nCounts depth of an operation, looking at its selection sets, including fields in fragments and inline fragments. The following example has a depth of 3.\n\n```graphql query getProduct { book { # 1 ...bookDetails } }\n\nfragment bookDetails on Book { details { # 2 ... on ProductDetailsBook { country # 3 } } } ```",
-          "format": "uint32",
-          "minimum": 0.0,
-          "nullable": true,
-          "type": "integer"
-        },
-        "max_height": {
-          "description": "If set, requests with operations higher than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_DEPTH_LIMIT\"}`\n\nHeight is based on simple merging of fields using the same name or alias, but only within the same selection set. For example `name` here is only counted once and the query has height 3, not 4:\n\n```graphql query { name { first } name { last } } ```\n\nThis may change in a future version of Apollo Router to do [full field merging across fragments][merging] instead.\n\n[merging]: https://spec.graphql.org/October2021/#sec-Field-Selection-Merging]",
-          "format": "uint32",
-          "minimum": 0.0,
-          "nullable": true,
-          "type": "integer"
-        },
-        "max_root_fields": {
-          "description": "If set, requests with operations with more root fields than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_ROOT_FIELDS_LIMIT\"}`\n\nThis limit counts only the top level fields in a selection set, including fragments and inline fragments.",
-          "format": "uint32",
-          "minimum": 0.0,
-          "nullable": true,
-          "type": "integer"
-        },
-        "parser_max_recursion": {
-          "default": 500,
-          "description": "Limit recursion in the GraphQL parser to protect against stack overflow. default: 500",
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
-        },
-        "parser_max_tokens": {
-          "default": 15000,
-          "description": "Limit the number of tokens the GraphQL parser processes before aborting.",
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
-        },
-        "warn_only": {
-          "default": false,
-          "description": "If set to true (which is the default is dev mode), requests that exceed a `max_*` limit are *not* rejected. Instead they are executed normally, and a warning is logged.",
-          "type": "boolean"
+    "ListLength": {
+      "oneOf": [
+        {
+          "description": "The length of the list",
+          "enum": [
+            "value"
+          ],
+          "type": "string"
         }
-      },
-      "type": "object"
+      ]
     },
     "ListenAddr": {
       "anyOf": [
@@ -3115,11 +3755,13 @@ expression: "&schema"
           "type": "object"
         },
         "service_name": {
+          "default": null,
           "description": "Set a service.name resource in your metrics",
           "nullable": true,
           "type": "string"
         },
         "service_namespace": {
+          "default": null,
           "description": "Set a service.namespace attribute in your metrics",
           "nullable": true,
           "type": "string"
@@ -3154,6 +3796,13 @@ expression: "&schema"
             "histogram"
           ],
           "type": "object"
+        },
+        {
+          "description": "Simply drop the metrics matching this view",
+          "enum": [
+            "drop"
+          ],
+          "type": "string"
         }
       ]
     },
@@ -3225,12 +3874,12 @@ expression: "&schema"
           "description": "#/definitions/MetricsCommon"
         },
         "otlp": {
-          "$ref": "#/definitions/Config9",
-          "description": "#/definitions/Config9"
-        },
-        "prometheus": {
           "$ref": "#/definitions/Config10",
           "description": "#/definitions/Config10"
+        },
+        "prometheus": {
+          "$ref": "#/definitions/Config11",
+          "description": "#/definitions/Config11"
         }
       },
       "type": "object"
@@ -3289,11 +3938,13 @@ expression: "&schema"
           "type": "object"
         },
         "service_name": {
+          "default": null,
           "description": "Set a service.name resource in your metrics",
           "nullable": true,
           "type": "string"
         },
         "service_namespace": {
+          "default": null,
           "description": "Set a service.namespace attribute in your metrics",
           "nullable": true,
           "type": "string"
@@ -3450,6 +4101,20 @@ expression: "&schema"
           "description": "Activates Persisted Queries (disabled by default)",
           "type": "boolean"
         },
+        "experimental_local_manifests": {
+          "default": null,
+          "description": "Enables using a local copy of the persisted query manifest to safelist operations",
+          "items": {
+            "type": "string"
+          },
+          "nullable": true,
+          "type": "array"
+        },
+        "experimental_prewarm_query_plan_cache": {
+          "default": false,
+          "description": "Experimental feature to prewarm the query plan cache with persisted queries",
+          "type": "boolean"
+        },
         "log_unknown": {
           "default": false,
           "description": "Enabling this field configures the router to log any freeform GraphQL request that is not in the persisted query list",
@@ -3483,8 +4148,8 @@ expression: "&schema"
       "additionalProperties": false,
       "properties": {
         "experimental.broken": {
-          "$ref": "#/definitions/Config",
-          "description": "#/definitions/Config"
+          "$ref": "#/definitions/Config2",
+          "description": "#/definitions/Config2"
         },
         "experimental.expose_query_plan": {
           "$ref": "#/definitions/ExposeQueryPlanConfig",
@@ -3495,8 +4160,8 @@ expression: "&schema"
           "description": "#/definitions/RecordConfig"
         },
         "experimental.restricted": {
-          "$ref": "#/definitions/Config2",
-          "description": "#/definitions/Config2"
+          "$ref": "#/definitions/Config3",
+          "description": "#/definitions/Config3"
         },
         "test.always_fails_to_start": {
           "$ref": "#/definitions/Conf",
@@ -3607,6 +4272,34 @@ expression: "&schema"
             "string"
           ],
           "type": "string"
+        },
+        {
+          "description": "The query aliases.",
+          "enum": [
+            "aliases"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The query depth.",
+          "enum": [
+            "depth"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The query height.",
+          "enum": [
+            "height"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The query root fields.",
+          "enum": [
+            "root_fields"
+          ],
+          "type": "string"
         }
       ]
     },
@@ -3651,6 +4344,7 @@ expression: "&schema"
           "type": "boolean"
         },
         "timeout": {
+          "default": null,
           "description": "Redis request timeout (default: 2ms)",
           "nullable": true,
           "type": "string"
@@ -3692,7 +4386,7 @@ expression: "&schema"
       "description": "Query planner modes.",
       "oneOf": [
         {
-          "description": "Use the new Rust-based implementation.",
+          "description": "Use the new Rust-based implementation.\n\nRaises an error at Router startup if the the new planner does not support the schema (such as using legacy Apollo Federation 1)",
           "enum": [
             "new"
           ],
@@ -3706,9 +4400,16 @@ expression: "&schema"
           "type": "string"
         },
         {
-          "description": "Use Rust-based and Javascript-based implementations side by side, logging warnings if the implementations disagree.",
+          "description": "Use primarily the Javascript-based implementation, but also schedule background jobs to run the Rust implementation and compare results, logging warnings if the implementations disagree.\n\nRaises an error at Router startup if the the new planner does not support the schema (such as using legacy Apollo Federation 1)",
           "enum": [
             "both"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Use primarily the Javascript-based implementation, but also schedule on a best-effort basis background jobs to run the Rust implementation and compare results, logging warnings if the implementations disagree.\n\nFalls back to `legacy` with a warning if the the new planner does not support the schema (such as using legacy Apollo Federation 1)",
+          "enum": [
+            "both_best_effort"
           ],
           "type": "string"
         }
@@ -3727,6 +4428,7 @@ expression: "&schema"
           "description": "#/definitions/AvailableParallelism"
         },
         "experimental_paths_limit": {
+          "default": null,
           "description": "Before creating query plans, for each path of fields in the query we compute all the possible options to traverse that path via the subgraphs. Multiple options can arise because fields in the path can be provided by multiple subgraphs, and abstract types (i.e. unions and interfaces) returned by fields sometimes require the query planner to traverse through each constituent object type. The number of options generated in this computation can grow large if the schema or query are sufficiently complex, and that will increase the time spent planning.\n\nThis config allows specifying a per-path limit to the number of options considered. If any path's options exceeds this limit, query planning will abort and the operation will fail.\n\nThe default value is None, which specifies no limit.",
           "format": "uint32",
           "minimum": 0.0,
@@ -3734,6 +4436,7 @@ expression: "&schema"
           "type": "integer"
         },
         "experimental_plans_limit": {
+          "default": null,
           "description": "Sets a limit to the number of generated query plans. The planning process generates many different query plans as it explores the graph, and the list can grow large. By using this limit, we prevent that growth and still get a valid query plan, but it may not be the optimal one.\n\nThe default limit is set to 10000, but it may change in the future",
           "format": "uint32",
           "minimum": 0.0,
@@ -3745,7 +4448,13 @@ expression: "&schema"
           "description": "If cache warm up is configured, this will allow the router to keep a query plan created with the old schema, if it determines that the schema update does not affect the corresponding query",
           "type": "boolean"
         },
+        "legacy_introspection_caching": {
+          "default": true,
+          "description": "Activates introspection response caching Historically, the Router has executed introspection queries in the query planner, and cached their response in its cache because they were expensive. This will change soon as introspection will be removed from the query planner. In the meantime, since storing introspection responses can fill up the cache, this option can be used to deactivate it. Default: true",
+          "type": "boolean"
+        },
         "warmed_up_queries": {
+          "default": null,
           "description": "Warms up the cache on reloads by running the query plan over a list of the most used queries (from the in memory cache) Configures the number of queries warmed up. Defaults to 1/3 of the in memory cache",
           "format": "uint",
           "minimum": 0.0,
@@ -3845,6 +4554,7 @@ expression: "&schema"
           "type": "boolean"
         },
         "timeout": {
+          "default": null,
           "description": "Redis request timeout (default: 2ms)",
           "nullable": true,
           "type": "string"
@@ -3855,6 +4565,7 @@ expression: "&schema"
           "nullable": true
         },
         "ttl": {
+          "default": null,
           "description": "TTL for entries",
           "nullable": true,
           "type": "string"
@@ -3914,6 +4625,10 @@ expression: "&schema"
     "RequestPropagation": {
       "additionalProperties": false,
       "properties": {
+        "format": {
+          "$ref": "#/definitions/TraceIdFormat",
+          "description": "#/definitions/TraceIdFormat"
+        },
         "header_name": {
           "description": "Choose the header name to expose trace_id (default: apollo-trace-id)",
           "type": "string"
@@ -3965,6 +4680,7 @@ expression: "&schema"
           "type": "number"
         },
         "ttl": {
+          "default": null,
           "description": "how long a single deposit should be considered. Must be between 1 and 60 seconds, default value is 10 seconds",
           "type": "string"
         }
@@ -3987,117 +4703,140 @@ expression: "&schema"
       "description": "Common attributes for http server and client. See https://opentelemetry.io/docs/specs/semconv/http/http-spans/#common-attributes",
       "properties": {
         "baggage": {
+          "default": null,
           "description": "All key values from trace baggage.",
           "nullable": true,
           "type": "boolean"
         },
         "dd.trace_id": {
+          "default": null,
           "description": "The datadog trace ID. This can be output in logs and used to correlate traces in Datadog.",
           "nullable": true,
           "type": "boolean"
         },
         "error.type": {
-          "description": "Describes a class of error the operation ended with. Examples: * timeout * name_resolution_error * 500 Requirement level: Conditionally Required: If request has ended with an error.",
+          "default": null,
+          "description": "Describes a class of error the operation ended with. Examples:\n\n* timeout * name_resolution_error * 500\n\nRequirement level: Conditionally Required: If request has ended with an error.",
           "nullable": true,
           "type": "boolean"
         },
         "http.request.body.size": {
-          "description": "The size of the request payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the Content-Length header. For requests using transport encoding, this should be the compressed size. Examples: * 3495 Requirement level: Recommended",
+          "default": null,
+          "description": "The size of the request payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the Content-Length header. For requests using transport encoding, this should be the compressed size. Examples:\n\n* 3495\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "http.request.method": {
-          "description": "HTTP request method. Examples: * GET * POST * HEAD Requirement level: Required",
+          "default": null,
+          "description": "HTTP request method. Examples:\n\n* GET * POST * HEAD\n\nRequirement level: Required",
           "nullable": true,
           "type": "boolean"
         },
         "http.response.body.size": {
-          "description": "The size of the response payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the Content-Length header. For requests using transport encoding, this should be the compressed size. Examples: * 3495 Requirement level: Recommended",
+          "default": null,
+          "description": "The size of the response payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the Content-Length header. For requests using transport encoding, this should be the compressed size. Examples:\n\n* 3495\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "http.response.status_code": {
-          "description": "HTTP response status code. Examples: * 200 Requirement level: Conditionally Required: If and only if one was received/sent.",
+          "default": null,
+          "description": "HTTP response status code. Examples:\n\n* 200\n\nRequirement level: Conditionally Required: If and only if one was received/sent.",
           "nullable": true,
           "type": "boolean"
         },
         "http.route": {
-          "description": "The matched route (path template in the format used by the respective server framework). Examples: * /graphql Requirement level: Conditionally Required: If and only if it’s available",
+          "default": null,
+          "description": "The matched route (path template in the format used by the respective server framework). Examples:\n\n* /graphql\n\nRequirement level: Conditionally Required: If and only if it’s available",
           "nullable": true,
           "type": "boolean"
         },
         "network.local.address": {
-          "description": "Local socket address. Useful in case of a multi-IP host. Examples: * 10.1.2.80 * /tmp/my.sock Requirement level: Opt-In",
+          "default": null,
+          "description": "Local socket address. Useful in case of a multi-IP host. Examples:\n\n* 10.1.2.80 * /tmp/my.sock\n\nRequirement level: Opt-In",
           "nullable": true,
           "type": "boolean"
         },
         "network.local.port": {
-          "description": "Local socket port. Useful in case of a multi-port host. Examples: * 65123 Requirement level: Opt-In",
+          "default": null,
+          "description": "Local socket port. Useful in case of a multi-port host. Examples:\n\n* 65123\n\nRequirement level: Opt-In",
           "nullable": true,
           "type": "boolean"
         },
         "network.peer.address": {
-          "description": "Peer address of the network connection - IP address or Unix domain socket name. Examples: * 10.1.2.80 * /tmp/my.sock Requirement level: Recommended",
+          "default": null,
+          "description": "Peer address of the network connection - IP address or Unix domain socket name. Examples:\n\n* 10.1.2.80 * /tmp/my.sock\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "network.peer.port": {
-          "description": "Peer port number of the network connection. Examples: * 65123 Requirement level: Recommended",
+          "default": null,
+          "description": "Peer port number of the network connection. Examples:\n\n* 65123\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "network.protocol.name": {
-          "description": "OSI application layer or non-OSI equivalent. Examples: * http * spdy Requirement level: Recommended: if not default (http).",
+          "default": null,
+          "description": "OSI application layer or non-OSI equivalent. Examples:\n\n* http * spdy\n\nRequirement level: Recommended: if not default (http).",
           "nullable": true,
           "type": "boolean"
         },
         "network.protocol.version": {
-          "description": "Version of the protocol specified in network.protocol.name. Examples: * 1.0 * 1.1 * 2 * 3 Requirement level: Recommended",
+          "default": null,
+          "description": "Version of the protocol specified in network.protocol.name. Examples:\n\n* 1.0 * 1.1 * 2 * 3\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "network.transport": {
-          "description": "OSI transport layer. Examples: * tcp * udp Requirement level: Conditionally Required",
+          "default": null,
+          "description": "OSI transport layer. Examples:\n\n* tcp * udp\n\nRequirement level: Conditionally Required",
           "nullable": true,
           "type": "boolean"
         },
         "network.type": {
-          "description": "OSI network layer or non-OSI equivalent. Examples: * ipv4 * ipv6 Requirement level: Recommended",
+          "default": null,
+          "description": "OSI network layer or non-OSI equivalent. Examples:\n\n* ipv4 * ipv6\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "server.address": {
-          "description": "Name of the local HTTP server that received the request. Examples: * example.com * 10.1.2.80 * /tmp/my.sock Requirement level: Recommended",
+          "default": null,
+          "description": "Name of the local HTTP server that received the request. Examples:\n\n* example.com * 10.1.2.80 * /tmp/my.sock\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "server.port": {
-          "description": "Port of the local HTTP server that received the request. Examples: * 80 * 8080 * 443 Requirement level: Recommended",
+          "default": null,
+          "description": "Port of the local HTTP server that received the request. Examples:\n\n* 80 * 8080 * 443\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "trace_id": {
+          "default": null,
           "description": "The OpenTelemetry trace ID. This can be output in logs.",
           "nullable": true,
           "type": "boolean"
         },
         "url.path": {
-          "description": "The URI path component Examples: * /search Requirement level: Required",
+          "default": null,
+          "description": "The URI path component Examples:\n\n* /search\n\nRequirement level: Required",
           "nullable": true,
           "type": "boolean"
         },
         "url.query": {
-          "description": "The URI query component Examples: * q=OpenTelemetry Requirement level: Conditionally Required: If and only if one was received/sent.",
+          "default": null,
+          "description": "The URI query component Examples:\n\n* q=OpenTelemetry\n\nRequirement level: Conditionally Required: If and only if one was received/sent.",
           "nullable": true,
           "type": "boolean"
         },
         "url.scheme": {
-          "description": "The URI scheme component identifying the used protocol. Examples: * http * https Requirement level: Required",
+          "default": null,
+          "description": "The URI scheme component identifying the used protocol. Examples:\n\n* http * https\n\nRequirement level: Required",
           "nullable": true,
           "type": "boolean"
         },
         "user_agent.original": {
-          "description": "Value of the HTTP User-Agent header sent by the client. Examples: * CERN-LineMode/2.15 * libwww/2.17b3 Requirement level: Recommended",
+          "default": null,
+          "description": "Value of the HTTP User-Agent header sent by the client. Examples:\n\n* CERN-LineMode/2.15 * libwww/2.17b3\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         }
@@ -4121,16 +4860,16 @@ expression: "&schema"
       "additionalProperties": false,
       "properties": {
         "error": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_RouterSelector",
+          "description": "#/definitions/StandardEventConfig_for_RouterSelector"
         },
         "request": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_RouterSelector",
+          "description": "#/definitions/StandardEventConfig_for_RouterSelector"
         },
         "response": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_RouterSelector",
+          "description": "#/definitions/StandardEventConfig_for_RouterSelector"
         }
       },
       "type": "object"
@@ -4165,6 +4904,11 @@ expression: "&schema"
           "default": false,
           "description": "Send the body",
           "type": "boolean"
+        },
+        "condition": {
+          "$ref": "#/definitions/Condition_for_RouterSelector",
+          "description": "#/definitions/Condition_for_RouterSelector",
+          "nullable": true
         },
         "context": {
           "default": false,
@@ -4202,6 +4946,11 @@ expression: "&schema"
           "default": false,
           "description": "Send the body",
           "type": "boolean"
+        },
+        "condition": {
+          "$ref": "#/definitions/Condition_for_RouterSelector",
+          "description": "#/definitions/Condition_for_RouterSelector",
+          "nullable": true
         },
         "context": {
           "default": false,
@@ -4299,12 +5048,26 @@ expression: "&schema"
           "description": "The trace ID of the request.",
           "properties": {
             "trace_id": {
-              "$ref": "#/definitions/TraceIdFormat2",
-              "description": "#/definitions/TraceIdFormat2"
+              "$ref": "#/definitions/TraceIdFormat",
+              "description": "#/definitions/TraceIdFormat"
             }
           },
           "required": [
             "trace_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Apollo Studio operation id",
+          "properties": {
+            "studio_operation_id": {
+              "description": "Apollo Studio operation id",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "studio_operation_id"
           ],
           "type": "object"
         },
@@ -4324,6 +5087,25 @@ expression: "&schema"
           },
           "required": [
             "response_context"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The operation name from the query.",
+          "properties": {
+            "default": {
+              "description": "Optional default value.",
+              "nullable": true,
+              "type": "string"
+            },
+            "operation_name": {
+              "$ref": "#/definitions/OperationName",
+              "description": "#/definitions/OperationName"
+            }
+          },
+          "required": [
+            "operation_name"
           ],
           "type": "object"
         },
@@ -4366,14 +5148,15 @@ expression: "&schema"
           "type": "object"
         },
         {
+          "description": "Deprecated, should not be used anymore, use static field instead",
           "type": "string"
         },
         {
           "additionalProperties": false,
           "properties": {
             "static": {
-              "description": "A static string value",
-              "type": "string"
+              "$ref": "#/definitions/AttributeValue",
+              "description": "#/definitions/AttributeValue"
             }
           },
           "required": [
@@ -4393,6 +5176,19 @@ expression: "&schema"
             "on_graphql_error"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "error": {
+              "$ref": "#/definitions/ErrorRepr",
+              "description": "#/definitions/ErrorRepr"
+            }
+          },
+          "required": [
+            "error"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -4405,6 +5201,7 @@ expression: "&schema"
           "nullable": true
         },
         "timeout": {
+          "default": null,
           "description": "Enable timeout for incoming requests",
           "type": "string"
         }
@@ -4433,6 +5230,18 @@ expression: "&schema"
         }
       },
       "type": "object"
+    },
+    "RouterValue": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Standard",
+          "description": "#/definitions/Standard"
+        },
+        {
+          "$ref": "#/definitions/RouterSelector",
+          "description": "#/definitions/RouterSelector"
+        }
+      ]
     },
     "Sampler": {
       "oneOf": [
@@ -4476,6 +5285,18 @@ expression: "&schema"
         }
       },
       "type": "object"
+    },
+    "SelectorOrValue_for_GraphQLSelector": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/AttributeValue",
+          "description": "#/definitions/AttributeValue"
+        },
+        {
+          "$ref": "#/definitions/GraphQLSelector",
+          "description": "#/definitions/GraphQLSelector"
+        }
+      ]
     },
     "SelectorOrValue_for_RouterSelector": {
       "anyOf": [
@@ -4617,6 +5438,87 @@ expression: "&schema"
       ],
       "type": "string"
     },
+    "StandardEventConfig_for_RouterSelector": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/EventLevel",
+          "description": "#/definitions/EventLevel"
+        },
+        {
+          "properties": {
+            "condition": {
+              "$ref": "#/definitions/Condition_for_RouterSelector",
+              "description": "#/definitions/Condition_for_RouterSelector"
+            },
+            "level": {
+              "$ref": "#/definitions/EventLevel",
+              "description": "#/definitions/EventLevel"
+            }
+          },
+          "required": [
+            "condition",
+            "level"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "StandardEventConfig_for_SubgraphSelector": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/EventLevel",
+          "description": "#/definitions/EventLevel"
+        },
+        {
+          "properties": {
+            "condition": {
+              "$ref": "#/definitions/Condition_for_SubgraphSelector",
+              "description": "#/definitions/Condition_for_SubgraphSelector"
+            },
+            "level": {
+              "$ref": "#/definitions/EventLevel",
+              "description": "#/definitions/EventLevel"
+            }
+          },
+          "required": [
+            "condition",
+            "level"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "StandardEventConfig_for_SupergraphSelector": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/EventLevel",
+          "description": "#/definitions/EventLevel"
+        },
+        {
+          "properties": {
+            "condition": {
+              "$ref": "#/definitions/Condition_for_SupergraphSelector",
+              "description": "#/definitions/Condition_for_SupergraphSelector"
+            },
+            "level": {
+              "$ref": "#/definitions/EventLevel",
+              "description": "#/definitions/EventLevel"
+            }
+          },
+          "required": [
+            "condition",
+            "level"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "StandardUnit": {
+      "enum": [
+        "unit"
+      ],
+      "type": "string"
+    },
     "StdOut": {
       "additionalProperties": false,
       "properties": {
@@ -4709,14 +5611,25 @@ expression: "&schema"
       "description": "Per subgraph configuration for entity caching",
       "properties": {
         "enabled": {
+          "default": true,
           "description": "activates caching for this subgraph, overrides the global configuration",
-          "nullable": true,
           "type": "boolean"
         },
+        "invalidation": {
+          "$ref": "#/definitions/SubgraphInvalidationConfig",
+          "description": "#/definitions/SubgraphInvalidationConfig",
+          "nullable": true
+        },
         "private_id": {
+          "default": null,
           "description": "Context key used to separate cache sections per user",
           "nullable": true,
           "type": "string"
+        },
+        "redis": {
+          "$ref": "#/definitions/RedisCache",
+          "description": "#/definitions/RedisCache",
+          "nullable": true
         },
         "ttl": {
           "$ref": "#/definitions/Ttl",
@@ -4742,22 +5655,26 @@ expression: "&schema"
       "additionalProperties": false,
       "properties": {
         "subgraph.graphql.document": {
-          "description": "The GraphQL document being executed. Examples: * query findBookById { bookById(id: ?) { name } } Requirement level: Recommended",
+          "default": null,
+          "description": "The GraphQL document being executed. Examples:\n\n* `query findBookById { bookById(id: ?) { name } }`\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "subgraph.graphql.operation.name": {
-          "description": "The name of the operation being executed. Examples: * findBookById Requirement level: Recommended",
+          "default": null,
+          "description": "The name of the operation being executed. Examples:\n\n* findBookById\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "subgraph.graphql.operation.type": {
-          "description": "The type of the operation being executed. Examples: * query * subscription * mutation Requirement level: Recommended",
+          "default": null,
+          "description": "The type of the operation being executed. Examples:\n\n* query * subscription * mutation\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "subgraph.name": {
-          "description": "The name of the subgraph Examples: * products Requirement level: Required",
+          "default": null,
+          "description": "The name of the subgraph Examples:\n\n* products\n\nRequirement level: Required",
           "nullable": true,
           "type": "boolean"
         }
@@ -4794,6 +5711,25 @@ expression: "&schema"
           "additionalProperties": {
             "$ref": "#/definitions/CommonBatchingConfig",
             "description": "#/definitions/CommonBatchingConfig"
+          },
+          "default": {},
+          "description": "per subgraph options",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "SubgraphConfiguration_for_Subgraph": {
+      "description": "Configuration options pertaining to the subgraph server component.",
+      "properties": {
+        "all": {
+          "$ref": "#/definitions/Subgraph",
+          "description": "#/definitions/Subgraph"
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/Subgraph",
+            "description": "#/definitions/Subgraph"
           },
           "default": {},
           "description": "per subgraph options",
@@ -4862,16 +5798,16 @@ expression: "&schema"
       "additionalProperties": false,
       "properties": {
         "error": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SubgraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SubgraphSelector"
         },
         "request": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SubgraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SubgraphSelector"
         },
         "response": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SubgraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SubgraphSelector"
         }
       },
       "type": "object"
@@ -4890,6 +5826,22 @@ expression: "&schema"
         "http.client.response.body.size": {
           "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector",
           "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector"
+        }
+      },
+      "type": "object"
+    },
+    "SubgraphInvalidationConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Enable the invalidation",
+          "type": "boolean"
+        },
+        "shared_key": {
+          "default": "",
+          "description": "Shared key needed to request the invalidation endpoint",
+          "type": "string"
         }
       },
       "type": "object"
@@ -4914,6 +5866,17 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "SubgraphQuery": {
+      "oneOf": [
+        {
+          "description": "The raw query kind.",
+          "enum": [
+            "string"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "SubgraphRequestConf": {
       "additionalProperties": false,
       "description": "What information is passed to a subgraph request/response stage",
@@ -4922,6 +5885,11 @@ expression: "&schema"
           "default": false,
           "description": "Send the body",
           "type": "boolean"
+        },
+        "condition": {
+          "$ref": "#/definitions/Condition_for_SubgraphSelector",
+          "description": "#/definitions/Condition_for_SubgraphSelector",
+          "nullable": true
         },
         "context": {
           "default": false,
@@ -4959,6 +5927,11 @@ expression: "&schema"
           "default": false,
           "description": "Send the body",
           "type": "boolean"
+        },
+        "condition": {
+          "$ref": "#/definitions/Condition_for_SubgraphSelector",
+          "description": "#/definitions/Condition_for_SubgraphSelector",
+          "nullable": true
         },
         "context": {
           "default": false,
@@ -5019,14 +5992,27 @@ expression: "&schema"
         {
           "additionalProperties": false,
           "properties": {
+            "subgraph_name": {
+              "description": "The subgraph name",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "subgraph_name"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
             "default": {
               "description": "Optional default value.",
               "nullable": true,
               "type": "string"
             },
             "subgraph_query": {
-              "$ref": "#/definitions/Query",
-              "description": "#/definitions/Query"
+              "$ref": "#/definitions/SubgraphQuery",
+              "description": "#/definitions/SubgraphQuery"
             }
           },
           "required": [
@@ -5280,6 +6266,19 @@ expression: "&schema"
         {
           "additionalProperties": false,
           "properties": {
+            "subgraph_on_graphql_error": {
+              "description": "Boolean set to true if the response body contains graphql error",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "subgraph_on_graphql_error"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
             "baggage": {
               "description": "The name of the baggage item.",
               "type": "string"
@@ -5314,18 +6313,50 @@ expression: "&schema"
           "type": "object"
         },
         {
+          "description": "Deprecated, should not be used anymore, use static field instead",
           "type": "string"
         },
         {
           "additionalProperties": false,
           "properties": {
             "static": {
-              "description": "A static string value",
-              "type": "string"
+              "$ref": "#/definitions/AttributeValue",
+              "description": "#/definitions/AttributeValue"
             }
           },
           "required": [
             "static"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "error": {
+              "$ref": "#/definitions/ErrorRepr",
+              "description": "#/definitions/ErrorRepr"
+            }
+          },
+          "required": [
+            "error"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "cache": {
+              "$ref": "#/definitions/CacheKind",
+              "description": "#/definitions/CacheKind"
+            },
+            "entity_type": {
+              "$ref": "#/definitions/EntityType",
+              "description": "#/definitions/EntityType",
+              "nullable": true
+            }
+          },
+          "required": [
+            "cache"
           ],
           "type": "object"
         }
@@ -5361,6 +6392,7 @@ expression: "&schema"
           "nullable": true
         },
         "timeout": {
+          "default": null,
           "description": "Enable timeout for incoming requests",
           "type": "string"
         }
@@ -5403,6 +6435,18 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "SubgraphValue": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Standard",
+          "description": "#/definitions/Standard"
+        },
+        {
+          "$ref": "#/definitions/SubgraphSelector",
+          "description": "#/definitions/SubgraphSelector"
+        }
+      ]
+    },
     "SubscriptionConfig": {
       "additionalProperties": false,
       "description": "Subscriptions configuration",
@@ -5418,6 +6462,7 @@ expression: "&schema"
           "type": "boolean"
         },
         "max_opened_subscriptions": {
+          "default": null,
           "description": "This is a limit to only have maximum X opened subscriptions at the same time. By default if it's not set there is no limit.",
           "format": "uint",
           "minimum": 0.0,
@@ -5429,6 +6474,7 @@ expression: "&schema"
           "description": "#/definitions/SubscriptionModeConfig"
         },
         "queue_capacity": {
+          "default": null,
           "description": "It represent the capacity of the in memory queue to know how many events we can keep in a buffer",
           "format": "uint",
           "minimum": 0.0,
@@ -5474,6 +6520,7 @@ expression: "&schema"
           "type": "boolean"
         },
         "experimental_reuse_query_fragments": {
+          "default": null,
           "description": "Enable reuse of query fragments Default: depends on the federation version",
           "nullable": true,
           "type": "boolean"
@@ -5509,37 +6556,44 @@ expression: "&schema"
       "description": "Attributes for Cost",
       "properties": {
         "cost.actual": {
+          "default": null,
           "description": "The actual cost of the operation using the currently configured cost model",
           "nullable": true,
           "type": "boolean"
         },
         "cost.delta": {
+          "default": null,
           "description": "The delta (estimated - actual) cost of the operation using the currently configured cost model",
           "nullable": true,
           "type": "boolean"
         },
         "cost.estimated": {
+          "default": null,
           "description": "The estimated cost of the operation using the currently configured cost model",
           "nullable": true,
           "type": "boolean"
         },
         "cost.result": {
+          "default": null,
           "description": "The cost result, this is an error code returned by the cost calculation or COST_OK",
           "nullable": true,
           "type": "boolean"
         },
         "graphql.document": {
-          "description": "The GraphQL document being executed. Examples: * query findBookById { bookById(id: ?) { name } } Requirement level: Recommended",
+          "default": null,
+          "description": "The GraphQL document being executed. Examples:\n\n* `query findBookById { bookById(id: ?) { name } }`\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "graphql.operation.name": {
-          "description": "The name of the operation being executed. Examples: * findBookById Requirement level: Recommended",
+          "default": null,
+          "description": "The name of the operation being executed. Examples:\n\n* findBookById\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "graphql.operation.type": {
-          "description": "The type of the operation being executed. Examples: * query * subscription * mutation Requirement level: Recommended",
+          "default": null,
+          "description": "The type of the operation being executed. Examples:\n\n* query * subscription * mutation\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         }
@@ -5550,16 +6604,16 @@ expression: "&schema"
       "additionalProperties": false,
       "properties": {
         "error": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SupergraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SupergraphSelector"
         },
         "request": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SupergraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SupergraphSelector"
         },
         "response": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SupergraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SupergraphSelector"
         }
       },
       "type": "object"
@@ -5590,6 +6644,11 @@ expression: "&schema"
           "default": false,
           "description": "Send the body",
           "type": "boolean"
+        },
+        "condition": {
+          "$ref": "#/definitions/Condition_for_SupergraphSelector",
+          "description": "#/definitions/Condition_for_SupergraphSelector",
+          "nullable": true
         },
         "context": {
           "default": false,
@@ -5622,6 +6681,11 @@ expression: "&schema"
           "default": false,
           "description": "Send the body",
           "type": "boolean"
+        },
+        "condition": {
+          "$ref": "#/definitions/Condition_for_SupergraphSelector",
+          "description": "#/definitions/Condition_for_SupergraphSelector",
+          "nullable": true
         },
         "context": {
           "default": false,
@@ -5804,6 +6868,42 @@ expression: "&schema"
         {
           "additionalProperties": false,
           "properties": {
+            "default": {
+              "$ref": "#/definitions/AttributeValue",
+              "description": "#/definitions/AttributeValue",
+              "nullable": true
+            },
+            "response_data": {
+              "description": "The supergraph response body json path of the chunks.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "response_data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "default": {
+              "$ref": "#/definitions/AttributeValue",
+              "description": "#/definitions/AttributeValue",
+              "nullable": true
+            },
+            "response_errors": {
+              "description": "The supergraph response body json path of the chunks.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "response_errors"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
             "baggage": {
               "description": "The name of the baggage item.",
               "type": "string"
@@ -5838,18 +6938,45 @@ expression: "&schema"
           "type": "object"
         },
         {
+          "description": "Deprecated, should not be used anymore, use static field instead",
           "type": "string"
         },
         {
           "additionalProperties": false,
           "properties": {
             "static": {
-              "description": "A static string value",
-              "type": "string"
+              "$ref": "#/definitions/AttributeValue",
+              "description": "#/definitions/AttributeValue"
             }
           },
           "required": [
             "static"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "on_graphql_error": {
+              "description": "Boolean set to true if the response body contains graphql error",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "on_graphql_error"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "error": {
+              "$ref": "#/definitions/ErrorRepr",
+              "description": "#/definitions/ErrorRepr"
+            }
+          },
+          "required": [
+            "error"
           ],
           "type": "object"
         },
@@ -5864,6 +6991,20 @@ expression: "&schema"
           },
           "required": [
             "cost"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Boolean returning true if it's the primary response and not events like subscription events or deferred responses",
+          "properties": {
+            "is_primary_response": {
+              "description": "Boolean returning true if it's the primary response and not events like subscription events or deferred responses",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "is_primary_response"
           ],
           "type": "object"
         }
@@ -5891,6 +7032,22 @@ expression: "&schema"
         }
       },
       "type": "object"
+    },
+    "SupergraphValue": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Standard",
+          "description": "#/definitions/Standard"
+        },
+        {
+          "$ref": "#/definitions/Event_for_SupergraphSelector",
+          "description": "#/definitions/Event_for_SupergraphSelector"
+        },
+        {
+          "$ref": "#/definitions/SupergraphSelector",
+          "description": "#/definitions/SupergraphSelector"
+        }
+      ]
     },
     "Temporality": {
       "oneOf": [
@@ -5947,6 +7104,7 @@ expression: "&schema"
       "description": "Configuration options pertaining to the subgraph server component.",
       "properties": {
         "certificate_authorities": {
+          "default": null,
           "description": "list of certificate authorities in PEM format",
           "nullable": true,
           "type": "string"
@@ -6017,27 +7175,30 @@ expression: "&schema"
           "type": "string"
         },
         {
-          "description": "Format the Trace ID as a decimal number\n\n(e.g. Trace ID 16 -> 16)",
-          "enum": [
-            "decimal"
-          ],
-          "type": "string"
-        }
-      ]
-    },
-    "TraceIdFormat2": {
-      "oneOf": [
-        {
-          "description": "Open Telemetry trace ID, a hex string.",
+          "description": "Format the Trace ID as a hexadecimal number\n\n(e.g. Trace ID 16 -> 00000000000000000000000000000010)",
           "enum": [
             "open_telemetry"
           ],
           "type": "string"
         },
         {
-          "description": "Datadog trace ID, a u64.",
+          "description": "Format the Trace ID as a decimal number\n\n(e.g. Trace ID 16 -> 16)",
+          "enum": [
+            "decimal"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Datadog",
           "enum": [
             "datadog"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "UUID format with dashes (eg. 67e55044-10b1-426f-9247-bb680e5fe0c8)",
+          "enum": [
+            "uuid"
           ],
           "type": "string"
         }
@@ -6052,28 +7213,28 @@ expression: "&schema"
           "description": "#/definitions/TracingCommon"
         },
         "datadog": {
-          "$ref": "#/definitions/Config13",
-          "description": "#/definitions/Config13"
+          "$ref": "#/definitions/Config14",
+          "description": "#/definitions/Config14"
         },
         "experimental_response_trace_id": {
           "$ref": "#/definitions/ExposeTraceId",
           "description": "#/definitions/ExposeTraceId"
         },
         "jaeger": {
-          "$ref": "#/definitions/Config11",
-          "description": "#/definitions/Config11"
+          "$ref": "#/definitions/Config12",
+          "description": "#/definitions/Config12"
         },
         "otlp": {
-          "$ref": "#/definitions/Config9",
-          "description": "#/definitions/Config9"
+          "$ref": "#/definitions/Config10",
+          "description": "#/definitions/Config10"
         },
         "propagation": {
           "$ref": "#/definitions/Propagation",
           "description": "#/definitions/Propagation"
         },
         "zipkin": {
-          "$ref": "#/definitions/Config12",
-          "description": "#/definitions/Config12"
+          "$ref": "#/definitions/Config13",
+          "description": "#/definitions/Config13"
         }
       },
       "type": "object"
@@ -6135,11 +7296,13 @@ expression: "&schema"
           "description": "#/definitions/SamplerOption"
         },
         "service_name": {
+          "default": null,
           "description": "The trace service name",
           "nullable": true,
           "type": "string"
         },
         "service_namespace": {
+          "default": null,
           "description": "The trace service namespace",
           "nullable": true,
           "type": "string"
@@ -6150,6 +7313,17 @@ expression: "&schema"
     "Ttl": {
       "description": "Per subgraph configuration for entity caching",
       "type": "string"
+    },
+    "TypeName": {
+      "oneOf": [
+        {
+          "description": "The GraphQL type name",
+          "enum": [
+            "string"
+          ],
+          "type": "string"
+        }
+      ]
     },
     "UriEndpoint": {
       "type": "string"
@@ -6163,6 +7337,7 @@ expression: "&schema"
           "description": "#/definitions/HeartbeatInterval"
         },
         "path": {
+          "default": null,
           "description": "Path on which WebSockets are listening",
           "nullable": true,
           "type": "string"
@@ -6237,117 +7412,140 @@ expression: "&schema"
       "description": "Common attributes for http server and client. See https://opentelemetry.io/docs/specs/semconv/http/http-spans/#common-attributes",
       "properties": {
         "baggage": {
+          "default": null,
           "description": "All key values from trace baggage.",
           "nullable": true,
           "type": "boolean"
         },
         "dd.trace_id": {
+          "default": null,
           "description": "The datadog trace ID. This can be output in logs and used to correlate traces in Datadog.",
           "nullable": true,
           "type": "boolean"
         },
         "error.type": {
-          "description": "Describes a class of error the operation ended with. Examples: * timeout * name_resolution_error * 500 Requirement level: Conditionally Required: If request has ended with an error.",
+          "default": null,
+          "description": "Describes a class of error the operation ended with. Examples:\n\n* timeout * name_resolution_error * 500\n\nRequirement level: Conditionally Required: If request has ended with an error.",
           "nullable": true,
           "type": "boolean"
         },
         "http.request.body.size": {
-          "description": "The size of the request payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the Content-Length header. For requests using transport encoding, this should be the compressed size. Examples: * 3495 Requirement level: Recommended",
+          "default": null,
+          "description": "The size of the request payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the Content-Length header. For requests using transport encoding, this should be the compressed size. Examples:\n\n* 3495\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "http.request.method": {
-          "description": "HTTP request method. Examples: * GET * POST * HEAD Requirement level: Required",
+          "default": null,
+          "description": "HTTP request method. Examples:\n\n* GET * POST * HEAD\n\nRequirement level: Required",
           "nullable": true,
           "type": "boolean"
         },
         "http.response.body.size": {
-          "description": "The size of the response payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the Content-Length header. For requests using transport encoding, this should be the compressed size. Examples: * 3495 Requirement level: Recommended",
+          "default": null,
+          "description": "The size of the response payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the Content-Length header. For requests using transport encoding, this should be the compressed size. Examples:\n\n* 3495\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "http.response.status_code": {
-          "description": "HTTP response status code. Examples: * 200 Requirement level: Conditionally Required: If and only if one was received/sent.",
+          "default": null,
+          "description": "HTTP response status code. Examples:\n\n* 200\n\nRequirement level: Conditionally Required: If and only if one was received/sent.",
           "nullable": true,
           "type": "boolean"
         },
         "http.route": {
-          "description": "The matched route (path template in the format used by the respective server framework). Examples: * /graphql Requirement level: Conditionally Required: If and only if it’s available",
+          "default": null,
+          "description": "The matched route (path template in the format used by the respective server framework). Examples:\n\n* /graphql\n\nRequirement level: Conditionally Required: If and only if it’s available",
           "nullable": true,
           "type": "boolean"
         },
         "network.local.address": {
-          "description": "Local socket address. Useful in case of a multi-IP host. Examples: * 10.1.2.80 * /tmp/my.sock Requirement level: Opt-In",
+          "default": null,
+          "description": "Local socket address. Useful in case of a multi-IP host. Examples:\n\n* 10.1.2.80 * /tmp/my.sock\n\nRequirement level: Opt-In",
           "nullable": true,
           "type": "boolean"
         },
         "network.local.port": {
-          "description": "Local socket port. Useful in case of a multi-port host. Examples: * 65123 Requirement level: Opt-In",
+          "default": null,
+          "description": "Local socket port. Useful in case of a multi-port host. Examples:\n\n* 65123\n\nRequirement level: Opt-In",
           "nullable": true,
           "type": "boolean"
         },
         "network.peer.address": {
-          "description": "Peer address of the network connection - IP address or Unix domain socket name. Examples: * 10.1.2.80 * /tmp/my.sock Requirement level: Recommended",
+          "default": null,
+          "description": "Peer address of the network connection - IP address or Unix domain socket name. Examples:\n\n* 10.1.2.80 * /tmp/my.sock\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "network.peer.port": {
-          "description": "Peer port number of the network connection. Examples: * 65123 Requirement level: Recommended",
+          "default": null,
+          "description": "Peer port number of the network connection. Examples:\n\n* 65123\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "network.protocol.name": {
-          "description": "OSI application layer or non-OSI equivalent. Examples: * http * spdy Requirement level: Recommended: if not default (http).",
+          "default": null,
+          "description": "OSI application layer or non-OSI equivalent. Examples:\n\n* http * spdy\n\nRequirement level: Recommended: if not default (http).",
           "nullable": true,
           "type": "boolean"
         },
         "network.protocol.version": {
-          "description": "Version of the protocol specified in network.protocol.name. Examples: * 1.0 * 1.1 * 2 * 3 Requirement level: Recommended",
+          "default": null,
+          "description": "Version of the protocol specified in network.protocol.name. Examples:\n\n* 1.0 * 1.1 * 2 * 3\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "network.transport": {
-          "description": "OSI transport layer. Examples: * tcp * udp Requirement level: Conditionally Required",
+          "default": null,
+          "description": "OSI transport layer. Examples:\n\n* tcp * udp\n\nRequirement level: Conditionally Required",
           "nullable": true,
           "type": "boolean"
         },
         "network.type": {
-          "description": "OSI network layer or non-OSI equivalent. Examples: * ipv4 * ipv6 Requirement level: Recommended",
+          "default": null,
+          "description": "OSI network layer or non-OSI equivalent. Examples:\n\n* ipv4 * ipv6\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "server.address": {
-          "description": "Name of the local HTTP server that received the request. Examples: * example.com * 10.1.2.80 * /tmp/my.sock Requirement level: Recommended",
+          "default": null,
+          "description": "Name of the local HTTP server that received the request. Examples:\n\n* example.com * 10.1.2.80 * /tmp/my.sock\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "server.port": {
-          "description": "Port of the local HTTP server that received the request. Examples: * 80 * 8080 * 443 Requirement level: Recommended",
+          "default": null,
+          "description": "Port of the local HTTP server that received the request. Examples:\n\n* 80 * 8080 * 443\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "trace_id": {
+          "default": null,
           "description": "The OpenTelemetry trace ID. This can be output in logs.",
           "nullable": true,
           "type": "boolean"
         },
         "url.path": {
-          "description": "The URI path component Examples: * /search Requirement level: Required",
+          "default": null,
+          "description": "The URI path component Examples:\n\n* /search\n\nRequirement level: Required",
           "nullable": true,
           "type": "boolean"
         },
         "url.query": {
-          "description": "The URI query component Examples: * q=OpenTelemetry Requirement level: Conditionally Required: If and only if one was received/sent.",
+          "default": null,
+          "description": "The URI query component Examples:\n\n* q=OpenTelemetry\n\nRequirement level: Conditionally Required: If and only if one was received/sent.",
           "nullable": true,
           "type": "boolean"
         },
         "url.scheme": {
-          "description": "The URI scheme component identifying the used protocol. Examples: * http * https Requirement level: Required",
+          "default": null,
+          "description": "The URI scheme component identifying the used protocol. Examples:\n\n* http * https\n\nRequirement level: Required",
           "nullable": true,
           "type": "boolean"
         },
         "user_agent.original": {
-          "description": "Value of the HTTP User-Agent header sent by the client. Examples: * CERN-LineMode/2.15 * libwww/2.17b3 Requirement level: Recommended",
+          "default": null,
+          "description": "Value of the HTTP User-Agent header sent by the client. Examples:\n\n* CERN-LineMode/2.15 * libwww/2.17b3\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         }
@@ -6362,117 +7560,140 @@ expression: "&schema"
       "description": "Common attributes for http server and client. See https://opentelemetry.io/docs/specs/semconv/http/http-spans/#common-attributes",
       "properties": {
         "baggage": {
+          "default": null,
           "description": "All key values from trace baggage.",
           "nullable": true,
           "type": "boolean"
         },
         "dd.trace_id": {
+          "default": null,
           "description": "The datadog trace ID. This can be output in logs and used to correlate traces in Datadog.",
           "nullable": true,
           "type": "boolean"
         },
         "error.type": {
-          "description": "Describes a class of error the operation ended with. Examples: * timeout * name_resolution_error * 500 Requirement level: Conditionally Required: If request has ended with an error.",
+          "default": null,
+          "description": "Describes a class of error the operation ended with. Examples:\n\n* timeout * name_resolution_error * 500\n\nRequirement level: Conditionally Required: If request has ended with an error.",
           "nullable": true,
           "type": "boolean"
         },
         "http.request.body.size": {
-          "description": "The size of the request payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the Content-Length header. For requests using transport encoding, this should be the compressed size. Examples: * 3495 Requirement level: Recommended",
+          "default": null,
+          "description": "The size of the request payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the Content-Length header. For requests using transport encoding, this should be the compressed size. Examples:\n\n* 3495\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "http.request.method": {
-          "description": "HTTP request method. Examples: * GET * POST * HEAD Requirement level: Required",
+          "default": null,
+          "description": "HTTP request method. Examples:\n\n* GET * POST * HEAD\n\nRequirement level: Required",
           "nullable": true,
           "type": "boolean"
         },
         "http.response.body.size": {
-          "description": "The size of the response payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the Content-Length header. For requests using transport encoding, this should be the compressed size. Examples: * 3495 Requirement level: Recommended",
+          "default": null,
+          "description": "The size of the response payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the Content-Length header. For requests using transport encoding, this should be the compressed size. Examples:\n\n* 3495\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "http.response.status_code": {
-          "description": "HTTP response status code. Examples: * 200 Requirement level: Conditionally Required: If and only if one was received/sent.",
+          "default": null,
+          "description": "HTTP response status code. Examples:\n\n* 200\n\nRequirement level: Conditionally Required: If and only if one was received/sent.",
           "nullable": true,
           "type": "boolean"
         },
         "http.route": {
-          "description": "The matched route (path template in the format used by the respective server framework). Examples: * /graphql Requirement level: Conditionally Required: If and only if it’s available",
+          "default": null,
+          "description": "The matched route (path template in the format used by the respective server framework). Examples:\n\n* /graphql\n\nRequirement level: Conditionally Required: If and only if it’s available",
           "nullable": true,
           "type": "boolean"
         },
         "network.local.address": {
-          "description": "Local socket address. Useful in case of a multi-IP host. Examples: * 10.1.2.80 * /tmp/my.sock Requirement level: Opt-In",
+          "default": null,
+          "description": "Local socket address. Useful in case of a multi-IP host. Examples:\n\n* 10.1.2.80 * /tmp/my.sock\n\nRequirement level: Opt-In",
           "nullable": true,
           "type": "boolean"
         },
         "network.local.port": {
-          "description": "Local socket port. Useful in case of a multi-port host. Examples: * 65123 Requirement level: Opt-In",
+          "default": null,
+          "description": "Local socket port. Useful in case of a multi-port host. Examples:\n\n* 65123\n\nRequirement level: Opt-In",
           "nullable": true,
           "type": "boolean"
         },
         "network.peer.address": {
-          "description": "Peer address of the network connection - IP address or Unix domain socket name. Examples: * 10.1.2.80 * /tmp/my.sock Requirement level: Recommended",
+          "default": null,
+          "description": "Peer address of the network connection - IP address or Unix domain socket name. Examples:\n\n* 10.1.2.80 * /tmp/my.sock\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "network.peer.port": {
-          "description": "Peer port number of the network connection. Examples: * 65123 Requirement level: Recommended",
+          "default": null,
+          "description": "Peer port number of the network connection. Examples:\n\n* 65123\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "network.protocol.name": {
-          "description": "OSI application layer or non-OSI equivalent. Examples: * http * spdy Requirement level: Recommended: if not default (http).",
+          "default": null,
+          "description": "OSI application layer or non-OSI equivalent. Examples:\n\n* http * spdy\n\nRequirement level: Recommended: if not default (http).",
           "nullable": true,
           "type": "boolean"
         },
         "network.protocol.version": {
-          "description": "Version of the protocol specified in network.protocol.name. Examples: * 1.0 * 1.1 * 2 * 3 Requirement level: Recommended",
+          "default": null,
+          "description": "Version of the protocol specified in network.protocol.name. Examples:\n\n* 1.0 * 1.1 * 2 * 3\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "network.transport": {
-          "description": "OSI transport layer. Examples: * tcp * udp Requirement level: Conditionally Required",
+          "default": null,
+          "description": "OSI transport layer. Examples:\n\n* tcp * udp\n\nRequirement level: Conditionally Required",
           "nullable": true,
           "type": "boolean"
         },
         "network.type": {
-          "description": "OSI network layer or non-OSI equivalent. Examples: * ipv4 * ipv6 Requirement level: Recommended",
+          "default": null,
+          "description": "OSI network layer or non-OSI equivalent. Examples:\n\n* ipv4 * ipv6\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "server.address": {
-          "description": "Name of the local HTTP server that received the request. Examples: * example.com * 10.1.2.80 * /tmp/my.sock Requirement level: Recommended",
+          "default": null,
+          "description": "Name of the local HTTP server that received the request. Examples:\n\n* example.com * 10.1.2.80 * /tmp/my.sock\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "server.port": {
-          "description": "Port of the local HTTP server that received the request. Examples: * 80 * 8080 * 443 Requirement level: Recommended",
+          "default": null,
+          "description": "Port of the local HTTP server that received the request. Examples:\n\n* 80 * 8080 * 443\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "trace_id": {
+          "default": null,
           "description": "The OpenTelemetry trace ID. This can be output in logs.",
           "nullable": true,
           "type": "boolean"
         },
         "url.path": {
-          "description": "The URI path component Examples: * /search Requirement level: Required",
+          "default": null,
+          "description": "The URI path component Examples:\n\n* /search\n\nRequirement level: Required",
           "nullable": true,
           "type": "boolean"
         },
         "url.query": {
-          "description": "The URI query component Examples: * q=OpenTelemetry Requirement level: Conditionally Required: If and only if one was received/sent.",
+          "default": null,
+          "description": "The URI query component Examples:\n\n* q=OpenTelemetry\n\nRequirement level: Conditionally Required: If and only if one was received/sent.",
           "nullable": true,
           "type": "boolean"
         },
         "url.scheme": {
-          "description": "The URI scheme component identifying the used protocol. Examples: * http * https Requirement level: Required",
+          "default": null,
+          "description": "The URI scheme component identifying the used protocol. Examples:\n\n* http * https\n\nRequirement level: Required",
           "nullable": true,
           "type": "boolean"
         },
         "user_agent.original": {
-          "description": "Value of the HTTP User-Agent header sent by the client. Examples: * CERN-LineMode/2.15 * libwww/2.17b3 Requirement level: Recommended",
+          "default": null,
+          "description": "Value of the HTTP User-Agent header sent by the client. Examples:\n\n* CERN-LineMode/2.15 * libwww/2.17b3\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         }
@@ -6486,22 +7707,26 @@ expression: "&schema"
       },
       "properties": {
         "subgraph.graphql.document": {
-          "description": "The GraphQL document being executed. Examples: * query findBookById { bookById(id: ?) { name } } Requirement level: Recommended",
+          "default": null,
+          "description": "The GraphQL document being executed. Examples:\n\n* `query findBookById { bookById(id: ?) { name } }`\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "subgraph.graphql.operation.name": {
-          "description": "The name of the operation being executed. Examples: * findBookById Requirement level: Recommended",
+          "default": null,
+          "description": "The name of the operation being executed. Examples:\n\n* findBookById\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "subgraph.graphql.operation.type": {
-          "description": "The type of the operation being executed. Examples: * query * subscription * mutation Requirement level: Recommended",
+          "default": null,
+          "description": "The type of the operation being executed. Examples:\n\n* query * subscription * mutation\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "subgraph.name": {
-          "description": "The name of the subgraph Examples: * products Requirement level: Required",
+          "default": null,
+          "description": "The name of the subgraph Examples:\n\n* products\n\nRequirement level: Required",
           "nullable": true,
           "type": "boolean"
         }
@@ -6515,22 +7740,26 @@ expression: "&schema"
       },
       "properties": {
         "subgraph.graphql.document": {
-          "description": "The GraphQL document being executed. Examples: * query findBookById { bookById(id: ?) { name } } Requirement level: Recommended",
+          "default": null,
+          "description": "The GraphQL document being executed. Examples:\n\n* `query findBookById { bookById(id: ?) { name } }`\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "subgraph.graphql.operation.name": {
-          "description": "The name of the operation being executed. Examples: * findBookById Requirement level: Recommended",
+          "default": null,
+          "description": "The name of the operation being executed. Examples:\n\n* findBookById\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "subgraph.graphql.operation.type": {
-          "description": "The type of the operation being executed. Examples: * query * subscription * mutation Requirement level: Recommended",
+          "default": null,
+          "description": "The type of the operation being executed. Examples:\n\n* query * subscription * mutation\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "subgraph.name": {
-          "description": "The name of the subgraph Examples: * products Requirement level: Required",
+          "default": null,
+          "description": "The name of the subgraph Examples:\n\n* products\n\nRequirement level: Required",
           "nullable": true,
           "type": "boolean"
         }
@@ -6545,37 +7774,44 @@ expression: "&schema"
       "description": "Attributes for Cost",
       "properties": {
         "cost.actual": {
+          "default": null,
           "description": "The actual cost of the operation using the currently configured cost model",
           "nullable": true,
           "type": "boolean"
         },
         "cost.delta": {
+          "default": null,
           "description": "The delta (estimated - actual) cost of the operation using the currently configured cost model",
           "nullable": true,
           "type": "boolean"
         },
         "cost.estimated": {
+          "default": null,
           "description": "The estimated cost of the operation using the currently configured cost model",
           "nullable": true,
           "type": "boolean"
         },
         "cost.result": {
+          "default": null,
           "description": "The cost result, this is an error code returned by the cost calculation or COST_OK",
           "nullable": true,
           "type": "boolean"
         },
         "graphql.document": {
-          "description": "The GraphQL document being executed. Examples: * query findBookById { bookById(id: ?) { name } } Requirement level: Recommended",
+          "default": null,
+          "description": "The GraphQL document being executed. Examples:\n\n* `query findBookById { bookById(id: ?) { name } }`\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "graphql.operation.name": {
-          "description": "The name of the operation being executed. Examples: * findBookById Requirement level: Recommended",
+          "default": null,
+          "description": "The name of the operation being executed. Examples:\n\n* findBookById\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "graphql.operation.type": {
-          "description": "The type of the operation being executed. Examples: * query * subscription * mutation Requirement level: Recommended",
+          "default": null,
+          "description": "The type of the operation being executed. Examples:\n\n* query * subscription * mutation\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         }
@@ -6590,37 +7826,72 @@ expression: "&schema"
       "description": "Attributes for Cost",
       "properties": {
         "cost.actual": {
+          "default": null,
           "description": "The actual cost of the operation using the currently configured cost model",
           "nullable": true,
           "type": "boolean"
         },
         "cost.delta": {
+          "default": null,
           "description": "The delta (estimated - actual) cost of the operation using the currently configured cost model",
           "nullable": true,
           "type": "boolean"
         },
         "cost.estimated": {
+          "default": null,
           "description": "The estimated cost of the operation using the currently configured cost model",
           "nullable": true,
           "type": "boolean"
         },
         "cost.result": {
+          "default": null,
           "description": "The cost result, this is an error code returned by the cost calculation or COST_OK",
           "nullable": true,
           "type": "boolean"
         },
         "graphql.document": {
-          "description": "The GraphQL document being executed. Examples: * query findBookById { bookById(id: ?) { name } } Requirement level: Recommended",
+          "default": null,
+          "description": "The GraphQL document being executed. Examples:\n\n* `query findBookById { bookById(id: ?) { name } }`\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "graphql.operation.name": {
-          "description": "The name of the operation being executed. Examples: * findBookById Requirement level: Recommended",
+          "default": null,
+          "description": "The name of the operation being executed. Examples:\n\n* findBookById\n\nRequirement level: Recommended",
           "nullable": true,
           "type": "boolean"
         },
         "graphql.operation.type": {
-          "description": "The type of the operation being executed. Examples: * query * subscription * mutation Requirement level: Recommended",
+          "default": null,
+          "description": "The type of the operation being executed. Examples:\n\n* query * subscription * mutation\n\nRequirement level: Recommended",
+          "nullable": true,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::CacheInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes,_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector,_apollo_router::plugins::telemetry::config_new::selectors::SubgraphValue>": {
+      "additionalProperties": {
+        "$ref": "#/definitions/Instrument_for_CacheAttributes_and_SubgraphSelector_and_SubgraphValue",
+        "description": "#/definitions/Instrument_for_CacheAttributes_and_SubgraphSelector_and_SubgraphValue"
+      },
+      "properties": {
+        "apollo.router.operations.entity.cache": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector"
+        }
+      },
+      "type": "object"
+    },
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector": {
+      "additionalProperties": {
+        "$ref": "#/definitions/SubgraphSelector",
+        "description": "#/definitions/SubgraphSelector"
+      },
+      "properties": {
+        "entity.type": {
+          "default": null,
+          "description": "Entity type",
           "nullable": true,
           "type": "boolean"
         }
@@ -6634,16 +7905,16 @@ expression: "&schema"
       },
       "properties": {
         "error": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_RouterSelector",
+          "description": "#/definitions/StandardEventConfig_for_RouterSelector"
         },
         "request": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_RouterSelector",
+          "description": "#/definitions/StandardEventConfig_for_RouterSelector"
         },
         "response": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_RouterSelector",
+          "description": "#/definitions/StandardEventConfig_for_RouterSelector"
         }
       },
       "type": "object"
@@ -6655,16 +7926,16 @@ expression: "&schema"
       },
       "properties": {
         "error": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SubgraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SubgraphSelector"
         },
         "request": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SubgraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SubgraphSelector"
         },
         "response": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SubgraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SubgraphSelector"
         }
       },
       "type": "object"
@@ -6676,24 +7947,80 @@ expression: "&schema"
       },
       "properties": {
         "error": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SupergraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SupergraphSelector"
         },
         "request": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SupergraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SupergraphSelector"
         },
         "response": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SupergraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SupergraphSelector"
         }
       },
       "type": "object"
     },
-    "extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::RouterInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes,_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector>": {
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::GraphQLInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes,_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector,_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLValue>": {
       "additionalProperties": {
-        "$ref": "#/definitions/Instrument_for_RouterAttributes_and_RouterSelector",
-        "description": "#/definitions/Instrument_for_RouterAttributes_and_RouterSelector"
+        "$ref": "#/definitions/Instrument_for_GraphQLAttributes_and_GraphQLSelector_and_GraphQLValue",
+        "description": "#/definitions/Instrument_for_GraphQLAttributes_and_GraphQLSelector_and_GraphQLValue"
+      },
+      "properties": {
+        "field.execution": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector"
+        },
+        "list.length": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector"
+        }
+      },
+      "type": "object"
+    },
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector": {
+      "additionalProperties": {
+        "$ref": "#/definitions/GraphQLSelector",
+        "description": "#/definitions/GraphQLSelector"
+      },
+      "properties": {
+        "graphql.field.name": {
+          "default": null,
+          "description": "The GraphQL field name",
+          "nullable": true,
+          "type": "boolean"
+        },
+        "graphql.field.type": {
+          "default": null,
+          "description": "The GraphQL field type",
+          "nullable": true,
+          "type": "boolean"
+        },
+        "graphql.list.length": {
+          "default": null,
+          "description": "If the field is a list, the length of the list",
+          "nullable": true,
+          "type": "boolean"
+        },
+        "graphql.operation.name": {
+          "default": null,
+          "description": "The GraphQL operation name",
+          "nullable": true,
+          "type": "boolean"
+        },
+        "graphql.type.name": {
+          "default": null,
+          "description": "The GraphQL type name",
+          "nullable": true,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::RouterInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes,_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector,_apollo_router::plugins::telemetry::config_new::selectors::RouterValue>": {
+      "additionalProperties": {
+        "$ref": "#/definitions/Instrument_for_RouterAttributes_and_RouterSelector_and_RouterValue",
+        "description": "#/definitions/Instrument_for_RouterAttributes_and_RouterSelector_and_RouterValue"
       },
       "properties": {
         "http.server.active_requests": {
@@ -6715,10 +8042,10 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::SubgraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes,_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector>": {
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::SubgraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes,_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector,_apollo_router::plugins::telemetry::config_new::selectors::SubgraphValue>": {
       "additionalProperties": {
-        "$ref": "#/definitions/Instrument_for_SubgraphAttributes_and_SubgraphSelector",
-        "description": "#/definitions/Instrument_for_SubgraphAttributes_and_SubgraphSelector"
+        "$ref": "#/definitions/Instrument_for_SubgraphAttributes_and_SubgraphSelector_and_SubgraphValue",
+        "description": "#/definitions/Instrument_for_SubgraphAttributes_and_SubgraphSelector_and_SubgraphValue"
       },
       "properties": {
         "http.client.request.body.size": {
@@ -6736,10 +8063,10 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::SupergraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes,_apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector>": {
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::SupergraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes,_apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector,_apollo_router::plugins::telemetry::config_new::selectors::SupergraphValue>": {
       "additionalProperties": {
-        "$ref": "#/definitions/Instrument_for_SupergraphAttributes_and_SupergraphSelector",
-        "description": "#/definitions/Instrument_for_SupergraphAttributes_and_SupergraphSelector"
+        "$ref": "#/definitions/Instrument_for_SupergraphAttributes_and_SupergraphSelector_and_SupergraphValue",
+        "description": "#/definitions/Instrument_for_SupergraphAttributes_and_SupergraphSelector_and_SupergraphValue"
       },
       "properties": {
         "cost.actual": {
@@ -6822,9 +8149,17 @@ expression: "&schema"
                   "type": "boolean"
                 },
                 "display_trace_id": {
-                  "default": true,
-                  "description": "Include the trace id (if any) with the log event. (default: true)",
-                  "type": "boolean"
+                  "$ref": "#/definitions/DisplayTraceIdFormat",
+                  "description": "#/definitions/DisplayTraceIdFormat"
+                },
+                "span_attributes": {
+                  "default": [],
+                  "description": "List of span attributes to attach to the json log object",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array",
+                  "uniqueItems": true
                 }
               },
               "type": "object"
@@ -6920,9 +8255,8 @@ expression: "&schema"
                   "type": "boolean"
                 },
                 "display_trace_id": {
-                  "default": false,
-                  "description": "Include the trace id (if any) with the log event. (default: false)",
-                  "type": "boolean"
+                  "$ref": "#/definitions/DisplayTraceIdFormat",
+                  "description": "#/definitions/DisplayTraceIdFormat"
                 }
               },
               "type": "object"
@@ -6973,9 +8307,9 @@ expression: "&schema"
       "$ref": "#/definitions/CSRFConfig",
       "description": "#/definitions/CSRFConfig"
     },
-    "experimental_api_schema_generation_mode": {
-      "$ref": "#/definitions/ApiSchemaMode",
-      "description": "#/definitions/ApiSchemaMode"
+    "demand_control": {
+      "$ref": "#/definitions/DemandControlConfig",
+      "description": "#/definitions/DemandControlConfig"
     },
     "experimental_apollo_metrics_generation_mode": {
       "$ref": "#/definitions/ApolloMetricsGenerationMode",
@@ -6984,10 +8318,6 @@ expression: "&schema"
     "experimental_chaos": {
       "$ref": "#/definitions/Chaos",
       "description": "#/definitions/Chaos"
-    },
-    "experimental_demand_control": {
-      "$ref": "#/definitions/DemandControlConfig",
-      "description": "#/definitions/DemandControlConfig"
     },
     "experimental_query_planner_mode": {
       "$ref": "#/definitions/QueryPlannerMode",
@@ -7003,8 +8333,8 @@ expression: "&schema"
       "description": "#/definitions/ForbidMutationsConfig"
     },
     "headers": {
-      "$ref": "#/definitions/Config4",
-      "description": "#/definitions/Config4"
+      "$ref": "#/definitions/Config5",
+      "description": "#/definitions/Config5"
     },
     "health_check": {
       "$ref": "#/definitions/HealthCheck",
@@ -7015,12 +8345,12 @@ expression: "&schema"
       "description": "#/definitions/Homepage"
     },
     "include_subgraph_errors": {
-      "$ref": "#/definitions/Config5",
-      "description": "#/definitions/Config5"
+      "$ref": "#/definitions/Config6",
+      "description": "#/definitions/Config6"
     },
     "limits": {
-      "$ref": "#/definitions/Limits",
-      "description": "#/definitions/Limits"
+      "$ref": "#/definitions/Config",
+      "description": "#/definitions/Config"
     },
     "override_subgraph_url": {
       "$ref": "#/definitions/Conf5",
@@ -7035,16 +8365,16 @@ expression: "&schema"
       "description": "#/definitions/Plugins"
     },
     "preview_entity_cache": {
-      "$ref": "#/definitions/Config6",
-      "description": "#/definitions/Config6"
+      "$ref": "#/definitions/Config7",
+      "description": "#/definitions/Config7"
     },
     "preview_file_uploads": {
       "$ref": "#/definitions/FileUploadsConfig",
       "description": "#/definitions/FileUploadsConfig"
     },
     "progressive_override": {
-      "$ref": "#/definitions/Config7",
-      "description": "#/definitions/Config7"
+      "$ref": "#/definitions/Config8",
+      "description": "#/definitions/Config8"
     },
     "rhai": {
       "$ref": "#/definitions/Conf6",
@@ -7071,8 +8401,8 @@ expression: "&schema"
       "description": "#/definitions/Tls"
     },
     "traffic_shaping": {
-      "$ref": "#/definitions/Config14",
-      "description": "#/definitions/Config14"
+      "$ref": "#/definitions/Config15",
+      "description": "#/definitions/Config15"
     }
   },
   "title": "Configuration",

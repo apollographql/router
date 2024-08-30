@@ -14,7 +14,9 @@ use self::storage::ValueType;
 use crate::configuration::RedisCache;
 
 pub(crate) mod redis;
+mod size_estimation;
 pub(crate) mod storage;
+pub(crate) use size_estimation::estimate_size;
 
 type WaitMap<K, V> = Arc<Mutex<HashMap<K, broadcast::Sender<V>>>>;
 pub(crate) const DEFAULT_CACHE_CAPACITY: NonZeroUsize = match NonZeroUsize::new(512) {
@@ -37,7 +39,7 @@ where
     pub(crate) async fn with_capacity(
         capacity: NonZeroUsize,
         redis: Option<RedisCache>,
-        caller: &str,
+        caller: &'static str,
     ) -> Result<Self, BoxError> {
         Ok(Self {
             wait_map: Arc::new(Mutex::new(HashMap::new())),
@@ -47,12 +49,18 @@ where
 
     pub(crate) async fn from_configuration(
         config: &crate::configuration::Cache,
-        caller: &str,
+        caller: &'static str,
     ) -> Result<Self, BoxError> {
         Self::with_capacity(config.in_memory.limit, config.redis.clone(), caller).await
     }
 
-    pub(crate) async fn get(&self, key: &K) -> Entry<K, V> {
+    /// `init_from_redis` is called with values newly deserialized from Redis cache
+    /// if an error is returned, the value is ignored and considered a cache miss.
+    pub(crate) async fn get(
+        &self,
+        key: &K,
+        init_from_redis: impl FnMut(&mut V) -> Result<(), String>,
+    ) -> Entry<K, V> {
         // waiting on a value from the cache is a potentially long(millisecond scale) task that
         // can involve a network call to an external database. To reduce the waiting time, we
         // go through a wait map to register interest in data associated with a key.
@@ -90,7 +98,7 @@ where
                 // request other keys independently
                 drop(locked_wait_map);
 
-                if let Some(value) = self.storage.get(key).await {
+                if let Some(value) = self.storage.get(key, init_from_redis).await {
                     self.send(sender, key, value.clone()).await;
 
                     return Entry {
@@ -216,7 +224,7 @@ mod tests {
             .await
             .unwrap();
 
-        let entry = cache.get(&k).await;
+        let entry = cache.get(&k, |_| Ok(())).await;
 
         if entry.is_first() {
             // potentially long and complex async task that can fail
@@ -236,7 +244,7 @@ mod tests {
                 .unwrap();
 
         for i in 0..14 {
-            let entry = cache.get(&i).await;
+            let entry = cache.get(&i, |_| Ok(())).await;
             entry.insert(i).await;
         }
 
@@ -264,7 +272,7 @@ mod tests {
         // one delegated retrieve is made
         let mut computations: FuturesUnordered<_> = (0..100)
             .map(|_| async {
-                let entry = cache.get(&1).await;
+                let entry = cache.get(&1, |_| Ok(())).await;
                 if entry.is_first() {
                     let value = mock.retrieve(1).await;
                     entry.insert(value).await;

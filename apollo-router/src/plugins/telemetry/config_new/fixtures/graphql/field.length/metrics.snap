@@ -1,0 +1,18 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
+description: Field length
+expression: "&metrics.all()"
+info:
+  telemetry:
+    instrumentation:
+      instruments:
+        default_requirement_level: none
+        graphql:
+          list.length: true
+---
+- name: graphql.field.list.length
+  description: Length of a selected field in the GraphQL response
+  data:
+    datapoints:
+      - sum: 3
+        attributes: {}

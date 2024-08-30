@@ -1,10 +1,10 @@
 ---
 title: Router Logging to stdout
 subtitle: Configure logging to stdout
-description: Configure logging output to stdout in the Apollo Router. Format in human-readable text or machine-readable JSON.
+description: Configure logging output to stdout in the Apollo GraphOS Router or Apollo Router Core. Format in human-readable text or machine-readable JSON.
 ---
 
-You can configure Apollo Router logging to be directed to stdout, and its output format can be set to text or JSON.
+You can configure GraphOS Router or Apollo Router Core logging to be directed to stdout, and its output format can be set to text or JSON.
 
 For general logging configuration, refer to [Router Logging Configuration](./overview).
 
@@ -46,7 +46,7 @@ telemetry:
 
 You can configure the log format when you're running on an interactive shell. This is useful during development.
 
-If both `format` and `tty_format` are configured then the output depends on the environment where the Router is run:
+If both `format` and `tty_format` are configured then the output depends on the environment where the router is run:
 
 * In an interactive shell, `tty_format` will take precedence.
 * In a non-interactive shell, `format` will take precedence.
@@ -140,7 +140,7 @@ telemetry:
               display_current_span: true
               display_service_name: true
               display_service_namespace: true
-              display_trace_id: true
+              display_trace_id: true # true|false|open_telemetry|hexadecimal|decimal|datadog|uuid
               display_span_id: true 
 ```
 
@@ -154,8 +154,7 @@ Example `text` output:
 
 | Option                      | Values                         | Default   | Description                                                             |
 |-----------------------------|--------------------------------|-----------|-------------------------------------------------------------------------|
-| `flavor`                    | `default`\|`compact`\|`pretty` | `default` | The overall output formatting.                                          |
-| `ansi_escape_codes`         | `true`\|`false`                | `false`   | Use ansi terminal escape codes.                                         |
+| `ansi_escape_codes`         | `true`\|`false`                | `true`   | Use ansi terminal escape codes.                                         |
 | `display_filename`          | `true`\|`false`                | `false`   | The filename where the log event was raised.                            |
 | `display_level`             | `true`\|`false`                | `true`    | The level of the log event, e.g. INFO, WARN, ERROR, TRACE.              |
 | `display_line_number`       | `true`\|`false`                | `false`   | The line number where the event was raised.                             |
@@ -165,8 +164,10 @@ Example `text` output:
 | `display_timestamp`         | `true`\|`false`                | `true`    | The timestamp of when the event was raised.                             |
 | `display_service_name`      | `true`\|`false`                | `false`   | The service name as configured in metrics common.                       |
 | `display_service_namespace` | `true`\|`false`                | `false`   | The service namespace as configured in metrics common.                  |
-| `display_trace_id`          | `true`\|`false`                | `false`   | The trace id of the span in which the event was raised.                 |
+| `display_trace_id`          | `true`\|`false`\|`open_telemetry`\|`hexadecimal`\|`decimal`\|`datadog`\|`uuid`      | `false`   | The trace id of the span in which the event was raised.                 |
 | `display_span_id`           | `true`\|`false`                | `false`   | The span ID of the span in which the event was raised.                  |
+| `display_span_list`         | `true`\|`false`                | `true`    | A list of all spans to root in which the event was raised and all of their attributes. |
+| `display_current_span`      | `true`\|`false`                | `true`   | The span in which the event was raised and all of its' attributes.                     |
 
 
 ### `json`
@@ -224,7 +225,7 @@ telemetry:
              display_current_span: true
              display_span_list: true
              display_resource: true
-             display_trace_id: true
+             display_trace_id: true # true|false|open_telemetry|hexadecimal|decimal|datadog|uuid
              display_span_id: true 
 ```
 
@@ -334,6 +335,44 @@ Example output with a list of spans:
 }
 ```
 
+#### `span_attributes`
+
+The `telemetry.exporters.logging.stdout.format.json.span_attributes` option allows you to display a subset of all span attributes. It takes as input an array of span attribute names to log.
+
+When `span_attributes` is specified, the router searches for the first attribute in the list of span attributes from the root span to the current span and attaches it to the outermost JSON object for the log event.
+
+If you set the same attribute name for different spans at different levels, the router chooses the attributes of child spans before the attributes of parent spans.
+
+For example, you can display just the `span_attr_1` span attribute:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+     logging:
+       stdout:
+         enabled: true
+         format: 
+           json:
+             display_span_list: false
+             span_attributes:
+             - span_attr_1
+```
+
+Example output with a list of spans:
+
+```json
+{
+  "timestamp": "2023-10-30T14:09:34.771388Z",
+  "level": "INFO",
+  "fields": {
+    "event_attr_1": "event_attr_1",
+    "event_attr_2": "event_attr_2"
+  },
+  "target": "event_target",
+  "span_attr_1": "span_attr_1"
+}
+```
+
 #### `display_resource`
 
 The `telemetry.logging.stdout.format.json.display_resource` option configures whether resources configured in `router.yaml` are displayed in log messages. By default, `display_resource` is `true`.
@@ -362,17 +401,18 @@ telemetry:
 
 | Option                | Values            | Default | Event Field   | Description                                                                            |
 |-----------------------|-------------------|---------|:--------------|----------------------------------------------------------------------------------------|
-| `current_span`        | `true`\|`false`   | `false` | `span`        | The span in which the event was raised and all of its' attributes.                     |
+| `display_current_span`| `true`\|`false`   | `false` | `span`        | The span in which the event was raised and all of its' attributes.                     |
 | `display_filename`    | `true`\|`false`   | `false` | `filename`    | The filename where the log event was raised.                                           |
 | `display_level`       | `true`\|`false`   | `true`  | `level`       | The level of the log event, e.g. INFO, WARN, ERROR, TRACE.                             |
 | `display_line_number` | `true`\|`false`   | `false` | `line_number` | The line number where the event was raised.                                            |
-| `display_target`      | `true`\|`false`   | `false` | `target`      | The module name where the event was raised.                                            |
+| `display_target`      | `true`\|`false`   | `true`  | `target`      | The module name where the event was raised.                                            |
 | `display_thread_id`   | `true`\|`false`   | `false` | `thread_id`   | The id of the thread where the event was raised.                                       |
 | `display_thread_name` | `true`\|`false`   | `false` | `thread_name` | The name of the thread where the event was raised.                                     |
 | `display_timestamp`   | `true`\|`false`   | `true`  | `timestamp`   | The timestamp of when the event was raised.                                            |
-| `display_span_list`   | `true`\|`false`   | `false` | `spans`       | A list of all spans to root in which the event was raised and all of their attributes. |
+| `display_span_list`   | `true`\|`false`   | `true`  | `spans`       | A list of all spans to root in which the event was raised and all of their attributes. |
 | `display_resource`    | `true`\|`false`   | `true`  | `resource`    | The resource as configured in tracing common.                                          |
-| `display_trace_id`    | `true`\|`false`   | `true`  | `trace_id`    | The trace id of the span in which the event was raised.                                |
+| `display_trace_id`    | `true`\|`false`\|`open_telemetry`\|`hexadecimal`\|`decimal`\|`datadog`\|`uuid` | The trace id of the span in which the event was raised.                                |
 | `display_span_id`     | `true`\|`false`   | `true`  | `span_id`     | The span id of the span in which the event was raised.                                 |
+| `span_attributes`     | `[string]`        | `[]`    | `*`           | List of span attributes to attach to the JSON log object.                              |
 
 

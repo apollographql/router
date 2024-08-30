@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::RwLock;
+use std::time::Duration;
 use std::time::SystemTime;
 
+use aws_credential_types::provider::error::CredentialsError;
 use aws_credential_types::provider::ProvideCredentials;
 use aws_credential_types::Credentials;
 use aws_sigv4::http_request::sign;
@@ -11,15 +14,19 @@ use aws_sigv4::http_request::SignableRequest;
 use aws_sigv4::http_request::SigningSettings;
 use aws_smithy_runtime_api::client::identity::Identity;
 use aws_types::region::Region;
+use aws_types::sdk_config::SharedCredentialsProvider;
 use http::HeaderMap;
 use http::Request;
-use hyper::Body;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use tokio::sync::mpsc::Sender;
+use tokio::task::JoinHandle;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+use crate::services::router::body::get_body_bytes;
+use crate::services::router::body::RouterBody;
 use crate::services::SubgraphRequest;
 
 /// Hardcoded Config using access_key and secret.
@@ -185,24 +192,121 @@ pub(crate) struct Config {
 #[allow(dead_code)]
 #[derive(Clone, Default)]
 pub(crate) struct SigningParams {
-    pub(crate) all: Option<SigningParamsConfig>,
-    pub(crate) subgraphs: HashMap<String, SigningParamsConfig>,
+    pub(crate) all: Option<Arc<SigningParamsConfig>>,
+    pub(crate) subgraphs: HashMap<String, Arc<SigningParamsConfig>>,
 }
 
 #[derive(Clone)]
 pub(crate) struct SigningParamsConfig {
-    credentials_provider: Arc<dyn ProvideCredentials>,
+    credentials_provider: CredentialsProvider,
     region: Region,
     service_name: String,
     subgraph_name: String,
 }
 
+#[derive(Clone, Debug)]
+struct CredentialsProvider {
+    credentials: Arc<RwLock<Credentials>>,
+    _credentials_updater_handle: Arc<JoinHandle<()>>,
+    #[allow(dead_code)]
+    refresh_credentials: Sender<()>,
+}
+
+// Refresh token if it will expire within the next 5 minutes
+const MIN_REMAINING_DURATION: Duration = std::time::Duration::from_secs(60 * 5);
+// If the token couldn't be refreshed, try again in 1 minute
+const RETRY_DURATION: Duration = std::time::Duration::from_secs(60);
+
+impl CredentialsProvider {
+    async fn from_provide_credentials(
+        provide_credentials: impl ProvideCredentials + 'static,
+    ) -> Result<Self, CredentialsError> {
+        let credentials_provider = SharedCredentialsProvider::new(provide_credentials);
+        let (sender, mut refresh_credentials_receiver) = tokio::sync::mpsc::channel(1);
+        let credentials = credentials_provider.provide_credentials().await?;
+        let mut refresh_timer = next_refresh_timer(&credentials);
+        let credentials = Arc::new(RwLock::new(credentials));
+        let c2 = credentials.clone();
+        let crp2 = credentials_provider.clone();
+        let handle = tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = tokio::time::sleep(refresh_timer.unwrap_or(Duration::MAX)) => {
+                       refresh_timer = refresh_credentials(&crp2, &c2).await;
+                    },
+                    rcr = refresh_credentials_receiver.recv() => {
+                        if rcr.is_some() {
+                            refresh_timer = refresh_credentials(&crp2, &c2).await;
+                        } else {
+                            return;
+                        }
+                    },
+                }
+            }
+        });
+        Ok(Self {
+            _credentials_updater_handle: Arc::new(handle),
+            refresh_credentials: sender,
+            credentials,
+        })
+    }
+
+    #[allow(dead_code)]
+    pub(crate) async fn refresh_credentials(&self) {
+        let _ = self.refresh_credentials.send(()).await;
+    }
+}
+
+async fn refresh_credentials(
+    credentials_provider: &(impl ProvideCredentials + 'static),
+    credentials: &RwLock<Credentials>,
+) -> Option<Duration> {
+    match credentials_provider.provide_credentials().await {
+        Ok(new_credentials) => {
+            let mut credentials = credentials
+                .write()
+                .expect("authentication: credentials RwLock poisoned");
+            *credentials = new_credentials;
+            next_refresh_timer(&credentials)
+        }
+        Err(e) => {
+            tracing::warn!("authentication: couldn't refresh credentials {e}");
+            Some(RETRY_DURATION)
+        }
+    }
+}
+
+fn next_refresh_timer(credentials: &Credentials) -> Option<Duration> {
+    credentials
+        .expiry()
+        .and_then(|e| e.duration_since(SystemTime::now()).ok())
+        .and_then(|d| {
+            d.checked_sub(MIN_REMAINING_DURATION)
+                .or(Some(Duration::from_secs(0)))
+        })
+}
+
+impl ProvideCredentials for CredentialsProvider {
+    fn provide_credentials<'a>(
+        &'a self,
+    ) -> aws_credential_types::provider::future::ProvideCredentials<'a>
+    where
+        Self: 'a,
+    {
+        aws_credential_types::provider::future::ProvideCredentials::ready(Ok(self
+            .credentials
+            .read()
+            .expect("authentication: credentials RwLock poisoned")
+            .clone()))
+    }
+}
+
 impl SigningParamsConfig {
     pub(crate) async fn sign(
-        self,
-        mut req: Request<Body>,
+        &self,
+        mut req: Request<RouterBody>,
         subgraph_name: &str,
-    ) -> Result<Request<Body>, BoxError> {
+    ) -> Result<Request<RouterBody>, BoxError> {
         let credentials = self.credentials().await?;
         let builder = self.signing_params_builder(&credentials).await?;
         let (parts, body) = req.into_parts();
@@ -210,7 +314,7 @@ impl SigningParamsConfig {
         // We'll go with default signed headers
         let headers = HeaderMap::<&'static str>::default();
         // UnsignedPayload only applies to lattice
-        let body_bytes = hyper::body::to_bytes(body).await?.to_vec();
+        let body_bytes = get_body_bytes(body).await?.to_vec();
         let signable_request = SignableRequest::new(
             parts.method.as_str(),
             parts.uri.to_string(),
@@ -231,14 +335,15 @@ impl SigningParamsConfig {
                 error
             })?
             .into_parts();
-        req = Request::<Body>::from_parts(parts, body_bytes.into());
+        req = Request::<RouterBody>::from_parts(parts, body_bytes.into());
         signing_instructions.apply_to_request_http0x(&mut req);
         increment_success_counter(subgraph_name);
         Ok(req)
     }
+
     // This function is the same as above, except it's a new one because () doesn't implement HttpBody`
     pub(crate) async fn sign_empty(
-        self,
+        &self,
         mut req: Request<()>,
         subgraph_name: &str,
     ) -> Result<Request<()>, BoxError> {
@@ -325,23 +430,14 @@ pub(super) async fn make_signing_params(
     match config {
         AuthConfig::AWSSigV4(config) => {
             let credentials_provider = config.get_credentials_provider().await;
-            if let Err(e) = credentials_provider.provide_credentials().await {
-                let error_subgraph_name = if subgraph_name == "all" {
-                    "all subgraphs".to_string()
-                } else {
-                    format!("{} subgraph", subgraph_name)
-                };
-                return Err(format!(
-                    "auth: {}: couldn't get credentials from provider: {}",
-                    error_subgraph_name, e,
-                )
-                .into());
-            }
-
             Ok(SigningParamsConfig {
                 region: config.region(),
                 service_name: config.service_name(),
-                credentials_provider,
+                credentials_provider: CredentialsProvider::from_provide_credentials(
+                    credentials_provider,
+                )
+                .await
+                .map_err(BoxError::from)?,
                 subgraph_name: subgraph_name.to_string(),
             })
         }
@@ -360,7 +456,7 @@ fn get_signing_settings(signing_params: &SigningParamsConfig) -> SigningSettings
 }
 
 pub(super) struct SubgraphAuth {
-    pub(super) signing_params: SigningParams,
+    pub(super) signing_params: Arc<SigningParams>,
 }
 
 impl SubgraphAuth {
@@ -373,7 +469,9 @@ impl SubgraphAuth {
             ServiceBuilder::new()
                 .map_request(move |req: SubgraphRequest| {
                     let signing_params = signing_params.clone();
-                    req.context.extensions().lock().insert(signing_params);
+                    req.context
+                        .extensions()
+                        .with_lock(|mut lock| lock.insert(signing_params));
                     req
                 })
                 .service(service)
@@ -385,7 +483,7 @@ impl SubgraphAuth {
 }
 
 impl SubgraphAuth {
-    fn params_for_service(&self, service_name: &str) -> Option<SigningParamsConfig> {
+    fn params_for_service(&self, service_name: &str) -> Option<Arc<SigningParamsConfig>> {
         self.signing_params
             .subgraphs
             .get(service_name)
@@ -396,6 +494,8 @@ impl SubgraphAuth {
 
 #[cfg(test)]
 mod test {
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
     use std::sync::Arc;
 
     use http::header::CONTENT_LENGTH;
@@ -527,7 +627,7 @@ mod test {
             .returning(example_response);
 
         let mut service = SubgraphAuth {
-            signing_params: SigningParams {
+            signing_params: Arc::new(SigningParams {
                 all: make_signing_params(
                     &AuthConfig::AWSSigV4(AWSSigV4Config::Hardcoded(AWSSigV4HardcodedConfig {
                         access_key_id: "id".to_string(),
@@ -539,9 +639,10 @@ mod test {
                     "all",
                 )
                 .await
-                .ok(),
+                .ok()
+                .map(Arc::new),
                 subgraphs: Default::default(),
-            },
+            }),
         }
         .subgraph_service("test_subgraph", mock.boxed());
 
@@ -579,7 +680,7 @@ mod test {
             .returning(example_response);
 
         let mut service = SubgraphAuth {
-            signing_params: SigningParams {
+            signing_params: Arc::new(SigningParams {
                 all: make_signing_params(
                     &AuthConfig::AWSSigV4(AWSSigV4Config::Hardcoded(AWSSigV4HardcodedConfig {
                         access_key_id: "id".to_string(),
@@ -591,9 +692,10 @@ mod test {
                     "all",
                 )
                 .await
-                .ok(),
+                .ok()
+                .map(Arc::new),
                 subgraphs: Default::default(),
-            },
+            }),
         }
         .subgraph_service("test_subgraph", mock.boxed());
 
@@ -601,10 +703,109 @@ mod test {
         Ok(())
     }
 
-    fn example_response(_: SubgraphRequest) -> Result<SubgraphResponse, BoxError> {
+    #[tokio::test]
+    async fn test_credentials_provider_keeps_credentials_in_cache() -> Result<(), BoxError> {
+        #[derive(Debug, Default, Clone)]
+        struct TestCredentialsProvider {
+            times_called: Arc<AtomicUsize>,
+        }
+
+        impl ProvideCredentials for TestCredentialsProvider {
+            fn provide_credentials<'a>(
+                &'a self,
+            ) -> aws_credential_types::provider::future::ProvideCredentials<'a>
+            where
+                Self: 'a,
+            {
+                self.times_called.fetch_add(1, Ordering::SeqCst);
+                aws_credential_types::provider::future::ProvideCredentials::ready(Ok(
+                    Credentials::new("test_key", "test_secret", None, None, "test_provider"),
+                ))
+            }
+        }
+
+        let tcp = TestCredentialsProvider::default();
+
+        let cp = CredentialsProvider::from_provide_credentials(tcp.clone())
+            .await
+            .unwrap();
+
+        let _ = cp.provide_credentials().await.unwrap();
+        let _ = cp.provide_credentials().await.unwrap();
+
+        assert_eq!(1, tcp.times_called.load(Ordering::SeqCst));
+
+        cp.refresh_credentials().await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let _ = cp.provide_credentials().await.unwrap();
+        let _ = cp.provide_credentials().await.unwrap();
+
+        assert_eq!(2, tcp.times_called.load(Ordering::SeqCst));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_credentials_provider_refresh_on_stale() -> Result<(), BoxError> {
+        #[derive(Debug, Default, Clone)]
+        struct TestCredentialsProvider {
+            times_called: Arc<AtomicUsize>,
+        }
+
+        impl ProvideCredentials for TestCredentialsProvider {
+            fn provide_credentials<'a>(
+                &'a self,
+            ) -> aws_credential_types::provider::future::ProvideCredentials<'a>
+            where
+                Self: 'a,
+            {
+                self.times_called.fetch_add(1, Ordering::SeqCst);
+                aws_credential_types::provider::future::ProvideCredentials::ready(Ok(
+                    // The token will expire immediately, it should be refreshed fairly fast
+                    Credentials::new(
+                        "test_key",
+                        "test_secret",
+                        None,
+                        // 5 minutes + 1 second
+                        SystemTime::now().checked_add(Duration::from_secs(60 * 5 + 1)),
+                        "test_provider",
+                    ),
+                ))
+            }
+        }
+
+        let tcp = TestCredentialsProvider::default();
+
+        let cp = CredentialsProvider::from_provide_credentials(tcp.clone())
+            .await
+            .unwrap();
+
+        let _ = cp.provide_credentials().await.unwrap();
+        let _ = cp.provide_credentials().await.unwrap();
+
+        assert_eq!(1, tcp.times_called.load(Ordering::SeqCst));
+
+        cp.refresh_credentials().await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let _ = cp.provide_credentials().await.unwrap();
+        let _ = cp.provide_credentials().await.unwrap();
+
+        assert_eq!(2, tcp.times_called.load(Ordering::SeqCst));
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        assert_eq!(3, tcp.times_called.load(Ordering::SeqCst));
+
+        Ok(())
+    }
+
+    fn example_response(req: SubgraphRequest) -> Result<SubgraphResponse, BoxError> {
         Ok(SubgraphResponse::new_from_response(
             http::Response::default(),
             Context::new(),
+            req.subgraph_name.unwrap_or_else(|| String::from("test")),
         ))
     }
 
@@ -640,17 +841,17 @@ mod test {
     fn get_signed_request(
         request: &SubgraphRequest,
         service_name: String,
-    ) -> hyper::Request<hyper::Body> {
-        let signing_params = {
-            let ctx = request.context.extensions().lock();
-            let sp = ctx.get::<SigningParamsConfig>();
-            sp.cloned().unwrap()
-        };
+    ) -> http::Request<RouterBody> {
+        let signing_params = request
+            .context
+            .extensions()
+            .with_lock(|lock| lock.get::<Arc<SigningParamsConfig>>().cloned())
+            .unwrap();
 
         let http_request = request
             .clone()
             .subgraph_request
-            .map(|body| hyper::Body::from(serde_json::to_string(&body).unwrap()));
+            .map(|body| RouterBody::from(serde_json::to_string(&body).unwrap()));
 
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();

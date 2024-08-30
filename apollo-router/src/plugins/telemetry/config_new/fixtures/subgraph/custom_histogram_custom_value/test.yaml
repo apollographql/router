@@ -1,0 +1,34 @@
+description: Custom histogram with value from custom header
+events:
+  - - router_request:
+        uri: "/hello"
+        method: GET
+        headers:
+          count_header: "10"
+        body: |
+          hello
+    - supergraph_request:
+        uri: "/hello"
+        method: GET
+        headers:
+          count_header: "10"
+        query: "query { hello }"
+    - subgraph_request:
+        query: "query { hello }"
+        operation_name: "Products"
+        operation_kind: query
+        subgraph_name: "products"
+        headers:
+          count_header: 10
+    - subgraph_response:
+        status: 200
+        data:
+          hello: "world"
+    - supergraph_response:
+        status: 200
+        data:
+          hello: "world"
+    - router_response:
+        body: |
+          hello
+        status: 200

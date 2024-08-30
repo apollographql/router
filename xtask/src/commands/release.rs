@@ -9,6 +9,7 @@ use walkdir::WalkDir;
 use xtask::*;
 
 use crate::commands::changeset::slurp_and_remove_changesets;
+mod process;
 
 #[derive(Debug, clap::Subcommand)]
 pub enum Command {
@@ -17,6 +18,9 @@ pub enum Command {
 
     /// Verify that a release is ready to be published
     PreVerify,
+
+    Start(process::Start),
+    Continue,
 }
 
 impl Command {
@@ -24,12 +28,14 @@ impl Command {
         match self {
             Command::Prepare(command) => command.run(),
             Command::PreVerify => PreVerify::run(),
+            Command::Start(start) => process::Process::start(start),
+            Command::Continue => process::Process::cont(),
         }
     }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-enum Version {
+pub(crate) enum Version {
     Major,
     Minor,
     Patch,
@@ -78,14 +84,10 @@ macro_rules! replace_in_file {
 
 impl Prepare {
     pub fn run(&self) -> Result<()> {
-        tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .unwrap()
-            .block_on(async { self.prepare_release().await })
+        self.prepare_release()
     }
 
-    async fn prepare_release(&self) -> Result<(), Error> {
+    fn prepare_release(&self) -> Result<(), Error> {
         self.ensure_pristine_checkout()?;
         self.ensure_prereqs()?;
         let version = self.update_cargo_tomls(&self.version)?;
@@ -174,29 +176,17 @@ impl Prepare {
     /// Update the `apollo-router` version in the `dependencies` sections of the `Cargo.toml` files in `apollo-router-scaffold/templates/**`.
     fn update_cargo_tomls(&self, version: &Version) -> Result<String> {
         println!("updating Cargo.toml files");
+        fn bump(component: &str) -> Result<()> {
+            for package in ["apollo-federation", "apollo-router"] {
+                cargo!(["set-version", "--bump", component, "--package", package]);
+            }
+            Ok(())
+        }
         match version {
             Version::Current => {}
-            Version::Major => cargo!([
-                "set-version",
-                "--bump",
-                "major",
-                "--package",
-                "apollo-router"
-            ]),
-            Version::Minor => cargo!([
-                "set-version",
-                "--bump",
-                "minor",
-                "--package",
-                "apollo-router"
-            ]),
-            Version::Patch => cargo!([
-                "set-version",
-                "--bump",
-                "patch",
-                "--package",
-                "apollo-router"
-            ]),
+            Version::Major => bump("major")?,
+            Version::Minor => bump("minor")?,
+            Version::Patch => bump("patch")?,
             Version::Nightly => {
                 // Get the first 8 characters of the current commit hash by running
                 // the Command::new("git") command.  Be sure to take the output and
@@ -231,6 +221,9 @@ impl Prepare {
                 );
             }
             Version::Version(version) => {
+                // Also updates apollo-router's dependency:
+                cargo!(["set-version", version, "--package", "apollo-federation"]);
+
                 cargo!(["set-version", version, "--package", "apollo-router"])
             }
         }
@@ -252,12 +245,12 @@ impl Prepare {
                 cargo!(["set-version", &resolved_version, "--package", package])
             }
             replace_in_file!(
-                "./apollo-router-scaffold/templates/base/Cargo.toml",
+                "./apollo-router-scaffold/templates/base/Cargo.template.toml",
                 "^apollo-router\\s*=\\s*\"[^\"]+\"",
                 format!("apollo-router = \"{resolved_version}\"")
             );
             replace_in_file!(
-                "./apollo-router-scaffold/templates/base/xtask/Cargo.toml",
+                "./apollo-router-scaffold/templates/base/xtask/Cargo.template.toml",
                 r#"^apollo-router-scaffold = \{\s*git\s*=\s*"https://github.com/apollographql/router.git",\s*tag\s*=\s*"v[^"]+"\s*\}$"#,
                 format!(
                     r#"apollo-router-scaffold = {{ git = "https://github.com/apollographql/router.git", tag = "v{resolved_version}" }}"#

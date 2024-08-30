@@ -1,10 +1,10 @@
 ---
 title: Metrics exporters
-subtitle: Export Apollo Router metrics
-description: Collect and export metrics from the Apollo Router for Prometheus, OpenTelemetry Protocol (OTLP), Datadog, and New Relic
+subtitle: Export router metrics
+description: Collect and export metrics from the Apollo GraphOS Router or Apollo Router Core for Prometheus, OpenTelemetry Protocol (OTLP), Datadog, and New Relic.
 ---
 
-The Apollo Router supports collection of metrics with [OpenTelemetry](https://opentelemetry.io/), with exporters for:
+The GraphOS Router and Apollo Router Core support collection of metrics with [OpenTelemetry](https://opentelemetry.io/), with exporters for:
 
 * [Prometheus](./prometheus)
 * [OpenTelemetry Protocol (OTLP)](./otlp)
@@ -75,7 +75,7 @@ If the service name isn't explicitly set, it defaults to `unknown_service:router
 
 ### `resource`
 
-A resource attribute is a set of key-value pairs that provide additional information to an exporter. Application performance monitors (APM) may interpret and display resource information. 
+A resource attribute is a set of key-value pairs that provide additional information to an exporter. It's an attribute of an [OpenTelemetry resource](https://opentelemetry.io/docs/specs/otel/resource/sdk/). Application performance monitors (APM) can interpret and display resource information. 
 
 In [`router.yaml`](../../../overview/#yaml-config-file), resource attributes are set in `telemetry.metrics.common.resource`. For example:
 
@@ -122,6 +122,12 @@ You can add custom attributes (OpenTelemetry) and labels (Prometheus) to the `ap
 * headers from the request or response
 * a value from a context
 * a value from the request or response body ([JSON path](https://goessner.net/articles/JsonPath/))
+
+<Note>
+
+Use [resource attributes](#resource) instead to provide information about telemetry resources, including hosts and environments.
+
+</Note>
 
 An example of configuring these attributes is shown below:
 
@@ -211,6 +217,20 @@ telemetry:
 
 ```
 
+You can drop specific metrics if you don't want these metrics to be sent to your APM.
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    metrics:
+      common:
+        service_name: apollo-router
+        views:
+          - name: apollo_router_http_request_duration_seconds # Instrument name you want to edit. You can use wildcard in names. If you want to target all instruments just use '*'
+            aggregation: drop
+
+```
+
 ## Metrics common reference
 
 | Attribute           | Default                  | Description                                                   |
@@ -219,9 +239,10 @@ telemetry:
 | `service_namespace` |                          | The OpenTelemetry namespace.                                  |
 | `resource`          |                          | The OpenTelemetry resource to attach to metrics.              |
 | `attributes`        |                          | Customization for the apollo_router_http_requests instrument. |
+| `views`             |                          | Override default buckets or configuration for metrics (including dropping the metric itself) |
 
 
 ## Related topics
 
 * [Connecting OpenTelemetry traces to Prometheus](/technotes/TN0003-opentelemetry-traces-to-prometheus)
-* [Sending Apollo Router traces and metrics to APM tools using OpenTelemetry](/technotes/TN0015-router-to-apm-via-opentelemetry/)
+* [Sending router traces and metrics to APM tools using OpenTelemetry](/technotes/TN0015-router-to-apm-via-opentelemetry/)

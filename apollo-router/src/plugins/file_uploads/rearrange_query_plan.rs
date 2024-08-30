@@ -1,6 +1,7 @@
 use std::cmp;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use indexmap::IndexMap;
 use indexmap::IndexSet;
@@ -37,12 +38,14 @@ pub(super) fn rearrange_query_plan(
         );
     }
 
-    let root = rearrange_plan_node(root, &mut IndexMap::new(), &variable_ranges)?;
+    let root = rearrange_plan_node(root, &mut IndexMap::default(), &variable_ranges)?;
     Ok(QueryPlan {
-        root,
+        root: Arc::new(root),
         usage_reporting: query_plan.usage_reporting.clone(),
         formatted_query_plan: query_plan.formatted_query_plan.clone(),
         query: query_plan.query.clone(),
+        query_metrics: query_plan.query_metrics,
+        estimated_size: Default::default(),
     })
 }
 
@@ -79,7 +82,7 @@ fn rearrange_plan_node<'a>(
         PlanNode::Fetch(fetch) => {
             // Extract variables used in this node.
             for variable in fetch.variable_usages.iter() {
-                if let Some((name, range)) = variable_ranges.get_key_value(variable.as_str()) {
+                if let Some((name, range)) = variable_ranges.get_key_value(variable.as_ref()) {
                     acc_variables.entry(name).or_insert(range);
                 }
             }
@@ -88,14 +91,14 @@ fn rearrange_plan_node<'a>(
         PlanNode::Subscription { primary, rest } => {
             // Extract variables used in this node
             for variable in primary.variable_usages.iter() {
-                if let Some((name, range)) = variable_ranges.get_key_value(variable.as_str()) {
+                if let Some((name, range)) = variable_ranges.get_key_value(variable.as_ref()) {
                     acc_variables.entry(name).or_insert(range);
                 }
             }
 
             // Error if 'rest' contains file variables
             if let Some(rest) = rest {
-                let mut rest_variables = IndexMap::new();
+                let mut rest_variables = IndexMap::default();
                 // ignore result use it just to collect variables
                 drop(rearrange_plan_node(
                     rest,
@@ -128,7 +131,7 @@ fn rearrange_plan_node<'a>(
                 .transpose();
 
             // Error if 'deferred' contains file variables
-            let mut deferred_variables = IndexMap::new();
+            let mut deferred_variables = IndexMap::default();
             for DeferredNode { node, .. } in deferred.iter() {
                 if let Some(node) = node {
                     // ignore result use it just to collect variables

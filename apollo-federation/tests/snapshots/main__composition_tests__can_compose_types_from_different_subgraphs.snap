@@ -1,6 +1,6 @@
 ---
-source: tests/composition_tests.rs
-expression: print_sdl(&supergraph.schema)
+source: apollo-federation/tests/composition_tests.rs
+expression: print_sdl(supergraph.schema.schema())
 ---
 schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
   query: Query
@@ -8,7 +8,7 @@ schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://spec
 
 directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
-directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, overrideLabel: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 
 directive @join__graph(name: String!, url: String!) on ENUM_VALUE
 
@@ -20,9 +20,11 @@ directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
+scalar Import @join__type(graph: SUBGRAPHA) @join__type(graph: SUBGRAPHB)
+
 type Product @join__type(graph: SUBGRAPHA) {
-  sku: String!
-  name: String!
+  sku: String! @join__field(graph: SUBGRAPHA)
+  name: String! @join__field(graph: SUBGRAPHA)
 }
 
 type Query @join__type(graph: SUBGRAPHA) @join__type(graph: SUBGRAPHB) {
@@ -30,8 +32,8 @@ type Query @join__type(graph: SUBGRAPHA) @join__type(graph: SUBGRAPHB) {
 }
 
 type User @join__type(graph: SUBGRAPHB) {
-  name: String
-  email: String!
+  name: String @join__field(graph: SUBGRAPHB)
+  email: String! @join__field(graph: SUBGRAPHB)
 }
 
 scalar join__FieldSet
@@ -51,4 +53,3 @@ enum link__Purpose {
   """EXECUTION features provide metadata necessary for operation execution."""
   EXECUTION
 }
-

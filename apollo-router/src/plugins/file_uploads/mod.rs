@@ -29,6 +29,7 @@ use crate::plugin::PluginPrivate;
 use crate::register_private_plugin;
 use crate::services::execution;
 use crate::services::router;
+use crate::services::router::body::RouterBody;
 use crate::services::subgraph;
 use crate::services::supergraph;
 
@@ -173,10 +174,12 @@ async fn router_layer(
 
         let (mut request_parts, request_body) = req.router_request.into_parts();
 
-        let mut multipart = MultipartRequest::new(request_body, boundary, limits);
+        let mut multipart = MultipartRequest::new(request_body.into(), boundary, limits);
         let operations_stream = multipart.operations_field().await?;
 
-        req.context.extensions().lock().insert(multipart);
+        req.context
+            .extensions()
+            .with_lock(|mut lock| lock.insert(multipart));
 
         let content_type = operations_stream
             .headers()
@@ -188,9 +191,9 @@ async fn router_layer(
         request_parts.headers.insert(CONTENT_TYPE, content_type);
         request_parts.headers.remove(CONTENT_LENGTH);
 
-        let request_body = hyper::Body::wrap_stream(operations_stream);
+        let request_body = RouterBody::wrap_stream(operations_stream);
         return Ok(router::Request::from((
-            http::Request::from_parts(request_parts, request_body),
+            http::Request::from_parts(request_parts, request_body.into_inner()),
             req.context,
         )));
     }
@@ -202,9 +205,7 @@ async fn supergraph_layer(mut req: supergraph::Request) -> Result<supergraph::Re
     let multipart = req
         .context
         .extensions()
-        .lock()
-        .get::<MultipartRequest>()
-        .cloned();
+        .with_lock(|lock| lock.get::<MultipartRequest>().cloned());
 
     if let Some(mut multipart) = multipart {
         let map_field = multipart.map_field().await?;
@@ -226,13 +227,12 @@ async fn supergraph_layer(mut req: supergraph::Request) -> Result<supergraph::Re
             }
         }
 
-        req.context
-            .extensions()
-            .lock()
-            .insert(SupergraphLayerResult {
+        req.context.extensions().with_lock(|mut lock| {
+            lock.insert(SupergraphLayerResult {
                 multipart,
                 map: Arc::new(map_field),
-            });
+            })
+        });
     }
     Ok(req)
 }
@@ -305,9 +305,7 @@ fn execution_layer(req: execution::Request) -> Result<execution::Request> {
     let supergraph_result = req
         .context
         .extensions()
-        .lock()
-        .get::<SupergraphLayerResult>()
-        .cloned();
+        .with_lock(|lock| lock.get::<SupergraphLayerResult>().cloned());
     if let Some(supergraph_result) = supergraph_result {
         let SupergraphLayerResult { map, .. } = supergraph_result;
 
@@ -321,9 +319,7 @@ async fn subgraph_layer(mut req: subgraph::Request) -> subgraph::Request {
     let supergraph_result = req
         .context
         .extensions()
-        .lock()
-        .get::<SupergraphLayerResult>()
-        .cloned();
+        .with_lock(|lock| lock.get::<SupergraphLayerResult>().cloned());
     if let Some(supergraph_result) = supergraph_result {
         let SupergraphLayerResult { multipart, map } = supergraph_result;
 
@@ -350,8 +346,8 @@ static APOLLO_REQUIRE_PREFLIGHT: HeaderName = HeaderName::from_static("apollo-re
 static TRUE: http::HeaderValue = HeaderValue::from_static("true");
 
 pub(crate) async fn http_request_wrapper(
-    mut req: http::Request<hyper::Body>,
-) -> http::Request<hyper::Body> {
+    mut req: http::Request<RouterBody>,
+) -> http::Request<RouterBody> {
     let form = req.extensions_mut().get::<MultipartFormData>().cloned();
     if let Some(form) = form {
         let (mut request_parts, operations) = req.into_parts();
@@ -363,7 +359,7 @@ pub(crate) async fn http_request_wrapper(
         request_parts
             .headers
             .insert(CONTENT_TYPE, form.content_type());
-        let body = hyper::Body::wrap_stream(form.into_stream(operations).await);
+        let body = RouterBody::wrap_stream(form.into_stream(operations).await);
         return http::Request::from_parts(request_parts, body);
     }
     req

@@ -1,11 +1,13 @@
+use std::backtrace::Backtrace;
 use std::cmp::Ordering;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Write;
 
-use apollo_compiler::ast::InvalidNameError;
+use apollo_compiler::executable::GetOperationError;
 use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::validation::WithErrors;
+use apollo_compiler::InvalidNameError;
 use lazy_static::lazy_static;
 
 use crate::subgraph::spec::FederationSpecError;
@@ -28,18 +30,43 @@ impl From<SchemaRootKind> for String {
     }
 }
 
+#[derive(Clone, Debug, strum_macros::Display, PartialEq, Eq)]
+pub enum UnsupportedFeatureKind {
+    #[strum(to_string = "progressive overrides")]
+    ProgressiveOverrides,
+    #[strum(to_string = "defer")]
+    Defer,
+    #[strum(to_string = "context")]
+    Context,
+    #[strum(to_string = "alias")]
+    Alias,
+}
+
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum SingleFederationError {
     #[error(
         "An internal error has occurred, please report this bug to Apollo.\n\nDetails: {message}"
     )]
     Internal { message: String },
-    #[error("{message}")]
-    InvalidGraphQL { message: String },
+    #[error("An internal error has occurred, please report this bug to Apollo. Details: {0}")]
+    #[allow(private_interfaces)] // users should not inspect this.
+    InternalRebaseError(#[from] crate::operation::RebaseError),
+    #[error("{diagnostics}")]
+    InvalidGraphQL { diagnostics: DiagnosticList },
+    #[error(transparent)]
+    InvalidGraphQLName(#[from] InvalidNameError),
+    #[error("Subgraph invalid: {message}")]
+    InvalidSubgraph { message: String },
+    #[error("Operation name not found")]
+    UnknownOperation,
     #[error("{message}")]
     DirectiveDefinitionInvalid { message: String },
     #[error("{message}")]
     TypeDefinitionInvalid { message: String },
+    #[error("{message}")]
+    UnsupportedFederationDirective { message: String },
+    #[error("{message}")]
+    UnsupportedFederationVersion { message: String },
     #[error("{message}")]
     UnsupportedLinkedFeature { message: String },
     #[error("{message}")]
@@ -173,7 +200,10 @@ pub enum SingleFederationError {
     #[error("{message}")]
     OverrideOnInterface { message: String },
     #[error("{message}")]
-    UnsupportedFeature { message: String },
+    UnsupportedFeature {
+        message: String,
+        kind: UnsupportedFeatureKind,
+    },
     #[error("{message}")]
     InvalidFederationSupergraph { message: String },
     #[error("{message}")]
@@ -194,11 +224,22 @@ impl SingleFederationError {
     pub fn code(&self) -> ErrorCode {
         match self {
             SingleFederationError::Internal { .. } => ErrorCode::Internal,
-            SingleFederationError::InvalidGraphQL { .. } => ErrorCode::InvalidGraphQL,
+            SingleFederationError::InternalRebaseError { .. } => ErrorCode::Internal,
+            SingleFederationError::InvalidGraphQL { .. }
+            | SingleFederationError::InvalidGraphQLName(_) => ErrorCode::InvalidGraphQL,
+            SingleFederationError::InvalidSubgraph { .. } => ErrorCode::InvalidGraphQL,
+            SingleFederationError::UnknownOperation => ErrorCode::InvalidGraphQL,
             SingleFederationError::DirectiveDefinitionInvalid { .. } => {
                 ErrorCode::DirectiveDefinitionInvalid
             }
             SingleFederationError::TypeDefinitionInvalid { .. } => ErrorCode::TypeDefinitionInvalid,
+            SingleFederationError::UnsupportedFederationDirective { .. } => {
+                ErrorCode::UnsupportedFederationDirective
+            }
+            SingleFederationError::UnsupportedFederationVersion { .. } => {
+                ErrorCode::UnsupportedFederationVersion
+            }
+
             SingleFederationError::UnsupportedLinkedFeature { .. } => {
                 ErrorCode::UnsupportedLinkedFeature
             }
@@ -363,25 +404,32 @@ impl SingleFederationError {
     }
 }
 
-impl From<InvalidNameError> for SingleFederationError {
-    fn from(err: InvalidNameError) -> Self {
-        SingleFederationError::InvalidGraphQL {
-            message: format!("Invalid GraphQL name \"{}\"", err.0),
-        }
-    }
-}
-
 impl From<InvalidNameError> for FederationError {
     fn from(err: InvalidNameError) -> Self {
         SingleFederationError::from(err).into()
     }
 }
 
+impl From<GetOperationError> for FederationError {
+    fn from(_: GetOperationError) -> Self {
+        SingleFederationError::UnknownOperation.into()
+    }
+}
+
 impl From<FederationSpecError> for FederationError {
-    fn from(_err: FederationSpecError) -> Self {
+    fn from(err: FederationSpecError) -> Self {
         // TODO: When we get around to finishing the composition port, we should really switch it to
         // using FederationError instead of FederationSpecError.
-        todo!()
+        let message = err.to_string();
+        match err {
+            FederationSpecError::UnsupportedVersionError { .. } => {
+                SingleFederationError::UnsupportedFederationVersion { message }.into()
+            }
+            FederationSpecError::UnsupportedFederationDirective { .. } => {
+                SingleFederationError::UnsupportedFederationDirective { message }.into()
+            }
+            FederationSpecError::InvalidGraphQLName(message) => message.into(),
+        }
     }
 }
 
@@ -393,8 +441,8 @@ pub struct MultipleFederationErrors {
 impl MultipleFederationErrors {
     pub fn push(&mut self, error: FederationError) {
         match error {
-            FederationError::SingleFederationError(error) => {
-                self.errors.push(error);
+            FederationError::SingleFederationError { inner, .. } => {
+                self.errors.push(inner);
             }
             FederationError::MultipleFederationErrors(errors) => {
                 self.errors.extend(errors.errors);
@@ -410,7 +458,7 @@ impl Display for MultipleFederationErrors {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "The following errors occurred:")?;
         for error in &self.errors {
-            write!(f, "\n\n  - ")?;
+            write!(f, "\n  - ")?;
             for c in error.to_string().chars() {
                 if c == '\n' {
                     write!(f, "\n    ")?;
@@ -423,16 +471,9 @@ impl Display for MultipleFederationErrors {
     }
 }
 
-impl From<DiagnosticList> for MultipleFederationErrors {
-    fn from(value: DiagnosticList) -> Self {
-        Self {
-            errors: value
-                .iter()
-                .map(|e| SingleFederationError::InvalidGraphQL {
-                    message: e.error.to_string(),
-                })
-                .collect(),
-        }
+impl From<DiagnosticList> for SingleFederationError {
+    fn from(diagnostics: DiagnosticList) -> Self {
+        SingleFederationError::InvalidGraphQL { diagnostics }
     }
 }
 
@@ -468,24 +509,50 @@ impl Display for AggregateFederationError {
     }
 }
 
+/// Work around thiserror, which when an error field has a type named `Backtrace`
+/// "helpfully" implements `Error::provides` even though that API is not stable yet:
+/// <https://github.com/rust-lang/rust/issues/99301>
+type ThiserrorTrustMeThisIsTotallyNotABacktrace = Backtrace;
+
 // PORT_NOTE: Often times, JS functions would either throw/return a GraphQLError, return a vector
 // of GraphQLErrors, or take a vector of GraphQLErrors and group them together under an
 // AggregateGraphQLError which itself would have a specific error message and code, and throw that.
 // We represent all these cases with an enum, and delegate to the members.
-#[derive(Debug, Clone, thiserror::Error)]
+#[derive(thiserror::Error)]
 pub enum FederationError {
-    #[error(transparent)]
-    SingleFederationError(#[from] SingleFederationError),
+    #[error("{inner}")]
+    SingleFederationError {
+        inner: SingleFederationError,
+        trace: ThiserrorTrustMeThisIsTotallyNotABacktrace,
+    },
     #[error(transparent)]
     MultipleFederationErrors(#[from] MultipleFederationErrors),
     #[error(transparent)]
     AggregateFederationError(#[from] AggregateFederationError),
 }
 
+impl std::fmt::Debug for FederationError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SingleFederationError { inner, trace } => write!(f, "{inner}\n{trace}"),
+            Self::MultipleFederationErrors(inner) => std::fmt::Debug::fmt(inner, f),
+            Self::AggregateFederationError(inner) => std::fmt::Debug::fmt(inner, f),
+        }
+    }
+}
+
+impl From<SingleFederationError> for FederationError {
+    fn from(inner: SingleFederationError) -> Self {
+        Self::SingleFederationError {
+            inner,
+            trace: Backtrace::capture(),
+        }
+    }
+}
+
 impl From<DiagnosticList> for FederationError {
     fn from(value: DiagnosticList) -> Self {
-        let value: MultipleFederationErrors = value.into();
-        value.into()
+        SingleFederationError::from(value).into()
     }
 }
 
@@ -496,7 +563,7 @@ impl<T> From<WithErrors<T>> for FederationError {
 }
 
 impl FederationError {
-    pub(crate) fn internal(message: impl Into<String>) -> Self {
+    pub fn internal(message: impl Into<String>) -> Self {
         SingleFederationError::Internal {
             message: message.into(),
         }
@@ -1138,6 +1205,19 @@ lazy_static! {
         "An internal federation error occured.".to_owned(),
         None,
     );
+
+    static ref UNSUPPORTED_FEDERATION_VERSION: ErrorCodeDefinition = ErrorCodeDefinition::new(
+        "UNSUPPORTED_FEDERATION_VERSION".to_owned(),
+        "Supergraphs composed with federation version 1 are not supported. Please recompose your supergraph with federation version 2 or greater".to_owned(),
+        None,
+    );
+
+    static ref UNSUPPORTED_FEDERATION_DIRECTIVE: ErrorCodeDefinition = ErrorCodeDefinition::new(
+        "UNSUPPORTED_FEDERATION_DIRECTIVE".to_owned(),
+        "Indicates that the specified specification version is outside of supported range".to_owned(),
+        None,
+
+    );
 }
 
 #[derive(Debug, strum_macros::EnumIter)]
@@ -1219,6 +1299,8 @@ pub enum ErrorCode {
     InterfaceObjectUsageError,
     InterfaceKeyNotOnImplementation,
     InterfaceKeyMissingImplementationType,
+    UnsupportedFederationVersion,
+    UnsupportedFederationDirective,
 }
 
 impl ErrorCode {
@@ -1316,6 +1398,8 @@ impl ErrorCode {
             ErrorCode::InterfaceKeyMissingImplementationType => {
                 &INTERFACE_KEY_MISSING_IMPLEMENTATION_TYPE
             }
+            ErrorCode::UnsupportedFederationVersion => &UNSUPPORTED_FEDERATION_VERSION,
+            ErrorCode::UnsupportedFederationDirective => &UNSUPPORTED_FEDERATION_DIRECTIVE,
         }
     }
 }

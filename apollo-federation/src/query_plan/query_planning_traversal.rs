@@ -1,10 +1,15 @@
 use std::sync::Arc;
 
-use indexmap::IndexSet;
+use apollo_compiler::collections::IndexSet;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
+use serde::Serialize;
+use tracing::trace;
 
 use crate::error::FederationError;
+use crate::operation::Operation;
+use crate::operation::Selection;
+use crate::operation::SelectionSet;
 use crate::query_graph::condition_resolver::ConditionResolution;
 use crate::query_graph::condition_resolver::ConditionResolutionCacheResult;
 use crate::query_graph::condition_resolver::ConditionResolver;
@@ -27,21 +32,18 @@ use crate::query_plan::fetch_dependency_graph::compute_nodes_for_tree;
 use crate::query_plan::fetch_dependency_graph::FetchDependencyGraph;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToCostProcessor;
-use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToQueryPlanProcessor;
 use crate::query_plan::generate::generate_all_plans_and_find_best;
 use crate::query_plan::generate::PlanBuilder;
-use crate::query_plan::operation::Operation;
-use crate::query_plan::operation::Selection;
-use crate::query_plan::operation::SelectionSet;
+use crate::query_plan::query_planner::compute_root_fetch_groups;
 use crate::query_plan::query_planner::QueryPlannerConfig;
 use crate::query_plan::query_planner::QueryPlanningStatistics;
 use crate::query_plan::QueryPlanCost;
 use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
-use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::ValidFederationSchema;
+use crate::utils::logging::snapshot;
 
 // PORT_NOTE: Named `PlanningParameters` in the JS codebase, but there was no particular reason to
 // leave out to the `Query` prefix, so it's been added for consistency. Similar to `GraphPath`, we
@@ -49,15 +51,13 @@ use crate::schema::ValidFederationSchema;
 // runtime (introducing the new field `head_must_be_root`).
 // NOTE: `head_must_be_root` can be deduced from the `head` node's type, so we might be able to
 //       remove it.
-pub(crate) struct QueryPlanningParameters {
+pub(crate) struct QueryPlanningParameters<'a> {
     /// The supergraph schema that generated the federated query graph.
     pub(crate) supergraph_schema: ValidFederationSchema,
     /// The federated query graph used for query planning.
     pub(crate) federated_query_graph: Arc<QueryGraph>,
     /// The operation to be query planned.
     pub(crate) operation: Arc<Operation>,
-    /// A processor for converting fetch dependency graphs to query plans.
-    pub(crate) processor: FetchDependencyGraphToQueryPlanProcessor,
     /// The query graph node at which query planning begins.
     pub(crate) head: NodeIndex,
     /// Whether the head must be a root node for query planning.
@@ -70,12 +70,12 @@ pub(crate) struct QueryPlanningParameters {
         Arc<IndexSet<AbstractTypeDefinitionPosition>>,
     /// The configuration for the query planner.
     pub(crate) config: QueryPlannerConfig,
-    pub(crate) statistics: QueryPlanningStatistics,
+    pub(crate) statistics: &'a QueryPlanningStatistics,
 }
 
-pub(crate) struct QueryPlanningTraversal<'a> {
+pub(crate) struct QueryPlanningTraversal<'a, 'b> {
     /// The parameters given to query planning.
-    parameters: &'a QueryPlanningParameters,
+    parameters: &'a QueryPlanningParameters<'b>,
     /// The root kind of the operation.
     root_kind: SchemaRootDefinitionKind,
     /// True if query planner `@defer` support is enabled and the operation contains some `@defer`
@@ -106,6 +106,7 @@ pub(crate) struct QueryPlanningTraversal<'a> {
     resolver_cache: ConditionResolverCache,
 }
 
+#[derive(Debug, Serialize)]
 struct OpenBranchAndSelections {
     /// The options for this open branch.
     open_branch: OpenBranch,
@@ -113,6 +114,18 @@ struct OpenBranchAndSelections {
     selections: Vec<Selection>,
 }
 
+struct PlanInfo {
+    fetch_dependency_graph: FetchDependencyGraph,
+    path_tree: Arc<OpPathTree>,
+}
+
+impl std::fmt::Debug for PlanInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.path_tree, f)
+    }
+}
+
+#[derive(Serialize)]
 pub(crate) struct BestQueryPlanInfo {
     /// The fetch dependency graph for this query plan.
     pub fetch_dependency_graph: FetchDependencyGraph,
@@ -139,7 +152,11 @@ impl BestQueryPlanInfo {
     }
 }
 
-impl<'a> QueryPlanningTraversal<'a> {
+impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
+    #[cfg_attr(
+        feature = "snapshot_tracing",
+        tracing::instrument(level = "trace", skip_all, name = "QueryPlanningTraversal::new")
+    )]
     pub fn new(
         // TODO(@goto-bus-stop): This probably needs a mutable reference for some of the
         // yet-unimplemented methods, and storing a mutable ref in `Self` here smells bad.
@@ -166,6 +183,10 @@ impl<'a> QueryPlanningTraversal<'a> {
 
     // Many arguments is okay for a private constructor function.
     #[allow(clippy::too_many_arguments)]
+    #[cfg_attr(
+        feature = "snapshot_tracing",
+        tracing::instrument(level = "trace", skip_all, name = "QueryPlanningTraversal::new_inner")
+    )]
     fn new_inner(
         parameters: &'a QueryPlanningParameters,
         selection_set: SelectionSet,
@@ -196,6 +217,7 @@ impl<'a> QueryPlanningTraversal<'a> {
             parameters.head,
         )
         .unwrap();
+
         // In JS this is done *inside* create_initial_options, which would require awareness of the
         // query graph.
         let tail = parameters
@@ -233,11 +255,27 @@ impl<'a> QueryPlanningTraversal<'a> {
 
     // PORT_NOTE: In JS, the traversal is still usable after finding the best plan. Here we consume
     // the struct so we do not need to return a reference, which is very unergonomic.
+    #[cfg_attr(
+        feature = "snapshot_tracing",
+        tracing::instrument(
+            level = "trace",
+            skip_all,
+            name = "QueryPlanningTraversal::find_best_plan"
+        )
+    )]
     pub fn find_best_plan(mut self) -> Result<Option<BestQueryPlanInfo>, FederationError> {
         self.find_best_plan_inner()?;
         Ok(self.best_plan)
     }
 
+    #[cfg_attr(
+        feature = "snapshot_tracing",
+        tracing::instrument(
+            level = "trace",
+            skip_all,
+            name = "QueryPlanningTraversal::find_best_plan_inner"
+        )
+    )]
     fn find_best_plan_inner(&mut self) -> Result<Option<&BestQueryPlanInfo>, FederationError> {
         while let Some(mut current_branch) = self.open_branches.pop() {
             let Some(current_selection) = current_branch.selections.pop() else {
@@ -248,6 +286,7 @@ impl<'a> QueryPlanningTraversal<'a> {
             let (terminate_planning, new_branch) =
                 self.handle_open_branch(&current_selection, &mut current_branch.open_branch.0)?;
             if terminate_planning {
+                trace!("Planning termianted!");
                 // We clear both open branches and closed ones as a means to terminate the plan
                 // computation with no plan.
                 self.open_branches = vec![];
@@ -267,6 +306,14 @@ impl<'a> QueryPlanningTraversal<'a> {
 
     /// Returns whether to terminate planning immediately, and any new open branches to push onto
     /// the stack.
+    #[cfg_attr(
+        feature = "snapshot_tracing",
+        tracing::instrument(
+            level = "trace",
+            skip_all,
+            name = "QueryPlanningTraversal::handle_open_branch"
+        )
+    )]
     fn handle_open_branch(
         &mut self,
         selection: &Selection,
@@ -275,6 +322,15 @@ impl<'a> QueryPlanningTraversal<'a> {
         let operation_element = selection.element()?;
         let mut new_options = vec![];
         let mut no_followups: bool = false;
+
+        snapshot!(name = "Options", options, "options");
+
+        snapshot!(
+            "OperationElement",
+            operation_element.to_string(),
+            "operation_element"
+        );
+
         for option in options.iter_mut() {
             let followups_for_option = option.advance_with_operation_element(
                 self.parameters.supergraph_schema.clone(),
@@ -303,6 +359,8 @@ impl<'a> QueryPlanningTraversal<'a> {
                 }
             }
         }
+
+        snapshot!(new_options, "new_options");
 
         if no_followups {
             // This operation element is valid from this option, but is guarantee to yield no result
@@ -374,8 +432,8 @@ impl<'a> QueryPlanningTraversal<'a> {
             };
         }
 
-        if let Some(selection_set) = selection.selection_set()? {
-            let mut all_tail_nodes = IndexSet::new();
+        if let Some(selection_set) = selection.selection_set() {
+            let mut all_tail_nodes = IndexSet::default();
             for option in &new_options {
                 for path in &option.paths.0 {
                     all_tail_nodes.insert(path.tail);
@@ -402,7 +460,7 @@ impl<'a> QueryPlanningTraversal<'a> {
                 let new_selection_set = Arc::new(
                     selection_set
                         .add_back_typename_in_attachments()?
-                        .add_typename_field_for_abstract_types(None, &None)?,
+                        .add_typename_field_for_abstract_types(None)?,
                 );
                 self.record_closed_branch(ClosedBranch(
                     new_options
@@ -460,27 +518,34 @@ impl<'a> QueryPlanningTraversal<'a> {
         //   later condition is that `selection` is originally a supergraph selection, but that we're looking to apply "as-is" to a subgraph.
         //   But suppose it has a `... on I` where `I` is an interface. Then it's possible that `I` includes "more" types in the supergraph
         //   than in the subgraph, and so we might have to type-explode it. If so, we cannot use the selection "as-is".
-        // PORT_NOTE: The JS code performs the last check lazily. Instead of that, this check is
-        // skipped if `nodes` is empty.
-        if !nodes.is_empty()
-            && selection.selections.values().any(|val| match val {
-                Selection::InlineFragment(fragment) => {
-                    match &fragment.inline_fragment.data().type_condition_position {
-                        Some(type_condition) => self
-                            .parameters
-                            .abstract_types_with_inconsistent_runtime_types
-                            .iter()
-                            .any(|ty| ty.type_name() == type_condition.type_name()),
-                        None => false,
+        let mut has_inconsistent_abstract_types: Option<bool> = None;
+        let mut check_has_inconsistent_runtime_types = || match has_inconsistent_abstract_types {
+            Some(has_inconsistent_abstract_types) => {
+                Ok::<bool, FederationError>(has_inconsistent_abstract_types)
+            }
+            None => {
+                let check_result = selection.any_element(&mut |element| match element {
+                    OpPathElement::InlineFragment(inline_fragment) => {
+                        match &inline_fragment.type_condition_position {
+                            Some(type_condition) => Ok(self
+                                .parameters
+                                .abstract_types_with_inconsistent_runtime_types
+                                .iter()
+                                .any(|ty| ty.type_name() == type_condition.type_name())),
+                            None => Ok(false),
+                        }
                     }
-                }
-                _ => false,
-            })
-        {
-            return Ok(false);
-        }
+                    _ => Ok(false),
+                })?;
+                has_inconsistent_abstract_types = Some(check_result);
+                Ok(check_result)
+            }
+        };
         for node in nodes {
             let n = self.parameters.federated_query_graph.node_weight(*node)?;
+            if n.has_reachable_cross_subgraph_edges {
+                return Ok(false);
+            }
             let parent_ty = match &n.type_ {
                 QueryGraphNodeType::SchemaType(ty) => {
                     match CompositeTypeDefinitionPosition::try_from(ty.clone()) {
@@ -490,7 +555,14 @@ impl<'a> QueryPlanningTraversal<'a> {
                 }
                 QueryGraphNodeType::FederatedRootType(_) => return Ok(false),
             };
-            if n.has_reachable_cross_subgraph_edges || !selection.can_rebase_on(&parent_ty) {
+            let schema = self
+                .parameters
+                .federated_query_graph
+                .schema_by_source(&n.source)?;
+            if !selection.can_rebase_on(&parent_ty, schema)? {
+                return Ok(false);
+            }
+            if check_has_inconsistent_runtime_types()? {
                 return Ok(false);
             }
         }
@@ -500,7 +572,7 @@ impl<'a> QueryPlanningTraversal<'a> {
     fn cost(
         &mut self,
         dependency_graph: &mut FetchDependencyGraph,
-    ) -> Result<i64, FederationError> {
+    ) -> Result<QueryPlanCost, FederationError> {
         let (main, deferred) = dependency_graph.process(self.cost_processor, self.root_kind)?;
         if deferred.is_empty() {
             Ok(main)
@@ -518,13 +590,33 @@ impl<'a> QueryPlanningTraversal<'a> {
         }
     }
 
+    #[cfg_attr(
+        feature = "snapshot_tracing",
+        tracing::instrument(
+            level = "trace",
+            skip_all,
+            name = "QueryPlanningTraversal::compute_best_plan_from_closed_branches"
+        )
+    )]
     fn compute_best_plan_from_closed_branches(&mut self) -> Result<(), FederationError> {
+        snapshot!(
+            name = "ClosedBranches",
+            self.closed_branches,
+            "closed_branches"
+        );
+
         if self.closed_branches.is_empty() {
             return Ok(());
         }
         self.prune_closed_branches();
         self.sort_options_in_closed_branches()?;
         self.reduce_options_if_needed();
+
+        snapshot!(
+            name = "ClosedBranches",
+            self.closed_branches,
+            "closed_branches_after_reduce"
+        );
 
         // debug log
         // self.closed_branches
@@ -552,6 +644,7 @@ impl<'a> QueryPlanningTraversal<'a> {
         let (first_group, second_group) = self.closed_branches.split_at(sole_path_branch_index);
 
         let initial_tree;
+        snapshot!("FetchDependencyGraph", "", "Generating initial dep graph");
         let mut initial_dependency_graph = self.new_dependency_graph();
         let federated_query_graph = &self.parameters.federated_query_graph;
         let root = &self.parameters.head;
@@ -571,6 +664,10 @@ impl<'a> QueryPlanningTraversal<'a> {
                 &single_choice_branches,
             )?;
             self.updated_dependency_graph(&mut initial_dependency_graph, &initial_tree)?;
+            snapshot!(
+                initial_dependency_graph,
+                "Updated dep graph with initial tree"
+            );
             if first_group.is_empty() {
                 // Well, we have the only possible plan; it's also the best.
                 let cost = self.cost(&mut initial_dependency_graph)?;
@@ -580,6 +677,9 @@ impl<'a> QueryPlanningTraversal<'a> {
                     cost,
                 }
                 .into();
+
+                snapshot!(self.best_plan, "best_plan");
+
                 return Ok(());
             }
         }
@@ -603,16 +703,21 @@ impl<'a> QueryPlanningTraversal<'a> {
             .collect();
 
         let (best, cost) = generate_all_plans_and_find_best(
-            (initial_dependency_graph, Arc::new(initial_tree)),
+            PlanInfo {
+                fetch_dependency_graph: initial_dependency_graph,
+                path_tree: Arc::new(initial_tree),
+            },
             other_trees,
             /*plan_builder*/ self,
         )?;
         self.best_plan = BestQueryPlanInfo {
-            fetch_dependency_graph: best.0,
-            path_tree: best.1,
+            fetch_dependency_graph: best.fetch_dependency_graph,
+            path_tree: best.path_tree,
             cost,
         }
         .into();
+
+        snapshot!(self.best_plan, "best_plan");
         Ok(())
     }
 
@@ -715,10 +820,11 @@ impl<'a> QueryPlanningTraversal<'a> {
         // We sort branches by those that have the most options first.
         self.closed_branches
             .sort_by(|b1, b2| b1.0.len().cmp(&b2.0.len()).reverse());
-        let mut plan_count = self
-            .closed_branches
-            .iter()
-            .try_fold(1, |product, branch| {
+
+        /// Returns usize::MAX for integer overflow
+        fn product_of_closed_branches_len(closed_branches: &[ClosedBranch]) -> usize {
+            let mut product: usize = 1;
+            for branch in closed_branches {
                 if branch.0.is_empty() {
                     // This would correspond to not being to find *any* path
                     // for a particular queried field,
@@ -729,12 +835,18 @@ impl<'a> QueryPlanningTraversal<'a> {
                     // is exactly to ensure we can never run into this path.
                     // In any case, we will throw later if that happens,
                     // but let's just return the proper result here, which is no plan at all.
-                    None
+                    return 0;
                 } else {
-                    Some(product * branch.0.len())
+                    let Some(new_product) = product.checked_mul(branch.0.len()) else {
+                        return usize::MAX;
+                    };
+                    product = new_product
                 }
-            })
-            .unwrap_or(0);
+            }
+            product
+        }
+
+        let mut plan_count = product_of_closed_branches_len(&self.closed_branches);
         // debug!("Query has {plan_count} possible plans");
 
         let max_evaluated_plans =
@@ -747,9 +859,29 @@ impl<'a> QueryPlanningTraversal<'a> {
                 break;
             }
             Self::prune_and_reorder_first_branch(&mut self.closed_branches);
-            plan_count -= plan_count / first_branch_len;
+            if plan_count != usize::MAX {
+                // We had `old_plan_count == first_branch_len * rest` and
+                // reduced `first_branch_len` by 1, so the new count is:
+                //
+                // (first_branch_len - 1) * rest
+                // = first_branch_len * rest - rest
+                // = (first_branch_len * rest) - (first_branch_len * rest) / first_branch_len
+                // = old_plan_count - old_plan_count / first_branch_len
+                plan_count -= plan_count / first_branch_len;
+            } else {
+                // Previous count had overflowed, so recompute the reduced one from scratch
+                plan_count = product_of_closed_branches_len(&self.closed_branches)
+            }
 
             // debug!("Reduced plans to consider to {plan_count} plans");
+        }
+
+        if self.is_top_level {
+            let evaluated = &self.parameters.statistics.evaluated_plan_count;
+            evaluated.set(evaluated.get() + plan_count);
+        } else {
+            // We're resolving a sub-plan for an edge condition,
+            // and we don't want to count those as "evaluated plans".
         }
     }
 
@@ -819,6 +951,14 @@ impl<'a> QueryPlanningTraversal<'a> {
         )
     }
 
+    #[cfg_attr(
+        feature = "snapshot_tracing",
+        tracing::instrument(
+            level = "trace",
+            skip_all,
+            name = "QueryPlanningTraversal::updated_dependency_graph"
+        )
+    )]
     fn updated_dependency_graph(
         &self,
         dependency_graph: &mut FetchDependencyGraph,
@@ -829,41 +969,7 @@ impl<'a> QueryPlanningTraversal<'a> {
             QueryGraphNodeType::FederatedRootType(_)
         );
         if is_root_path_tree {
-            // The root of the pathTree is one of the "fake" root of the subgraphs graph,
-            // which belongs to no subgraph but points to each ones.
-            // So we "unpack" the first level of the tree to find out our top level groups
-            // (and initialize our stack).
-            // Note that we can safely ignore the triggers of that first level
-            // as it will all be free transition, and we know we cannot have conditions.
-            for child in &path_tree.childs {
-                let edge = child.edge.expect("The root edge should not be None");
-                let (_source_node, target_node) = path_tree.graph.edge_endpoints(edge)?;
-                let target_node = path_tree.graph.node_weight(target_node)?;
-                let subgraph_name = &target_node.source;
-                let root_type = match &target_node.type_ {
-                    QueryGraphNodeType::SchemaType(OutputTypeDefinitionPosition::Object(
-                        object,
-                    )) => object.clone().into(),
-                    ty => {
-                        return Err(FederationError::internal(format!(
-                            "expected an object type for the root of a subgraph, found {ty}"
-                        )))
-                    }
-                };
-                let fetch_dependency_node = dependency_graph.get_or_create_root_node(
-                    subgraph_name,
-                    self.root_kind,
-                    root_type,
-                )?;
-                compute_nodes_for_tree(
-                    dependency_graph,
-                    &child.tree,
-                    fetch_dependency_node,
-                    Default::default(),
-                    Default::default(),
-                    &Default::default(),
-                )?;
-            }
+            compute_root_fetch_groups(self.root_kind, dependency_graph, path_tree)?;
         } else {
             let query_graph_node = path_tree.graph.node_weight(path_tree.node)?;
             let subgraph_name = &query_graph_node.source;
@@ -889,14 +995,23 @@ impl<'a> QueryPlanningTraversal<'a> {
                 &Default::default(),
             )?;
         }
+
+        snapshot!(dependency_graph, "updated_dependency_graph");
         Ok(())
     }
 
+    #[cfg_attr(
+        feature = "snapshot_tracing",
+        tracing::instrument(
+            level = "trace",
+            skip_all,
+            name = "QueryPlanningTraversal::resolve_condition_plan"
+        )
+    )]
     fn resolve_condition_plan(
         &self,
         edge: EdgeIndex,
-        // PORT_NOTE: The following parameters are not currently used.
-        _context: &OpGraphPathContext,
+        context: &OpGraphPathContext,
         excluded_destinations: &ExcludedDestinations,
         excluded_conditions: &ExcludedConditions,
     ) -> Result<ConditionResolution, FederationError> {
@@ -918,13 +1033,12 @@ impl<'a> QueryPlanningTraversal<'a> {
             supergraph_schema: self.parameters.supergraph_schema.clone(),
             federated_query_graph: graph.clone(),
             operation: self.parameters.operation.clone(),
-            processor: self.parameters.processor.clone(),
             abstract_types_with_inconsistent_runtime_types: self
                 .parameters
                 .abstract_types_with_inconsistent_runtime_types
                 .clone(),
             config: self.parameters.config.clone(),
-            statistics: self.parameters.statistics.clone(),
+            statistics: self.parameters.statistics,
         };
         let best_plan_opt = QueryPlanningTraversal::new_inner(
             &parameters,
@@ -933,7 +1047,7 @@ impl<'a> QueryPlanningTraversal<'a> {
             self.has_defers,
             self.root_kind,
             self.cost_processor,
-            Default::default(),
+            context.clone(),
             excluded_destinations.clone(),
             excluded_conditions.add_item(edge_conditions),
         )?
@@ -948,35 +1062,30 @@ impl<'a> QueryPlanningTraversal<'a> {
     }
 }
 
-impl PlanBuilder<(FetchDependencyGraph, Arc<OpPathTree>), Arc<OpPathTree>>
-    for QueryPlanningTraversal<'_>
-{
+impl<'a: 'b, 'b> PlanBuilder<PlanInfo, Arc<OpPathTree>> for QueryPlanningTraversal<'a, 'b> {
     fn add_to_plan(
         &mut self,
-        (plan_graph, plan_tree): &(FetchDependencyGraph, Arc<OpPathTree>),
+        plan_info: &PlanInfo,
         tree: Arc<OpPathTree>,
-    ) -> (FetchDependencyGraph, Arc<OpPathTree>) {
-        let mut updated_graph = plan_graph.clone();
-        let result = self.updated_dependency_graph(&mut updated_graph, &tree);
-        if result.is_ok() {
-            let updated_tree = plan_tree.merge(&tree);
-            (updated_graph, updated_tree)
-        } else {
-            // Failed to update. Return the original plan.
-            (updated_graph, plan_tree.clone())
-        }
+    ) -> Result<PlanInfo, FederationError> {
+        let mut updated_graph = plan_info.fetch_dependency_graph.clone();
+        self.updated_dependency_graph(&mut updated_graph, &tree)
+            .map(|_| PlanInfo {
+                fetch_dependency_graph: updated_graph,
+                path_tree: plan_info.path_tree.merge(&tree),
+            })
     }
 
     fn compute_plan_cost(
         &mut self,
-        (plan_graph, _): &mut (FetchDependencyGraph, Arc<OpPathTree>),
+        plan_info: &mut PlanInfo,
     ) -> Result<QueryPlanCost, FederationError> {
-        self.cost(plan_graph)
+        self.cost(&mut plan_info.fetch_dependency_graph)
     }
 
     fn on_plan_generated(
         &self,
-        (_, _plan_tree): &(FetchDependencyGraph, Arc<OpPathTree>),
+        _plan_info: &PlanInfo,
         _cost: QueryPlanCost,
         _prev_cost: Option<QueryPlanCost>,
     ) {
@@ -1006,7 +1115,7 @@ impl PlanBuilder<(FetchDependencyGraph, Arc<OpPathTree>), Arc<OpPathTree>>
 //            The same would be infeasible to implement in Rust due to the cyclic references.
 //            Thus, instead of `condition_resolver` field, QueryPlanningTraversal was made to
 //            implement `ConditionResolver` trait along with `resolver_cache` field.
-impl<'a> ConditionResolver for QueryPlanningTraversal<'a> {
+impl<'a> ConditionResolver for QueryPlanningTraversal<'a, '_> {
     /// A query plan resolver for edge conditions that caches the outcome per edge.
     fn resolve(
         &mut self,

@@ -44,8 +44,6 @@ use test_log::test;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
-#[cfg(unix)]
-use tokio::io::BufReader;
 use tokio::sync::mpsc;
 use tokio_util::io::StreamReader;
 use tower::service_fn;
@@ -85,6 +83,7 @@ use crate::services::RouterResponse;
 use crate::services::SupergraphResponse;
 use crate::services::MULTIPART_DEFER_ACCEPT;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
+use crate::spec::Schema;
 use crate::test_harness::http_client;
 use crate::test_harness::http_client::MaybeMultipart;
 use crate::uplink::license_enforcement::LicenseState;
@@ -376,7 +375,7 @@ async fn it_displays_sandbox() {
 
     // Regular studio redirect
     let response = client
-        .get(&format!(
+        .get(format!(
             "{}/",
             server.graphql_listen_address().as_ref().unwrap()
         ))
@@ -422,7 +421,7 @@ async fn it_displays_sandbox_with_different_supergraph_path() {
 
     // Regular studio redirect
     let response = client
-        .get(&format!(
+        .get(format!(
             "{}/custom",
             server.graphql_listen_address().as_ref().unwrap()
         ))
@@ -739,7 +738,7 @@ async fn response_with_root_wildcard() -> Result<(), ApolloRouterError> {
     // Post query without path
     let response = client
         .post(
-            &server
+            server
                 .graphql_listen_address()
                 .as_ref()
                 .unwrap()
@@ -1046,7 +1045,7 @@ async fn cors_preflight() -> Result<(), ApolloRouterError> {
     let response = client
         .request(
             Method::OPTIONS,
-            &format!(
+            format!(
                 "{}/graphql",
                 server.graphql_listen_address().as_ref().unwrap()
             ),
@@ -1197,7 +1196,7 @@ async fn it_displays_homepage() {
         .await
         .unwrap();
     let response = client
-        .get(&format!(
+        .get(format!(
             "{}/",
             server.graphql_listen_address().as_ref().unwrap()
         ))
@@ -1244,7 +1243,7 @@ async fn it_doesnt_display_disabled_homepage() {
         .await
         .unwrap();
     let response = client
-        .get(&format!(
+        .get(format!(
             "{}/",
             server.graphql_listen_address().as_ref().unwrap()
         ))
@@ -1270,14 +1269,11 @@ async fn it_answers_to_custom_endpoint() -> Result<(), ApolloRouterError> {
         Ok::<_, BoxError>(
             http::Response::builder()
                 .status(StatusCode::OK)
-                .body(
-                    format!(
-                        "{} + {}",
-                        req.router_request.method(),
-                        req.router_request.uri().path()
-                    )
-                    .into(),
-                )
+                .body(format!(
+                    "{} + {}",
+                    req.router_request.method(),
+                    req.router_request.uri().path()
+                ))
                 .unwrap()
                 .into(),
         )
@@ -1303,7 +1299,7 @@ async fn it_answers_to_custom_endpoint() -> Result<(), ApolloRouterError> {
 
     for path in &["/a-custom-path", "/an-other-custom-path"] {
         let response = client
-            .get(&format!(
+            .get(format!(
                 "{}{}",
                 server.graphql_listen_address().as_ref().unwrap(),
                 path
@@ -1318,7 +1314,7 @@ async fn it_answers_to_custom_endpoint() -> Result<(), ApolloRouterError> {
 
     for path in &["/a-custom-path", "/an-other-custom-path"] {
         let response = client
-            .post(&format!(
+            .post(format!(
                 "{}{}",
                 server.graphql_listen_address().as_ref().unwrap(),
                 path
@@ -1380,14 +1376,11 @@ async fn it_refuses_to_bind_two_extra_endpoints_on_the_same_path() {
         Ok::<_, BoxError>(
             http::Response::builder()
                 .status(StatusCode::OK)
-                .body(
-                    format!(
-                        "{} + {}",
-                        req.router_request.method(),
-                        req.router_request.uri().path()
-                    )
-                    .into(),
-                )
+                .body(format!(
+                    "{} + {}",
+                    req.router_request.method(),
+                    req.router_request.uri().path()
+                ))
                 .unwrap()
                 .into(),
         )
@@ -1875,7 +1868,7 @@ async fn http_compressed_service() -> impl Service<
         .map_err(Into::into);
 
     let service = http_client::response_decompression(service)
-        .map_request(|mut req: http::Request<hyper::Body>| {
+        .map_request(|mut req: http::Request<crate::services::router::Body>| {
             req.headers_mut().append(
                 ACCEPT,
                 HeaderValue::from_static(APPLICATION_JSON.essence_str()),
@@ -2076,7 +2069,7 @@ async fn listening_to_unix_socket() {
     .await;
 
     assert_eq!(
-        serde_json::from_slice::<graphql::Response>(&output).unwrap(),
+        serde_json::from_str::<graphql::Response>(&output).unwrap(),
         expected_response,
     );
 
@@ -2084,12 +2077,12 @@ async fn listening_to_unix_socket() {
     let output = send_to_unix_socket(
         server.graphql_listen_address().as_ref().unwrap(),
         Method::GET,
-        r#"query=query%7Bme%7Bname%7D%7D"#,
+        r#"/?query=query%7Bme%7Bname%7D%7D"#,
     )
     .await;
 
     assert_eq!(
-        serde_json::from_slice::<graphql::Response>(&output).unwrap(),
+        serde_json::from_str::<graphql::Response>(&output).unwrap(),
         expected_response,
     );
 
@@ -2097,67 +2090,31 @@ async fn listening_to_unix_socket() {
 }
 
 #[cfg(unix)]
-async fn send_to_unix_socket(addr: &ListenAddr, method: Method, body: &str) -> Vec<u8> {
-    use tokio::io::AsyncBufReadExt;
-    use tokio::io::Interest;
+async fn send_to_unix_socket(addr: &ListenAddr, method: Method, body: &str) -> String {
     use tokio::net::UnixStream;
+    let stream = UnixStream::connect(addr.to_string()).await.unwrap();
+    let (mut sender, conn) = hyper::client::conn::handshake(stream).await.unwrap();
+    tokio::task::spawn(async move {
+        if let Err(err) = conn.await {
+            println!("Connection failed: {:?}", err);
+        }
+    });
 
-    let content = match method {
-        Method::GET => {
-            format!(
-                "{} /?{} HTTP/1.1\r
-Host: localhost:4100\r
-Content-Length: {}\r
-Content-Type: application/json\r
-Accept: application/json\r
-
-\n",
-                method.as_str(),
-                body,
-                body.len(),
-            )
-        }
-        Method::POST => {
-            format!(
-                "{} / HTTP/1.1\r
-Host: localhost:4100\r
-Content-Length: {}\r
-Content-Type: application/json\r
-Accept: application/json\r
-
-{}\n",
-                method.as_str(),
-                body.len(),
-                body
-            )
-        }
-        _ => {
-            unimplemented!()
-        }
-    };
-    let mut stream = UnixStream::connect(addr.to_string()).await.unwrap();
-    stream.ready(Interest::WRITABLE).await.unwrap();
-    stream.write_all(content.as_bytes()).await.unwrap();
-    stream.flush().await.unwrap();
-    let stream = BufReader::new(stream);
-    let mut lines = stream.lines();
-    let header_first_line = lines
-        .next_line()
-        .await
-        .unwrap()
-        .expect("no header received");
-    // skip the rest of the headers
-    let mut headers = String::new();
-    let mut stream = lines.into_inner();
-    loop {
-        if stream.read_line(&mut headers).await.unwrap() == 2 {
-            break;
-        }
+    let http_body = hyper::Body::from(body.to_string());
+    let mut request = http::Request::builder()
+        .method(method.clone())
+        .header("Host", "localhost:4100")
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json")
+        .body(http_body)
+        .unwrap();
+    if method == Method::GET {
+        *request.uri_mut() = body.parse().unwrap();
     }
-    // get rest of the buffer as body
-    let body = stream.buffer().to_vec();
-    assert!(header_first_line.contains(" 200 "), "");
-    body
+
+    let response = sender.send_request(request).await.unwrap();
+    let body = response.collect().await.unwrap().to_bytes();
+    String::from_utf8(body.to_vec()).unwrap()
 }
 
 #[tokio::test]
@@ -2309,14 +2266,11 @@ async fn test_supergraph_timeout() {
     let conf: Arc<Configuration> = Arc::new(serde_json::from_value(config).unwrap());
 
     let schema = include_str!("..//testdata/minimal_supergraph.graphql");
-    let planner = BridgeQueryPlannerPool::new(
-        schema.to_string(),
-        conf.clone(),
-        NonZeroUsize::new(1).unwrap(),
-    )
-    .await
-    .unwrap();
-    let schema = planner.schema();
+    let schema = Arc::new(Schema::parse(schema, &conf).unwrap());
+    let planner =
+        BridgeQueryPlannerPool::new(schema.clone(), conf.clone(), NonZeroUsize::new(1).unwrap())
+            .await
+            .unwrap();
 
     // we do the entire supergraph rebuilding instead of using `from_supergraph_mock_callback_and_configuration`
     // because we need the plugins to apply on the supergraph
@@ -2384,6 +2338,18 @@ async fn test_supergraph_timeout() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
+
     let body = response.bytes().await.unwrap();
-    assert_eq!(std::str::from_utf8(&body).unwrap(), "request timed out");
+    let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        body,
+        json!({
+             "errors": [{
+                 "message": "Request timed out",
+                 "extensions": {
+                     "code": "REQUEST_TIMEOUT"
+                 }
+             }]
+        })
+    );
 }

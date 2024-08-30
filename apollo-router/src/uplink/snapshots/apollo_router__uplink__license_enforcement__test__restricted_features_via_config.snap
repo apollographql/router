@@ -45,8 +45,17 @@ Configuration yaml:
 * Advanced telemetry
   .telemetry..spans.subgraph
 
+* Advanced telemetry
+  .telemetry..instruments
+
+* Advanced telemetry
+  .telemetry..graphql
+
 * File uploads plugin
   .preview_file_uploads
 
 * Demand control plugin
-  .experimental_demand_control
+  .demand_control
+
+* Apollo metrics extended references
+  .telemetry.apollo.experimental_apollo_metrics_reference_mode

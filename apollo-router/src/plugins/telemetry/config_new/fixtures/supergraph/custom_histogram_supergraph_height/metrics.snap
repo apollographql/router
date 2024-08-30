@@ -1,0 +1,23 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
+description: Query Height histogram with value from context
+expression: "&metrics.all()"
+info:
+  telemetry:
+    instrumentation:
+      instruments:
+        supergraph:
+          query.height:
+            description: The height of the query
+            value:
+              query: height
+            unit: unit
+            type: histogram
+---
+- name: query.height
+  description: The height of the query
+  unit: unit
+  data:
+    datapoints:
+      - sum: 3
+        attributes: {}

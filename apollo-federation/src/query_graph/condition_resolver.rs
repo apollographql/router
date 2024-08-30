@@ -3,7 +3,7 @@
 //            trait directly using `ConditionResolverCache`.
 use std::sync::Arc;
 
-use indexmap::IndexMap;
+use apollo_compiler::collections::IndexMap;
 use petgraph::graph::EdgeIndex;
 
 use crate::error::FederationError;
@@ -43,7 +43,7 @@ pub(crate) enum UnsatisfiedConditionReason {
 impl ConditionResolution {
     pub(crate) fn no_conditions() -> Self {
         Self::Satisfied {
-            cost: 0,
+            cost: 0.0,
             path_tree: None,
         }
     }

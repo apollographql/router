@@ -1057,7 +1057,7 @@ async fn subscription_callback_schema_reload() {
 
     let new_schema = format!("{SCHEMA}  ");
     // reload schema
-    let schema = Schema::parse_test(&new_schema, &configuration).unwrap();
+    let schema = Schema::parse(&new_schema, &configuration).unwrap();
     notify.broadcast_schema(Arc::new(schema));
     insta::assert_json_snapshot!(tokio::time::timeout(
         Duration::from_secs(1),
@@ -1695,9 +1695,11 @@ async fn reconstruct_deferred_query_under_interface() {
 
 fn subscription_context() -> Context {
     let context = Context::new();
-    context.extensions().lock().insert(ClientRequestAccepts {
-        multipart_subscription: true,
-        ..Default::default()
+    context.extensions().with_lock(|mut lock| {
+        lock.insert(ClientRequestAccepts {
+            multipart_subscription: true,
+            ..Default::default()
+        })
     });
 
     context
@@ -1705,9 +1707,11 @@ fn subscription_context() -> Context {
 
 fn defer_context() -> Context {
     let context = Context::new();
-    context.extensions().lock().insert(ClientRequestAccepts {
-        multipart_defer: true,
-        ..Default::default()
+    context.extensions().with_lock(|mut lock| {
+        lock.insert(ClientRequestAccepts {
+            multipart_defer: true,
+            ..Default::default()
+        })
     });
 
     context

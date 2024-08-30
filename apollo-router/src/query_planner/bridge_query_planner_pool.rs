@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -8,6 +10,9 @@ use async_channel::bounded;
 use async_channel::Sender;
 use futures::future::BoxFuture;
 use opentelemetry::metrics::MeterProvider;
+use opentelemetry::metrics::ObservableGauge;
+use opentelemetry::metrics::Unit;
+use opentelemetry_api::metrics::Meter;
 use router_bridge::planner::Planner;
 use tokio::sync::oneshot;
 use tokio::task::JoinSet;
@@ -19,6 +24,7 @@ use super::QueryPlanResult;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::metrics::meter_provider;
+use crate::query_planner::PlannerMode;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
 use crate::spec::Schema;
@@ -28,7 +34,7 @@ static CHANNEL_SIZE: usize = 1_000;
 
 #[derive(Clone)]
 pub(crate) struct BridgeQueryPlannerPool {
-    planners: Vec<Arc<Planner<QueryPlanResult>>>,
+    js_planners: Vec<Arc<Planner<QueryPlanResult>>>,
     sender: Sender<(
         QueryPlannerRequest,
         oneshot::Sender<Result<QueryPlannerResponse, QueryPlannerError>>,
@@ -36,23 +42,29 @@ pub(crate) struct BridgeQueryPlannerPool {
     schema: Arc<Schema>,
     subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     _pool_size_gauge: opentelemetry::metrics::ObservableGauge<u64>,
+    v8_heap_used: Arc<AtomicU64>,
+    _v8_heap_used_gauge: ObservableGauge<u64>,
+    v8_heap_total: Arc<AtomicU64>,
+    _v8_heap_total_gauge: ObservableGauge<u64>,
 }
 
 impl BridgeQueryPlannerPool {
     pub(crate) async fn new(
-        sdl: String,
+        schema: Arc<Schema>,
         configuration: Arc<Configuration>,
         size: NonZeroUsize,
     ) -> Result<Self, ServiceBuildError> {
-        Self::new_from_planners(Default::default(), sdl, configuration, size).await
+        Self::new_from_planners(Default::default(), schema, configuration, size).await
     }
 
     pub(crate) async fn new_from_planners(
-        old_planners: Vec<Arc<Planner<QueryPlanResult>>>,
-        schema: String,
+        old_js_planners: Vec<Arc<Planner<QueryPlanResult>>>,
+        schema: Arc<Schema>,
         configuration: Arc<Configuration>,
         size: NonZeroUsize,
     ) -> Result<Self, ServiceBuildError> {
+        let rust_planner = PlannerMode::maybe_rust(&schema, &configuration)?;
+
         let mut join_set = JoinSet::new();
 
         let (sender, receiver) = bounded::<(
@@ -60,15 +72,16 @@ impl BridgeQueryPlannerPool {
             oneshot::Sender<Result<QueryPlannerResponse, QueryPlannerError>>,
         )>(CHANNEL_SIZE);
 
-        let mut old_planners_iterator = old_planners.into_iter();
+        let mut old_js_planners_iterator = old_js_planners.into_iter();
 
         (0..size.into()).for_each(|_| {
-            let sdl = schema.clone();
+            let schema = schema.clone();
             let configuration = configuration.clone();
+            let rust_planner = rust_planner.clone();
 
-            let old_planner = old_planners_iterator.next();
+            let old_planner = old_js_planners_iterator.next();
             join_set.spawn(async move {
-                BridgeQueryPlanner::new(sdl, configuration, old_planner).await
+                BridgeQueryPlanner::new(schema, configuration, old_planner, rust_planner).await
             });
         });
 
@@ -80,15 +93,6 @@ impl BridgeQueryPlannerPool {
             bridge_query_planners.push(bridge_query_planner);
         }
 
-        let schema = bridge_query_planners
-            .first()
-            .ok_or_else(|| {
-                ServiceBuildError::QueryPlannerError(QueryPlannerError::PoolProcessing(
-                    "There should be at least 1 Query Planner service in pool".to_string(),
-                ))
-            })?
-            .schema();
-
         let subgraph_schemas = bridge_query_planners
             .first()
             .ok_or_else(|| {
@@ -98,12 +102,12 @@ impl BridgeQueryPlannerPool {
             })?
             .subgraph_schemas();
 
-        let planners = bridge_query_planners
+        let planners: Vec<_> = bridge_query_planners
             .iter()
             .map(|p| p.planner().clone())
             .collect();
 
-        for (worker_id, mut planner) in bridge_query_planners.into_iter().enumerate() {
+        for mut planner in bridge_query_planners.into_iter() {
             let receiver = receiver.clone();
 
             tokio::spawn(async move {
@@ -116,39 +120,78 @@ impl BridgeQueryPlannerPool {
                             continue;
                         }
                     };
-                    let start = Instant::now();
 
                     let res = svc.call(request).await;
-
-                    f64_histogram!(
-                        "apollo.router.query_planning.plan.duration",
-                        "Duration of the query planning.",
-                        start.elapsed().as_secs_f64(),
-                        "workerId" = worker_id.to_string()
-                    );
 
                     let _ = res_sender.send(res);
                 }
             });
         }
         let sender_for_gauge = sender.clone();
-        let pool_size_gauge = meter_provider()
-            .meter("apollo/router")
+        let meter = meter_provider().meter("apollo/router");
+        let pool_size_gauge = meter
             .u64_observable_gauge("apollo.router.query_planning.queued")
+            .with_description("Number of queries waiting to be planned")
+            .with_unit(Unit::new("query"))
             .with_callback(move |m| m.observe(sender_for_gauge.len() as u64, &[]))
             .init();
 
+        let (v8_heap_used, _v8_heap_used_gauge) = Self::create_heap_used_gauge(&meter);
+        let (v8_heap_total, _v8_heap_total_gauge) = Self::create_heap_total_gauge(&meter);
+
+        // initialize v8 metrics
+        if let Some(bridge_query_planner) = planners.first().cloned() {
+            Self::get_v8_metrics(
+                bridge_query_planner,
+                v8_heap_used.clone(),
+                v8_heap_total.clone(),
+            )
+            .await;
+        }
+
         Ok(Self {
-            planners,
+            js_planners: planners,
             sender,
             schema,
             subgraph_schemas,
             _pool_size_gauge: pool_size_gauge,
+            v8_heap_used,
+            _v8_heap_used_gauge,
+            v8_heap_total,
+            _v8_heap_total_gauge,
         })
     }
 
+    fn create_heap_used_gauge(meter: &Meter) -> (Arc<AtomicU64>, ObservableGauge<u64>) {
+        let current_heap_used = Arc::new(AtomicU64::new(0));
+        let current_heap_used_for_gauge = current_heap_used.clone();
+        let heap_used_gauge = meter
+            .u64_observable_gauge("apollo.router.v8.heap.used")
+            .with_description("V8 heap used, in bytes")
+            .with_unit(Unit::new("By"))
+            .with_callback(move |i| {
+                i.observe(current_heap_used_for_gauge.load(Ordering::SeqCst), &[])
+            })
+            .init();
+        (current_heap_used, heap_used_gauge)
+    }
+
+    fn create_heap_total_gauge(meter: &Meter) -> (Arc<AtomicU64>, ObservableGauge<u64>) {
+        let current_heap_total = Arc::new(AtomicU64::new(0));
+        let current_heap_total_for_gauge = current_heap_total.clone();
+        let heap_total_gauge = meter
+            .u64_observable_gauge("apollo.router.v8.heap.total")
+            .with_description("V8 heap total, in bytes")
+            .with_unit(Unit::new("By"))
+            .with_callback(move |i| {
+                i.observe(current_heap_total_for_gauge.load(Ordering::SeqCst), &[])
+            })
+            .init();
+        (current_heap_total, heap_total_gauge)
+    }
+
     pub(crate) fn planners(&self) -> Vec<Arc<Planner<QueryPlanResult>>> {
-        self.planners.clone()
+        self.js_planners.clone()
     }
 
     pub(crate) fn schema(&self) -> Arc<Schema> {
@@ -159,6 +202,18 @@ impl BridgeQueryPlannerPool {
         &self,
     ) -> Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>> {
         self.subgraph_schemas.clone()
+    }
+
+    async fn get_v8_metrics(
+        planner: Arc<Planner<QueryPlanResult>>,
+        v8_heap_used: Arc<AtomicU64>,
+        v8_heap_total: Arc<AtomicU64>,
+    ) {
+        let metrics = planner.get_heap_statistics().await;
+        if let Ok(metrics) = metrics {
+            v8_heap_used.store(metrics.heap_used, Ordering::SeqCst);
+            v8_heap_total.store(metrics.heap_total, Ordering::SeqCst);
+        }
     }
 }
 
@@ -186,6 +241,20 @@ impl tower::Service<QueryPlannerRequest> for BridgeQueryPlannerPool {
         let (response_sender, response_receiver) = oneshot::channel();
         let sender = self.sender.clone();
 
+        let get_metrics_future =
+            if let Some(bridge_query_planner) = self.js_planners.first().cloned() {
+                let v8_heap_used = self.v8_heap_used.clone();
+                let v8_heap_total = self.v8_heap_total.clone();
+
+                Some(Self::get_v8_metrics(
+                    bridge_query_planner,
+                    v8_heap_used,
+                    v8_heap_total,
+                ))
+            } else {
+                None
+            };
+
         Box::pin(async move {
             let start = Instant::now();
             let _ = sender.send((req, response_sender)).await;
@@ -197,11 +266,76 @@ impl tower::Service<QueryPlannerRequest> for BridgeQueryPlannerPool {
             f64_histogram!(
                 "apollo.router.query_planning.total.duration",
                 "Duration of the time the router waited for a query plan, including both the queue time and planning time.",
-                start.elapsed().as_secs_f64(),
-                []
+                start.elapsed().as_secs_f64()
             );
+
+            if let Some(f) = get_metrics_future {
+                // execute in a separate task to avoid blocking the request
+                tokio::task::spawn(f);
+            }
 
             res
         })
+    }
+}
+
+#[cfg(test)]
+
+mod tests {
+    use opentelemetry_sdk::metrics::data::Gauge;
+
+    use super::*;
+    use crate::metrics::FutureMetricsExt;
+    use crate::spec::Query;
+    use crate::Context;
+
+    #[tokio::test]
+    async fn test_v8_metrics() {
+        let sdl = include_str!("../testdata/supergraph.graphql");
+        let config = Arc::default();
+        let schema = Arc::new(Schema::parse(sdl, &config).unwrap());
+
+        async move {
+            let mut pool = BridgeQueryPlannerPool::new(
+                schema.clone(),
+                config.clone(),
+                NonZeroUsize::new(2).unwrap(),
+            )
+            .await
+            .unwrap();
+            let query = "query { me { name } }".to_string();
+
+            let doc = Query::parse_document(&query, None, &schema, &config).unwrap();
+            let context = Context::new();
+            context.extensions().with_lock(|mut lock| lock.insert(doc));
+
+            pool.call(QueryPlannerRequest::new(query, None, context))
+                .await
+                .unwrap();
+
+            let metrics = crate::metrics::collect_metrics();
+            let heap_used = metrics.find("apollo.router.v8.heap.used").unwrap();
+            let heap_total = metrics.find("apollo.router.v8.heap.total").unwrap();
+
+            println!(
+                "got heap_used: {:?}, heap_total: {:?}",
+                heap_used
+                    .data
+                    .as_any()
+                    .downcast_ref::<Gauge<u64>>()
+                    .unwrap()
+                    .data_points[0]
+                    .value,
+                heap_total
+                    .data
+                    .as_any()
+                    .downcast_ref::<Gauge<u64>>()
+                    .unwrap()
+                    .data_points[0]
+                    .value
+            );
+        }
+        .with_metrics()
+        .await;
     }
 }

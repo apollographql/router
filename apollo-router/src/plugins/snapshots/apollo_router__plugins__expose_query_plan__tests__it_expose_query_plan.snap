@@ -68,7 +68,8 @@ expression: "serde_json::to_value(response).unwrap()"
               "id": null,
               "inputRewrites": null,
               "outputRewrites": null,
-              "schemaAwareHash": "7245d488e97c3b2ac9f5fa4dd4660940b94ad81af070013305b2c0f76337b2f9",
+              "contextRewrites": null,
+              "schemaAwareHash": "39cac6386a951cd4dbdfc9c91d7d24cc1061481ab03b72c483422446e09cba32",
               "authorization": {
                 "is_authenticated": false,
                 "scopes": [],
@@ -107,7 +108,8 @@ expression: "serde_json::to_value(response).unwrap()"
                 "id": null,
                 "inputRewrites": null,
                 "outputRewrites": null,
-                "schemaAwareHash": "6e0b4156706ea0cf924500cfdc99dd44b9f0ed07e2d3f888d4aff156e6a33238",
+                "contextRewrites": null,
+                "schemaAwareHash": "ee6ac550117eed7d8fcaf66c83fd5177bf03a9d5761f484e2664ea4e66149127",
                 "authorization": {
                   "is_authenticated": false,
                   "scopes": [],
@@ -153,7 +155,8 @@ expression: "serde_json::to_value(response).unwrap()"
                     "id": null,
                     "inputRewrites": null,
                     "outputRewrites": null,
-                    "schemaAwareHash": "ff649f3d70241d5a8cd5f5d03ff4c41ecff72b0e4129a480207b05ac92318042",
+                    "contextRewrites": null,
+                    "schemaAwareHash": "76d400fc6a494cbe05a44751923e570ee31928f0fb035ea36c14d4d6f4545482",
                     "authorization": {
                       "is_authenticated": false,
                       "scopes": [],
@@ -196,7 +199,8 @@ expression: "serde_json::to_value(response).unwrap()"
                     "id": null,
                     "inputRewrites": null,
                     "outputRewrites": null,
-                    "schemaAwareHash": "bf9f3beda78a7a565e47c862157bad4ec871d724d752218da1168455dddca074",
+                    "contextRewrites": null,
+                    "schemaAwareHash": "66c61f60e730b77cd0a58908fee01dc7a0742c47e9f847037e01297d37918821",
                     "authorization": {
                       "is_authenticated": false,
                       "scopes": [],

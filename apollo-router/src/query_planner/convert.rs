@@ -3,21 +3,18 @@ use std::sync::Arc;
 use apollo_compiler::executable;
 use apollo_federation::query_plan as next;
 
-use crate::query_planner::bridge_query_planner as bridge;
 use crate::query_planner::fetch::SubgraphOperation;
 use crate::query_planner::plan;
 use crate::query_planner::rewrites;
 use crate::query_planner::selection;
 use crate::query_planner::subscription;
 
-impl From<&'_ next::QueryPlan> for bridge::QueryPlan {
-    fn from(value: &'_ next::QueryPlan) -> Self {
-        let next::QueryPlan {
-            node,
-            statistics: _,
-        } = value;
-        Self { node: option(node) }
-    }
+pub(crate) fn convert_root_query_plan_node(js: &next::QueryPlan) -> Option<plan::PlanNode> {
+    let next::QueryPlan {
+        node,
+        statistics: _,
+    } = js;
+    option(node)
 }
 
 impl From<&'_ next::TopLevelPlanNode> for plan::PlanNode {
@@ -74,6 +71,7 @@ impl From<&'_ Box<next::FetchNode>> for plan::PlanNode {
             operation_kind,
             input_rewrites,
             output_rewrites,
+            context_rewrites,
         } = &**value;
         Self::Fetch(super::fetch::FetchNode {
             service_name: subgraph_name.clone(),
@@ -81,11 +79,12 @@ impl From<&'_ Box<next::FetchNode>> for plan::PlanNode {
             variable_usages: variable_usages.iter().map(|v| v.clone().into()).collect(),
             // TODO: use Arc in apollo_federation to avoid this clone
             operation: SubgraphOperation::from_parsed(Arc::new(operation_document.clone())),
-            operation_name: operation_name.clone(),
+            operation_name: operation_name.clone().map(|n| n.into()),
             operation_kind: (*operation_kind).into(),
-            id: id.map(|id| id.to_string().into()),
+            id: id.map(|id| id.to_string()),
             input_rewrites: option_vec(input_rewrites),
             output_rewrites: option_vec(output_rewrites),
+            context_rewrites: option_vec(context_rewrites),
             schema_aware_hash: Default::default(),
             authorization: Default::default(),
         })
@@ -153,13 +152,14 @@ impl From<&'_ next::FetchNode> for subscription::SubscriptionNode {
             operation_kind,
             input_rewrites,
             output_rewrites,
+            context_rewrites: _,
         } = value;
         Self {
             service_name: subgraph_name.clone(),
             variable_usages: variable_usages.iter().map(|v| v.clone().into()).collect(),
             // TODO: use Arc in apollo_federation to avoid this clone
             operation: SubgraphOperation::from_parsed(Arc::new(operation_document.clone())),
-            operation_name: operation_name.clone(),
+            operation_name: operation_name.clone().map(|n| n.into()),
             operation_kind: (*operation_kind).into(),
             input_rewrites: option_vec(input_rewrites),
             output_rewrites: option_vec(output_rewrites),

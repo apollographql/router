@@ -1,9 +1,10 @@
 ---
-title: Sending HTTP headers to subgraphs
-description: Configure which headers the Apollo Router sends to which subgraphs
+title: Header Propagation
+subtitle: Configure HTTP header propagation to subgraphs
+description: Configure which HTTP headers the Apollo GraphOS Router or Apollo Router Core sends to which subgraphs. Define per-subgraph header rules, along with rules that apply to all subgraphs.
 ---
 
-You can configure which HTTP headers the Apollo Router includes in its requests to each of your subgraphs. You can define per-subgraph header rules, along with rules that apply to _all_ subgraphs.
+You can configure which HTTP headers the GraphOS Router or Apollo Route Core includes in its requests to each of your subgraphs. You can define per-subgraph header rules, along with rules that apply to _all_ subgraphs.
 
 You define header rules in your [YAML configuration file](./overview/#yaml-config-file), like so:
 
@@ -26,7 +27,7 @@ headers:
 
 ## Supported header rules
 
-The Apollo Router supports the following types of header rules:
+The router supports the following types of header rules:
 
 ### `propagate`
 
@@ -39,7 +40,11 @@ You can specify which headers to propagate based on a matching [regex pattern](h
     matching: .*
 ```
 
-> **Note:** The Apollo Router _never_ propagates so-called [hop-by-hop headers](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers#hop-by-hop_headers) (such as `Content-Length`) when propagating by pattern.
+<Note>
+
+The router _never_ propagates so-called [hop-by-hop headers](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers#hop-by-hop_headers) (such as `Content-Length`) when propagating by pattern.
+
+</Note>
 
 Alternatively, you can provide a static string via the `named` option. These `named` configurations have additional flexibility, because they support the following options:
 

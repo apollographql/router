@@ -4,38 +4,8 @@ use apollo_compiler::Schema;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::schema::position::FieldDefinitionPosition;
-use crate::schema::position::InterfaceTypeDefinitionPosition;
-use crate::schema::position::TypeDefinitionPosition;
-use crate::schema::position::UnionTypeDefinitionPosition;
 
-pub(crate) enum AbstractType {
-    Interface(InterfaceTypeDefinitionPosition),
-    Union(UnionTypeDefinitionPosition),
-}
-
-impl AbstractType {
-    pub(crate) fn introspection_typename_field(&self) -> FieldDefinitionPosition {
-        match self {
-            AbstractType::Interface(interface) => {
-                FieldDefinitionPosition::Interface(interface.introspection_typename_field())
-            }
-            AbstractType::Union(union) => {
-                FieldDefinitionPosition::Union(union.introspection_typename_field())
-            }
-        }
-    }
-}
-
-pub(crate) fn is_abstract_type(ty: TypeDefinitionPosition) -> bool {
-    matches!(
-        ty,
-        crate::schema::position::TypeDefinitionPosition::Interface(_)
-            | crate::schema::position::TypeDefinitionPosition::Union(_)
-    )
-}
-
-pub(crate) fn is_composite_type(ty: &NamedType, schema: &Schema) -> Result<bool, FederationError> {
+fn is_composite_type(ty: &NamedType, schema: &Schema) -> Result<bool, FederationError> {
     Ok(matches!(
         schema
             .types

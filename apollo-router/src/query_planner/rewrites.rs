@@ -8,7 +8,7 @@
 //! every appear on the input side, while other will only appear on outputs, but it does not hurt
 //! to be future-proof by supporting all types of rewrites on both "sides".
 
-use apollo_compiler::NodeStr;
+use apollo_compiler::Name;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -43,11 +43,11 @@ pub(crate) struct DataValueSetter {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DataKeyRenamer {
     pub(crate) path: Path,
-    pub(crate) rename_key_to: NodeStr,
+    pub(crate) rename_key_to: Name,
 }
 
 impl DataRewrite {
-    fn maybe_apply(&self, schema: &Schema, data: &mut Value) {
+    pub(crate) fn maybe_apply(&self, schema: &Schema, data: &mut Value) {
         match self {
             DataRewrite::ValueSetter(setter) => {
                 // The `path` of rewrites can only be either `Key` or `Fragment`, and so far
@@ -109,6 +109,7 @@ pub(crate) fn apply_rewrites(
 
 #[cfg(test)]
 mod tests {
+    use apollo_compiler::name;
     use serde_json_bytes::json;
 
     use super::*;
@@ -160,11 +161,11 @@ mod tests {
 
         let dr = DataRewrite::KeyRenamer(DataKeyRenamer {
             path: "data/testField__alias_0".into(),
-            rename_key_to: "testField".into(),
+            rename_key_to: name!("testField"),
         });
 
         dr.maybe_apply(
-            &Schema::parse_test(SCHEMA, &Default::default()).unwrap(),
+            &Schema::parse(SCHEMA, &Default::default()).unwrap(),
             &mut data,
         );
 
@@ -198,11 +199,11 @@ mod tests {
 
         let dr = DataRewrite::KeyRenamer(DataKeyRenamer {
             path: "data/testField__alias_0".into(),
-            rename_key_to: "testField".into(),
+            rename_key_to: name!("testField"),
         });
 
         dr.maybe_apply(
-            &Schema::parse_test(SCHEMA, &Default::default()).unwrap(),
+            &Schema::parse(SCHEMA, &Default::default()).unwrap(),
             &mut data,
         );
 

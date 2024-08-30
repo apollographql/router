@@ -39,48 +39,36 @@ fn remove_core_feature_elements(schema: &mut FederationSchema) -> Result<(), Fed
     for position in &types_for_removal {
         match position {
             position::TypeDefinitionPosition::Object(position) => {
-                let object = position.get(schema.schema())?;
-                let remove_children = object
+                let object = position.get(schema.schema())?.clone();
+                object
                     .fields
                     .keys()
                     .map(|field_name| position.field(field_name.clone()))
-                    .collect::<Vec<_>>();
-                for child in remove_children {
-                    child.remove(schema)?;
-                }
+                    .try_for_each(|child| child.remove(schema))?;
             }
             position::TypeDefinitionPosition::Interface(position) => {
-                let interface = position.get(schema.schema())?;
-                let remove_children = interface
+                let interface = position.get(schema.schema())?.clone();
+                interface
                     .fields
                     .keys()
                     .map(|field_name| position.field(field_name.clone()))
-                    .collect::<Vec<_>>();
-                for child in remove_children {
-                    child.remove(schema)?;
-                }
+                    .try_for_each(|child| child.remove(schema))?;
             }
             position::TypeDefinitionPosition::InputObject(position) => {
-                let input_object = position.get(schema.schema())?;
-                let remove_children = input_object
+                let input_object = position.get(schema.schema())?.clone();
+                input_object
                     .fields
                     .keys()
                     .map(|field_name| position.field(field_name.clone()))
-                    .collect::<Vec<_>>();
-                for child in remove_children {
-                    child.remove(schema)?;
-                }
+                    .try_for_each(|child| child.remove(schema))?;
             }
             position::TypeDefinitionPosition::Enum(position) => {
-                let enum_ = position.get(schema.schema())?;
-                let remove_children = enum_
+                let enum_ = position.get(schema.schema())?.clone();
+                enum_
                     .values
                     .keys()
                     .map(|field_name| position.value(field_name.clone()))
-                    .collect::<Vec<_>>();
-                for child in remove_children {
-                    child.remove(schema)?;
-                }
+                    .try_for_each(|child| child.remove(schema))?;
             }
             _ => {}
         }
@@ -146,7 +134,7 @@ pub fn to_api_schema(
 
     remove_core_feature_elements(&mut api_schema)?;
 
-    let schema = api_schema.schema_mut();
+    let mut schema = api_schema.into_inner();
 
     if options.include_defer {
         schema
@@ -160,9 +148,9 @@ pub fn to_api_schema(
             .insert(name!("stream"), stream_definition());
     }
 
-    crate::compat::make_print_schema_compatible(schema);
+    crate::compat::make_print_schema_compatible(&mut schema);
 
-    api_schema.validate()
+    ValidFederationSchema::new(schema.validate()?)
 }
 
 fn defer_definition() -> Node<DirectiveDefinition> {

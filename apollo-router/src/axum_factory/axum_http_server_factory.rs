@@ -1,4 +1,5 @@
 //! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
+use std::fmt::Display;
 use std::pin::Pin;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
@@ -27,6 +28,7 @@ use hyper::Body;
 use itertools::Itertools;
 use multimap::MultiMap;
 use serde::Serialize;
+use serde_json::json;
 #[cfg(unix)]
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
@@ -52,12 +54,11 @@ use crate::axum_factory::listeners::get_extra_listeners;
 use crate::axum_factory::listeners::serve_router_on_listen_addr;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
+use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
 use crate::plugins::telemetry::SpanMode;
-use crate::plugins::traffic_shaping::Elapsed;
-use crate::plugins::traffic_shaping::RateLimited;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
@@ -302,6 +303,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 main_listener,
                 actual_main_listen_address.clone(),
                 all_routers.main.1,
+                true,
                 all_connections_stopped_sender.clone(),
             );
 
@@ -340,6 +342,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                             listener,
                             listen_addr.clone(),
                             router,
+                            false,
                             all_connections_stopped_sender.clone(),
                         );
                         (
@@ -644,10 +647,7 @@ async fn handle_graphql(
             .in_current_span();
         let res = match tokio::task::spawn(task).await {
             Ok(res) => res,
-            Err(err) => {
-                let msg = format!("router service call failed: {err}");
-                return (StatusCode::INTERNAL_SERVER_ERROR, msg).into_response();
-            }
+            Err(err) => return internal_server_error(err),
         };
         cancel_handler.on_response();
         res
@@ -663,25 +663,7 @@ async fn handle_graphql(
     );
 
     match res {
-        Err(err) => {
-            if let Some(source_err) = err.source() {
-                if source_err.is::<RateLimited>() {
-                    return RateLimited::new().into_response();
-                }
-                if source_err.is::<Elapsed>() {
-                    return Elapsed::new().into_response();
-                }
-            }
-            if err.is::<RateLimited>() {
-                return RateLimited::new().into_response();
-            }
-            if err.is::<Elapsed>() {
-                return Elapsed::new().into_response();
-            }
-
-            let msg = format!("router service call failed: {err}");
-            (StatusCode::INTERNAL_SERVER_ERROR, msg).into_response()
-        }
+        Err(err) => internal_server_error(err),
         Ok(response) => {
             let (mut parts, body) = response.response.into_parts();
 
@@ -696,13 +678,34 @@ async fn handle_graphql(
                         CONTENT_ENCODING,
                         HeaderValue::from_static(compressor.content_encoding()),
                     );
-                    Body::wrap_stream(compressor.process(body))
+                    Body::wrap_stream(compressor.process(body.into()))
                 }
             };
 
             http::Response::from_parts(parts, body).into_response()
         }
     }
+}
+
+fn internal_server_error<T>(err: T) -> Response
+where
+    T: Display,
+{
+    tracing::error!(
+        code = "INTERNAL_SERVER_ERROR",
+        %err,
+    );
+
+    // This intentionally doesn't include an error message as this could represent leakage of internal information.
+    // The error message is logged above.
+    let error = graphql::Error::builder()
+        .message("internal server error")
+        .extension_code("INTERNAL_SERVER_ERROR")
+        .build();
+
+    let response = graphql::Response::builder().error(error).build();
+
+    (StatusCode::INTERNAL_SERVER_ERROR, Json(json!(response))).into_response()
 }
 
 struct CancelHandler<'a> {
@@ -734,7 +737,9 @@ impl<'a> Drop for CancelHandler<'a> {
                 self.span
                     .in_scope(|| tracing::error!("broken pipe: the client closed the connection"));
             }
-            self.context.extensions().lock().insert(CanceledRequest);
+            self.context
+                .extensions()
+                .with_lock(|mut lock| lock.insert(CanceledRequest));
         }
     }
 }
@@ -779,7 +784,10 @@ mod tests {
         assert_eq!(mode, SpanMode::Deprecated);
     }
 
-    #[tokio::test]
+    // Perform a short wait, (100ns) which is intended to complete before the http router call. If
+    // it does complete first, then the http router call will be cancelled and we'll see an error
+    // log in our assert.
+    #[tokio::test(flavor = "multi_thread")]
     async fn request_cancel_log() {
         let mut http_router = crate::TestHarness::builder()
             .configuration_yaml(include_str!("testdata/log_on_broken_pipe.router.yaml"))
@@ -791,7 +799,7 @@ mod tests {
 
         async {
             let _res = tokio::time::timeout(
-                std::time::Duration::from_micros(100),
+                std::time::Duration::from_nanos(100),
                 http_router.call(
                     http::Request::builder()
                         .method("POST")
@@ -803,15 +811,17 @@ mod tests {
                 ),
             )
             .await;
-
-            tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
         }
         .with_subscriber(assert_snapshot_subscriber!(
             tracing_core::LevelFilter::ERROR
         ))
         .await
     }
-    #[tokio::test]
+
+    // Perform a short wait, (100ns) which is intended to complete before the http router call. If
+    // it does complete first, then the http router call will be cancelled and we'll not see an
+    // error log in our assert.
+    #[tokio::test(flavor = "multi_thread")]
     async fn request_cancel_no_log() {
         let mut http_router = crate::TestHarness::builder()
             .configuration_yaml(include_str!("testdata/no_log_on_broken_pipe.router.yaml"))
@@ -823,7 +833,7 @@ mod tests {
 
         async {
             let _res = tokio::time::timeout(
-                std::time::Duration::from_micros(100),
+                std::time::Duration::from_nanos(100),
                 http_router.call(
                     http::Request::builder()
                         .method("POST")
@@ -835,8 +845,6 @@ mod tests {
                 ),
             )
             .await;
-
-            tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
         }
         .with_subscriber(assert_snapshot_subscriber!(
             tracing_core::LevelFilter::ERROR

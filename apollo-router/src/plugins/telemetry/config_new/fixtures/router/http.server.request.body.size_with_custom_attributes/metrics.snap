@@ -1,0 +1,22 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
+description: Server request body size metrics
+expression: "&metrics.all()"
+info:
+  telemetry:
+    instrumentation:
+      instruments:
+        router:
+          http.server.active_requests: false
+          http.server.request.duration: false
+          http.server.request.body.size: true
+---
+- name: http.server.request.body.size
+  description: Size of HTTP server request bodies.
+  unit: By
+  data:
+    datapoints:
+      - sum: 35
+        attributes:
+          http.request.method: GET
+          http.response.status_code: 200

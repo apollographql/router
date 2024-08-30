@@ -1,29 +1,41 @@
 type Query {
-    getScalar(id: ID): String
-    anotherScalar: Int
-    object1: FirstObjectType
-    interfaceInstance1: MyInterface
-    someUnion: UnionOfObjectTypes
-    someObjects: [FirstObjectType]
-    intList: [Int]
+  getScalar(id: ID): String
+  getScalarByObject(args: OuterInput): String
+  anotherScalar: Int
+  object1: FirstObjectType
+  interfaceInstance1: MyInterface
+  someUnion: UnionOfObjectTypes
+  someObjects: [FirstObjectType]
+  intList: [Int]
+  getObjectsByObject(args: OuterInput): [SecondObjectType]
 }
 
 type Mutation {
-    doSomething: Int
+  doSomething: Int
 }
 
 type FirstObjectType {
-    field1: Int
-    innerList: [SecondObjectType]
+  field1: Int
+  innerList: [SecondObjectType]
 }
 
 interface MyInterface {
-    field2: String
+  field2: String
 }
 
 type SecondObjectType implements MyInterface {
-    field1: Int
-    field2: String
+  field1: Int
+  field2: String
 }
 
 union UnionOfObjectTypes = FirstObjectType | SecondObjectType
+
+input InnerInput {
+  id: ID
+}
+
+input OuterInput {
+  inner: InnerInput
+  inner2: InnerInput
+  listOfInner: [InnerInput!]
+}
