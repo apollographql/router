@@ -77,6 +77,13 @@ pub(crate) enum DefaultAttributeRequirementLevel {
     Recommended,
 }
 
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
+pub(crate) enum StandardAttribute {
+    Bool(bool),
+    Aliased(String),
+}
+
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[cfg_attr(test, derive(PartialEq))]
 #[serde(deny_unknown_fields, default)]
@@ -84,7 +91,7 @@ pub(crate) struct RouterAttributes {
     /// The datadog trace ID.
     /// This can be output in logs and used to correlate traces in Datadog.
     #[serde(rename = "dd.trace_id")]
-    pub(crate) datadog_trace_id: Option<bool>,
+    pub(crate) datadog_trace_id: Option<StandardAttribute>,
 
     /// The OpenTelemetry trace ID.
     /// This can be output in logs.
