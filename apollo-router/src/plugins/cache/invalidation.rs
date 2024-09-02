@@ -151,9 +151,10 @@ async fn handle_request(
 
     // FIXME: configurable batch size
     let mut stream = storage.scan(key_prefix.clone(), Some(100));
-    let mut count = 0u64;
+    // let mut count = 0u64;
     let mut error = None;
-
+    let mut keys_to_delete = Vec::new();
+    let start_scan = Instant::now();
     while let Some(res) = stream.next().await {
         match res {
             Err(e) => {
@@ -167,15 +168,12 @@ async fn handle_request(
             }
             Ok(scan_res) => {
                 if let Some(keys) = scan_res.results() {
-                    let keys = keys
-                        .iter()
-                        .filter_map(|k| k.as_str())
-                        .map(|k| RedisKey(k.to_string()))
-                        .collect::<Vec<_>>();
+                    keys_to_delete.extend(
+                        keys.iter()
+                            .filter_map(|k| k.as_str())
+                            .map(|k| RedisKey(k.to_string())),
+                    );
                     if !keys.is_empty() {
-                        count += keys.len() as u64;
-                        storage.delete(keys).await;
-
                         u64_counter!(
                             "apollo.router.operations.entity.invalidation.entry",
                             "Entity cache counter for invalidated entries",
@@ -189,6 +187,19 @@ async fn handle_request(
             }
         }
     }
+    f64_histogram!(
+        "apollo.router.cache.invalidation.scan",
+        "Duration for redis scan",
+        start_scan.elapsed().as_secs_f64()
+    );
+
+    let start_del = Instant::now();
+    let count = storage.delete(keys_to_delete).await.unwrap_or_default() as u64;
+    f64_histogram!(
+        "apollo.router.cache.invalidation.delete",
+        "Duration for redis delete",
+        start_del.elapsed().as_secs_f64()
+    );
 
     u64_histogram!(
         "apollo.router.cache.invalidation.keys",
