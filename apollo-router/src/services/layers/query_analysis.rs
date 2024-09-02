@@ -5,8 +5,10 @@ use std::hash::Hash;
 use std::sync::Arc;
 
 use apollo_compiler::ast;
+use apollo_compiler::executable::Operation;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Node;
 use http::StatusCode;
 use lru::LruCache;
 use router_bridge::planner::UsageReporting;
@@ -77,7 +79,7 @@ impl QueryAnalysisLayer {
         &self,
         query: &str,
         operation_name: Option<&str>,
-    ) -> Result<ParsedDocument, SpecError> {
+    ) -> Result<(ParsedDocument, Node<Operation>), SpecError> {
         let query = query.to_string();
         let operation_name = operation_name.map(|o| o.to_string());
         let schema = self.schema.clone();
@@ -89,12 +91,27 @@ impl QueryAnalysisLayer {
 
         task::spawn_blocking(move || {
             span.in_scope(|| {
-                Query::parse_document(
+                let doc = Query::parse_document(
                     &query,
                     operation_name.as_deref(),
                     schema.as_ref(),
                     conf.as_ref(),
-                )
+                )?;
+                if let Ok(operation) = doc
+                    .executable
+                    .operations
+                    .get(operation_name.as_deref())
+                    .cloned()
+                {
+                    Ok((doc, operation))
+                } else if let Some(name) = operation_name {
+                    Err(SpecError::UnknownOperation(name))
+                } else if doc.executable.operations.is_empty() {
+                    Err(SpecError::NoOperation)
+                } else {
+                    debug_assert!(doc.executable.operations.len() > 1);
+                    Err(SpecError::MultipleOperationWithoutOperationName)
+                }
             })
         })
         .await
@@ -146,70 +163,61 @@ impl QueryAnalysisLayer {
             .cloned();
 
         let res = match entry {
-            None => {
-                match self.parse_document(&query, op_name.as_deref()).await {
-                    Err(errors) => {
-                        (*self.cache.lock().await).put(
-                            QueryAnalysisKey {
-                                query,
-                                operation_name: op_name,
-                            },
-                            Err(errors.clone()),
-                        );
-                        let errors = match errors.into_graphql_errors() {
-                            Ok(v) => v,
-                            Err(errors) => vec![Error::builder()
-                                .message(errors.to_string())
-                                .extension_code(errors.extension_code())
-                                .build()],
-                        };
+            None => match self.parse_document(&query, op_name.as_deref()).await {
+                Err(errors) => {
+                    (*self.cache.lock().await).put(
+                        QueryAnalysisKey {
+                            query,
+                            operation_name: op_name,
+                        },
+                        Err(errors.clone()),
+                    );
+                    let errors = match errors.into_graphql_errors() {
+                        Ok(v) => v,
+                        Err(errors) => vec![Error::builder()
+                            .message(errors.to_string())
+                            .extension_code(errors.extension_code())
+                            .build()],
+                    };
 
-                        return Err(SupergraphResponse::builder()
-                            .errors(errors)
-                            .status_code(StatusCode::BAD_REQUEST)
-                            .context(request.context)
-                            .build()
-                            .expect("response is valid"));
-                    }
-                    Ok(doc) => {
-                        let context = Context::new();
-
-                        let operation = doc.executable.operations.get(op_name.as_deref()).ok();
-                        let operation_name = operation.as_ref().and_then(|operation| {
-                            operation.name.as_ref().map(|s| s.as_str().to_owned())
-                        });
-
-                        if self.enable_authorization_directives {
-                            AuthorizationPlugin::query_analysis(
-                                &doc,
-                                operation_name.as_deref(),
-                                &self.schema,
-                                &context,
-                            );
-                        }
-
-                        context
-                            .insert(OPERATION_NAME, operation_name)
-                            .expect("cannot insert operation name into context; this is a bug");
-                        let operation_kind =
-                            operation.map(|op| OperationKind::from(op.operation_type));
-                        // FIXME: I think we should not add an operation kind by default. If it's an invalid graphql operation for example it might be useful to detect there isn't operation_kind
-                        context
-                            .insert(OPERATION_KIND, operation_kind.unwrap_or_default())
-                            .expect("cannot insert operation kind in the context; this is a bug");
-
-                        (*self.cache.lock().await).put(
-                            QueryAnalysisKey {
-                                query,
-                                operation_name: op_name.clone(),
-                            },
-                            Ok((context.clone(), doc.clone())),
-                        );
-
-                        Ok((context, doc))
-                    }
+                    return Err(SupergraphResponse::builder()
+                        .errors(errors)
+                        .status_code(StatusCode::BAD_REQUEST)
+                        .context(request.context)
+                        .build()
+                        .expect("response is valid"));
                 }
-            }
+                Ok((doc, operation)) => {
+                    let context = Context::new();
+
+                    if self.enable_authorization_directives {
+                        AuthorizationPlugin::query_analysis(
+                            &doc,
+                            op_name.as_deref(),
+                            &self.schema,
+                            &context,
+                        );
+                    }
+
+                    context
+                        .insert(OPERATION_NAME, operation.name.clone())
+                        .expect("cannot insert operation name into context; this is a bug");
+                    let operation_kind = OperationKind::from(operation.operation_type);
+                    context
+                        .insert(OPERATION_KIND, operation_kind)
+                        .expect("cannot insert operation kind in the context; this is a bug");
+
+                    (*self.cache.lock().await).put(
+                        QueryAnalysisKey {
+                            query,
+                            operation_name: op_name.clone(),
+                        },
+                        Ok((context.clone(), doc.clone())),
+                    );
+
+                    Ok((context, doc))
+                }
+            },
             Some(c) => c,
         };
 
