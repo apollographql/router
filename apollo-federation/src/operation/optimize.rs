@@ -3206,66 +3206,6 @@ mod tests {
     ///
 
     #[test]
-    #[should_panic(expected = "directive is not supported for FRAGMENT_DEFINITION")]
-    // XXX(@goto-bus-stop): this test does not make sense, we should remove this feature
-    fn reuse_fragments_with_same_directive_on_the_fragment() {
-        let schema_doc = r#"
-                type Query {
-                  t1: T
-                  t2: T
-                  t3: T
-                }
-        
-                type T {
-                  a: Int
-                  b: Int
-                  c: Int
-                  d: Int
-                }
-        "#;
-
-        let query = r#"
-                  fragment DirectiveOnDef on T @include(if: $cond1) {
-                    a
-                  }
-        
-                  query myQuery($cond1: Boolean!, $cond2: Boolean!) {
-                    t1 {
-                      ...DirectiveOnDef
-                    }
-                    t2 {
-                      ... on T @include(if: $cond2) {
-                        a
-                      }
-                    }
-                    t3 {
-                      ...DirectiveOnDef @include(if: $cond2)
-                    }
-                  }
-        "#;
-
-        test_fragments_roundtrip!(schema_doc, query, @r###"
-                  query myQuery($cond1: Boolean!, $cond2: Boolean!) {
-                    t1 {
-                      ... on T @include(if: $cond1) {
-                        a
-                      }
-                    }
-                    t2 {
-                      ... on T @include(if: $cond2) {
-                        a
-                      }
-                    }
-                    t3 {
-                      ... on T @include(if: $cond1) @include(if: $cond2) {
-                        a
-                      }
-                    }
-                  }
-        "###);
-    }
-
-    #[test]
     fn reuse_fragments_with_same_directive_in_the_fragment_selection() {
         let schema_doc = r#"
                 type Query {
