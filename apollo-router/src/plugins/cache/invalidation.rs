@@ -12,6 +12,7 @@ use thiserror::Error;
 use tokio::sync::broadcast;
 use tower::BoxError;
 use tracing::Instrument;
+use tracing::Span;
 
 use super::entity::Storage as EntityStorage;
 use crate::cache::redis::RedisCacheStorage;
@@ -26,6 +27,7 @@ pub(crate) struct Invalidation {
         Vec<InvalidationRequest>,
         InvalidationOrigin,
         broadcast::Sender<Result<u64, InvalidationError>>,
+        Span,
     )>,
 }
 
@@ -79,9 +81,10 @@ impl Invalidation {
         origin: InvalidationOrigin,
         requests: Vec<InvalidationRequest>,
     ) -> Result<u64, BoxError> {
+        let span = Span::current();
         let (response_tx, mut response_rx) = broadcast::channel(2);
         self.handle
-            .send((requests, origin, response_tx.clone()))
+            .send((requests, origin, response_tx.clone(), span))
             .await
             .map_err(|e| format!("cannot send invalidation request: {e}"))?;
 
@@ -108,9 +111,10 @@ async fn start(
         Vec<InvalidationRequest>,
         InvalidationOrigin,
         broadcast::Sender<Result<u64, InvalidationError>>,
+        Span,
     )>,
 ) {
-    while let Some((requests, origin, response_tx)) = handle.recv().await {
+    while let Some((requests, origin, response_tx, parent_span)) = handle.recv().await {
         let origin = match origin {
             InvalidationOrigin::Endpoint => "endpoint",
             InvalidationOrigin::Extensions => "extensions",
@@ -122,12 +126,12 @@ async fn start(
             "origin" = origin
         );
 
+        let _guard = parent_span.enter();
+        let handle_span = tracing::info_span!("cache.invalidation.batch", "origin" = origin);
+        drop(_guard);
         if let Err(err) = response_tx.send(
             handle_request_batch(&storage, origin, requests)
-                .instrument(tracing::info_span!(
-                    "cache.invalidation.batch",
-                    "origin" = origin
-                ))
+                .instrument(handle_span)
                 .await,
         ) {
             ::tracing::error!("cannot send answer to invalidation request in the channel: {err}");
@@ -172,7 +176,10 @@ async fn handle_request(
                         .collect::<Vec<_>>();
                     if !keys.is_empty() {
                         count += keys.len() as u64;
-                        storage.delete(keys).await;
+                        storage
+                            .delete(keys)
+                            .instrument(tracing::info_span!("delete"))
+                            .await;
 
                         u64_counter!(
                             "apollo.router.operations.entity.invalidation.entry",

@@ -175,7 +175,7 @@ impl Service<router::Request> for InvalidationService {
                     }),
                 }
             }
-            .instrument(tracing::info_span!("invalidation_endpoint")),
+            .instrument(tracing::info_span!("request")),
         )
     }
 }
@@ -205,6 +205,7 @@ mod tests {
 
     use tokio::sync::broadcast;
     use tower::ServiceExt;
+    use tracing::Span;
 
     use super::*;
     use crate::plugins::cache::invalidation::InvalidationError;
@@ -255,10 +256,11 @@ mod tests {
             Vec<InvalidationRequest>,
             InvalidationOrigin,
             broadcast::Sender<Result<u64, InvalidationError>>,
+            Span,
         )>(128);
         tokio::task::spawn(async move {
             let mut called = false;
-            while let Some((requests, origin, response_tx)) = rx.recv().await {
+            while let Some((requests, origin, response_tx, _span)) = rx.recv().await {
                 called = true;
                 if requests
                     != [
@@ -350,6 +352,7 @@ mod tests {
             Vec<InvalidationRequest>,
             InvalidationOrigin,
             broadcast::Sender<Result<u64, InvalidationError>>,
+            Span,
         )>(128);
         let invalidation = Invalidation { handle };
         let config = Arc::new(SubgraphConfiguration {
@@ -402,12 +405,13 @@ mod tests {
             Vec<InvalidationRequest>,
             InvalidationOrigin,
             broadcast::Sender<Result<u64, InvalidationError>>,
+            Span,
         )>(128);
         let invalidation = Invalidation { handle };
 
         tokio::task::spawn(async move {
             let mut called = false;
-            while let Some((requests, origin, response_tx)) = rx.recv().await {
+            while let Some((requests, origin, response_tx, _span)) = rx.recv().await {
                 called = true;
                 if requests
                     != [
