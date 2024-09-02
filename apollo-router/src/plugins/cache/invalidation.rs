@@ -29,6 +29,7 @@ pub(crate) struct Invalidation {
         broadcast::Sender<Result<u64, InvalidationError>>,
         Span,
     )>,
+    storage: Arc<EntityStorage>,
 }
 
 #[derive(Error, Debug, Clone)]
@@ -70,10 +71,14 @@ impl Invalidation {
     pub(crate) async fn new(storage: Arc<EntityStorage>) -> Result<Self, BoxError> {
         let (tx, rx) = tokio::sync::mpsc::channel(128);
 
+        let s = storage.clone();
         tokio::task::spawn(async move {
-            start(storage, rx).await;
+            start(s, rx).await;
         });
-        Ok(Self { handle: tx })
+        Ok(Self {
+            handle: tx,
+            storage,
+        })
     }
 
     pub(crate) async fn invalidate(
@@ -82,7 +87,7 @@ impl Invalidation {
         requests: Vec<InvalidationRequest>,
     ) -> Result<u64, BoxError> {
         let span = Span::current();
-        let (response_tx, mut response_rx) = broadcast::channel(2);
+        /*let (response_tx, mut response_rx) = broadcast::channel(2);
         self.handle
             .send((requests, origin, response_tx.clone(), span))
             .await
@@ -97,7 +102,25 @@ impl Invalidation {
                     err
                 )
             })?
-            .map_err(|err| format!("received an invalidation error: {:?}", err))?;
+            .map_err(|err| format!("received an invalidation error: {:?}", err))?;*/
+
+        let origin = match origin {
+            InvalidationOrigin::Endpoint => "endpoint",
+            InvalidationOrigin::Extensions => "extensions",
+        };
+        u64_counter!(
+            "apollo.router.operations.entity.invalidation.event",
+            "Entity cache received a batch of invalidation requests",
+            1u64,
+            "origin" = origin
+        );
+
+        let result = handle_request_batch(&self.storage, origin, requests)
+            .instrument(tracing::info_span!(
+                "cache.invalidation.batch",
+                "origin" = origin
+            ))
+            .await?;
 
         Ok(result)
     }
