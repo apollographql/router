@@ -32,14 +32,13 @@ async fn top_level_inline_fragment() {
     let response = make_request(request).await;
     insta::assert_json_snapshot!(response, @r###"
     {
-      "errors": [
-        {
-          "message": "value retrieval failed: empty query plan. This behavior is unexpected and we suggest opening an issue to apollographql/router with a reproduction.",
-          "extensions": {
-            "code": "INTERNAL_SERVER_ERROR"
+      "data": {
+        "__schema": {
+          "queryType": {
+            "name": "Query"
           }
         }
-      ]
+      }
     }
     "###);
 }
@@ -93,9 +92,9 @@ async fn two_operations() {
     {
       "errors": [
         {
-          "message": "Schema introspection is currently not supported with multiple operations in the same document",
+          "message": "introspection error : Must provide operation name if query contains multiple operations.",
           "extensions": {
-            "code": "INTROSPECTION_WITH_MULTIPLE_OPERATIONS"
+            "code": "INTROSPECTION_ERROR"
           }
         }
       ]
@@ -162,15 +161,14 @@ async fn mixed() {
     let response = make_request(request).await;
     insta::assert_json_snapshot!(response, @r###"
     {
-      "data": null,
-      "extensions": {
-        "valueCompletion": [
-          {
-            "message": "Cannot return null for non-nullable field Query.__schema",
-            "path": []
+      "errors": [
+        {
+          "message": "Mixed queries with both schema introspection and concrete fields are not supported",
+          "extensions": {
+            "code": "MIXED_INTROSPECTION"
           }
-        ]
-      }
+        }
+      ]
     }
     "###);
 }

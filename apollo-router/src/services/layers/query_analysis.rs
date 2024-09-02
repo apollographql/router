@@ -107,6 +107,8 @@ impl QueryAnalysisLayer {
                 } else if let Some(name) = operation_name {
                     Err(SpecError::UnknownOperation(name))
                 } else if doc.executable.operations.is_empty() {
+                    // Maybe not reachable?
+                    // A valid document is non-empty and has no unused fragments
                     Err(SpecError::NoOperation)
                 } else {
                     debug_assert!(doc.executable.operations.len() > 1);
@@ -168,24 +170,11 @@ impl QueryAnalysisLayer {
                     (*self.cache.lock().await).put(
                         QueryAnalysisKey {
                             query,
-                            operation_name: op_name,
+                            operation_name: op_name.clone(),
                         },
                         Err(errors.clone()),
                     );
-                    let errors = match errors.into_graphql_errors() {
-                        Ok(v) => v,
-                        Err(errors) => vec![Error::builder()
-                            .message(errors.to_string())
-                            .extension_code(errors.extension_code())
-                            .build()],
-                    };
-
-                    return Err(SupergraphResponse::builder()
-                        .errors(errors)
-                        .status_code(StatusCode::BAD_REQUEST)
-                        .context(request.context)
-                        .build()
-                        .expect("response is valid"));
+                    Err(errors)
                 }
                 Ok((doc, operation)) => {
                     let context = Context::new();
@@ -258,8 +247,15 @@ impl QueryAnalysisLayer {
                         referenced_fields_by_type: HashMap::new(),
                     }))
                 });
+                let errors = match errors.into_graphql_errors() {
+                    Ok(v) => v,
+                    Err(errors) => vec![Error::builder()
+                        .message(errors.to_string())
+                        .extension_code(errors.extension_code())
+                        .build()],
+                };
                 Err(SupergraphResponse::builder()
-                    .errors(errors.into_graphql_errors().unwrap_or_default())
+                    .errors(errors)
                     .status_code(StatusCode::BAD_REQUEST)
                     .context(request.context)
                     .build()

@@ -49,7 +49,7 @@ async fn basic() {
     insta::assert_json_snapshot!(response, @r###"
     {
       "data": {
-        "__typename": "Query"
+        "__typename": "MyQuery"
       }
     }
     "###);
@@ -65,7 +65,7 @@ async fn aliased() {
     insta::assert_json_snapshot!(response, @r###"
     {
       "data": {
-        "n": "Query"
+        "n": "MyQuery"
       }
     }
     "###);
@@ -81,7 +81,7 @@ async fn mutation() {
     insta::assert_json_snapshot!(response, @r###"
     {
       "data": {
-        "__typename": "Mutation"
+        "__typename": "MyMutation"
       }
     }
     "###);
@@ -103,7 +103,7 @@ async fn two_named_operations() {
     insta::assert_json_snapshot!(response, @r###"
     {
       "data": {
-        "__typename": "Mutation"
+        "__typename": "MyQuery"
       }
     }
     "###);

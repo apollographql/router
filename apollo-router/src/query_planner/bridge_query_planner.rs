@@ -21,7 +21,6 @@ use router_bridge::planner::PlanSuccess;
 use router_bridge::planner::Planner;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
-use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 use tower::Service;
 
@@ -772,42 +771,83 @@ impl BridgeQueryPlanner {
             selections.unauthorized.paths = unauthorized_paths;
         }
 
-        if selections.contains_introspection() {
-            // It can happen if you have a statically skipped query like { get @skip(if: true) { id name }} because it will be statically filtered with {}
-            if selections
-                .operations
-                .first()
-                .map(|op| op.selection_set.is_empty())
-                .unwrap_or_default()
-            {
+        if selections
+            .operation(key.operation_name.as_deref())
+            .is_some_and(|op| op.selection_set.is_empty())
+        {
+            // All selections have @skip(true) or @include(false)
+            // Return an empty response now to avoid dealing with an empty query plan later
+            return Ok(QueryPlannerContent::Response {
+                response: Box::new(
+                    graphql::Response::builder()
+                        .data(Value::Object(Default::default()))
+                        .build(),
+                ),
+            });
+        }
+
+        let operation = doc
+            .executable
+            .operations
+            .get(key.operation_name.as_deref())
+            .ok();
+        let mut has_root_typename = false;
+        let mut has_schema_introspection = false;
+        let mut has_other_root_fields = false;
+        if let Some(operation) = operation {
+            for field in operation.root_fields(&doc.executable) {
+                match field.name.as_str() {
+                    "__typename" => has_root_typename = true,
+                    "__schema" | "__type" if operation.is_query() => {
+                        has_schema_introspection = true
+                    }
+                    _ => has_other_root_fields = true,
+                }
+            }
+            if has_root_typename && !has_schema_introspection && !has_other_root_fields {
+                // Fast path for __typename alone
+                if operation
+                    .selection_set
+                    .selections
+                    .iter()
+                    .all(|sel| sel.as_field().is_some_and(|f| f.name == "__typename"))
+                {
+                    let root_type_name: serde_json_bytes::ByteString =
+                        operation.selection_set.ty.as_str().into();
+                    let data = Value::Object(
+                        operation
+                            .root_fields(&doc.executable)
+                            .filter(|field| field.name == "__typename")
+                            .map(|field| {
+                                (
+                                    field.response_key().as_str().into(),
+                                    Value::String(root_type_name.clone()),
+                                )
+                            })
+                            .collect(),
+                    );
+                    return Ok(QueryPlannerContent::Response {
+                        response: Box::new(graphql::Response::builder().data(data).build()),
+                    });
+                } else {
+                    // fragments might use @include or @skip
+                }
+            }
+        } else {
+            // Should be unreachable as QueryAnalysisLayer would have returned an error
+        }
+
+        if has_schema_introspection {
+            if has_other_root_fields {
+                let error = graphql::Error::builder()
+                    .message("Mixed queries with both schema introspection and concrete fields are not supported")
+                    .extension_code("MIXED_INTROSPECTION")
+                    .build();
                 return Ok(QueryPlannerContent::Response {
-                    response: Box::new(
-                        graphql::Response::builder()
-                            .data(Value::Object(Default::default()))
-                            .build(),
-                    ),
+                    response: Box::new(graphql::Response::builder().error(error).build()),
                 });
             }
-            // If we have only one operation containing only the root field `__typename`
-            // (possibly aliased or repeated). (This does mean we fail to properly support
-            // {"query": "query A {__typename} query B{somethingElse}", "operationName":"A"}.)
-            if let Some(output_keys) = selections
-                .operations
-                .first()
-                .and_then(|op| op.is_only_typenames_with_output_keys())
-            {
-                let operation_name = selections.operations[0].kind().to_string();
-                let data: Value = Value::Object(Map::from_iter(
-                    output_keys
-                        .into_iter()
-                        .map(|key| (key, Value::String(operation_name.clone().into()))),
-                ));
-                return Ok(QueryPlannerContent::Response {
-                    response: Box::new(graphql::Response::builder().data(data).build()),
-                });
-            } else {
-                return self.introspection(key.original_query).await;
-            }
+            return self.introspection(key.original_query).await;
         }
 
         if key.filtered_query != key.original_query {
