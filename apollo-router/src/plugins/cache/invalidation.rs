@@ -152,11 +152,11 @@ async fn handle_request(
     );
 
     // FIXME: configurable batch size
-    let mut stream = storage.scan(key_prefix.clone(), Some(100));
+    let mut stream = storage.scan(key_prefix.clone(), Some(10000));
     let mut count = 0u64;
     let mut error = None;
 
-    while let Some(res) = stream.next().await {
+    while let Some(res) = stream.next().instrument(tracing::info_span!("scan")).await {
         match res {
             Err(e) => {
                 tracing::error!(
