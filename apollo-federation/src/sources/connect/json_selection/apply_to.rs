@@ -205,7 +205,8 @@ impl ApplyToInternal for NamedSelection {
                 if let Some(child) = data.get(name) {
                     let output_name = alias.as_ref().map_or(name, |alias| alias.name());
                     if let Some(selection) = selection {
-                        let value = selection.apply_to_path(child, vars, &input_path_with_key, errors);
+                        let value =
+                            selection.apply_to_path(child, vars, &input_path_with_key, errors);
                         if let Some(value) = value {
                             output.insert(output_name, value);
                         }

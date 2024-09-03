@@ -83,7 +83,10 @@ impl SubSelection {
         for selection in &self.selections {
             match selection {
                 NamedSelection::Field(alias, name, sub) => {
-                    let key = alias.as_ref().map(|a| a.name.as_str()).unwrap_or(name.as_str());
+                    let key = alias
+                        .as_ref()
+                        .map(|a| a.name.as_str())
+                        .unwrap_or(name.as_str());
                     if let Some(fields) = field_map.get_vec(key) {
                         if self.star.is_some() {
                             referenced_fields.insert(key);

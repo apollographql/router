@@ -622,12 +622,8 @@ impl Alias {
     }
 
     fn parse(input: &str) -> IResult<&str, Self> {
-        tuple((
-            Key::parse,
-            char(':'),
-            spaces_or_comments,
-        ))(input)
-        .map(|(input, (name, _, _))| (input, Self { name }))
+        tuple((Key::parse, char(':'), spaces_or_comments))(input)
+            .map(|(input, (name, _, _))| (input, Self { name }))
     }
 
     pub fn name(&self) -> &str {
@@ -892,45 +888,15 @@ mod tests {
 
     #[test]
     fn test_alias() {
-        assert_eq!(
-            Alias::parse("hello:"),
-            Ok((
-                "",
-                Alias::new("hello"),
-            )),
-        );
+        assert_eq!(Alias::parse("hello:"), Ok(("", Alias::new("hello"))));
 
-        assert_eq!(
-            Alias::parse("hello :"),
-            Ok((
-                "",
-                Alias::new("hello"),
-            )),
-        );
+        assert_eq!(Alias::parse("hello :"), Ok(("", Alias::new("hello"))));
 
-        assert_eq!(
-            Alias::parse("hello : "),
-            Ok((
-                "",
-                Alias::new("hello"),
-            )),
-        );
+        assert_eq!(Alias::parse("hello : "), Ok(("", Alias::new("hello"))));
 
-        assert_eq!(
-            Alias::parse("  hello :"),
-            Ok((
-                "",
-                Alias::new("hello"),
-            )),
-        );
+        assert_eq!(Alias::parse("  hello :"), Ok(("", Alias::new("hello"))));
 
-        assert_eq!(
-            Alias::parse("hello: "),
-            Ok((
-                "",
-                Alias::new("hello"),
-            )),
-        );
+        assert_eq!(Alias::parse("hello: "), Ok(("", Alias::new("hello"))));
     }
 
     #[test]
@@ -969,21 +935,13 @@ mod tests {
 
         assert_result_and_name(
             "hi: hello",
-            NamedSelection::Field(
-                Some(Alias::new("hi")),
-                Key::field("hello"),
-                None,
-            ),
+            NamedSelection::Field(Some(Alias::new("hi")), Key::field("hello"), None),
             "hi",
         );
 
         assert_result_and_name(
             "hi: 'hello world'",
-            NamedSelection::Field(
-                Some(Alias::new("hi")),
-                Key::quoted("hello world"),
-                None,
-            ),
+            NamedSelection::Field(Some(Alias::new("hi")), Key::quoted("hello world"), None),
             "hi",
         );
 
@@ -1031,21 +989,13 @@ mod tests {
 
         assert_result_and_name(
             "leggo: 'my ego'",
-            NamedSelection::Field(
-                Some(Alias::new("leggo")),
-                Key::quoted("my ego"),
-                None,
-            ),
+            NamedSelection::Field(Some(Alias::new("leggo")), Key::quoted("my ego"), None),
             "leggo",
         );
 
         assert_result_and_name(
             "'let go': 'my ego'",
-            NamedSelection::Field(
-                Some(Alias::quoted("let go")),
-                Key::quoted("my ego"),
-                None,
-            ),
+            NamedSelection::Field(Some(Alias::quoted("let go")), Key::quoted("my ego"), None),
             "let go",
         );
     }
@@ -1406,21 +1356,29 @@ mod tests {
                 path: PathList::Key(
                     Key::field("results"),
                     Box::new(PathList::Selection(SubSelection {
-                        selections: vec![
-                            NamedSelection::Field(None, Key::quoted("quoted without alias"), Some(SubSelection {
+                        selections: vec![NamedSelection::Field(
+                            None,
+                            Key::quoted("quoted without alias"),
+                            Some(SubSelection {
                                 selections: vec![
                                     NamedSelection::Field(None, Key::field("id"), None),
                                     NamedSelection::Field(None, Key::quoted("n a m e"), None),
                                 ],
                                 star: None,
-                            })),
-                        ],
+                            }),
+                        )],
                         star: None,
                     })),
-                )
+                ),
             };
-            check_path_selection(".results { 'quoted without alias' { id 'n a m e' } }", expected.clone());
-            check_path_selection(".results{'quoted without alias'{id'n a m e'}}", expected.clone());
+            check_path_selection(
+                ".results { 'quoted without alias' { id 'n a m e' } }",
+                expected.clone(),
+            );
+            check_path_selection(
+                ".results{'quoted without alias'{id'n a m e'}}",
+                expected.clone(),
+            );
         }
 
         {
@@ -1428,26 +1386,24 @@ mod tests {
                 path: PathList::Key(
                     Key::field("results"),
                     Box::new(PathList::Selection(SubSelection {
-                        selections: vec![
-                            NamedSelection::Field(
-                                Some(Alias::quoted("non-identifier alias")),
-                                Key::quoted("quoted with alias"),
-                                Some(SubSelection {
-                                    selections: vec![
-                                        NamedSelection::Field(None, Key::field("id"), None),
-                                        NamedSelection::Field(
-                                            Some(Alias::quoted("n a m e")),
-                                            Key::field("name"),
-                                            None,
-                                        ),
-                                    ],
-                                    star: None,
-                                }),
-                            ),
-                        ],
+                        selections: vec![NamedSelection::Field(
+                            Some(Alias::quoted("non-identifier alias")),
+                            Key::quoted("quoted with alias"),
+                            Some(SubSelection {
+                                selections: vec![
+                                    NamedSelection::Field(None, Key::field("id"), None),
+                                    NamedSelection::Field(
+                                        Some(Alias::quoted("n a m e")),
+                                        Key::field("name"),
+                                        None,
+                                    ),
+                                ],
+                                star: None,
+                            }),
+                        )],
                         star: None,
                     })),
-                )
+                ),
             };
             check_path_selection(
                 ".results { 'non-identifier alias': 'quoted with alias' { id 'n a m e': name } }",
@@ -1989,13 +1945,7 @@ mod tests {
     fn test_star_selection() {
         assert_eq!(
             StarSelection::parse("rest: *"),
-            Ok((
-                "",
-                StarSelection(
-                    Some(Alias::new("rest")),
-                    None
-                ),
-            )),
+            Ok(("", StarSelection(Some(Alias::new("rest")), None),)),
         );
 
         assert_eq!(
@@ -2048,10 +1998,7 @@ mod tests {
                             NamedSelection::Field(None, Key::field("y"), None),
                             NamedSelection::Field(None, Key::field("z"), None),
                         ],
-                        star: Some(StarSelection(
-                            Some(Alias::new("rest")),
-                            None
-                        )),
+                        star: Some(StarSelection(Some(Alias::new("rest")), None)),
                     })),
                 ),
             )),
