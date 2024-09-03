@@ -330,6 +330,18 @@ impl<'schema> FieldVisitor<Field<'schema>> for SelectionValidator<'schema, '_> {
             field.definition.name.clone(),
         ));
 
+        if !field.definition.arguments.is_empty() {
+            return Err(Message {
+                code: Code::FieldWithArguments,
+                message: format!(
+                    "{coordinate} selects field `{parent_type}.{field_name}`, which has arguments. Only fields with a connector can have arguments.",
+                    coordinate = &self.selection_coordinate,
+                    parent_type = self.last_field().ty().name,
+                ),
+                locations: self.selection_location.iter().cloned().chain(field.definition.line_column_range(&self.schema.sources)).collect(),
+            });
+        }
+
         match (field_type, is_group) {
             (ExtendedType::Object(object), true) => {
                 self.check_for_circular_reference(field, object)

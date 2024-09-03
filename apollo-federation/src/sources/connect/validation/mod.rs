@@ -455,6 +455,8 @@ pub enum Code {
     GroupSelectionRequiredForObject,
     /// Fields in the schema that aren't resolved by a connector
     UnresolvedField,
+    /// A field resolved by a connector has arguments defined
+    FieldWithArguments,
 }
 
 impl Code {
