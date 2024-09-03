@@ -82,10 +82,16 @@ impl Invalidation {
         requests: Vec<InvalidationRequest>,
     ) -> Result<u64, BoxError> {
         let (response_tx, mut response_rx) = broadcast::channel(2);
+        let start_reserve = Instant::now();
         self.handle
             .send((requests, origin, response_tx.clone()))
             .await
             .map_err(|e| format!("cannot send invalidation request: {e}"))?;
+        f64_histogram!(
+            "apollo.router.cache.invalidation.channel.duration",
+            "Duration to send through the invalidation channel",
+            start_reserve.elapsed().as_secs_f64()
+        );
 
         let result = response_rx
             .recv()
