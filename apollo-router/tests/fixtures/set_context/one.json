@@ -21,25 +21,6 @@
     },
     {
       "request": {
-        "query": "query Query__Subgraph1__0{t{__typename prop id u{__typename id}}}",
-        "operationName": "Query__Subgraph1__0"
-      },
-      "response": {
-        "data": {
-          "t": {
-            "__typename": "T",
-            "prop": "prop value",
-            "id": "1",
-            "u": {
-              "__typename": "U",
-              "id": "1"
-            }
-          }
-        }
-      }
-    },
-    {
-      "request": {
         "query": "query Query__Subgraph1__0{t{__typename prop id uList{__typename id}}}",
         "operationName": "Query__Subgraph1__0"
       },
@@ -133,27 +114,6 @@
         "data": {
           "_entities": [
             {
-              "id": "1",
-              "field": 1234
-            }
-          ]
-        }
-      }
-    },
-    {
-      "request": {
-        "query": "query Query__Subgraph1__1($representations:[_Any!]!$contextualArgument_1_0:String){_entities(representations:$representations){...on U{field(a:$contextualArgument_1_0)}}}",
-        "operationName": "Query__Subgraph1__1",
-        "variables": {
-          "contextualArgument_1_0": "prop value",
-          "representations": [{ "__typename": "U", "id": "1" }]
-        }
-      },
-      "response": {
-        "data": {
-          "_entities": [
-            {
-              "__typename": "U",
               "id": "1",
               "field": 1234
             }
