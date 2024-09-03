@@ -28,8 +28,6 @@ use tower::Service;
 use super::PlanNode;
 use super::QueryKey;
 use crate::apollo_studio_interop::generate_usage_reporting;
-use crate::apollo_studio_interop::UsageReportingComparisonResult;
-use crate::configuration::ApolloMetricsGenerationMode;
 use crate::configuration::QueryPlannerMode;
 use crate::error::PlanErrors;
 use crate::error::QueryPlannerError;
@@ -297,8 +295,6 @@ impl PlannerMode {
                 let plan = result?;
 
                 // Dummy value overwritten below in `BrigeQueryPlanner::plan`
-                // `Configuration::validate` ensures that we only take this path
-                // when we also have `ApolloMetricsGenerationMode::New``
                 let usage_reporting = UsageReporting {
                     stats_report_key: Default::default(),
                     referenced_fields_by_type: Default::default(),
@@ -530,24 +526,6 @@ impl BridgeQueryPlanner {
             )
             .await?;
 
-        // the `statsReportKey` field should match the original query instead of the filtered query, to index them all under the same query
-        let operation_signature = if matches!(
-            self.configuration
-                .experimental_apollo_metrics_generation_mode,
-            ApolloMetricsGenerationMode::Legacy | ApolloMetricsGenerationMode::Both
-        ) && original_query != filtered_query
-        {
-            Some(
-                self.planner
-                    .js_for_api_schema_and_introspection_and_operation_signature()
-                    .operation_signature(original_query.clone(), operation.clone())
-                    .await
-                    .map_err(QueryPlannerError::RouterBridgeError)?,
-            )
-        } else {
-            None
-        };
-
         match plan_success {
             PlanSuccess {
                 data:
@@ -557,111 +535,32 @@ impl BridgeQueryPlanner {
                     },
                 mut usage_reporting,
             } => {
-                if let Some(sig) = operation_signature {
-                    usage_reporting.stats_report_key = sig;
-                }
+                // If the query is filtered, we want to generate the signature using the original query and generate the
+                // reference using the filtered query. To do this, we need to re-parse the original query here.
+                let signature_doc = if original_query != filtered_query {
+                    Query::parse_document(
+                        &original_query,
+                        operation.clone().as_deref(),
+                        &self.schema,
+                        &self.configuration,
+                    )
+                    .unwrap_or(doc.clone())
+                } else {
+                    doc.clone()
+                };
 
-                if matches!(
-                    self.configuration
-                        .experimental_apollo_metrics_generation_mode,
-                    ApolloMetricsGenerationMode::New | ApolloMetricsGenerationMode::Both
-                ) {
-                    // If the query is filtered, we want to generate the signature using the original query and generate the
-                    // reference using the filtered query. To do this, we need to re-parse the original query here.
-                    let signature_doc = if original_query != filtered_query {
-                        Query::parse_document(
-                            &original_query,
-                            operation.clone().as_deref(),
-                            &self.schema,
-                            &self.configuration,
-                        )
-                        .unwrap_or(doc.clone())
-                    } else {
-                        doc.clone()
-                    };
+                let generated_usage_reporting = generate_usage_reporting(
+                    &signature_doc.executable,
+                    &doc.executable,
+                    &operation,
+                    self.schema.supergraph_schema(),
+                    &self.signature_normalization_algorithm,
+                );
 
-                    let generated_usage_reporting = generate_usage_reporting(
-                        &signature_doc.executable,
-                        &doc.executable,
-                        &operation,
-                        self.schema.supergraph_schema(),
-                        &self.signature_normalization_algorithm,
-                    );
-
-                    // Ignore comparison if the operation name is an empty string since there is a known issue where
-                    // router behaviour is incorrect in that case, and it also generates incorrect usage reports.
-                    // https://github.com/apollographql/router/issues/4837
-                    let is_empty_operation_name = operation.map_or(false, |s| s.is_empty());
-                    let is_in_both_metrics_mode = matches!(
-                        self.configuration
-                            .experimental_apollo_metrics_generation_mode,
-                        ApolloMetricsGenerationMode::Both
-                    );
-                    if !is_empty_operation_name && is_in_both_metrics_mode {
-                        let comparison_result = generated_usage_reporting.compare(&usage_reporting);
-
-                        if matches!(
-                            comparison_result,
-                            UsageReportingComparisonResult::StatsReportKeyNotEqual
-                                | UsageReportingComparisonResult::BothNotEqual
-                        ) {
-                            u64_counter!(
-                                "apollo.router.operations.telemetry.studio.signature",
-                                "The match status of the Apollo reporting signature generated by the JS implementation vs the Rust implementation",
-                                1,
-                                "generation.is_matched" = false
-                            );
-                            tracing::debug!(
-                                "Different signatures generated between router and router-bridge.\nQuery:\n{}\nRouter:\n{}\nRouter Bridge:\n{}",
-                                filtered_query,
-                                generated_usage_reporting.result.stats_report_key,
-                                usage_reporting.stats_report_key,
-                            );
-                        } else {
-                            u64_counter!(
-                                "apollo.router.operations.telemetry.studio.signature",
-                                "The match status of the Apollo reporting signature generated by the JS implementation vs the Rust implementation",
-                                1,
-                                "generation.is_matched" = true
-                            );
-                        }
-
-                        if matches!(
-                            comparison_result,
-                            UsageReportingComparisonResult::ReferencedFieldsNotEqual
-                                | UsageReportingComparisonResult::BothNotEqual
-                        ) {
-                            u64_counter!(
-                                "apollo.router.operations.telemetry.studio.references",
-                                "The match status of the Apollo reporting references generated by the JS implementation vs the Rust implementation",
-                                1,
-                                "generation.is_matched" = false
-                            );
-                            tracing::debug!(
-                                "Different referenced fields generated between router and router-bridge.\nQuery:\n{}\nRouter:\n{:?}\nRouter Bridge:\n{:?}",
-                                filtered_query,
-                                generated_usage_reporting.result.referenced_fields_by_type,
-                                usage_reporting.referenced_fields_by_type,
-                            );
-                        } else {
-                            u64_counter!(
-                                "apollo.router.operations.telemetry.studio.references",
-                                "The match status of the Apollo reporting references generated by the JS implementation vs the Rust implementation",
-                                1,
-                                "generation.is_matched" = true
-                            );
-                        }
-                    } else if matches!(
-                        self.configuration
-                            .experimental_apollo_metrics_generation_mode,
-                        ApolloMetricsGenerationMode::New
-                    ) {
-                        usage_reporting.stats_report_key =
-                            generated_usage_reporting.result.stats_report_key;
-                        usage_reporting.referenced_fields_by_type =
-                            generated_usage_reporting.result.referenced_fields_by_type;
-                    }
-                }
+                usage_reporting.stats_report_key =
+                    generated_usage_reporting.result.stats_report_key;
+                usage_reporting.referenced_fields_by_type =
+                    generated_usage_reporting.result.referenced_fields_by_type;
 
                 Ok(QueryPlannerContent::Plan {
                     plan: Arc::new(super::QueryPlan {
@@ -681,13 +580,9 @@ impl BridgeQueryPlanner {
                         query_plan: QueryPlan { node: None },
                         ..
                     },
-                mut usage_reporting,
+                usage_reporting,
             } => {
                 failfast_debug!("empty query plan");
-                if let Some(sig) = operation_signature {
-                    usage_reporting.stats_report_key = sig;
-                }
-
                 Err(QueryPlannerError::EmptyPlan(usage_reporting))
             }
         }

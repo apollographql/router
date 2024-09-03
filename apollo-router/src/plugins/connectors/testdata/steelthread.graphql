@@ -1,8 +1,9 @@
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
+  @link(url: "https://specs.apollo.dev/connect/v0.1", for: EXECUTION)
   @join__directive(graphs: [CONNECTORS], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"]})
-  @join__directive(graphs: [CONNECTORS], name: "source", args: {name: "json", http: {baseURL: "https://jsonplaceholder.typicode.com/", headers: [{name: "x-new-name", from: "x-rename-source"}, {name: "x-forward", from: "x-forward"}, {name: "x-insert", value: "inserted"}, {name: "x-config-variable-source", value: "before {$config.source.val} after"}]}})
+  @join__directive(graphs: [CONNECTORS], name: "source", args: {name: "json", http: {baseURL: "https://jsonplaceholder.typicode.com/", headers: [{name: "x-new-name", from: "x-rename-source"}, {name: "x-forward", from: "x-forward"}, {name: "x-insert", value: "inserted"}, {name: "x-config-variable-source", value: "before {$config.source.val} after"}, {name: "x-context-value-source", value: "before {$context.val} after"}]}})
 {
   query: Query
 }
@@ -67,7 +68,7 @@ type Query
   @join__type(graph: CONNECTORS)
   @join__type(graph: GRAPHQL)
 {
-  users: [User] @join__field(graph: CONNECTORS) @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/users", headers: [{name: "x-new-name", from: "x-rename-connect"}, {name: "x-insert-multi-value", value: "first,second"}, {name: "x-config-variable-connect", value: "before {$config.connect.val} after"}]}, selection: "id name"})
+  users: [User] @join__field(graph: CONNECTORS) @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/users", headers: [{name: "x-new-name", from: "x-rename-connect"}, {name: "x-insert-multi-value", value: "first,second"}, {name: "x-config-variable-connect", value: "before {$config.connect.val} after"}, {name: "x-context-value-connect", value: "before {$context.val} after"}]}, selection: "id name"})
   me: User @join__field(graph: CONNECTORS) @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/users/{$config.id}"}, selection: "id\nname\nusername"})
   user(id: ID!): User @join__field(graph: CONNECTORS) @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/users/{$args.id}"}, selection: "id\nname\nusername", entity: true})
   posts: [Post] @join__field(graph: CONNECTORS) @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/posts"}, selection: "id title user: { id: userId }"})

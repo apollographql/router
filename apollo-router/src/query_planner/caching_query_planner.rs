@@ -546,7 +546,7 @@ where
                                 }
                             }
 
-                            // This will be overridden when running in ApolloMetricsGenerationMode::New mode
+                            // This will be overridden by the Rust usage reporting implementation
                             if let Some(QueryPlannerContent::Plan { plan, .. }) = &content {
                                 context.extensions().with_lock(|mut lock| {
                                     lock.insert::<Arc<UsageReporting>>(plan.usage_reporting.clone())

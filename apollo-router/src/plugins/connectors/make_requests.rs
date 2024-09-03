@@ -29,10 +29,17 @@ pub(crate) struct RequestInputs {
 }
 
 impl RequestInputs {
-    pub(crate) fn merge(&self, config: Option<&CustomConfiguration>) -> IndexMap<String, Value> {
+    pub(crate) fn merge(
+        &self,
+        config: Option<&CustomConfiguration>,
+        context: Option<Map<ByteString, Value>>,
+    ) -> IndexMap<String, Value> {
         let mut map = IndexMap::with_capacity_and_hasher(3, Default::default());
         map.insert("$args".to_string(), Value::Object(self.args.clone()));
         map.insert("$this".to_string(), Value::Object(self.this.clone()));
+        if let Some(context) = context {
+            map.insert("$context".to_string(), json!(context));
+        }
         if let Some(config) = config {
             map.insert("$config".to_string(), json!(config));
         }
@@ -110,11 +117,17 @@ fn request_params_to_requests(
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
 ) -> Result<Vec<(http::Request<RouterBody>, ResponseKey)>, MakeRequestError> {
     let mut results = vec![];
-
+    let context: Map<ByteString, Value> = original_request
+        .context
+        .iter()
+        .map(|r| (r.key().as_str().into(), r.value().clone()))
+        .collect();
     for response_key in request_params {
         let request = make_request(
             &connector.transport,
-            response_key.inputs().merge(connector.config.as_ref()),
+            response_key
+                .inputs()
+                .merge(connector.config.as_ref(), Some(context.clone())),
             original_request,
             debug,
         )?;
