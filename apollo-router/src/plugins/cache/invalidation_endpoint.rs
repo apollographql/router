@@ -134,6 +134,7 @@ impl Service<router::Request> for InvalidationService {
                                 }
                                 match invalidation
                                     .invalidate(InvalidationOrigin::Endpoint, body)
+                                    .instrument(tracing::info_span!("invalidate"))
                                     .await
                                 {
                                     Ok(count) => Ok(router::Response {

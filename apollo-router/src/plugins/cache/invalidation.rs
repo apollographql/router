@@ -87,7 +87,6 @@ impl Invalidation {
             .await
             .map_err(|e| format!("cannot send invalidation request: {e}"))?;
 
-        let start_recv = Instant::now();
         let result = response_rx
             .recv()
             .await
@@ -98,11 +97,6 @@ impl Invalidation {
                 )
             })?
             .map_err(|err| format!("received an invalidation error: {:?}", err))?;
-        f64_histogram!(
-            "apollo.router.cache.invalidation.channel.duration",
-            "Duration to send through the invalidation channel",
-            start_recv.elapsed().as_secs_f64()
-        );
 
         Ok(result)
     }
