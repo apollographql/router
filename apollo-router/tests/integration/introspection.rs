@@ -4,12 +4,32 @@ use serde_json::json;
 use tower::ServiceExt;
 
 #[tokio::test]
-async fn simple() {
+async fn simple_legacy_mode() {
     let request = Request::fake_builder()
         .query("{ __schema { queryType { name } } }")
         .build()
         .unwrap();
-    let response = make_request(request).await;
+    let response = make_request(request, "legacy").await;
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "__schema": {
+          "queryType": {
+            "name": "Query"
+          }
+        }
+      }
+    }
+    "###);
+}
+
+#[tokio::test]
+async fn simple_new_mode() {
+    let request = Request::fake_builder()
+        .query("{ __schema { queryType { name } } }")
+        .build()
+        .unwrap();
+    let response = make_request(request, "new").await;
     insta::assert_json_snapshot!(response, @r###"
     {
       "data": {
@@ -29,7 +49,7 @@ async fn top_level_inline_fragment() {
         .query("{ ... { __schema { queryType { name } } } }")
         .build()
         .unwrap();
-    let response = make_request(request).await;
+    let response = make_request(request, "legacy").await;
     insta::assert_json_snapshot!(response, @r###"
     {
       "data": {
@@ -60,7 +80,7 @@ async fn variable() {
         .variable("d", true)
         .build()
         .unwrap();
-    let response = make_request(request).await;
+    let response = make_request(request, "legacy").await;
     insta::assert_json_snapshot!(response, @r###"
     {
       "errors": [
@@ -87,14 +107,14 @@ async fn two_operations() {
         .operation_name("ThisOp")
         .build()
         .unwrap();
-    let response = make_request(request).await;
+    let response = make_request(request, "legacy").await;
     insta::assert_json_snapshot!(response, @r###"
     {
       "errors": [
         {
-          "message": "introspection error : Must provide operation name if query contains multiple operations.",
+          "message": "Schema introspection is currently not supported with multiple operations in the same document",
           "extensions": {
-            "code": "INTROSPECTION_ERROR"
+            "code": "INTROSPECTION_WITH_MULTIPLE_OPERATIONS"
           }
         }
       ]
@@ -113,7 +133,7 @@ async fn operation_name_error() {
         )
         .build()
         .unwrap();
-    let response = make_request(request).await;
+    let response = make_request(request, "legacy").await;
     insta::assert_json_snapshot!(response, @r###"
     {
       "errors": [
@@ -132,7 +152,7 @@ async fn operation_name_error() {
         .operation_name("NonExistentOp")
         .build()
         .unwrap();
-    let response = make_request(request).await;
+    let response = make_request(request, "legacy").await;
     insta::assert_json_snapshot!(response, @r###"
     {
       "errors": [
@@ -158,7 +178,7 @@ async fn mixed() {
         )
         .build()
         .unwrap();
-    let response = make_request(request).await;
+    let response = make_request(request, "legacy").await;
     insta::assert_json_snapshot!(response, @r###"
     {
       "errors": [
@@ -173,9 +193,10 @@ async fn mixed() {
     "###);
 }
 
-async fn make_request(request: Request) -> apollo_router::graphql::Response {
+async fn make_request(request: Request, mode: &str) -> apollo_router::graphql::Response {
     apollo_router::TestHarness::builder()
         .configuration_json(json!({
+            "experimental_introspection_mode": mode,
             "supergraph": {
                 "introspection": true,
             },

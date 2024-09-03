@@ -97,23 +97,8 @@ impl QueryAnalysisLayer {
                     schema.as_ref(),
                     conf.as_ref(),
                 )?;
-                if let Ok(operation) = doc
-                    .executable
-                    .operations
-                    .get(operation_name.as_deref())
-                    .cloned()
-                {
-                    Ok((doc, operation))
-                } else if let Some(name) = operation_name {
-                    Err(SpecError::UnknownOperation(name))
-                } else if doc.executable.operations.is_empty() {
-                    // Maybe not reachable?
-                    // A valid document is non-empty and has no unused fragments
-                    Err(SpecError::NoOperation)
-                } else {
-                    debug_assert!(doc.executable.operations.len() > 1);
-                    Err(SpecError::MultipleOperationWithoutOperationName)
-                }
+                let operation = doc.get_operation(operation_name.as_deref())?.clone();
+                Ok((doc, operation))
             })
         })
         .await
@@ -272,6 +257,26 @@ pub(crate) struct ParsedDocumentInner {
     pub(crate) ast: ast::Document,
     pub(crate) executable: Arc<Valid<ExecutableDocument>>,
     pub(crate) hash: Arc<QueryHash>,
+}
+
+impl ParsedDocumentInner {
+    pub(crate) fn get_operation(
+        &self,
+        operation_name: Option<&str>,
+    ) -> Result<&Node<Operation>, SpecError> {
+        if let Ok(operation) = self.executable.operations.get(operation_name) {
+            Ok(operation)
+        } else if let Some(name) = operation_name {
+            Err(SpecError::UnknownOperation(name.to_owned()))
+        } else if self.executable.operations.is_empty() {
+            // Maybe not reachable?
+            // A valid document is non-empty and has no unused fragments
+            Err(SpecError::NoOperation)
+        } else {
+            debug_assert!(self.executable.operations.len() > 1);
+            Err(SpecError::MultipleOperationWithoutOperationName)
+        }
+    }
 }
 
 impl Display for ParsedDocumentInner {

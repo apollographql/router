@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use apollo_compiler::ast;
+use apollo_compiler::execution::InputCoercionError;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_federation::error::FederationError;
@@ -16,6 +17,7 @@ use futures::future::BoxFuture;
 use opentelemetry_api::metrics::MeterProvider as _;
 use opentelemetry_api::metrics::ObservableGauge;
 use opentelemetry_api::KeyValue;
+use router_bridge::introspect::IntrospectionError;
 use router_bridge::planner::PlanOptions;
 use router_bridge::planner::PlanSuccess;
 use router_bridge::planner::Planner;
@@ -27,6 +29,7 @@ use tower::Service;
 use super::PlanNode;
 use super::QueryKey;
 use crate::apollo_studio_interop::generate_usage_reporting;
+use crate::configuration::IntrospectionMode;
 use crate::configuration::QueryPlannerMode;
 use crate::error::PlanErrors;
 use crate::error::QueryPlannerError;
@@ -479,20 +482,82 @@ impl BridgeQueryPlanner {
         })
     }
 
-    async fn introspection(&self, query: String) -> Result<QueryPlannerContent, QueryPlannerError> {
-        match self.introspection.as_ref() {
-            Some(introspection) => {
-                let response = introspection
-                    .execute(query)
+    async fn introspection(
+        &self,
+        key: QueryKey,
+        doc: ParsedDocument,
+    ) -> Result<QueryPlannerContent, QueryPlannerError> {
+        let Some(introspection) = &self.introspection else {
+            return Ok(QueryPlannerContent::IntrospectionDisabled);
+        };
+        let mode = self.configuration.experimental_introspection_mode;
+        let response = if mode != IntrospectionMode::New && doc.executable.operations.len() > 1 {
+            // TODO: add an operation_name parameter to router-brigde to fix this?
+            let error = graphql::Error::builder()
+                .message(
+                    "Schema introspection is currently not supported \
+                     with multiple operations in the same document",
+                )
+                .extension_code("INTROSPECTION_WITH_MULTIPLE_OPERATIONS")
+                .build();
+            return Ok(QueryPlannerContent::Response {
+                response: Box::new(graphql::Response::builder().error(error).build()),
+            });
+        } else {
+            match mode {
+                IntrospectionMode::Legacy => introspection
+                    .execute(key.filtered_query)
                     .await
-                    .map_err(QueryPlannerError::Introspection)?;
-
-                Ok(QueryPlannerContent::Response {
-                    response: Box::new(response),
-                })
+                    .map_err(QueryPlannerError::Introspection)?,
+                IntrospectionMode::New => self.rust_introspection(&key, &doc)?,
+                IntrospectionMode::Both => {
+                    let rust_result = self.rust_introspection(&key, &doc);
+                    let js_result = introspection
+                        .execute(key.filtered_query)
+                        .await
+                        .map_err(QueryPlannerError::Introspection);
+                    todo!()
+                }
             }
-            None => Ok(QueryPlannerContent::IntrospectionDisabled),
-        }
+        };
+
+        Ok(QueryPlannerContent::Response {
+            response: Box::new(response),
+        })
+    }
+
+    fn rust_introspection(
+        &self,
+        key: &QueryKey,
+        doc: &ParsedDocument,
+    ) -> Result<graphql::Response, QueryPlannerError> {
+        let schema = self.schema.api_schema();
+        let operation = doc.get_operation(key.operation_name.as_deref())?;
+        apollo_compiler::execution::check_introspection_max_depth(&doc.executable, operation)
+            .map_err(|_e| {
+                QueryPlannerError::Introspection(IntrospectionError {
+                    message: Some("Maximum introspection depth exceeded".to_owned()),
+                })
+            })?;
+        let variable_values = Default::default();
+        let variable_values =
+            apollo_compiler::execution::coerce_variable_values(schema, operation, &variable_values)
+                .map_err(|e| {
+                    let message = match &e {
+                        InputCoercionError::SuspectedValidationBug(e) => &e.message,
+                        InputCoercionError::ValueError { message, .. } => message,
+                    };
+                    QueryPlannerError::Introspection(IntrospectionError {
+                        message: Some(message.clone()),
+                    })
+                })?;
+        let response = apollo_compiler::execution::execute_introspection_only_query(
+            schema,
+            &doc.executable,
+            operation,
+            &variable_values,
+        );
+        Ok(response.into())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -813,7 +878,7 @@ impl BridgeQueryPlanner {
                     .all(|sel| sel.as_field().is_some_and(|f| f.name == "__typename"))
                 {
                     let root_type_name: serde_json_bytes::ByteString =
-                        operation.selection_set.ty.as_str().into();
+                        operation.object_type().as_str().into();
                     let data = Value::Object(
                         operation
                             .root_fields(&doc.executable)
@@ -847,7 +912,7 @@ impl BridgeQueryPlanner {
                     response: Box::new(graphql::Response::builder().error(error).build()),
                 });
             }
-            return self.introspection(key.original_query).await;
+            return self.introspection(key, doc).await;
         }
 
         if key.filtered_query != key.original_query {

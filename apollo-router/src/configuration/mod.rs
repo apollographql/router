@@ -231,7 +231,7 @@ pub(crate) enum QueryPlannerMode {
 }
 
 /// Which implementation of GraphQL schema introspection to use, if enabled
-#[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
+#[derive(Copy, Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
 #[derivative(Debug)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum IntrospectionMode {
