@@ -18,6 +18,7 @@ use super::connect::BoxService;
 use super::http::HttpClientServiceFactory;
 use super::http::HttpRequest;
 use super::new_service::ServiceFactory;
+use crate::error::FetchError;
 use crate::plugins::connectors::error::Error as ConnectorError;
 use crate::plugins::connectors::handle_responses::handle_responses;
 use crate::plugins::connectors::http::Response as ConnectorResponse;
@@ -167,7 +168,24 @@ async fn execute(
                 http_request: req,
                 context,
             };
-            let res = client.oneshot(req).await?;
+            let res = client.oneshot(req).await.map_err(|e| {
+                match e.downcast::<FetchError>() {
+                    // Replace the internal subgraph name with the connector label
+                    Ok(inner) => match *inner {
+                        FetchError::SubrequestHttpError {
+                            status_code,
+                            service: _,
+                            reason,
+                        } => Box::new(FetchError::SubrequestHttpError {
+                            status_code,
+                            service: connector.id.label.clone(),
+                            reason,
+                        }),
+                        _ => inner,
+                    },
+                    Err(e) => e,
+                }
+            })?;
 
             Ok::<_, BoxError>(ConnectorResponse {
                 result: ConnectorResult::HttpResponse(res.http_response),
