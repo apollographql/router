@@ -123,21 +123,21 @@ async fn start(
             1u64,
             "origin" = origin
         );
-        let resp = handle_request_batch(&storage, origin, requests)
-            .instrument(tracing::info_span!(
-                "cache.invalidation.batch",
-                "origin" = origin
-            ))
-            .await;
-        {
-            let span = tracing::info_span!("cache.response.send");
-            let _entered = span.enter();
-            if let Err(err) = response_tx.send(resp) {
+        let storage = storage.clone();
+        tokio::task::spawn(async move {
+            if let Err(err) = response_tx.send(
+                handle_request_batch(&storage, origin, requests)
+                    .instrument(tracing::info_span!(
+                        "cache.invalidation.batch",
+                        "origin" = origin
+                    ))
+                    .await,
+            ) {
                 ::tracing::error!(
                     "cannot send answer to invalidation request in the channel: {err}"
                 );
             }
-        }
+        });
     }
 }
 
