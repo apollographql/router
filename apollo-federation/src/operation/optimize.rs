@@ -1007,7 +1007,7 @@ impl SelectionSet {
                 &fragment,
                 /*directives*/ &Default::default(),
             );
-            optimized.add_local_selection(&fragment_selection.into(), false)?;
+            optimized.add_local_selection(&fragment_selection.into())?;
         }
 
         optimized.add_local_selection_set(&not_covered_so_far)?;
@@ -1697,21 +1697,17 @@ impl FragmentGenerator {
                         self.visit_selection_set(selection_set)?;
                     }
                     new_selection_set
-                        .add_local_selection(&Selection::Field(Arc::clone(field.get())), false)?;
+                        .add_local_selection(&Selection::Field(Arc::clone(field.get())))?;
                 }
                 SelectionValue::FragmentSpread(frag) => {
-                    new_selection_set.add_local_selection(
-                        &Selection::FragmentSpread(Arc::clone(frag.get())),
-                        false,
-                    )?;
+                    new_selection_set
+                        .add_local_selection(&Selection::FragmentSpread(Arc::clone(frag.get())))?;
                 }
                 SelectionValue::InlineFragment(frag)
                     if !Self::is_worth_using(&frag.get().selection_set) =>
                 {
-                    new_selection_set.add_local_selection(
-                        &Selection::InlineFragment(Arc::clone(frag.get())),
-                        false,
-                    )?;
+                    new_selection_set
+                        .add_local_selection(&Selection::InlineFragment(Arc::clone(frag.get())))?;
                 }
                 SelectionValue::InlineFragment(mut candidate) => {
                     self.visit_selection_set(candidate.get_selection_set_mut())?;
@@ -1729,10 +1725,9 @@ impl FragmentGenerator {
                     // we can't just transfer them to the generated fragment spread,
                     // so we have to keep this inline fragment.
                     let Ok(skip_include) = skip_include else {
-                        new_selection_set.add_local_selection(
-                            &Selection::InlineFragment(Arc::clone(candidate.get())),
-                            false,
-                        )?;
+                        new_selection_set.add_local_selection(&Selection::InlineFragment(
+                            Arc::clone(candidate.get()),
+                        ))?;
                         continue;
                     };
 
@@ -1741,10 +1736,9 @@ impl FragmentGenerator {
                     // there's any directives on it. This code duplicates the body from the
                     // previous condition so it's very easy to remove when we're ready :)
                     if !skip_include.is_empty() {
-                        new_selection_set.add_local_selection(
-                            &Selection::InlineFragment(Arc::clone(candidate.get())),
-                            false,
-                        )?;
+                        new_selection_set.add_local_selection(&Selection::InlineFragment(
+                            Arc::clone(candidate.get()),
+                        ))?;
                         continue;
                     }
 
@@ -1769,8 +1763,8 @@ impl FragmentGenerator {
                         });
                         self.fragments.get(&name).unwrap()
                     };
-                    new_selection_set.add_local_selection(
-                        &Selection::from(FragmentSpreadSelection {
+                    new_selection_set.add_local_selection(&Selection::from(
+                        FragmentSpreadSelection {
                             spread: FragmentSpread::new(FragmentSpreadData {
                                 schema: selection_set.schema.clone(),
                                 fragment_name: existing.name.clone(),
@@ -1780,9 +1774,8 @@ impl FragmentGenerator {
                                 selection_id: crate::operation::SelectionId::new(),
                             }),
                             selection_set: existing.selection_set.clone(),
-                        }),
-                        false,
-                    )?;
+                        },
+                    ))?;
                 }
             }
         }

@@ -4,6 +4,7 @@ use std::sync::Arc;
 use selection_map::SelectionMap;
 
 use super::selection_map;
+use super::DirectiveList;
 use super::FieldSelection;
 use super::FieldSelectionValue;
 use super::FragmentSpreadSelection;
@@ -155,7 +156,7 @@ impl SelectionSet {
             }
             selections_to_merge.extend(other.selections.values());
         }
-        self.merge_selections_into(selections_to_merge.into_iter(), false)
+        self.merge_selections_into(selections_to_merge.into_iter())
     }
 
     /// NOTE: This is a private API and should be used with care, use `add_selection` instead.
@@ -176,7 +177,6 @@ impl SelectionSet {
     pub(super) fn merge_selections_into<'op>(
         &mut self,
         mut others: impl Iterator<Item = &'op Selection>,
-        allow_inline_optimization: bool,
     ) -> Result<(), FederationError> {
         fn insert_selection(
             target: &mut SelectionMap,
@@ -229,36 +229,29 @@ impl SelectionSet {
             Ok(())
         }
 
-        let target = Arc::make_mut(&mut self.selections);
-
-        if allow_inline_optimization {
-            fn recurse_on_inline_fragment<'a>(
-                target: &mut SelectionMap,
-                type_pos: &CompositeTypeDefinitionPosition,
-                others: impl Iterator<Item = &'a Selection>,
-            ) -> Result<(), FederationError> {
-                for selection in others {
-                    if let Selection::InlineFragment(inline) = selection {
-                        if inline.is_unnecessary(&type_pos) {
-                            recurse_on_inline_fragment(
-                                target,
-                                type_pos,
-                                inline.selection_set.selections.values(),
-                            )?;
-                            continue;
-                        }
+        fn recurse_on_inline_fragment<'a>(
+            target: &mut SelectionMap,
+            type_pos: &CompositeTypeDefinitionPosition,
+            others: impl Iterator<Item = &'a Selection>,
+        ) -> Result<(), FederationError> {
+            for selection in others {
+                if let Selection::InlineFragment(inline) = selection {
+                    if inline.is_unnecessary(type_pos) {
+                        recurse_on_inline_fragment(
+                            target,
+                            type_pos,
+                            inline.selection_set.selections.values(),
+                        )?;
+                        continue;
                     }
-                    insert_selection(target, selection)?;
                 }
-                Ok(())
+                insert_selection(target, selection)?;
             }
-            let type_pos = &self.type_position;
-            recurse_on_inline_fragment(target, type_pos, others)?;
-        } else {
-            others.try_for_each(|selection| insert_selection(target, selection))?;
+            Ok(())
         }
 
-        Ok(())
+        let target = Arc::make_mut(&mut self.selections);
+        recurse_on_inline_fragment(target, &self.type_position, others)
     }
 
     /// Inserts a `Selection` into the inner map. Should a selection with the same key already
@@ -275,14 +268,13 @@ impl SelectionSet {
     pub(crate) fn add_local_selection(
         &mut self,
         selection: &Selection,
-        allow_inline_optimization: bool,
     ) -> Result<(), FederationError> {
         debug_assert_eq!(
             &self.schema,
             selection.schema(),
             "In order to add selection it needs to point to the same schema"
         );
-        self.merge_selections_into(std::iter::once(selection), allow_inline_optimization)
+        self.merge_selections_into(std::iter::once(selection))
     }
 
     /// Inserts a `SelectionSet` into the inner map. Should any sub selection with the same key already

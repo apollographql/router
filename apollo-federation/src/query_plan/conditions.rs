@@ -10,6 +10,7 @@ use serde::Serialize;
 
 use crate::error::FederationError;
 use crate::operation::DirectiveList;
+use crate::operation::HasSelectionKey;
 use crate::operation::Selection;
 use crate::operation::SelectionMap;
 use crate::operation::SelectionSet;
@@ -223,12 +224,12 @@ pub(crate) fn remove_conditions_from_selection_set(
                             selection.with_updated_selection_set(Some(updated_selection_set))?
                         }
                     } else {
-                        Selection::from_element(updated_element, Some(updated_selection_set))?
+                        Selection::from_element(updated_element, Some(updated_selection_set), None)?
                     }
                 } else if updated_element == element {
                     selection.clone()
                 } else {
-                    Selection::from_element(updated_element, None)?
+                    Selection::from_element(updated_element, None, None)?
                 };
                 selection_map.insert(new_selection);
             }
@@ -280,12 +281,13 @@ pub(crate) fn remove_unneeded_top_level_fragment_directives(
                         let final_selection =
                             inline_fragment.with_updated_selection_set(updated_selections);
                         selection_map.insert(Selection::InlineFragment(Arc::new(final_selection)));
+                    } else {
+                        // We can skip some of the fragment directives directive.
+                        let final_selection = inline_fragment
+                            .with_updated_directives(DirectiveList::from_iter(needed_directives))
+                            .with_updated_selection_set(updated_selections);
+                        selection_map.insert(Selection::InlineFragment(Arc::new(final_selection)));
                     }
-
-                    // We can skip some of the fragment directives directive.
-                    let final_selection = inline_fragment
-                        .with_updated_directives(DirectiveList::from_iter(needed_directives));
-                    selection_map.insert(Selection::InlineFragment(Arc::new(final_selection)));
                 }
             }
             _ => {
