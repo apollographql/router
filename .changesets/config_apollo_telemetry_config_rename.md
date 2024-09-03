@@ -1,4 +1,4 @@
-###  ([#5807](https://github.com/apollographql/router/pull/5807))
+###  Remove experimental label from apollo usage reporting configs ([#5807](https://github.com/apollographql/router/pull/5807))
 
 All known issues related to the new Apollo usage report generation have been resolved so we are renaming some experimental options to be non-experimental.
 * `telemetry.apollo.experimental_apollo_metrics_reference_mode` is now `telemetry.apollo.metrics_reference_mode`
