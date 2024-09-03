@@ -607,12 +607,12 @@ This removal means some operations may have the same normalized signature though
 Enhanced normalization incorporates [input types](#input-types) and [aliases](#aliases) in signature generation.
 It also includes other improvements that make it more likely that two operations that only vary slightly have the same signature.
 
-Configure enhanced operation signature normalization in `router.yaml` with the `telemetry.apollo.experimental_apollo_signature_normalization_algorithm` option:
+Configure enhanced operation signature normalization in `router.yaml` with the `telemetry.apollo.signature_normalization_algorithm` option:
 
 ```yaml title="router.yaml"
 telemetry: 
   apollo:
-    experimental_apollo_signature_normalization_algorithm: enhanced # Default is legacy
+    signature_normalization_algorithm: enhanced # Default is legacy
 ```
 
 Once you enable this configuration, operations with enhanced signatures might appear with different operation IDs than they did previously in GraphOS Studio.
@@ -769,12 +769,12 @@ Beginning in v1.50.0, you can configure the router to report enum and input obje
 Apollo's legacy reference reporting doesn't include data about enum values and input object fields, meaning you can't view enum and input object field usage in GraphOS Studio.
 Legacy reporting can also cause [inaccurate operation checks](#enhanced-operation-checks).
 
-Configure extended reference reporting in `router.yaml` with the `telemetry.apollo.experimental_apollo_metrics_reference_mode` option like so:
+Configure extended reference reporting in `router.yaml` with the `telemetry.apollo.metrics_reference_mode` option like so:
 
 ```yaml title="router.yaml"
 telemetry: 
   apollo:
-    experimental_apollo_metrics_reference_mode: extended # Default is legacy
+    metrics_reference_mode: extended # Default is legacy
 ```
 #### Configuration effect timing
 

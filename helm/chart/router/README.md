@@ -79,6 +79,7 @@ helm show values oci://ghcr.io/apollographql/helm-charts/router
 | probes.readiness | object | `{"initialDelaySeconds":0}` | Configure readiness probe |
 | replicaCount | int | `1` |  |
 | resources | object | `{}` |  |
+| restartPolicy | string | `"Always"` | Sets the restart policy of pods |
 | rollingUpdate | object | `{}` | Sets the [rolling update strategy parameters](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#rolling-update-deployment).  Can take absolute values or % values. |
 | router | object | `{"args":["--hot-reload"],"configuration":{"health_check":{"listen":"0.0.0.0:8088"},"supergraph":{"listen":"0.0.0.0:4000"}}}` | See https://www.apollographql.com/docs/router/configuration/overview/#yaml-config-file for yaml structure |
 | securityContext | object | `{}` |  |
