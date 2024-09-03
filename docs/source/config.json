@@ -44,8 +44,7 @@
         "Demand Control" : [
           "/executing-operations/demand-control",
           [
-            "enterprise",
-            "preview"
+            "enterprise"
           ]
         ],
         "Privacy and Data Collection": "/privacy"
@@ -68,8 +67,7 @@
           ["enterprise", "preview"]
         ],
         "Client Protocol: HTTP Multipart": ["/executing-operations/subscription-multipart-protocol", ["enterprise"]]
-      },
-      "Demand Control": ["/executing-operations/demand-control", ["enterprise", "preview"]]
+      }
     },
     "Telemetry and Monitoring": {
       "Overview": "/configuration/telemetry/overview",
