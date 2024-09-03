@@ -30,6 +30,7 @@ pub(crate) struct Invalidation {
         Span,
     )>,
     storage: Arc<EntityStorage>,
+    scan_count: u32,
 }
 
 #[derive(Error, Debug, Clone)]
@@ -68,16 +69,20 @@ pub(crate) enum InvalidationOrigin {
 }
 
 impl Invalidation {
-    pub(crate) async fn new(storage: Arc<EntityStorage>) -> Result<Self, BoxError> {
+    pub(crate) async fn new(
+        storage: Arc<EntityStorage>,
+        scan_count: u32,
+    ) -> Result<Self, BoxError> {
         let (tx, rx) = tokio::sync::mpsc::channel(128);
 
         let s = storage.clone();
         tokio::task::spawn(async move {
-            start(s, rx).await;
+            start(s, rx, scan_count).await;
         });
         Ok(Self {
             handle: tx,
             storage,
+            scan_count,
         })
     }
 
@@ -115,7 +120,7 @@ impl Invalidation {
             "origin" = origin
         );
 
-        let result = handle_request_batch(&self.storage, origin, requests)
+        let result = handle_request_batch(&self.storage, origin, requests, self.scan_count)
             .instrument(tracing::info_span!(
                 "cache.invalidation.batch",
                 "origin" = origin
@@ -136,6 +141,7 @@ async fn start(
         broadcast::Sender<Result<u64, InvalidationError>>,
         Span,
     )>,
+    scan_count: u32,
 ) {
     while let Some((requests, origin, response_tx, parent_span)) = handle.recv().await {
         let origin = match origin {
@@ -153,7 +159,7 @@ async fn start(
         let handle_span = tracing::info_span!("cache.invalidation.batch", "origin" = origin);
         drop(_guard);
         if let Err(err) = response_tx.send(
-            handle_request_batch(&storage, origin, requests)
+            handle_request_batch(&storage, origin, requests, scan_count)
                 .instrument(handle_span)
                 .await,
         ) {
@@ -166,6 +172,7 @@ async fn handle_request(
     storage: &RedisCacheStorage,
     origin: &'static str,
     request: &InvalidationRequest,
+    scan_count: u32,
 ) -> Result<u64, InvalidationError> {
     let key_prefix = request.key_prefix();
     let subgraph = request.subgraph_name();
@@ -175,11 +182,14 @@ async fn handle_request(
     );
 
     // FIXME: configurable batch size
-    let mut stream = storage.scan(key_prefix.clone(), Some(10000));
+    let mut stream = storage.scan(key_prefix.clone(), Some(scan_count));
     let mut count = 0u64;
     let mut error = None;
 
-    while let Some(res) = stream.next().instrument(tracing::info_span!("scan")).await {
+    while let Some(res) = stream
+        .next() /*.instrument(tracing::info_span!("scan"))*/
+        .await
+    {
         match res {
             Err(e) => {
                 tracing::error!(
@@ -234,6 +244,7 @@ async fn handle_request_batch(
     storage: &EntityStorage,
     origin: &'static str,
     requests: Vec<InvalidationRequest>,
+    scan_count: u32,
 ) -> Result<u64, InvalidationError> {
     let mut count = 0;
     let mut errors = Vec::new();
@@ -243,7 +254,7 @@ async fn handle_request_batch(
             Some(s) => s,
             None => continue,
         };
-        match handle_request(redis_storage, origin, &request)
+        match handle_request(redis_storage, origin, &request, scan_count)
             .instrument(tracing::info_span!("cache.invalidation.request"))
             .await
         {

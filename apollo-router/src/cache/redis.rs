@@ -177,7 +177,7 @@ impl RedisCacheStorage {
             }),
             None,
             Some(ReconnectPolicy::new_exponential(0, 1, 2000, 5)),
-            3,
+            config.pool_size as usize,
         )
         .unwrap();
         let _handle = client.connect();
