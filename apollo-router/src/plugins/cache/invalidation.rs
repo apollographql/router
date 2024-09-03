@@ -173,7 +173,6 @@ async fn handle_request(
                         .map(|k| RedisKey(k.to_string()))
                         .collect::<Vec<_>>();
                     if !keys.is_empty() {
-                        let len = keys.len() as u64;
                         count += storage.delete(keys).await.unwrap_or(0) as u64;
 
                         u64_counter!(
