@@ -34,8 +34,8 @@ use crate::compat::coerce_executable_values;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::error::SingleFederationError::Internal;
+use crate::query_graph::graph_path::op_slice_condition_directives;
 use crate::query_graph::graph_path::OpPathElement;
-use crate::query_plan::conditions::remove_unneeded_top_level_fragment_directives;
 use crate::query_plan::conditions::Conditions;
 use crate::query_plan::FetchDataKeyRenamer;
 use crate::query_plan::FetchDataPathElement;
@@ -2672,16 +2672,6 @@ impl SelectionSet {
                 // in-place, we eagerly construct the selection that needs to be rebased on the target
                 // schema.
                 let element = ele.rebase_on(&self.type_position, &self.schema)?;
-                let unneeded_directives = path
-                    .iter()
-                    .flat_map(|path_element| {
-                        path_element
-                            .directives()
-                            .iter()
-                            .filter(|d| d.name == "include" || d.name == "skip")
-                    })
-                    .cloned()
-                    .collect();
                 if selection_set.is_none() || selection_set.is_some_and(|s| s.is_empty()) {
                     // This is a somewhat common case when dealing with `@key` "conditions" that we can
                     // end up with trying to add empty sub selection set on a non-leaf node. There is
@@ -2691,6 +2681,7 @@ impl SelectionSet {
                     if !ele.is_terminal()? {
                         return Ok(());
                     } else {
+                        let unneeded_directives = op_slice_condition_directives(path);
                         // add leaf
                         let selection =
                             Selection::from_element(element, None, Some(&unneeded_directives))?;
@@ -2709,28 +2700,13 @@ impl SelectionSet {
                         })
                         .transpose()?
                         .map(|selection_set| selection_set.without_unnecessary_fragments());
-                    match element {
-                        OpPathElement::InlineFragment(inline)
-                            if element.directives().is_empty()
-                                && (inline.type_condition_position.is_none()
-                                    || inline
-                                        .type_condition_position
-                                        .as_ref()
-                                        .is_some_and(|t| t == &self.type_position)) =>
-                        {
-                            if let Some(selection_set) = selection_set {
-                                self.add_selection_set(&selection_set)?;
-                            }
-                        }
-                        _ => {
-                            let selection = Selection::from_element(
-                                element,
-                                selection_set,
-                                Some(&unneeded_directives),
-                            )?;
-                            self.add_local_selection(&selection)?;
-                        }
-                    }
+                    let unneeded_directives = op_slice_condition_directives(path);
+                    let selection = Selection::from_element(
+                        element,
+                        selection_set,
+                        Some(&unneeded_directives),
+                    )?;
+                    self.add_local_selection(&selection)?;
                 }
             }
             // If we don't have any path, we rebase and merge in the given sub selections at the root.

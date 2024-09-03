@@ -10,7 +10,6 @@ use serde::Serialize;
 
 use crate::error::FederationError;
 use crate::operation::DirectiveList;
-use crate::operation::HasSelectionKey;
 use crate::operation::Selection;
 use crate::operation::SelectionMap;
 use crate::operation::SelectionSet;

@@ -4,7 +4,6 @@ use std::sync::Arc;
 use selection_map::SelectionMap;
 
 use super::selection_map;
-use super::DirectiveList;
 use super::FieldSelection;
 use super::FieldSelectionValue;
 use super::FragmentSpreadSelection;
@@ -49,7 +48,7 @@ impl<'a> FieldSelectionValue<'a> {
         if self.get().selection_set.is_some() {
             let Some(other_selection_set) = &other.selection_set else {
                 return Err(FederationError::internal(format!(
-                    "Field \"{}\" has composite type but not a selection set",
+                    "Field \"{}\" has non-composite type but also has a selection set",
                     other_field.field_position,
                 )));
             };
@@ -163,12 +162,6 @@ impl SelectionSet {
     ///
     /// A helper function for merging the given selections into this one.
     ///
-    /// If the `directives_of_parent_selection` flag is `Some`, the subselections of inline
-    /// fragments will be merged into the selection set if possible. This happens when the
-    /// selection set's type position matches the inline fragment's type condition or the fragment
-    /// has no type condition as well as the fragment has no directives or the same list of
-    /// directives as the given list of directives. Note that this happens recursely.
-    ///
     /// # Errors
     /// Returns an error if the parent type or schema of any selection does not match `self`'s.
     ///
@@ -176,7 +169,7 @@ impl SelectionSet {
     #[allow(unreachable_code)]
     pub(super) fn merge_selections_into<'op>(
         &mut self,
-        mut others: impl Iterator<Item = &'op Selection>,
+        others: impl Iterator<Item = &'op Selection>,
     ) -> Result<(), FederationError> {
         fn insert_selection(
             target: &mut SelectionMap,
@@ -185,6 +178,7 @@ impl SelectionSet {
             match target.entry(selection.key()) {
                 selection_map::Entry::Vacant(vacant) => {
                     vacant.insert(selection.clone())?;
+                    Ok(())
                 }
                 selection_map::Entry::Occupied(mut entry) => match entry.get_mut() {
                     SelectionValue::Field(mut field) => {
@@ -194,7 +188,7 @@ impl SelectionSet {
                                 field.get().field.field_position,
                             )));
                         };
-                        field.merge_into(other_field)?;
+                        field.merge_into(other_field)
                     }
                     SelectionValue::FragmentSpread(mut spread) => {
                         let Selection::FragmentSpread(other_spread) = selection else {
@@ -205,7 +199,7 @@ impl SelectionSet {
                                 ),
                             ));
                         };
-                        spread.merge_into(other_spread)?;
+                        spread.merge_into(other_spread)
                     }
                     SelectionValue::InlineFragment(mut inline) => {
                         let Selection::InlineFragment(other_inline) = selection else {
@@ -221,37 +215,34 @@ impl SelectionSet {
                                 ),
                             ));
                         };
-                        inline.merge_into(other_inline)?;
+                        inline.merge_into(other_inline)
                     }
                 },
             }
-
-            Ok(())
         }
 
         fn recurse_on_inline_fragment<'a>(
             target: &mut SelectionMap,
             type_pos: &CompositeTypeDefinitionPosition,
-            others: impl Iterator<Item = &'a Selection>,
+            mut others: impl Iterator<Item = &'a Selection>,
         ) -> Result<(), FederationError> {
-            for selection in others {
-                if let Selection::InlineFragment(inline) = selection {
-                    if inline.is_unnecessary(type_pos) {
-                        recurse_on_inline_fragment(
-                            target,
-                            type_pos,
-                            inline.selection_set.selections.values(),
-                        )?;
-                        continue;
-                    }
+            others.try_for_each(|selection| match selection {
+                Selection::InlineFragment(inline) if inline.is_unnecessary(type_pos) => {
+                    recurse_on_inline_fragment(
+                        target,
+                        type_pos,
+                        inline.selection_set.selections.values(),
+                    )
                 }
-                insert_selection(target, selection)?;
-            }
-            Ok(())
+                selection => insert_selection(target, selection),
+            })
         }
 
-        let target = Arc::make_mut(&mut self.selections);
-        recurse_on_inline_fragment(target, &self.type_position, others)
+        recurse_on_inline_fragment(
+            Arc::make_mut(&mut self.selections),
+            &self.type_position,
+            others,
+        )
     }
 
     /// Inserts a `Selection` into the inner map. Should a selection with the same key already

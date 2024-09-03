@@ -2873,15 +2873,6 @@ impl FetchSelectionSet {
     ) -> Result<(), FederationError> {
         let target = Arc::make_mut(&mut self.selection_set);
         target.add_at_path(path_in_node, selection_set)?;
-        /* Don't not work. Triggers an issue when turning set into a plan node
-        let restripped_selection_set = remove_unneeded_top_level_fragment_directives(
-            target,
-            &path_in_node.conditional_directives(),
-        )?;
-        if !restripped_selection_set.is_empty() {
-            *target = restripped_selection_set;
-        }
-        */
         // TODO: when calling this multiple times, maybe only re-compute conditions at the end?
         // Or make it lazily-initialized and computed on demand?
         self.conditions = self.selection_set.conditions()?;
