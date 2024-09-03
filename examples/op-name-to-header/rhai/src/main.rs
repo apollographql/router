@@ -1,7 +1,7 @@
 //! % curl -v \
 //!    --header 'content-type: application/json' \
 //!    --url 'http://127.0.0.1:4000' \
-//!    --data '{"operationName": "me", "query":"query Query {\n  me {\n    name\n  }\n}"}'
+//!    --data '{"operationName": "TopProduct", "query":"query TopProduct { topProducts { name } }"}'
 
 use anyhow::Result;
 
@@ -39,7 +39,7 @@ mod tests {
                             .headers()
                             .get("X-operation-name")
                             .expect("X-operation-name is present"),
-                        "me"
+                        "TopProducts"
                     );
                     Ok(supergraph::Response::fake_builder()
                         .data(expected_mock_response_data)
