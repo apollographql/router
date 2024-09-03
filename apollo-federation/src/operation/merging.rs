@@ -48,7 +48,7 @@ impl<'a> FieldSelectionValue<'a> {
         if self.get().selection_set.is_some() {
             let Some(other_selection_set) = &other.selection_set else {
                 return Err(FederationError::internal(format!(
-                    "Field \"{}\" has non-composite type but also has a selection set",
+                    "Field \"{}\" has composite type but not a selection set",
                     other_field.field_position,
                 )));
             };

@@ -1701,6 +1701,16 @@ mod inline_fragment_selection {
                 selection_set: self.selection_set.clone(),
             }
         }
+        pub(crate) fn with_updated_directives_and_selection_set(
+            &self,
+            directives: impl Into<DirectiveList>,
+            selection_set: SelectionSet,
+        ) -> Self {
+            Self {
+                inline_fragment: self.inline_fragment.with_updated_directives(directives),
+                selection_set,
+            }
+        }
     }
 
     impl HasSelectionKey for InlineFragmentSelection {
@@ -2644,12 +2654,13 @@ impl SelectionSet {
                 let mut selection = Arc::make_mut(&mut self.selections)
                     .entry(ele.key())
                     .or_insert(|| {
+                        let unnecessary_directives = op_slice_condition_directives(path);
                         Selection::from_element(
                             element,
                             // We immediately add a selection afterward to make this selection set
                             // valid.
                             Some(SelectionSet::empty(self.schema.clone(), sub_selection_type)),
-                            None,
+                            Some(&unnecessary_directives),
                         )
                     })?;
                 match &mut selection {

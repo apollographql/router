@@ -283,8 +283,10 @@ pub(crate) fn remove_unneeded_top_level_fragment_directives(
                     } else {
                         // We can skip some of the fragment directives directive.
                         let final_selection = inline_fragment
-                            .with_updated_directives(DirectiveList::from_iter(needed_directives))
-                            .with_updated_selection_set(updated_selections);
+                            .with_updated_directives_and_selection_set(
+                                DirectiveList::from_iter(needed_directives),
+                                updated_selections,
+                            );
                         selection_map.insert(Selection::InlineFragment(Arc::new(final_selection)));
                     }
                 }
