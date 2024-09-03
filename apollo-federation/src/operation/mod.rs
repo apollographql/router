@@ -794,22 +794,7 @@ impl Selection {
         // PORT_NOTE: This is TODO item is copied from the JS `selectionOfElement` function.
         // TODO: validate that the subSelection is ok for the element
         match element {
-            OpPathElement::Field(field) => {
-                if let Some(unnecessary_directives) = unnecessary_directives {
-                    let directives = field
-                        .directives
-                        .iter()
-                        .filter(|dir| !unnecessary_directives.contains(dir))
-                        .cloned()
-                        .collect::<DirectiveList>();
-                    Ok(Self::from_field(
-                        field.with_updated_directives(directives),
-                        sub_selections,
-                    ))
-                } else {
-                    Ok(Self::from_field(field, sub_selections))
-                }
-            }
+            OpPathElement::Field(field) => Ok(Self::from_field(field, sub_selections)),
             OpPathElement::InlineFragment(inline_fragment) => {
                 let Some(sub_selections) = sub_selections else {
                     return Err(FederationError::internal(
