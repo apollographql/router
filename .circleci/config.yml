@@ -736,7 +736,7 @@ jobs:
             - setup_remote_docker:
                 # CircleCI Image Policy
                 #   https://circleci.com/docs/remote-docker-images-support-policy/
-                version: 24.0.9
+                version: docker23
                 docker_layer_caching: true
             - run:
                 name: Docker build
