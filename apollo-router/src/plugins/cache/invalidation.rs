@@ -190,7 +190,7 @@ async fn handle_request(
                         u64_counter!(
                             "apollo.router.operations.entity.invalidation.entry",
                             "Entity cache counter for invalidated entries",
-                            len,
+                            count,
                             "origin" = origin,
                             "subgraph.name" = subgraph.clone()
                         );
