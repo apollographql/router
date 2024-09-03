@@ -27,6 +27,7 @@ use apollo_compiler::name;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use itertools::Itertools;
 use serde::Serialize;
 
 use crate::compat::coerce_executable_values;
@@ -45,6 +46,7 @@ use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::ValidFederationSchema;
+use crate::utils::FallibleIterator;
 
 mod contains;
 mod directive_list;
@@ -892,10 +894,6 @@ impl Selection {
                 Some(&inline_fragment_selection.selection_set)
             }
         }
-    }
-
-    fn sub_selection_type_position(&self) -> Option<CompositeTypeDefinitionPosition> {
-        Some(self.selection_set()?.type_position.clone())
     }
 
     pub(crate) fn conditions(&self) -> Result<Conditions, FederationError> {
@@ -2405,16 +2403,14 @@ impl SelectionSet {
         selection_key_groups: impl Iterator<Item = impl Iterator<Item = &'a Selection>>,
         named_fragments: &NamedFragments,
     ) -> Result<SelectionSet, FederationError> {
-        let mut result = SelectionMap::new();
-        for group in selection_key_groups {
-            let selection = Self::make_selection(schema, parent_type, group, named_fragments)?;
-            result.insert(selection);
-        }
-        Ok(SelectionSet {
-            schema: schema.clone(),
-            type_position: parent_type.clone(),
-            selections: Arc::new(result),
-        })
+        selection_key_groups
+            .map(|group| Self::make_selection(schema, parent_type, group, named_fragments))
+            .try_collect()
+            .map(|result| SelectionSet {
+                schema: schema.clone(),
+                type_position: parent_type.clone(),
+                selections: Arc::new(result),
+            })
     }
 
     // PORT_NOTE: Some features of the TypeScript `lazyMap` were not ported:
@@ -2471,6 +2467,7 @@ impl SelectionSet {
 
         // Now update the rest of the selections using the `mapper` function.
         update_new_selection(first_changed);
+
         for selection in iter {
             update_new_selection(mapper(selection)?)
         }
@@ -2504,14 +2501,22 @@ impl SelectionSet {
         })
     }
 
+    /// Adds __typename field for selection sets on abstract types.
+    ///
+    /// __typename is added to the sub selection set of a given selection in following conditions
+    /// * if a given selection is a field, we add a __typename sub selection if its selection set type
+    /// position is an abstract type
+    /// * if a given selection is a fragment, we only add __typename sub selection if fragment specifies
+    /// type condition and that type condition is an abstract type.
     pub(crate) fn add_typename_field_for_abstract_types(
         &self,
         parent_type_if_abstract: Option<AbstractTypeDefinitionPosition>,
     ) -> Result<SelectionSet, FederationError> {
         let mut selection_map = SelectionMap::new();
         if let Some(parent) = parent_type_if_abstract {
-            // XXX(@goto-bus-stop): if the selection set has an *alias* named __typename for some
-            // other field, this doesn't work right. is that allowed?
+            // We don't handle aliased __typename fields. This means we may end up with additional
+            // __typename sub selection. This should be fine though as aliased __typenames should
+            // be rare occurrence.
             if !self.has_top_level_typename_field() {
                 let typename_selection = Selection::from_field(
                     Field::new_introspection_typename(&self.schema, &parent.into(), None),
@@ -2522,11 +2527,24 @@ impl SelectionSet {
         }
         for selection in self.selections.values() {
             selection_map.insert(if let Some(selection_set) = selection.selection_set() {
-                let type_if_abstract = selection
-                    .sub_selection_type_position()
-                    .and_then(|ty| ty.try_into().ok());
+                let abstract_type = match selection {
+                    Selection::Field(field_selection) => field_selection
+                        .selection_set
+                        .as_ref()
+                        .map(|s| s.type_position.clone()),
+                    Selection::FragmentSpread(fragment_selection) => {
+                        Some(fragment_selection.spread.type_condition_position.clone())
+                    }
+                    Selection::InlineFragment(inline_fragment_selection) => {
+                        inline_fragment_selection
+                            .inline_fragment
+                            .type_condition_position
+                            .clone()
+                    }
+                }
+                .and_then(|ty| ty.try_into().ok());
                 let updated_selection_set =
-                    selection_set.add_typename_field_for_abstract_types(type_if_abstract)?;
+                    selection_set.add_typename_field_for_abstract_types(abstract_type)?;
 
                 if updated_selection_set == *selection_set {
                     selection.clone()
@@ -2854,13 +2872,10 @@ impl SelectionSet {
         if self.selections.is_empty() {
             Err(FederationError::internal("Invalid empty selection set"))
         } else {
-            for selection in self.selections.values() {
-                if let Some(s) = selection.selection_set() {
-                    s.validate(_variable_definitions)?;
-                }
-            }
-
-            Ok(())
+            self.selections
+                .values()
+                .filter_map(|selection| selection.selection_set())
+                .try_for_each(|s| s.validate(_variable_definitions))
         }
     }
 
@@ -2912,12 +2927,9 @@ impl SelectionSet {
         &self,
         predicate: &mut impl FnMut(OpPathElement) -> Result<bool, FederationError>,
     ) -> Result<bool, FederationError> {
-        for selection in self.selections.values() {
-            if selection.any_element(self.type_position.clone(), predicate)? {
-                return Ok(true);
-            }
-        }
-        Ok(false)
+        self.selections
+            .values()
+            .fallible_any(|selection| selection.any_element(self.type_position.clone(), predicate))
     }
 }
 
@@ -3123,13 +3135,12 @@ fn compute_aliases_for_non_merging_fields(
         }
     }
 
-    for selections in seen_response_names.into_values() {
-        if let Some(selections) = selections.selections {
-            compute_aliases_for_non_merging_fields(selections, alias_collector, schema)?;
-        }
-    }
-
-    Ok(())
+    seen_response_names
+        .into_values()
+        .filter_map(|selections| selections.selections)
+        .try_for_each(|selections| {
+            compute_aliases_for_non_merging_fields(selections, alias_collector, schema)
+        })
 }
 
 fn gen_alias_name(base_name: &Name, unavailable_names: &IndexMap<Name, SeenResponseName>) -> Name {
@@ -3322,6 +3333,25 @@ impl InlineFragmentSelection {
         parent_type_position: CompositeTypeDefinitionPosition,
         fragment_spread_selection: &Arc<FragmentSpreadSelection>,
     ) -> Result<InlineFragmentSelection, FederationError> {
+        let schema = fragment_spread_selection.spread.schema.schema();
+        for directive in fragment_spread_selection.spread.directives.iter() {
+            let Some(definition) = schema.directive_definitions.get(&directive.name) else {
+                return Err(FederationError::internal(format!(
+                    "Undefined directive {}",
+                    directive.name
+                )));
+            };
+            if !definition
+                .locations
+                .contains(&apollo_compiler::schema::DirectiveLocation::InlineFragment)
+            {
+                return Err(SingleFederationError::UnsupportedSpreadDirective {
+                    name: directive.name.clone(),
+                }
+                .into());
+            }
+        }
+
         // Note: We assume that fragment_spread_selection.spread.type_condition_position is the same as
         //       fragment_spread_selection.selection_set.type_position.
         Ok(InlineFragmentSelection::new(
