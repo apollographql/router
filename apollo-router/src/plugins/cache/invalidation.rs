@@ -29,9 +29,6 @@ pub(crate) enum InvalidationError {
     RedisError(#[from] RedisError),
     #[error("several errors")]
     Errors(#[from] InvalidationErrors),
-    #[cfg(test)]
-    #[error("custom error: {0}")]
-    Custom(String),
 }
 
 #[derive(Debug, Clone)]
