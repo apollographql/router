@@ -3,6 +3,8 @@ use apollo_router::services::supergraph::Request;
 use serde_json::json;
 use tower::ServiceExt;
 
+use crate::integration::IntegrationTest;
+
 #[tokio::test]
 async fn simple_legacy_mode() {
     let request = Request::fake_builder()
@@ -224,4 +226,31 @@ async fn make_request(request: Request, mode: &str) -> apollo_router::graphql::R
         .next_response()
         .await
         .unwrap()
+}
+
+#[tokio::test]
+async fn both_mode_integration() {
+    let mut router = IntegrationTest::builder()
+        .config(
+            "
+                experimental_introspection_mode: both
+                supergraph:
+                    introspection: true
+            ",
+        )
+        .supergraph("../examples/graphql/local.graphql")
+        .log("error,apollo_router=info,apollo_router::query_planner=debug")
+        .build()
+        .await;
+    router.start().await;
+    router.assert_started().await;
+    router
+        .execute_query(&json!({
+            "query": include_str!("../fixtures/introspect_full_schema.graphql"),
+        }))
+        .await;
+    // TODO: should be a match after https://apollographql.atlassian.net/browse/ROUTER-703
+    // router.assert_log_contains("Introspection match! 🎉").await;
+    router.assert_log_contains("Introspection mismatch").await;
+    router.graceful_shutdown().await;
 }
