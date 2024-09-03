@@ -90,6 +90,15 @@ impl BothModeComparisonJob {
 
             metric_query_planning_plan_duration(RUST_QP_MODE, start);
 
+            if let Ok(ref plan) = &result {
+                u64_histogram!(
+                    "apollo.router.query_planning.plan.evaluated_plans",
+                    "Number of query plans evaluated for a query before choosing the best one",
+                    plan.statistics.evaluated_plan_count.clone().into_inner() as u64,
+                    planner = "rust"
+                );
+            }
+
             // … to here, so the thread can only eiher reach here or panic.
             // We unset USING_CATCH_UNWIND in both cases.
             USING_CATCH_UNWIND.set(false);
