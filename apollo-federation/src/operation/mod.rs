@@ -2066,7 +2066,7 @@ impl SelectionSet {
             type_position,
             selections: Arc::new(SelectionMap::new()),
         };
-        merged.merge_selections_into(normalized_selections.iter())?;
+        merged.merge_selections_into(normalized_selections.iter(), false)?;
         Ok(merged)
     }
 
@@ -2163,7 +2163,7 @@ impl SelectionSet {
             type_position: self.type_position.clone(),
             selections: Arc::new(SelectionMap::new()),
         };
-        expanded.merge_selections_into(expanded_selections.iter())?;
+        expanded.merge_selections_into(expanded_selections.iter(), false)?;
         Ok(expanded)
     }
 
@@ -2696,7 +2696,7 @@ impl SelectionSet {
                         // add leaf
                         let selection =
                             Selection::from_element(element, None, Some(&unneeded_directives))?;
-                        self.add_local_selection(&selection)?
+                        self.add_local_selection(&selection, true)?
                     }
                 } else {
                     let selection_set = selection_set
@@ -2717,7 +2717,7 @@ impl SelectionSet {
                         selection_set,
                         Some(&unneeded_directives),
                     )?;
-                    self.add_local_selection(&selection)?;
+                    self.add_local_selection(&selection, true)?;
                 }
             }
             // If we don't have any path, we rebase and merge in the given sub selections at the root.

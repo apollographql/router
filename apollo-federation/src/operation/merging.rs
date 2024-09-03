@@ -155,12 +155,17 @@ impl SelectionSet {
             }
             selections_to_merge.extend(other.selections.values());
         }
-        self.merge_selections_into(selections_to_merge.into_iter())
+        self.merge_selections_into(selections_to_merge.into_iter(), false)
     }
 
     /// NOTE: This is a private API and should be used with care, use `add_selection` instead.
     ///
     /// A helper function for merging the given selections into this one.
+    ///
+    /// The `do_fragment_inlining` flag enables a check to see if any inline fragments yielded from
+    /// `others` can be recursively merged into the selection set instead of just merging in the
+    /// fragment. This requires that the fragment has no directives and either has no type
+    /// condition or the type condition matches this selection set's type position.
     ///
     /// # Errors
     /// Returns an error if the parent type or schema of any selection does not match `self`'s.
@@ -169,7 +174,8 @@ impl SelectionSet {
     #[allow(unreachable_code)]
     pub(super) fn merge_selections_into<'op>(
         &mut self,
-        others: impl Iterator<Item = &'op Selection>,
+        mut others: impl Iterator<Item = &'op Selection>,
+        do_fragment_inlining: bool,
     ) -> Result<(), FederationError> {
         fn insert_selection(
             target: &mut SelectionMap,
@@ -221,28 +227,30 @@ impl SelectionSet {
             }
         }
 
-        fn recurse_on_inline_fragment<'a>(
-            target: &mut SelectionMap,
-            type_pos: &CompositeTypeDefinitionPosition,
-            mut others: impl Iterator<Item = &'a Selection>,
-        ) -> Result<(), FederationError> {
-            others.try_for_each(|selection| match selection {
-                Selection::InlineFragment(inline) if inline.is_unnecessary(type_pos) => {
-                    recurse_on_inline_fragment(
-                        target,
-                        type_pos,
-                        inline.selection_set.selections.values(),
-                    )
-                }
-                selection => insert_selection(target, selection),
-            })
-        }
+        let target = Arc::make_mut(&mut self.selections);
 
-        recurse_on_inline_fragment(
-            Arc::make_mut(&mut self.selections),
-            &self.type_position,
-            others,
-        )
+        if do_fragment_inlining {
+            fn recurse_on_inline_fragment<'a>(
+                target: &mut SelectionMap,
+                type_pos: &CompositeTypeDefinitionPosition,
+                mut others: impl Iterator<Item = &'a Selection>,
+            ) -> Result<(), FederationError> {
+                others.try_for_each(|selection| match selection {
+                    Selection::InlineFragment(inline) if inline.is_unnecessary(type_pos) => {
+                        recurse_on_inline_fragment(
+                            target,
+                            type_pos,
+                            inline.selection_set.selections.values(),
+                        )
+                    }
+                    selection => insert_selection(target, selection),
+                })
+            }
+
+            recurse_on_inline_fragment(target, &self.type_position, others)
+        } else {
+            others.try_for_each(|selection| insert_selection(target, selection))
+        }
     }
 
     /// Inserts a `Selection` into the inner map. Should a selection with the same key already
@@ -259,13 +267,14 @@ impl SelectionSet {
     pub(crate) fn add_local_selection(
         &mut self,
         selection: &Selection,
+        do_fragment_inlining: bool,
     ) -> Result<(), FederationError> {
         debug_assert_eq!(
             &self.schema,
             selection.schema(),
             "In order to add selection it needs to point to the same schema"
         );
-        self.merge_selections_into(std::iter::once(selection))
+        self.merge_selections_into(std::iter::once(selection), do_fragment_inlining)
     }
 
     /// Inserts a `SelectionSet` into the inner map. Should any sub selection with the same key already
