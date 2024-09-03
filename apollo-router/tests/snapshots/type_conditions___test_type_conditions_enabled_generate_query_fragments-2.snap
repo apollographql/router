@@ -72,7 +72,7 @@ expression: response
               "kind": "Fetch",
               "serviceName": "searchSubgraph",
               "variableUsages": [],
-              "operation": "query Search__searchSubgraph__0 {\n  search {\n    __typename\n    ..._generated_onMovieResult2_0\n    ..._generated_onArticleResult2_0\n  }\n}\n\nfragment _generated_onEntityCollectionSection2_0 on EntityCollectionSection {\n  __typename\n  id\n}\n\nfragment _generated_onGallerySection2_0 on GallerySection {\n  __typename\n  id\n}\n\nfragment _generated_onMovieResult2_0 on MovieResult {\n  sections {\n    __typename\n    ..._generated_onEntityCollectionSection2_0\n    ..._generated_onGallerySection2_0\n  }\n  id\n}\n\nfragment _generated_onArticleResult2_0 on ArticleResult {\n  id\n  sections {\n    __typename\n    ..._generated_onGallerySection2_0\n    ..._generated_onEntityCollectionSection2_0\n  }\n}\n",
+              "operation": "query Search__searchSubgraph__0 { search { __typename ..._generated_onMovieResult2_0 ..._generated_onArticleResult2_0 } } fragment _generated_onEntityCollectionSection2_0 on EntityCollectionSection { __typename id } fragment _generated_onGallerySection2_0 on GallerySection { __typename id } fragment _generated_onMovieResult2_0 on MovieResult { sections { __typename ..._generated_onEntityCollectionSection2_0 ..._generated_onGallerySection2_0 } id } fragment _generated_onArticleResult2_0 on ArticleResult { id sections { __typename ..._generated_onGallerySection2_0 ..._generated_onEntityCollectionSection2_0 } }",
               "operationName": "Search__searchSubgraph__0",
               "operationKind": "query",
               "id": null,
@@ -133,7 +133,7 @@ expression: response
                     "variableUsages": [
                       "articleResultParam"
                     ],
-                    "operation": "query Search__artworkSubgraph__1($representations: [_Any!]!, $articleResultParam: String) {\n  _entities(representations: $representations) {\n    ... on GallerySection {\n      artwork(params: $articleResultParam)\n    }\n    ..._generated_onEntityCollectionSection2_0\n  }\n}\n\nfragment _generated_onEntityCollectionSection2_0 on EntityCollectionSection {\n  artwork(params: $articleResultParam)\n  title\n}\n",
+                    "operation": "query Search__artworkSubgraph__1($representations: [_Any!]!, $articleResultParam: String) { _entities(representations: $representations) { ... on GallerySection { artwork(params: $articleResultParam) } ..._generated_onEntityCollectionSection2_0 } } fragment _generated_onEntityCollectionSection2_0 on EntityCollectionSection { artwork(params: $articleResultParam) title }",
                     "operationName": "Search__artworkSubgraph__1",
                     "operationKind": "query",
                     "id": null,
@@ -192,7 +192,7 @@ expression: response
                     "variableUsages": [
                       "movieResultParam"
                     ],
-                    "operation": "query Search__artworkSubgraph__2($representations: [_Any!]!, $movieResultParam: String) {\n  _entities(representations: $representations) {\n    ..._generated_onEntityCollectionSection2_0\n    ... on GallerySection {\n      artwork(params: $movieResultParam)\n    }\n  }\n}\n\nfragment _generated_onEntityCollectionSection2_0 on EntityCollectionSection {\n  title\n  artwork(params: $movieResultParam)\n}\n",
+                    "operation": "query Search__artworkSubgraph__2($representations: [_Any!]!, $movieResultParam: String) { _entities(representations: $representations) { ..._generated_onEntityCollectionSection2_0 ... on GallerySection { artwork(params: $movieResultParam) } } } fragment _generated_onEntityCollectionSection2_0 on EntityCollectionSection { title artwork(params: $movieResultParam) }",
                     "operationName": "Search__artworkSubgraph__2",
                     "operationKind": "query",
                     "id": null,

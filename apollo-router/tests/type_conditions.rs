@@ -496,6 +496,8 @@ fn normalize_response_extensions(mut response: Response) -> Response {
                 if let Value::String(s) = value {
                     let new_value = Document::parse(s.as_str(), key.as_str())
                         .unwrap()
+                        .serialize()
+                        .no_indent()
                         .to_string();
                     *value = Value::String(new_value.into());
                 }

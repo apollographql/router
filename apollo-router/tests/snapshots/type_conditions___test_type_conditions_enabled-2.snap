@@ -72,7 +72,7 @@ expression: response
               "kind": "Fetch",
               "serviceName": "searchSubgraph",
               "variableUsages": [],
-              "operation": "query Search__searchSubgraph__0 {\n  search {\n    __typename\n    ... on MovieResult {\n      sections {\n        __typename\n        ... on EntityCollectionSection {\n          __typename\n          id\n        }\n        ... on GallerySection {\n          __typename\n          id\n        }\n      }\n      id\n    }\n    ... on ArticleResult {\n      id\n      sections {\n        __typename\n        ... on GallerySection {\n          __typename\n          id\n        }\n        ... on EntityCollectionSection {\n          __typename\n          id\n        }\n      }\n    }\n  }\n}\n",
+              "operation": "query Search__searchSubgraph__0 { search { __typename ... on MovieResult { sections { __typename ... on EntityCollectionSection { __typename id } ... on GallerySection { __typename id } } id } ... on ArticleResult { id sections { __typename ... on GallerySection { __typename id } ... on EntityCollectionSection { __typename id } } } } }",
               "operationName": "Search__searchSubgraph__0",
               "operationKind": "query",
               "id": null,
@@ -133,7 +133,7 @@ expression: response
                     "variableUsages": [
                       "articleResultParam"
                     ],
-                    "operation": "query Search__artworkSubgraph__1($representations: [_Any!]!, $articleResultParam: String) {\n  _entities(representations: $representations) {\n    ... on GallerySection {\n      artwork(params: $articleResultParam)\n    }\n    ... on EntityCollectionSection {\n      artwork(params: $articleResultParam)\n      title\n    }\n  }\n}\n",
+                    "operation": "query Search__artworkSubgraph__1($representations: [_Any!]!, $articleResultParam: String) { _entities(representations: $representations) { ... on GallerySection { artwork(params: $articleResultParam) } ... on EntityCollectionSection { artwork(params: $articleResultParam) title } } }",
                     "operationName": "Search__artworkSubgraph__1",
                     "operationKind": "query",
                     "id": null,
@@ -192,7 +192,7 @@ expression: response
                     "variableUsages": [
                       "movieResultParam"
                     ],
-                    "operation": "query Search__artworkSubgraph__2($representations: [_Any!]!, $movieResultParam: String) {\n  _entities(representations: $representations) {\n    ... on EntityCollectionSection {\n      title\n      artwork(params: $movieResultParam)\n    }\n    ... on GallerySection {\n      artwork(params: $movieResultParam)\n    }\n  }\n}\n",
+                    "operation": "query Search__artworkSubgraph__2($representations: [_Any!]!, $movieResultParam: String) { _entities(representations: $representations) { ... on EntityCollectionSection { title artwork(params: $movieResultParam) } ... on GallerySection { artwork(params: $movieResultParam) } } }",
                     "operationName": "Search__artworkSubgraph__2",
                     "operationKind": "query",
                     "id": null,
