@@ -31,6 +31,7 @@ use tracing_subscriber::Layer;
 
 use super::OtelData;
 use super::PreSampledTracer;
+use crate::plugins::cache::invalidation_endpoint::INVALIDATION_CACHE_BATCH;
 use crate::plugins::cache::invalidation_endpoint::INVALIDATION_ENDPOINT_SPAN_NAME;
 use crate::plugins::telemetry::config::Sampler;
 use crate::plugins::telemetry::config::SamplerOption;
@@ -735,6 +736,7 @@ where
             && meta.name() != ROUTER_SPAN_NAME
             && meta.name() != SUBSCRIPTION_EVENT_SPAN_NAME
             && meta.name() != INVALIDATION_ENDPOINT_SPAN_NAME
+            && meta.name() != INVALIDATION_CACHE_BATCH
         {
             return false;
         }
