@@ -985,11 +985,19 @@ pub(crate) struct QueryPlanRedisCache {
     #[serde(default = "default_reset_ttl")]
     /// When a TTL is set on a key, reset it when reading the data from that key
     pub(crate) reset_ttl: bool,
+
+    #[serde(default = "default_query_planner_cache_pool_size")]
+    /// The size of the Redis connection pool
+    pub(crate) pool_size: u32,
 }
 
 fn default_query_plan_cache_ttl() -> Duration {
     // Default TTL set to 30 days
     Duration::from_secs(86400 * 30)
+}
+
+fn default_query_planner_cache_pool_size() -> u32 {
+    1
 }
 
 /// Cache configuration
@@ -1063,10 +1071,18 @@ pub(crate) struct RedisCache {
     #[serde(default = "default_reset_ttl")]
     /// When a TTL is set on a key, reset it when reading the data from that key
     pub(crate) reset_ttl: bool,
+
+    #[serde(default = "default_pool_size")]
+    /// The size of the Redis connection pool
+    pub(crate) pool_size: u32,
 }
 
 fn default_required_to_start() -> bool {
     false
+}
+
+fn default_pool_size() -> u32 {
+    1
 }
 
 impl From<QueryPlanRedisCache> for RedisCache {
@@ -1081,6 +1097,7 @@ impl From<QueryPlanRedisCache> for RedisCache {
             tls: value.tls,
             required_to_start: value.required_to_start,
             reset_ttl: value.reset_ttl,
+            pool_size: value.pool_size,
         }
     }
 }
