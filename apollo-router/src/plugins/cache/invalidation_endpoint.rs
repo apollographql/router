@@ -28,6 +28,7 @@ use crate::services::router::body::RouterBody;
 use crate::ListenAddr;
 
 pub(crate) const INVALIDATION_ENDPOINT_SPAN_NAME: &str = "invalidation_endpoint";
+pub(crate) const INVALIDATION_CACHE_BATCH: &str = "cache.invalidation.batch";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
