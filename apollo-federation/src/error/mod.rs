@@ -8,6 +8,7 @@ use apollo_compiler::executable::GetOperationError;
 use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::validation::WithErrors;
 use apollo_compiler::InvalidNameError;
+use apollo_compiler::Name;
 use lazy_static::lazy_static;
 
 use crate::subgraph::spec::FederationSpecError;
@@ -59,6 +60,8 @@ pub enum SingleFederationError {
     InvalidSubgraph { message: String },
     #[error("Operation name not found")]
     UnknownOperation,
+    #[error("Unsupported custom directive @{name} on fragment spread. Due to query transformations during planning, the router requires directives on fragment spreads to support both the FRAGMENT_SPREAD and INLINE_FRAGMENT locations.")]
+    UnsupportedSpreadDirective { name: Name },
     #[error("{message}")]
     DirectiveDefinitionInvalid { message: String },
     #[error("{message}")]
@@ -228,7 +231,12 @@ impl SingleFederationError {
             SingleFederationError::InvalidGraphQL { .. }
             | SingleFederationError::InvalidGraphQLName(_) => ErrorCode::InvalidGraphQL,
             SingleFederationError::InvalidSubgraph { .. } => ErrorCode::InvalidGraphQL,
+            // TODO(@goto-bus-stop): this should have a different error code: it's not the graphql
+            // that's invalid, but the operation name
             SingleFederationError::UnknownOperation => ErrorCode::InvalidGraphQL,
+            // TODO(@goto-bus-stop): this should have a different error code: it's not invalid,
+            // just unsupported due to internal limitations.
+            SingleFederationError::UnsupportedSpreadDirective { .. } => ErrorCode::InvalidGraphQL,
             SingleFederationError::DirectiveDefinitionInvalid { .. } => {
                 ErrorCode::DirectiveDefinitionInvalid
             }
