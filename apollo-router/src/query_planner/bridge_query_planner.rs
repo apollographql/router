@@ -62,7 +62,7 @@ use crate::spec::SpecError;
 use crate::Configuration;
 
 pub(crate) const RUST_QP_MODE: &str = "rust";
-const JS_QP_MODE: &str = "js";
+pub(crate) const JS_QP_MODE: &str = "js";
 const UNSUPPORTED_CONTEXT: &str = "context";
 const UNSUPPORTED_OVERRIDES: &str = "overrides";
 const UNSUPPORTED_FED1: &str = "fed1";
@@ -266,7 +266,8 @@ impl PlannerMode {
 
                 let result = js.plan(filtered_query, operation, plan_options).await;
 
-                metric_query_planning_plan_duration(JS_QP_MODE, start);
+                let elapsed = start.elapsed().as_secs_f64();
+                metric_query_planning_plan_duration(JS_QP_MODE, elapsed);
 
                 let mut success = result
                     .map_err(QueryPlannerError::RouterBridgeError)?
@@ -290,7 +291,8 @@ impl PlannerMode {
                     .and_then(|operation| rust.build_query_plan(&doc.executable, operation))
                     .map_err(|e| QueryPlannerError::FederationError(e.to_string()));
 
-                metric_query_planning_plan_duration(RUST_QP_MODE, start);
+                let elapsed = start.elapsed().as_secs_f64();
+                metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
 
                 let plan = result?;
 
@@ -321,7 +323,8 @@ impl PlannerMode {
                     .plan(filtered_query, operation.clone(), plan_options)
                     .await;
 
-                metric_query_planning_plan_duration(JS_QP_MODE, start);
+                let elapsed = start.elapsed().as_secs_f64();
+                metric_query_planning_plan_duration(JS_QP_MODE, elapsed);
 
                 let mut js_result = result
                     .map_err(QueryPlannerError::RouterBridgeError)?
@@ -338,6 +341,7 @@ impl PlannerMode {
 
                 BothModeComparisonJob {
                     rust_planner: rust.clone(),
+                    js_duration: elapsed,
                     document: doc.executable.clone(),
                     operation_name: operation,
                     // Exclude usage reporting from the Result sent for comparison
@@ -887,11 +891,11 @@ pub fn render_diff(differences: &[diff::Result<&str>]) -> String {
     output
 }
 
-pub(crate) fn metric_query_planning_plan_duration(planner: &'static str, start: Instant) {
+pub(crate) fn metric_query_planning_plan_duration(planner: &'static str, elapsed: f64) {
     f64_histogram!(
         "apollo.router.query_planning.plan.duration",
         "Duration of the query planning.",
-        start.elapsed().as_secs_f64(),
+        elapsed,
         "planner" = planner
     );
 }
@@ -1542,7 +1546,8 @@ mod tests {
     #[test]
     fn test_metric_query_planning_plan_duration() {
         let start = Instant::now();
-        metric_query_planning_plan_duration(RUST_QP_MODE, start);
+        let elapsed = start.elapsed().as_secs_f64();
+        metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
         assert_histogram_exists!(
             "apollo.router.query_planning.plan.duration",
             f64,
@@ -1550,7 +1555,8 @@ mod tests {
         );
 
         let start = Instant::now();
-        metric_query_planning_plan_duration(JS_QP_MODE, start);
+        let elapsed = start.elapsed().as_secs_f64();
+        metric_query_planning_plan_duration(JS_QP_MODE, elapsed);
         assert_histogram_exists!(
             "apollo.router.query_planning.plan.duration",
             f64,

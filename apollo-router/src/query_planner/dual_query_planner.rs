@@ -38,6 +38,7 @@ const WORKER_THREAD_COUNT: usize = 1;
 
 pub(crate) struct BothModeComparisonJob {
     pub(crate) rust_planner: Arc<QueryPlanner>,
+    pub(crate) js_duration: f64,
     pub(crate) document: Arc<Valid<ExecutableDocument>>,
     pub(crate) operation_name: Option<String>,
     pub(crate) js_result: Result<QueryPlanResult, Arc<Vec<router_bridge::planner::PlanError>>>,
@@ -88,7 +89,18 @@ impl BothModeComparisonJob {
             // No question mark operator or macro from here …
             let result = self.rust_planner.build_query_plan(&self.document, name);
 
-            metric_query_planning_plan_duration(RUST_QP_MODE, start);
+            let elapsed = start.elapsed().as_secs_f64();
+            metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
+
+            metric_query_planning_plan_both_comparison_duration(
+                crate::query_planner::RUST_QP_MODE,
+                elapsed,
+            );
+
+            metric_query_planning_plan_both_comparison_duration(
+                crate::query_planner::JS_QP_MODE,
+                self.js_duration,
+            );
 
             // … to here, so the thread can only eiher reach here or panic.
             // We unset USING_CATCH_UNWIND in both cases.
@@ -167,6 +179,18 @@ impl BothModeComparisonJob {
             "generation.rust_error" = rust_result.is_err()
         );
     }
+}
+
+pub(crate) fn metric_query_planning_plan_both_comparison_duration(
+    planner: &'static str,
+    elapsed: f64,
+) {
+    f64_histogram!(
+        "apollo.router.operations.query_planner.both.duration",
+        "Comparing JS v.s. Rust query plan duration.",
+        elapsed,
+        "planner" = planner
+    );
 }
 
 // Specific comparison functions
