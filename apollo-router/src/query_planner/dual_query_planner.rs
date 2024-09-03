@@ -22,6 +22,7 @@ use super::FlattenNode;
 use crate::error::format_bridge_errors;
 use crate::executable::USING_CATCH_UNWIND;
 use crate::query_planner::bridge_query_planner::metric_query_planning_plan_duration;
+use crate::query_planner::bridge_query_planner::JS_QP_MODE;
 use crate::query_planner::bridge_query_planner::RUST_QP_MODE;
 use crate::query_planner::convert::convert_root_query_plan_node;
 use crate::query_planner::render_diff;
@@ -92,15 +93,8 @@ impl BothModeComparisonJob {
             let elapsed = start.elapsed().as_secs_f64();
             metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
 
-            metric_query_planning_plan_both_comparison_duration(
-                crate::query_planner::RUST_QP_MODE,
-                elapsed,
-            );
-
-            metric_query_planning_plan_both_comparison_duration(
-                crate::query_planner::JS_QP_MODE,
-                self.js_duration,
-            );
+            metric_query_planning_plan_both_comparison_duration(RUST_QP_MODE, elapsed);
+            metric_query_planning_plan_both_comparison_duration(JS_QP_MODE, self.js_duration);
 
             // … to here, so the thread can only eiher reach here or panic.
             // We unset USING_CATCH_UNWIND in both cases.
@@ -841,5 +835,32 @@ mod ast_comparison_tests {
         let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
         let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
         assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Instant;
+
+    #[test]
+    fn test_metric_query_planning_plan_both_comparison_duration() {
+        let start = Instant::now();
+        let elapsed = start.elapsed().as_secs_f64();
+        metric_query_planning_plan_both_comparison_duration(RUST_QP_MODE, elapsed);
+        assert_histogram_exists!(
+            "apollo.router.operations.query_planner.both.duration",
+            f64,
+            "planner" = "rust"
+        );
+
+        let start = Instant::now();
+        let elapsed = start.elapsed().as_secs_f64();
+        metric_query_planning_plan_both_comparison_duration(JS_QP_MODE, elapsed);
+        assert_histogram_exists!(
+            "apollo.router.operations.query_planner.both.duration",
+            f64,
+            "planner" = "js"
+        );
     }
 }
