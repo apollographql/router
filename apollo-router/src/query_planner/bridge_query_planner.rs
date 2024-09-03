@@ -273,13 +273,6 @@ impl PlannerMode {
                     .into_result()
                     .map_err(PlanErrors::from)?;
 
-                u64_histogram!(
-                    "apollo.router.query_planning.plan.evaluated_plans",
-                    "Number of query plans evaluated for a query before choosing the best one",
-                    success.data.evaluated_plan_count,
-                    planner = "js"
-                );
-
                 if let Some(root_node) = &mut success.data.query_plan.node {
                     // Arc freshly deserialized from Deno should be unique, so this doesn’t clone:
                     let root_node = Arc::make_mut(root_node);
@@ -312,15 +305,6 @@ impl PlannerMode {
                     init_query_plan_root_node(node)?;
                 }
 
-                let evaluated_plan_count =
-                    plan.statistics.evaluated_plan_count.clone().into_inner() as u64;
-                u64_histogram!(
-                    "apollo.router.query_planning.plan.evaluated_plans",
-                    "Number of query plans evaluated for a query before choosing the best one",
-                    evaluated_plan_count,
-                    planner = "rust"
-                );
-
                 Ok(PlanSuccess {
                     usage_reporting,
                     data: QueryPlanResult {
@@ -328,7 +312,11 @@ impl PlannerMode {
                         query_plan: QueryPlan {
                             node: root_node.map(Arc::new),
                         },
-                        evaluated_plan_count,
+                        evaluated_plan_count: plan
+                            .statistics
+                            .evaluated_plan_count
+                            .clone()
+                            .into_inner() as u64,
                     },
                 })
             }
@@ -352,13 +340,6 @@ impl PlannerMode {
                         let root_node = Arc::make_mut(root_node);
                         init_query_plan_root_node(root_node)?;
                     }
-
-                    u64_histogram!(
-                        "apollo.router.query_planning.plan.evaluated_plans",
-                        "Number of query plans evaluated for a query before choosing the best one",
-                        success.data.evaluated_plan_count,
-                        planner = "js"
-                    );
                 }
 
                 BothModeComparisonJob {
@@ -1642,11 +1623,7 @@ mod tests {
             .await
             .unwrap();
 
-            assert_histogram_exists!(
-                "apollo.router.query_planning.plan.evaluated_plans",
-                u64,
-                planner = "js"
-            );
+            assert_histogram_exists!("apollo.router.query_planning.plan.evaluated_plans", u64);
         }
         .with_metrics()
         .await;
