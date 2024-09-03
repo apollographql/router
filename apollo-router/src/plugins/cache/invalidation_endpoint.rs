@@ -82,7 +82,7 @@ impl Service<router::Request> for InvalidationService {
     }
 
     fn call(&mut self, req: router::Request) -> Self::Future {
-        let mut invalidation = self.invalidation.clone();
+        let invalidation = self.invalidation.clone();
         let config = self.config.clone();
         Box::pin(
             async move {
@@ -207,12 +207,22 @@ mod tests {
     use tower::ServiceExt;
 
     use super::*;
+    use crate::cache::redis::RedisCacheStorage;
+    use crate::plugins::cache::entity::Storage;
     use crate::plugins::cache::invalidation::InvalidationError;
+    use crate::plugins::cache::tests::MockStore;
 
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key() {
         let (handle, _rx) = tokio::sync::mpsc::channel(128);
-        let invalidation = Invalidation { handle };
+        let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
+            .await
+            .unwrap();
+        let storage = Arc::new(Storage {
+            all: Some(redis_cache),
+            subgraphs: HashMap::new(),
+        });
+        let invalidation = Invalidation { storage };
 
         let config = Arc::new(SubgraphConfiguration {
             all: Subgraph {
@@ -290,10 +300,14 @@ mod tests {
             }
             assert!(called);
         });
-
-        let invalidation = Invalidation {
-            handle: handle.clone(),
-        };
+        let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
+            .await
+            .unwrap();
+        let storage = Arc::new(Storage {
+            all: Some(redis_cache),
+            subgraphs: HashMap::new(),
+        });
+        let invalidation = Invalidation { storage };
         let config = Arc::new(SubgraphConfiguration {
             all: Subgraph {
                 ttl: None,
@@ -345,13 +359,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key_subgraph() {
-        #[allow(clippy::type_complexity)]
-        let (handle, _rx) = tokio::sync::mpsc::channel::<(
-            Vec<InvalidationRequest>,
-            InvalidationOrigin,
-            broadcast::Sender<Result<u64, InvalidationError>>,
-        )>(128);
-        let invalidation = Invalidation { handle };
+        let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
+            .await
+            .unwrap();
+        let storage = Arc::new(Storage {
+            all: Some(redis_cache),
+            subgraphs: HashMap::new(),
+        });
+        let invalidation = Invalidation { storage };
         let config = Arc::new(SubgraphConfiguration {
             all: Subgraph {
                 ttl: None,
@@ -398,12 +413,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalidation_service() {
-        let (handle, mut rx) = tokio::sync::mpsc::channel::<(
-            Vec<InvalidationRequest>,
-            InvalidationOrigin,
-            broadcast::Sender<Result<u64, InvalidationError>>,
-        )>(128);
-        let invalidation = Invalidation { handle };
+        let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
+            .await
+            .unwrap();
+        let storage = Arc::new(Storage {
+            all: Some(redis_cache),
+            subgraphs: HashMap::new(),
+        });
+        let invalidation = Invalidation { storage };
 
         tokio::task::spawn(async move {
             let mut called = false;

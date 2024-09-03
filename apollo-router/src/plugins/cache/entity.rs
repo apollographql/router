@@ -78,8 +78,8 @@ pub(crate) struct EntityCache {
 }
 
 pub(crate) struct Storage {
-    all: Option<RedisCacheStorage>,
-    subgraphs: HashMap<String, RedisCacheStorage>,
+    pub(crate) all: Option<RedisCacheStorage>,
+    pub(crate) subgraphs: HashMap<String, RedisCacheStorage>,
 }
 
 impl Storage {
