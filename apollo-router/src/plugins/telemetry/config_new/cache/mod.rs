@@ -93,14 +93,14 @@ impl Instrumented for CacheInstruments {
                         inner_cache_hit.selector = Some(Arc::new(SubgraphSelector::StaticField {
                             r#static: AttributeValue::I64(*hit as i64),
                         }));
-                        if inner_cache_hit
+                        if let Some(key) = inner_cache_hit
                             .selectors
                             .as_ref()
-                            .map(|s| s.attributes.entity_type == Some(true))
-                            .unwrap_or_default()
+                            .and_then(|s| s.attributes.entity_type.as_ref())
+                            .and_then(|a| a.key(ENTITY_TYPE))
                         {
                             inner_cache_hit.attributes.push(KeyValue::new(
-                                ENTITY_TYPE,
+                                key,
                                 opentelemetry::Value::String(entity_type.to_string().into()),
                             ));
                         }
@@ -118,14 +118,14 @@ impl Instrumented for CacheInstruments {
                         inner_cache_miss.selector = Some(Arc::new(SubgraphSelector::StaticField {
                             r#static: AttributeValue::I64(*miss as i64),
                         }));
-                        if inner_cache_miss
+                        if let Some(key) = inner_cache_miss
                             .selectors
                             .as_ref()
-                            .map(|s| s.attributes.entity_type == Some(true))
-                            .unwrap_or_default()
+                            .and_then(|s| s.attributes.entity_type.as_ref())
+                            .and_then(|a| a.key(ENTITY_TYPE))
                         {
                             inner_cache_miss.attributes.push(KeyValue::new(
-                                ENTITY_TYPE,
+                                key,
                                 opentelemetry::Value::String(entity_type.to_string().into()),
                             ));
                         }

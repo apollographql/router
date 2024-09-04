@@ -9,6 +9,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
+use super::attributes::StandardAttribute;
 use super::instruments::Increment;
 use super::instruments::StaticInstrument;
 use crate::metrics;
@@ -47,16 +48,16 @@ static COST_DELTA: &str = "cost.delta";
 pub(crate) struct SupergraphCostAttributes {
     /// The estimated cost of the operation using the currently configured cost model
     #[serde(rename = "cost.estimated")]
-    cost_estimated: Option<bool>,
+    cost_estimated: Option<StandardAttribute>,
     /// The actual cost of the operation using the currently configured cost model
     #[serde(rename = "cost.actual")]
-    cost_actual: Option<bool>,
+    cost_actual: Option<StandardAttribute>,
     /// The delta (estimated - actual) cost of the operation using the currently configured cost model
     #[serde(rename = "cost.delta")]
-    cost_delta: Option<bool>,
+    cost_delta: Option<StandardAttribute>,
     /// The cost result, this is an error code returned by the cost calculation or COST_OK
     #[serde(rename = "cost.result")]
-    cost_result: Option<bool>,
+    cost_result: Option<StandardAttribute>,
 }
 
 impl Selectors for SupergraphCostAttributes {
@@ -82,17 +83,33 @@ impl Selectors for SupergraphCostAttributes {
             .extensions()
             .with_lock(|lock| lock.get::<CostContext>().cloned());
         if let Some(cost_result) = cost_result {
-            if let Some(true) = self.cost_estimated {
-                attrs.push(KeyValue::new("cost.estimated", cost_result.estimated));
+            if let Some(key) = self
+                .cost_estimated
+                .as_ref()
+                .and_then(|a| a.key(Key::from_static_str("cost.estimated")))
+            {
+                attrs.push(KeyValue::new(key, cost_result.estimated));
             }
-            if let Some(true) = self.cost_actual {
-                attrs.push(KeyValue::new("cost.actual", cost_result.actual));
+            if let Some(key) = self
+                .cost_actual
+                .as_ref()
+                .and_then(|a| a.key(Key::from_static_str("cost.actual")))
+            {
+                attrs.push(KeyValue::new(key, cost_result.actual));
             }
-            if let Some(true) = self.cost_delta {
-                attrs.push(KeyValue::new("cost.delta", cost_result.delta()));
+            if let Some(key) = self
+                .cost_delta
+                .as_ref()
+                .and_then(|a| a.key(Key::from_static_str("cost.delta")))
+            {
+                attrs.push(KeyValue::new(key, cost_result.delta()));
             }
-            if let Some(true) = self.cost_result {
-                attrs.push(KeyValue::new("cost.result", cost_result.result));
+            if let Some(key) = self
+                .cost_result
+                .as_ref()
+                .and_then(|a| a.key(Key::from_static_str("cost.result")))
+            {
+                attrs.push(KeyValue::new(key, cost_result.result));
             }
         }
         attrs
