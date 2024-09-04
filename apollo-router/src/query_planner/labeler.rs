@@ -1,6 +1,8 @@
 //! Query Transformer implementation adding labels to @defer directives to identify deferred responses
 //!
 
+use std::collections::HashSet;
+
 use apollo_compiler::ast;
 use apollo_compiler::name;
 use apollo_compiler::Name;
@@ -25,12 +27,14 @@ pub(crate) fn add_defer_labels(
     let mut visitor = Labeler {
         next_label: 0,
         schema,
+        used_fragments: HashSet::new(),
     };
     document(&mut visitor, doc)
 }
 
 pub(crate) struct Labeler<'a> {
     schema: &'a Schema,
+    used_fragments: HashSet<String>,
     next_label: u32,
 }
 
@@ -64,6 +68,10 @@ impl Visitor for Labeler<'_> {
 
     fn schema(&self) -> &apollo_compiler::Schema {
         self.schema
+    }
+
+    fn used_fragments(&mut self) -> &mut HashSet<String> {
+        &mut self.used_fragments
     }
 }
 

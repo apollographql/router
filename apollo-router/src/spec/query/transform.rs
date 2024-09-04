@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use apollo_compiler::ast;
 use apollo_compiler::schema::FieldLookupError;
@@ -15,13 +15,13 @@ pub(crate) fn document(
         definitions: Vec::new(),
     };
 
+    let mut defined_fragments = HashMap::new();
     // walk through the fragment first: if a fragment is entirely filtered, we want to
     // remove the spread too
     for definition in &document.definitions {
         if let ast::Definition::FragmentDefinition(def) = definition {
             if let Some(new_def) = visitor.fragment_definition(def)? {
-                new.definitions
-                    .push(ast::Definition::FragmentDefinition(new_def.into()))
+                defined_fragments.insert(&def.name, new_def);
             }
         }
     }
@@ -33,10 +33,18 @@ pub(crate) fn document(
                 .root_operation(def.operation_type)
                 .ok_or("missing root operation definition")?
                 .clone();
+
             if let Some(new_def) = visitor.operation(&root_type, def)? {
                 new.definitions
                     .push(ast::Definition::OperationDefinition(new_def.into()))
             }
+        }
+    }
+
+    for (name, fragment) in defined_fragments.into_iter() {
+        if visitor.used_fragments().contains(name.as_str()) {
+            new.definitions
+                .push(ast::Definition::FragmentDefinition(fragment.into()));
         }
     }
     Ok(new)
@@ -44,6 +52,8 @@ pub(crate) fn document(
 
 pub(crate) trait Visitor: Sized {
     fn schema(&self) -> &apollo_compiler::Schema;
+
+    fn used_fragments(&mut self) -> &mut HashSet<String>;
 
     /// Transform an operation definition.
     ///
@@ -89,7 +99,12 @@ pub(crate) trait Visitor: Sized {
         &mut self,
         def: &ast::FragmentSpread,
     ) -> Result<Option<ast::FragmentSpread>, BoxError> {
-        fragment_spread(self, def)
+        let res = fragment_spread(self, def);
+        if let Ok(Some(ref fragment)) = res.as_ref() {
+            self.used_fragments()
+                .insert(fragment.fragment_name.as_str().to_string());
+        }
+        res
     }
 
     /// Transform a inline fragment within a selection set.
@@ -259,6 +274,7 @@ pub(crate) fn collect_fragments(
 fn test_add_directive_to_fields() {
     struct AddDirective {
         schema: apollo_compiler::Schema,
+        used_fragments: HashSet<String>,
     }
 
     impl Visitor for AddDirective {
@@ -282,6 +298,10 @@ fn test_add_directive_to_fields() {
 
         fn schema(&self) -> &apollo_compiler::Schema {
             &self.schema
+        }
+
+        fn used_fragments(&mut self) -> &mut HashSet<String> {
+            &mut self.used_fragments
         }
     }
 
@@ -310,7 +330,10 @@ fn test_add_directive_to_fields() {
     let ast = apollo_compiler::ast::Document::parse(graphql, "").unwrap();
     let (schema, _doc) = ast.to_mixed_validate().unwrap();
     let schema = schema.into_inner();
-    let mut visitor = AddDirective { schema };
+    let mut visitor = AddDirective {
+        schema,
+        used_fragments: HashSet::new(),
+    };
     let expected = "fragment F on Query {
   next @added {
     a @added

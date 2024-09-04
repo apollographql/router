@@ -1,6 +1,7 @@
 //! Authorization plugin
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use apollo_compiler::ast;
 use apollo_compiler::executable;
@@ -176,6 +177,7 @@ impl<'a> traverse::Visitor for AuthenticatedCheckVisitor<'a> {
 pub(crate) struct AuthenticatedVisitor<'a> {
     schema: &'a schema::Schema,
     fragments: HashMap<&'a Name, &'a ast::FragmentDefinition>,
+    used_fragments: HashSet<String>,
     implementers_map: &'a apollo_compiler::collections::HashMap<Name, Implementers>,
     pub(crate) query_requires_authentication: bool,
     pub(crate) unauthorized_paths: Vec<Path>,
@@ -197,6 +199,7 @@ impl<'a> AuthenticatedVisitor<'a> {
         Some(Self {
             schema,
             fragments: transform::collect_fragments(executable),
+            used_fragments: HashSet::new(),
             implementers_map,
             dry_run,
             query_requires_authentication: false,
@@ -458,11 +461,15 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
             self.unauthorized_paths.push(self.current_path.clone());
 
             if self.dry_run {
+                self.used_fragments()
+                    .insert(node.fragment_name.as_str().to_string());
                 transform::fragment_spread(self, node)
             } else {
                 Ok(None)
             }
         } else {
+            self.used_fragments()
+                .insert(node.fragment_name.as_str().to_string());
             transform::fragment_spread(self, node)
         };
 
@@ -514,6 +521,10 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
 
     fn schema(&self) -> &apollo_compiler::Schema {
         self.schema
+    }
+
+    fn used_fragments(&mut self) -> &mut HashSet<String> {
+        &mut self.used_fragments
     }
 }
 

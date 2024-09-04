@@ -188,6 +188,7 @@ impl<'a> traverse::Visitor for PolicyExtractionVisitor<'a> {
 pub(crate) struct PolicyFilteringVisitor<'a> {
     schema: &'a schema::Schema,
     fragments: HashMap<&'a Name, &'a ast::FragmentDefinition>,
+    used_fragments: HashSet<String>,
     implementers_map: &'a apollo_compiler::collections::HashMap<Name, Implementers>,
     dry_run: bool,
     request_policies: HashSet<String>,
@@ -230,6 +231,7 @@ impl<'a> PolicyFilteringVisitor<'a> {
         Some(Self {
             schema,
             fragments: transform::collect_fragments(executable),
+            used_fragments: HashSet::new(),
             implementers_map,
             dry_run,
             request_policies: successful_policies,
@@ -574,11 +576,15 @@ impl<'a> transform::Visitor for PolicyFilteringVisitor<'a> {
             self.unauthorized_paths.push(self.current_path.clone());
 
             if self.dry_run {
+                self.used_fragments()
+                    .insert(node.fragment_name.as_str().to_string());
                 transform::fragment_spread(self, node)
             } else {
                 Ok(None)
             }
         } else {
+            self.used_fragments()
+                .insert(node.fragment_name.as_str().to_string());
             transform::fragment_spread(self, node)
         };
 
@@ -630,6 +636,10 @@ impl<'a> transform::Visitor for PolicyFilteringVisitor<'a> {
 
     fn schema(&self) -> &apollo_compiler::Schema {
         self.schema
+    }
+
+    fn used_fragments(&mut self) -> &mut HashSet<String> {
+        &mut self.used_fragments
     }
 }
 
