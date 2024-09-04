@@ -493,7 +493,7 @@ impl BridgeQueryPlanner {
         };
         let mode = self.configuration.experimental_introspection_mode;
         let response = if mode != IntrospectionMode::New && doc.executable.operations.len() > 1 {
-            // TODO: add an operation_name parameter to router-brigde to fix this?
+            // TODO: add an operation_name parameter to router-bridge to fix this?
             let error = graphql::Error::builder()
                 .message(
                     "Schema introspection is currently not supported \
@@ -668,7 +668,7 @@ impl BridgeQueryPlanner {
                 (Value::Array(a), Value::Array(b)) => iter_cmp(a, b, json_compare),
                 (Value::Object(a), Value::Object(b)) => {
                     iter_cmp(a, b, |(key_a, a), (key_b, b)| {
-                        assert_eq!(key_a, key_b); // Response object keys are in selection set order
+                        debug_assert_eq!(key_a, key_b); // Response object keys are in selection set order
                         json_compare(a, b)
                     })
                 }
