@@ -577,7 +577,6 @@ impl FetchDependencyGraphNodePath {
                     .schema
                     .possible_runtime_types(typ)?
                     .iter()
-                    // TODO: check with the team, we probably want to replace it with something more meaningful.
                     .map(|ctdp| ctdp.get(self.schema.schema()).cloned())
                     .collect::<Result<Vec<_>, _>>()?)
             })
