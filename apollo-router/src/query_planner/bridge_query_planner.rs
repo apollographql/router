@@ -304,6 +304,7 @@ impl PlannerMode {
                 if let Some(node) = &mut root_node {
                     init_query_plan_root_node(node)?;
                 }
+
                 Ok(PlanSuccess {
                     usage_reporting,
                     data: QueryPlanResult {
@@ -311,6 +312,11 @@ impl PlannerMode {
                         query_plan: QueryPlan {
                             node: root_node.map(Arc::new),
                         },
+                        evaluated_plan_count: plan
+                            .statistics
+                            .evaluated_plan_count
+                            .clone()
+                            .into_inner() as u64,
                     },
                 })
             }
@@ -532,6 +538,7 @@ impl BridgeQueryPlanner {
                     QueryPlanResult {
                         query_plan: QueryPlan { node: Some(node) },
                         formatted_query_plan,
+                        evaluated_plan_count,
                     },
                 mut usage_reporting,
             } => {
@@ -548,6 +555,12 @@ impl BridgeQueryPlanner {
                 } else {
                     doc.clone()
                 };
+
+                u64_histogram!(
+                    "apollo.router.query_planning.plan.evaluated_plans",
+                    "Number of query plans evaluated for a query before choosing the best one",
+                    evaluated_plan_count
+                );
 
                 let generated_usage_reporting = generate_usage_reporting(
                     &signature_doc.executable,
@@ -844,6 +857,7 @@ impl BridgeQueryPlanner {
 pub struct QueryPlanResult {
     pub(super) formatted_query_plan: Option<Arc<String>>,
     pub(super) query_plan: QueryPlan,
+    pub(super) evaluated_plan_count: u64,
 }
 
 impl QueryPlanResult {
@@ -1594,5 +1608,24 @@ mod tests {
             "init.error_kind" = "internal",
             "init.is_success" = false
         );
+    }
+
+    #[test(tokio::test)]
+    async fn test_evaluated_plans_histogram() {
+        async {
+            let _ = plan(
+                EXAMPLE_SCHEMA,
+                include_str!("testdata/query.graphql"),
+                include_str!("testdata/query.graphql"),
+                None,
+                PlanOptions::default(),
+            )
+            .await
+            .unwrap();
+
+            assert_histogram_exists!("apollo.router.query_planning.plan.evaluated_plans", u64);
+        }
+        .with_metrics()
+        .await;
     }
 }
