@@ -840,8 +840,9 @@ mod ast_comparison_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::time::Instant;
+
+    use super::*;
 
     #[test]
     fn test_metric_query_planning_plan_both_comparison_duration() {
