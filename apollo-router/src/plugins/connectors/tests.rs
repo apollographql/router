@@ -83,6 +83,18 @@ pub(crate) mod mock_api {
         )
     }
 
+    pub(crate) fn users_error() -> Mock {
+        Mock::given(method("GET")).and(path("/users")).respond_with(
+            ResponseTemplate::new(404).set_body_json(serde_json::json!([
+                {
+                    "kind": "json",
+                    "content": {},
+                    "selection": null
+                }
+            ])),
+        )
+    }
+
     pub(crate) fn user_1() -> Mock {
         Mock::given(method("GET"))
             .and(path("/users/1"))
@@ -1090,6 +1102,96 @@ async fn test_no_source() {
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
         vec![Matcher::new().method("GET").path("/users/1").build()],
+    );
+}
+
+#[tokio::test]
+async fn error_not_redacted() {
+    let mock_server = MockServer::start().await;
+    mock_api::users_error().mount(&mock_server).await;
+
+    let response = execute(
+        STEEL_THREAD_SCHEMA,
+        &mock_server.uri(),
+        "query { users { id name username } }",
+        Default::default(),
+        Some(json!({
+            "include_subgraph_errors": {
+                "subgraphs": {
+                    "connectors": true
+                }
+            }
+        })),
+        |_| {},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "users": null
+      },
+      "errors": [
+        {
+          "message": "HTTP fetch failed from 'connectors.json http: GET /users': 404: Not Found",
+          "path": [],
+          "extensions": {
+            "code": "SUBREQUEST_HTTP_ERROR",
+            "service": "connectors.json http: GET /users",
+            "reason": "404: Not Found",
+            "http": {
+              "status": 404
+            }
+          }
+        }
+      ]
+    }
+    "###);
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![Matcher::new().method("GET").path("/users").build()],
+    );
+}
+
+#[tokio::test]
+async fn error_redacted() {
+    let mock_server = MockServer::start().await;
+    mock_api::users_error().mount(&mock_server).await;
+
+    let response = execute(
+        STEEL_THREAD_SCHEMA,
+        &mock_server.uri(),
+        "query { users { id name username } }",
+        Default::default(),
+        Some(json!({
+            "include_subgraph_errors": {
+                "subgraphs": {
+                    "connectors": false
+                }
+            }
+        })),
+        |_| {},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "users": null
+      },
+      "errors": [
+        {
+          "message": "Subgraph errors redacted",
+          "path": []
+        }
+      ]
+    }
+    "###);
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![Matcher::new().method("GET").path("/users").build()],
     );
 }
 
