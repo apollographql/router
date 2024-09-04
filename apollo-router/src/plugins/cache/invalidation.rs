@@ -129,7 +129,7 @@ impl Invalidation {
                             .map(|k| RedisKey(k.to_string()))
                             .collect::<Vec<_>>();
                         if !keys.is_empty() {
-                            let deleted = redis_storage.delete(keys).await as u64;
+                            let deleted = redis_storage.delete(keys).await.unwrap_or(0) as u64;
                             count += deleted;
 
                             u64_counter!(
