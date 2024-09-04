@@ -129,13 +129,13 @@ impl Invalidation {
                             .map(|k| RedisKey(k.to_string()))
                             .collect::<Vec<_>>();
                         if !keys.is_empty() {
-                            count += keys.len() as u64;
-                            redis_storage.delete(keys).await;
+                            let deleted = redis_storage.delete(keys).await as u64;
+                            count += deleted;
 
                             u64_counter!(
                                 "apollo.router.operations.entity.invalidation.entry",
                                 "Entity cache counter for invalidated entries",
-                                1u64,
+                                deleted,
                                 "origin" = origin,
                                 "subgraph.name" = subgraph.clone()
                             );
