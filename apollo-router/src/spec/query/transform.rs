@@ -23,12 +23,23 @@ pub(crate) fn document(
     // remove the spread too
     for definition in &document.definitions {
         if let ast::Definition::FragmentDefinition(def) = definition {
+            visitor.used_fragments().clear();
+            visitor.used_variables().clear();
+
             if let Some(new_def) = visitor.fragment_definition(def)? {
                 // keep the list of used variables per fragment, as we need to use it to know which variables are used
                 // in a query
                 let used_variables = visitor.used_variables().clone();
-                visitor.used_variables().clear();
-                defined_fragments.insert(def.name.as_str(), (new_def, used_variables));
+
+                // keep the list of used fragments per fragment, as we need to use it to gather used variables later
+                // unfortunately, we may not know the variable used for those fragments at this point, as they may not
+                // have been processed yet
+                let local_used_fragments = visitor.used_fragments().clone();
+
+                defined_fragments.insert(
+                    def.name.as_str(),
+                    (new_def, used_variables, local_used_fragments),
+                );
             }
         }
     }
@@ -48,10 +59,31 @@ pub(crate) fn document(
             visitor.used_fragments().clear();
             visitor.used_variables().clear();
             if let Some(mut new_def) = visitor.operation(&root_type, def)? {
-                let local_used_fragments = visitor.used_fragments().clone();
+                let mut local_used_fragments = visitor.used_fragments().clone();
+
+                // gather the entire list of fragments used in this operation
+                loop {
+                    let mut new_local_used_fragments = local_used_fragments.clone();
+                    for fragment_name in local_used_fragments.iter() {
+                        if let Some((_, _, fragments_used_by_fragment)) =
+                            defined_fragments.get(fragment_name.as_str())
+                        {
+                            new_local_used_fragments.extend(fragments_used_by_fragment.clone());
+                        }
+                    }
+
+                    // no more changes, we can stop
+                    if new_local_used_fragments.len() == local_used_fragments.len() {
+                        break;
+                    }
+                    local_used_fragments = new_local_used_fragments;
+                }
+
                 // add to the list of used variables all the variables used in the fragment spreads
-                for fragment in local_used_fragments.iter() {
-                    if let Some((_fragment, variables)) = defined_fragments.get(fragment.as_str()) {
+                for fragment_name in local_used_fragments.iter() {
+                    if let Some((_fragment, variables, _)) =
+                        defined_fragments.get(fragment_name.as_str())
+                    {
                         visitor.used_variables().extend(variables.iter().cloned());
                     }
                 }
@@ -69,7 +101,7 @@ pub(crate) fn document(
         }
     }
 
-    for (name, (fragment, _)) in defined_fragments.into_iter() {
+    for (name, (fragment, _, _)) in defined_fragments.into_iter() {
         if used_fragments.contains(name) {
             new.definitions
                 .push(ast::Definition::FragmentDefinition(fragment.into()));

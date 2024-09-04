@@ -45,4 +45,8 @@ fragment F3 on Query {
   ...F4
 }
 
+fragment F4 on Query {
+  v(v: $v)
+}
+
 paths: ["/t"]
