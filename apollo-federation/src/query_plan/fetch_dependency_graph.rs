@@ -4637,7 +4637,7 @@ mod tests {
             .as_composite_type()
             .unwrap();
 
-        let path = FetchDependencyGraphNodePath::new(valid_schema, false, query_root);
+        let path = FetchDependencyGraphNodePath::new(valid_schema, false, query_root).unwrap();
 
         let path = path.add(Arc::new(foo)).unwrap();
         let path = path.add(Arc::new(frag)).unwrap();
