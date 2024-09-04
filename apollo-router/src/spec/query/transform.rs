@@ -1,4 +1,5 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::collections::HashSet;
 
 use apollo_compiler::ast;
 use apollo_compiler::schema::FieldLookupError;
@@ -43,6 +44,7 @@ pub(crate) fn document(
                 .ok_or("missing root operation definition")?
                 .clone();
 
+            // we reset the used_fragments and used_variables lists for each operation
             visitor.used_fragments().clear();
             visitor.used_variables().clear();
             if let Some(mut new_def) = visitor.operation(&root_type, def)? {
