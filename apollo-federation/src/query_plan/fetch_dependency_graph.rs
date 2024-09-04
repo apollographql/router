@@ -556,24 +556,36 @@ impl FetchDependencyGraphNodePath {
             .possible_types
             .clone()
             .into_iter()
-            .flat_map(|pt| {
-                let fd = pt.fields.get(element.name()).unwrap();
+            .map(|pt| {
+                let fd = pt
+                    .fields
+                    .get(element.name()) // TODO: check with the team, we probably want to replace it with something more meaningful.
+                    .ok_or_else(|| {
+                        FederationError::internal(
+                            "element is not a field for type, this cannot happen.",
+                        )
+                    })?;
                 let typ = self
                     .schema
-                    .get_type(fd.ty.inner_named_type().clone())
-                    .unwrap()
+                    .get_type(fd.ty.inner_named_type().clone())?
                     .as_composite_type()
-                    .unwrap();
-                self.schema
-                    .possible_runtime_types(typ)
-                    .unwrap()
+                    // TODO: check with the team, we probably want to replace it with something more meaningful.
+                    .ok_or_else(|| {
+                        FederationError::internal("field type is not a composite type")
+                    })?;
+                Ok(self
+                    .schema
+                    .possible_runtime_types(typ)?
                     .iter()
                     .map(|ctdp| (ctdp.get(self.schema.schema()).unwrap()).clone())
-                    .collect::<Vec<_>>()
+                    .collect::<Vec<_>>())
             })
+            .collect::<Result<Vec<Vec<Node<ObjectType>>>, FederationError>>()?
+            .into_iter()
+            .flatten()
             .collect::<Vec<_>>();
 
-        res.sort_by(|stuff, other_stuff| stuff.name.cmp(&other_stuff.name));
+        res.sort_by(|a, b| a.name.cmp(&b.name));
 
         Ok(res)
     }
