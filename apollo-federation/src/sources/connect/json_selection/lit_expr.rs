@@ -13,7 +13,6 @@ use nom::combinator::opt;
 use nom::combinator::recognize;
 use nom::multi::many0;
 use nom::multi::many1;
-use nom::sequence::delimited;
 use nom::sequence::pair;
 use nom::sequence::preceded;
 use nom::sequence::tuple;
@@ -67,50 +66,84 @@ impl LitExpr {
 
     // LitNumber ::= "-"? ([0-9]+ ("." [0-9]*)? | "." [0-9]+)
     fn parse_number(input: Span) -> IResult<Span, Parsed<Self>> {
-        let (suffix, (neg, _spaces, num)) = delimited(
+        let (suffix, (_, neg, _, num, _)) = tuple((
             spaces_or_comments,
-            tuple((
-                opt(char('-')),
-                spaces_or_comments,
-                alt((
-                    recognize(pair(
-                        many1(one_of("0123456789")),
-                        opt(preceded(char('.'), many0(one_of("0123456789")))),
+            opt(parsed_span("-")),
+            spaces_or_comments,
+            alt((
+                map(
+                    pair(
+                        recognize(many1(one_of("0123456789"))),
+                        opt(tuple((
+                            spaces_or_comments,
+                            parsed_span("."),
+                            spaces_or_comments,
+                            recognize(many0(one_of("0123456789"))),
+                        ))),
+                    ),
+                    |(int, frac)| {
+                        let int_loc = Some((
+                            int.location_offset(),
+                            int.location_offset() + int.fragment().len(),
+                        ));
+
+                        let mut s = String::new();
+                        s.push_str(int.fragment());
+
+                        let full_loc = if let Some((_, dot, _, frac)) = frac {
+                            let frac_loc = merge_locs(
+                                dot.loc(),
+                                if frac.len() > 0 {
+                                    Some((
+                                        frac.location_offset(),
+                                        frac.location_offset() + frac.fragment().len(),
+                                    ))
+                                } else {
+                                    None
+                                },
+                            );
+                            s.push('.');
+                            if frac.fragment().is_empty() {
+                                s.push('0');
+                            } else {
+                                s.push_str(frac.fragment());
+                            }
+                            merge_locs(int_loc, frac_loc)
+                        } else {
+                            int_loc
+                        };
+
+                        Parsed::new(s, full_loc)
+                    },
+                ),
+                map(
+                    tuple((
+                        spaces_or_comments,
+                        parsed_span("."),
+                        spaces_or_comments,
+                        recognize(many1(one_of("0123456789"))),
                     )),
-                    recognize(pair(tag("."), many1(one_of("0123456789")))),
-                )),
+                    |(_, dot, _, frac)| {
+                        let frac_loc = Some((
+                            frac.location_offset(),
+                            frac.location_offset() + frac.fragment().len(),
+                        ));
+                        let full_loc = merge_locs(dot.loc(), frac_loc);
+                        Parsed::new(format!("0.{}", frac.fragment()), full_loc)
+                    },
+                ),
             )),
             spaces_or_comments,
-        )(input)?;
+        ))(input)?;
 
         let mut number = String::new();
-        if let Some('-') = neg {
+        if neg.is_some() {
             number.push('-');
         }
-        if num.starts_with('.') {
-            // The serde_json::Number::parse method requires a leading digit
-            // before the decimal point.
-            number.push('0');
-        }
-        number.push_str(*num.fragment());
-        if num.ends_with('.') {
-            // The serde_json::Number::parse method requires a trailing digit
-            // after the decimal point.
-            number.push('0');
-        }
+        number.push_str(num.as_str());
 
         if let Ok(lit_number) = number.parse().map(Self::Number) {
-            let loc = Some((
-                num.location_offset(),
-                num.location_offset() + num.fragment().len(),
-            ));
-
-            let loc = if let Some(neg) = neg {
-                merge_locs(neg.loc(), loc)
-            } else {
-                loc
-            };
-
+            let loc = merge_locs(neg.and_then(|n| n.loc()), num.loc());
             Ok((suffix, Parsed::new(lit_number, loc)))
         } else {
             Err(nom::Err::Failure(nom::error::Error::new(
