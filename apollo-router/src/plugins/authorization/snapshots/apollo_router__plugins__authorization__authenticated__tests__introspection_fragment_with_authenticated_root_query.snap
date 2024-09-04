@@ -17,6 +17,14 @@ query:
         }
         
 filtered:
+query {
+    __schema {
+        types {
+            ... TypeDef
+        }
+    }
+}
+
 fragment TypeDef on __Type {
   name
 }
