@@ -45,12 +45,14 @@ pub(super) fn validate_entity_arg(
                         .collect(),
                 })
                 // TODO: Allow interfaces
-            } else if field.ty.is_list() || schema.get_object(field.ty.inner_named_type()).is_none()
+            } else if field.ty.is_list()
+                || schema.get_object(field.ty.inner_named_type()).is_none()
+                || field.ty.is_non_null()
             {
                 messages.push(Message {
                     code: Code::EntityTypeInvalid,
                     message: format!(
-                        "{coordinate} is invalid. Entities can only be non-list, object types.",
+                        "{coordinate} is invalid. Entities can only be non-list, nullable, object types.",
                         coordinate = connect_directive_entity_argument_coordinate(
                             connect_directive_name,
                             entity_arg_value.as_ref(),

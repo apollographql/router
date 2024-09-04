@@ -1,12 +1,12 @@
 ---
 source: apollo-federation/src/sources/connect/validation/mod.rs
 expression: "format!(\"{:#?}\", errors)"
-input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_entity_arg_on_non_entity_field.graphql
+input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_entity_arg_on_non_null_type.graphql
 ---
 [
     Message {
         code: EntityTypeInvalid,
-        message: "`@connect(entity: true)` on `Query.name` is invalid. Entities can only be non-list, nullable, object types.",
+        message: "`@connect(entity: true)` on `Query.users` is invalid. Entities can only be non-list, nullable, object types.",
         locations: [
             LineColumn {
                 line: 8,
