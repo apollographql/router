@@ -1835,7 +1835,6 @@ mod tests {
         });
     }
 
-    /*
     #[test]
     fn introspection_fragment_with_authenticated_root_query() {
         static QUERY: &str = r#"
@@ -1859,5 +1858,5 @@ mod tests {
             result: doc,
             paths
         });
-    }*/
+    }
 }
