@@ -39,6 +39,13 @@ pub(crate) struct InvalidationEndpointConfig {
     pub(crate) path: String,
     /// Listen address on which the invalidation endpoint must listen.
     pub(crate) listen: ListenAddr,
+    #[serde(default = "default_scan_count")]
+    /// Number of keys to return at once from a redis SCAN command
+    pub(crate) scan_count: u32,
+}
+
+fn default_scan_count() -> u32 {
+    1000
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -219,7 +226,10 @@ mod tests {
             all: Some(redis_cache),
             subgraphs: HashMap::new(),
         });
-        let invalidation = Invalidation { storage };
+        let invalidation = Invalidation {
+            storage,
+            scan_count: 1000,
+        };
 
         let config = Arc::new(SubgraphConfiguration {
             all: Subgraph {
@@ -265,7 +275,10 @@ mod tests {
             all: Some(redis_cache),
             subgraphs: HashMap::new(),
         });
-        let invalidation = Invalidation { storage };
+        let invalidation = Invalidation {
+            storage,
+            scan_count: 1000,
+        };
         let config = Arc::new(SubgraphConfiguration {
             all: Subgraph {
                 ttl: None,
