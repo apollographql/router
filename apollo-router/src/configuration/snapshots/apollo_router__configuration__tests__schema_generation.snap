@@ -4333,6 +4333,13 @@ expression: "&schema"
           "nullable": true,
           "type": "string"
         },
+        "pool_size": {
+          "default": 1,
+          "description": "The size of the Redis connection pool",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "required_to_start": {
           "default": false,
           "description": "Prevents the router from starting if it cannot connect to Redis",
@@ -4542,6 +4549,13 @@ expression: "&schema"
           "description": "Redis password if not provided in the URLs. This field takes precedence over the password in the URL",
           "nullable": true,
           "type": "string"
+        },
+        "pool_size": {
+          "default": 1,
+          "description": "The size of the Redis connection pool",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
         },
         "required_to_start": {
           "default": false,
