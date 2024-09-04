@@ -577,8 +577,9 @@ impl FetchDependencyGraphNodePath {
                     .schema
                     .possible_runtime_types(typ)?
                     .iter()
-                    .map(|ctdp| (ctdp.get(self.schema.schema()).unwrap()).clone())
-                    .collect::<Vec<_>>())
+                    // TODO: check with the team, we probably want to replace it with something more meaningful.
+                    .map(|ctdp| ctdp.get(self.schema.schema()).cloned())
+                    .collect::<Result<Vec<_>, _>>()?)
             })
             .collect::<Result<Vec<Vec<Node<ObjectType>>>, FederationError>>()?
             .into_iter()
