@@ -2478,6 +2478,37 @@ impl FetchDependencyGraphNode {
             _ => err,
         })?;
 
+        // this function removes unnecessary pieces of the query plan requires selection set.
+        fn trim_requires_selection_node(
+            selection_set: &executable::SelectionSet,
+        ) -> Vec<executable::Selection> {
+            selection_set
+                .selections
+                .iter()
+                .filter_map(|s| match s {
+                    executable::Selection::Field(field) => Some(executable::Selection::from(
+                        executable::Field::new(field.name.clone(), field.definition.clone())
+                            .with_selections(trim_requires_selection_node(&field.selection_set)),
+                    )),
+                    executable::Selection::InlineFragment(inline_fragment) => {
+                        let new_fragment = if inline_fragment.type_condition.is_some() {
+                            executable::InlineFragment::with_type_condition(
+                                inline_fragment.type_condition.clone().unwrap(),
+                            )
+                        } else {
+                            executable::InlineFragment::without_type_condition(
+                                inline_fragment.selection_set.ty.clone(),
+                            )
+                        }
+                        .with_selections(trim_requires_selection_node(
+                            &inline_fragment.selection_set,
+                        ));
+                        Some(executable::Selection::from(new_fragment))
+                    }
+                    executable::Selection::FragmentSpread(_) => None,
+                })
+                .collect()
+        }
         let node = super::PlanNode::Fetch(Box::new(super::FetchNode {
             subgraph_name: self.subgraph_name.clone(),
             id: self.id.get().copied(),
@@ -2486,7 +2517,7 @@ impl FetchDependencyGraphNode {
                 .as_ref()
                 .map(executable::SelectionSet::try_from)
                 .transpose()?
-                .map(|selection_set| selection_set.selections),
+                .map(|selection_set| trim_requires_selection_node(&selection_set)),
             operation_document,
             operation_name,
             operation_kind: self.root_kind.into(),
