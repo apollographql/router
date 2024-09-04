@@ -1,13 +1,11 @@
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure (redundant inline spread)
 fn it_handles_a_simple_at_requires_triggered_within_a_conditional() {
     let planner = planner!(
         Subgraph1: r#"
             type Query {
               t: T
             }
-  
+
             type T @key(fields: "id") {
               id: ID!
               a: Int
@@ -73,7 +71,7 @@ fn it_handles_an_at_requires_triggered_conditionally() {
             type Query {
               t: T
             }
-  
+
             type T @key(fields: "id") {
               id: ID!
               a: Int
@@ -143,7 +141,7 @@ fn it_handles_an_at_requires_where_multiple_conditional_are_involved() {
             type Query {
               a: A
             }
-  
+
             type A @key(fields: "idA") {
               idA: ID!
             }
@@ -153,7 +151,7 @@ fn it_handles_an_at_requires_where_multiple_conditional_are_involved() {
               idA: ID!
               b: [B]
             }
-  
+
             type B @key(fields: "idB") {
               idB: ID!
               required: Int
