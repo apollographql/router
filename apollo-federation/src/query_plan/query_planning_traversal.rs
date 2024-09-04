@@ -1005,7 +1005,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                     dependency_graph.supergraph_schema.clone(),
                     self.parameters.config.type_conditioned_fetching,
                     root_type,
-                ),
+                )?,
                 Default::default(),
                 &Default::default(),
             )?;

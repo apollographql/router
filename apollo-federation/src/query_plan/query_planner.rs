@@ -767,7 +767,7 @@ pub(crate) fn compute_root_fetch_groups(
                 dependency_graph.supergraph_schema.clone(),
                 type_conditioned_fetching_enabled,
                 root_type,
-            ),
+            )?,
             Default::default(),
             &Default::default(),
         )?;

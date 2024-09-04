@@ -69,6 +69,7 @@ use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::OutputTypeDefinitionPosition;
+use crate::schema::position::PositionLookupError;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
@@ -452,17 +453,18 @@ impl FetchDependencyGraphNodePath {
         schema: ValidFederationSchema,
         type_conditioned_fetching_enabled: bool,
         root_type: CompositeTypeDefinitionPosition,
-    ) -> Self {
+    ) -> Result<Self, FederationError> {
         let root_possible_types: Vec<_> = if type_conditioned_fetching_enabled {
-            schema.possible_runtime_types(root_type).unwrap()
+            schema.possible_runtime_types(root_type)?
         } else {
             Default::default()
         }
         .into_iter()
-        .map(|pos| pos.get(schema.schema()).unwrap().clone())
-        .collect();
+        .map(|pos| Ok(pos.get(schema.schema())?.clone()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e: PositionLookupError| FederationError::from(e))?;
 
-        Self {
+        Ok(Self {
             schema,
             type_conditioned_fetching_enabled,
             full_path: Default::default(),
@@ -470,7 +472,7 @@ impl FetchDependencyGraphNodePath {
             response_path: Default::default(),
             possible_types: root_possible_types.clone(),
             possible_types_after_last_field: root_possible_types,
-        }
+        })
     }
     fn for_new_key_fetch(&self, new_context: Arc<OpPath>) -> Self {
         Self {
@@ -489,7 +491,7 @@ impl FetchDependencyGraphNodePath {
         element: Arc<OpPathElement>,
     ) -> Result<FetchDependencyGraphNodePath, FederationError> {
         let response_path = self.updated_response_path(&element)?;
-        let new_possible_types = self.new_possible_types(&element);
+        let new_possible_types = self.new_possible_types(&element)?;
         let possible_types_after_last_field = if let &OpPathElement::Field(_) = element.as_ref() {
             new_possible_types.clone()
         } else {
@@ -507,17 +509,19 @@ impl FetchDependencyGraphNodePath {
         })
     }
 
-    fn new_possible_types(&self, element: &OpPathElement) -> Vec<Node<ObjectType>> {
+    fn new_possible_types(
+        &self,
+        element: &OpPathElement,
+    ) -> Result<Vec<Node<ObjectType>>, FederationError> {
         if !self.type_conditioned_fetching_enabled {
-            return Default::default();
+            return Ok(Default::default());
         }
 
-        match element {
+        let res = match element {
             OpPathElement::InlineFragment(f) => match &f.type_condition_position {
                 None => self.possible_types.clone(),
                 Some(tcp) => {
-                    let element_possible_types =
-                        self.schema.possible_runtime_types(tcp.clone()).unwrap();
+                    let element_possible_types = self.schema.possible_runtime_types(tcp.clone())?;
                     self.possible_types
                         .iter()
                         // TODO: O(n)
@@ -530,18 +534,22 @@ impl FetchDependencyGraphNodePath {
                         .collect()
                 }
             },
-            OpPathElement::Field(f) => self.advance_field_type(f),
-        }
+            OpPathElement::Field(f) => self.advance_field_type(f)?,
+        };
+        Ok(res)
     }
 
-    fn advance_field_type(&self, element: &Field) -> Vec<Node<ObjectType>> {
+    fn advance_field_type(
+        &self,
+        element: &Field,
+    ) -> Result<Vec<Node<ObjectType>>, FederationError> {
         if !element
             .data()
             .output_base_type()
             .map(|base_type| base_type.is_composite_type())
             .unwrap_or_default()
         {
-            return Default::default();
+            return Ok(Default::default());
         }
 
         let mut res = self
@@ -567,7 +575,7 @@ impl FetchDependencyGraphNodePath {
 
         res.sort_by(|stuff, other_stuff| stuff.name.cmp(&other_stuff.name));
 
-        res
+        Ok(res)
     }
 
     fn updated_response_path(
