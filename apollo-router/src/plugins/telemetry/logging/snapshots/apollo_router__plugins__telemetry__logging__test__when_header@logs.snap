@@ -9,13 +9,11 @@ expression: yaml
   span:
     apollo_private.field_level_instrumentation_ratio: 0.01
     apollo_private.graphql.variables: "{}"
-    graphql.document: "query { foo }"
     name: supergraph
     otel.kind: INTERNAL
   spans:
     - apollo_private.field_level_instrumentation_ratio: 0.01
       apollo_private.graphql.variables: "{}"
-      graphql.document: "query { foo }"
       name: supergraph
       otel.kind: INTERNAL
 - fields:
@@ -25,13 +23,11 @@ expression: yaml
   span:
     apollo_private.field_level_instrumentation_ratio: 0.01
     apollo_private.graphql.variables: "{}"
-    graphql.document: "query { foo }"
     name: supergraph
     otel.kind: INTERNAL
   spans:
     - apollo_private.field_level_instrumentation_ratio: 0.01
       apollo_private.graphql.variables: "{}"
-      graphql.document: "query { foo }"
       name: supergraph
       otel.kind: INTERNAL
 - fields: {}
@@ -40,13 +36,11 @@ expression: yaml
   span:
     apollo_private.field_level_instrumentation_ratio: 0.01
     apollo_private.graphql.variables: "{}"
-    graphql.document: "query { foo }"
     name: supergraph
     otel.kind: INTERNAL
   spans:
     - apollo_private.field_level_instrumentation_ratio: 0.01
       apollo_private.graphql.variables: "{}"
-      graphql.document: "query { foo }"
       name: supergraph
       otel.kind: INTERNAL
 - fields:
@@ -56,13 +50,11 @@ expression: yaml
   span:
     apollo_private.field_level_instrumentation_ratio: 0.01
     apollo_private.graphql.variables: "{}"
-    graphql.document: "query { foo }"
     name: supergraph
     otel.kind: INTERNAL
   spans:
     - apollo_private.field_level_instrumentation_ratio: 0.01
       apollo_private.graphql.variables: "{}"
-      graphql.document: "query { foo }"
       name: supergraph
       otel.kind: INTERNAL
 - fields:

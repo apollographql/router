@@ -5421,7 +5421,7 @@ expression: "&schema"
           "type": "string"
         },
         {
-          "description": "Use new OpenTelemetry spec compliant span attributes or preserve existing. This will be the default in future.",
+          "description": "Use new OpenTelemetry spec compliant span attributes or preserve existing.",
           "enum": [
             "spec_compliant"
           ],

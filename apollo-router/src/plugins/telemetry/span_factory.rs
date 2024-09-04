@@ -20,9 +20,9 @@ use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
 #[serde(rename_all = "snake_case")]
 pub(crate) enum SpanMode {
     /// Keep the request span as root span and deprecated attributes. This option will eventually removed.
-    #[default]
     Deprecated,
-    /// Use new OpenTelemetry spec compliant span attributes or preserve existing. This will be the default in future.
+    /// Use new OpenTelemetry spec compliant span attributes or preserve existing.
+    #[default]
     SpecCompliant,
 }
 

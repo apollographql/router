@@ -301,7 +301,7 @@ impl Plugin for Telemetry {
         let (sampling_filter_ratio, tracer_provider) = Self::create_tracer_provider(&config)?;
 
         if config.instrumentation.spans.mode == SpanMode::Deprecated {
-            ::tracing::warn!("telemetry.instrumentation.spans.mode is currently set to 'deprecated', either explicitly or via defaulting. Set telemetry.instrumentation.spans.mode explicitly in your router.yaml to 'spec_compliant' for log and span attributes that follow OpenTelemetry semantic conventions. This option will be defaulted to 'spec_compliant' in a future release and eventually removed altogether");
+            ::tracing::warn!("telemetry.instrumentation.spans.mode is currently set to 'deprecated'. Set telemetry.instrumentation.spans.mode explicitly in your router.yaml to 'spec_compliant' for log and span attributes that follow OpenTelemetry semantic conventions. This option will eventually be removed.");
         }
 
         let BuiltinInstruments {
