@@ -1,14 +1,20 @@
 use std::collections::HashMap;
+use std::future;
 
+use futures::stream;
+use futures::StreamExt;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
+use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use crate::json_ext::Object;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
+use crate::services::execution;
+use crate::services::fetch::SubgraphNameExt;
 use crate::services::subgraph;
 use crate::services::SubgraphResponse;
 
@@ -72,6 +78,33 @@ impl Plugin for IncludeSubgraphErrors {
                 .boxed();
         }
         service
+    }
+
+    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+        let all = self.config.all;
+        let subgraphs = self.config.subgraphs.clone();
+        ServiceBuilder::new()
+            .map_response(move |mut response: execution::Response| {
+                response.response = response.response.map(move |response| {
+                    response
+                        .flat_map(move |mut response| {
+                            response.errors.iter_mut().for_each(|error| {
+                                if let Some(subgraph_name) = error.subgraph_name() {
+                                    if !*subgraphs.get(&subgraph_name).unwrap_or(&all) {
+                                        tracing::info!("redacted subgraph({subgraph_name}) error");
+                                        error.message = REDACTED_ERROR_MESSAGE.to_string();
+                                        error.extensions = Object::default();
+                                    }
+                                }
+                            });
+                            stream::once(future::ready(response))
+                        })
+                        .boxed()
+                });
+                response
+            })
+            .service(service)
+            .boxed()
     }
 }
 
