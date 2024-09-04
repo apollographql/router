@@ -598,9 +598,15 @@ supergraph:
 
 </MinVersion>
 
-<ExperimentalFeature />
+<Note>
 
-Beginning in v1.49.0, the router supports enhanced operation signature normalization.
+The router supports enhanced operation signature normalization in the following versions:
+
+- [General availability](/resources/product-launch-stages/#general-availability) in v1.54.0 and later
+- [Experimental](/resources/product-launch-stages/#experimental-features) in v1.49.0 to v1.53.0
+
+</Note>
+
 Apollo's legacy operation signature algorithm removes information about certain fields, such as input objects and aliases.
 This removal means some operations may have the same normalized signature though they are distinct operations.
 
@@ -761,11 +767,19 @@ query AliasedQuery {
 
 </MinVersion>
 
-<ExperimentalFeature />
+<Note>
+
+The router supports extended reference reporting in the following versions:
+
+- [General availability](/resources/product-launch-stages/#general-availability) in v1.54.0 and later
+- [Experimental](/resources/product-launch-stages/#experimental-features) in v1.50.0 to v1.53.0
+
+</Note>
+
 
 <EnterpriseFeature linkWithAnchor="https://www.apollographql.com/pricing#graphos-router" />
 
-Beginning in v1.50.0, you can configure the router to report enum and input object references for enhanced insights and operation checks.
+You can configure the router to report enum and input object references for enhanced insights and operation checks.
 Apollo's legacy reference reporting doesn't include data about enum values and input object fields, meaning you can't view enum and input object field usage in GraphOS Studio.
 Legacy reporting can also cause [inaccurate operation checks](#enhanced-operation-checks).
 
