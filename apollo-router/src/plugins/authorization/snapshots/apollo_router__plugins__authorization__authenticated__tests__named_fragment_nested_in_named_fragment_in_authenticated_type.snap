@@ -22,7 +22,7 @@ query:
         }
         
 filtered:
-query($u: Int, $include:Boolean) {
+query($u: Int, $include: Boolean) {
   u(u: $u) @include(if: $include)
 }
 

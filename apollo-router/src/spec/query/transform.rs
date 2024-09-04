@@ -55,9 +55,9 @@ pub(crate) fn document(
                 }
                 used_fragments.extend(local_used_fragments);
 
+                // remove unused variables
                 new_def.variables.retain(|var| {
                     let res = visitor.used_variables().contains(var.name.as_str());
-                    println!("var: {:?} used: {}", var, res);
                     res
                 });
 
@@ -208,10 +208,18 @@ pub(crate) fn field(
 
     for argument in def.arguments.iter() {
         if let Some(var) = argument.value.as_variable() {
-            println!("adding var: {:?}", var);
             visitor.used_variables().insert(var.as_str().to_string());
         }
     }
+
+    for directive in def.directives.iter() {
+        for argument in directive.arguments.iter() {
+            if let Some(var) = argument.value.as_variable() {
+                visitor.used_variables().insert(var.as_str().to_string());
+            }
+        }
+    }
+
     Ok(Some(ast::Field {
         alias: def.alias.clone(),
         name: def.name.clone(),
@@ -231,6 +239,15 @@ pub(crate) fn fragment_spread(
     visitor
         .used_fragments()
         .insert(def.fragment_name.as_str().to_string());
+
+    for directive in def.directives.iter() {
+        for argument in directive.arguments.iter() {
+            if let Some(var) = argument.value.as_variable() {
+                visitor.used_variables().insert(var.as_str().to_string());
+            }
+        }
+    }
+
     Ok(Some(def.clone()))
 }
 
@@ -245,6 +262,15 @@ pub(crate) fn inline_fragment(
     let Some(selection_set) = selection_set(visitor, parent_type, &def.selection_set)? else {
         return Ok(None);
     };
+
+    for directive in def.directives.iter() {
+        for argument in directive.arguments.iter() {
+            if let Some(var) = argument.value.as_variable() {
+                visitor.used_variables().insert(var.as_str().to_string());
+            }
+        }
+    }
+
     Ok(Some(ast::InlineFragment {
         type_condition: def.type_condition.clone(),
         directives: def.directives.clone(),
