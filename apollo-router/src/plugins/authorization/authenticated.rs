@@ -1786,6 +1786,7 @@ mod tests {
     type Query  {
         t: T
         u(u:Int): String
+        v(v:Int): Int
     }
 
     type T @authenticated {
@@ -1796,21 +1797,28 @@ mod tests {
     #[test]
     fn named_fragment_nested_in_named_fragment_in_authenticated_type() {
         static QUERY: &str = r#"
-        query($id:String, $u:Int, $include:Boolean, $skip:Boolean) {
-            t {
-                ... F
-            }
+        query A($v: Int) {
+            ... F3
+        }
+
+        query B($id:String, $u:Int, $include:Boolean, $skip:Boolean) {
+            ... F1
+        
             u(u:$u) @include(if: $include)
         }
 
         fragment F1 on Query {
             t {
-                ... F @skip(if: $skip)
+                ... F2 @skip(if: $skip)
             }
         }
 
-        fragment F on T {
+        fragment F2 on T {
             f(id: $id)
+        }
+
+        fragment F3 on Query {
+            v(v: $v)
         }
         "#;
 
