@@ -1818,6 +1818,10 @@ mod tests {
         }
 
         fragment F3 on Query {
+            ...F3
+        }
+
+        fragment F4 on Query {
             v(v: $v)
         }
         "#;
