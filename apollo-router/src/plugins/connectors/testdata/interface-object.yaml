@@ -1,0 +1,48 @@
+# rover supergraph compose --config apollo-router/src/plugins/connectors/testdata/interface-object.yaml > apollo-router/src/plugins/connectors/testdata/interface-object.graphql
+# the result is manually edited because 2.10 disallows interface object
+federation_version: =2.10.0-alpha.1
+subgraphs:
+  connectors:
+    routing_url: none
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.10", import: ["@key"])
+          @link(
+            url: "https://specs.apollo.dev/connect/v0.1"
+            import: ["@connect", "@source"]
+          )
+          @source(name: "json", http: { baseURL: "http://localhost:4001" })
+
+        type Query {
+          x: [Itf2]
+            @connect(
+              source: "json"
+              http: { GET: "/itf" }
+              selection: "id"
+            )
+        }
+
+        type Itf2 @key(fields: "id") {
+          id: ID!
+        }
+  graphql:
+    routing_url: none
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.10", import: ["@key"])
+
+        interface Itf @key(fields: "id") {
+          id: ID!
+        }
+
+        type T1 implements Itf @key(fields: "id") {
+          id: ID!
+          a: String
+        }
+
+        type T2 implements Itf @key(fields: "id") {
+          id: ID!
+          b: String
+        }

@@ -1195,6 +1195,82 @@ async fn error_redacted() {
     );
 }
 
+#[tokio::test]
+async fn test_interface_object() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/itf"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!([{ "id": 1 }, { "id": 2 }])),
+        )
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/graphql"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+          "data": {
+            "_entities": [{
+              "__typename": "T1",
+              "a": "a"
+            }, {
+              "__typename": "T2",
+              "b": "b"
+            }]
+          }
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let response = execute(
+        INTERFACE_OBJECT_SCHEMA,
+        &mock_server.uri(),
+        "query { x { __typename id ... on T1 { a } ... on T2 { b } } }",
+        Default::default(),
+        None,
+        |_| {},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "x": [
+          {
+            "__typename": "T1",
+            "id": 1,
+            "a": "a"
+          },
+          {
+            "__typename": "T2",
+            "id": 2,
+            "b": "b"
+          }
+        ]
+      }
+    }
+    "###);
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+          Matcher::new().method("GET").path("/itf").build(),
+          Matcher::new()
+            .method("POST")
+            .path("/graphql")
+            .body(serde_json::json!({
+              "query": r#"query($representations:[_Any!]!){_entities(representations:$representations){...on Itf{__typename ...on T1{a}...on T2{b}}}}"#,
+              "variables": {
+                "representations": [
+                  { "__typename": "Itf", "id": 1 },
+                  { "__typename": "Itf", "id": 2 }
+                ]
+              }
+            }))
+            .build()
+        ],
+    );
+}
+
 mod quickstart_tests {
     use super::*;
 
@@ -1481,6 +1557,7 @@ const NULLABILITY_SCHEMA: &str = include_str!("./testdata/nullability.graphql");
 const SELECTION_SCHEMA: &str = include_str!("./testdata/selection.graphql");
 const NO_SOURCES_SCHEMA: &str = include_str!("./testdata/connector-without-source.graphql");
 const QUICKSTART_SCHEMA: &str = include_str!("./testdata/quickstart.graphql");
+const INTERFACE_OBJECT_SCHEMA: &str = include_str!("./testdata/interface-object.graphql");
 
 async fn execute(
     schema: &str,

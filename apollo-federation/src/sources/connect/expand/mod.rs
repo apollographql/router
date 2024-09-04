@@ -614,6 +614,32 @@ mod helpers {
                         ))
                     }
                 }?;
+            } else {
+                // If we don't have a key, but the type is an interfaceObject
+                // we'll try just copying over the defined keys.
+                let output_ty = output_type.get(self.original_schema.schema())?;
+                let has_interface_object = output_ty
+                    .directives()
+                    .iter()
+                    .any(|d| d.name == name!("federation__interfaceObject"));
+                if has_interface_object {
+                    let keys = output_ty
+                        .directives()
+                        .iter()
+                        .filter(|d| d.name == name!("federation__key"));
+                    for key in keys {
+                        match &output_type {
+                            TypeDefinitionPosition::Object(o) => {
+                                o.insert_directive(to_schema, key.clone())
+                            }
+                            TypeDefinitionPosition::Interface(i) => {
+                                i.insert_directive(to_schema, key.clone())
+                            }
+
+                            _ => Ok(()),
+                        }?;
+                    }
+                }
             }
 
             Ok(())
