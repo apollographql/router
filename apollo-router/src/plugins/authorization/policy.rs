@@ -189,6 +189,7 @@ pub(crate) struct PolicyFilteringVisitor<'a> {
     schema: &'a schema::Schema,
     fragments: HashMap<&'a Name, &'a ast::FragmentDefinition>,
     used_fragments: HashSet<String>,
+    used_variables: HashSet<String>,
     implementers_map: &'a apollo_compiler::collections::HashMap<Name, Implementers>,
     dry_run: bool,
     request_policies: HashSet<String>,
@@ -232,6 +233,7 @@ impl<'a> PolicyFilteringVisitor<'a> {
             schema,
             fragments: transform::collect_fragments(executable),
             used_fragments: HashSet::new(),
+            used_variables: HashSet::new(),
             implementers_map,
             dry_run,
             request_policies: successful_policies,
@@ -636,6 +638,10 @@ impl<'a> transform::Visitor for PolicyFilteringVisitor<'a> {
 
     fn used_fragments(&mut self) -> &mut HashSet<String> {
         &mut self.used_fragments
+    }
+
+    fn used_variables(&mut self) -> &mut HashSet<String> {
+        &mut self.used_variables
     }
 }
 

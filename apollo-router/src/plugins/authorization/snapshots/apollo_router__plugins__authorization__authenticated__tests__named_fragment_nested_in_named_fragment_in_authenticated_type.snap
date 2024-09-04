@@ -4,11 +4,11 @@ expression: "TestResult { query: QUERY, result: doc, paths }"
 ---
 query:
 
-        query($id:String, $skip:Boolean) {
+        query($id:String, $u:Int, $include:Boolean, $skip:Boolean) {
             t {
                 ... F
             }
-            u
+            u(u:$u) @include(if: $include)
         }
 
         fragment F1 on Query {
@@ -22,8 +22,8 @@ query:
         }
         
 filtered:
-query {
-  u
+query($u: Int, $include:Boolean) {
+  u(u: $u) @include(if: $include)
 }
 
 paths: ["/t"]

@@ -206,6 +206,7 @@ pub(crate) struct ScopeFilteringVisitor<'a> {
     schema: &'a schema::Schema,
     fragments: HashMap<&'a Name, &'a ast::FragmentDefinition>,
     used_fragments: HashSet<String>,
+    used_variables: HashSet<String>,
     implementers_map: &'a apollo_compiler::collections::HashMap<Name, Implementers>,
     request_scopes: HashSet<String>,
     pub(crate) query_requires_scopes: bool,
@@ -230,6 +231,7 @@ impl<'a> ScopeFilteringVisitor<'a> {
             schema,
             fragments: transform::collect_fragments(executable),
             used_fragments: HashSet::new(),
+            used_variables: HashSet::new(),
             implementers_map,
             request_scopes: scopes,
             dry_run,
@@ -638,6 +640,10 @@ impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
 
     fn used_fragments(&mut self) -> &mut HashSet<String> {
         &mut self.used_fragments
+    }
+
+    fn used_variables(&mut self) -> &mut HashSet<String> {
+        &mut self.used_variables
     }
 }
 

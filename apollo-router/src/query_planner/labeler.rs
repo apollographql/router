@@ -28,6 +28,7 @@ pub(crate) fn add_defer_labels(
         next_label: 0,
         schema,
         used_fragments: HashSet::new(),
+        used_variables: HashSet::new(),
     };
     document(&mut visitor, doc)
 }
@@ -35,6 +36,7 @@ pub(crate) fn add_defer_labels(
 pub(crate) struct Labeler<'a> {
     schema: &'a Schema,
     used_fragments: HashSet<String>,
+    used_variables: HashSet<String>,
     next_label: u32,
 }
 
@@ -72,6 +74,10 @@ impl Visitor for Labeler<'_> {
 
     fn used_fragments(&mut self) -> &mut HashSet<String> {
         &mut self.used_fragments
+    }
+
+    fn used_variables(&mut self) -> &mut HashSet<String> {
+        &mut self.used_variables
     }
 }
 

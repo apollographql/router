@@ -178,6 +178,7 @@ pub(crate) struct AuthenticatedVisitor<'a> {
     schema: &'a schema::Schema,
     fragments: HashMap<&'a Name, &'a ast::FragmentDefinition>,
     used_fragments: HashSet<String>,
+    used_variables: HashSet<String>,
     implementers_map: &'a apollo_compiler::collections::HashMap<Name, Implementers>,
     pub(crate) query_requires_authentication: bool,
     pub(crate) unauthorized_paths: Vec<Path>,
@@ -200,6 +201,7 @@ impl<'a> AuthenticatedVisitor<'a> {
             schema,
             fragments: transform::collect_fragments(executable),
             used_fragments: HashSet::new(),
+            used_variables: HashSet::new(),
             implementers_map,
             dry_run,
             query_requires_authentication: false,
@@ -521,6 +523,10 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
 
     fn used_fragments(&mut self) -> &mut HashSet<String> {
         &mut self.used_fragments
+    }
+
+    fn used_variables(&mut self) -> &mut HashSet<String> {
+        &mut self.used_variables
     }
 }
 
@@ -1779,7 +1785,7 @@ mod tests {
 
     type Query  {
         t: T
-        u: String
+        u(u:Int): String
     }
 
     type T @authenticated {
@@ -1790,11 +1796,11 @@ mod tests {
     #[test]
     fn named_fragment_nested_in_named_fragment_in_authenticated_type() {
         static QUERY: &str = r#"
-        query($id:String, $skip:Boolean) {
+        query($id:String, $u:Int, $include:Boolean, $skip:Boolean) {
             t {
                 ... F
             }
-            u
+            u(u:$u) @include(if: $include)
         }
 
         fragment F1 on Query {

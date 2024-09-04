@@ -15,16 +15,25 @@ pub(crate) fn document(
         definitions: Vec::new(),
     };
 
+    // keeps the list of fragments defined in the produced document (the visitor might have removed some of them)
     let mut defined_fragments = HashMap::new();
+
     // walk through the fragment first: if a fragment is entirely filtered, we want to
     // remove the spread too
     for definition in &document.definitions {
         if let ast::Definition::FragmentDefinition(def) = definition {
             if let Some(new_def) = visitor.fragment_definition(def)? {
-                defined_fragments.insert(&def.name, new_def);
+                // keep the list of used variables per fragment, as we need to use it to know which variables are used
+                // in a query
+                let used_variables = visitor.used_variables().clone();
+                visitor.used_variables().clear();
+                defined_fragments.insert(def.name.as_str(), (new_def, used_variables));
             }
         }
     }
+
+    // keeps the list of fragments used in the produced document (some fragment spreads might have been removed)
+    let mut used_fragments = HashSet::new();
 
     for definition in &document.definitions {
         if let ast::Definition::OperationDefinition(def) = definition {
@@ -34,15 +43,32 @@ pub(crate) fn document(
                 .ok_or("missing root operation definition")?
                 .clone();
 
-            if let Some(new_def) = visitor.operation(&root_type, def)? {
+            visitor.used_fragments().clear();
+            visitor.used_variables().clear();
+            if let Some(mut new_def) = visitor.operation(&root_type, def)? {
+                let local_used_fragments = visitor.used_fragments().clone();
+                // add to the list of used variables all the variables used in the fragment spreads
+                for fragment in local_used_fragments.iter() {
+                    if let Some((_fragment, variables)) = defined_fragments.get(fragment.as_str()) {
+                        visitor.used_variables().extend(variables.iter().cloned());
+                    }
+                }
+                used_fragments.extend(local_used_fragments);
+
+                new_def.variables.retain(|var| {
+                    let res = visitor.used_variables().contains(var.name.as_str());
+                    println!("var: {:?} used: {}", var, res);
+                    res
+                });
+
                 new.definitions
-                    .push(ast::Definition::OperationDefinition(new_def.into()))
+                    .push(ast::Definition::OperationDefinition(new_def.into()));
             }
         }
     }
 
-    for (name, fragment) in defined_fragments.into_iter() {
-        if visitor.used_fragments().contains(name.as_str()) {
+    for (name, (fragment, _)) in defined_fragments.into_iter() {
+        if used_fragments.contains(name) {
             new.definitions
                 .push(ast::Definition::FragmentDefinition(fragment.into()));
         }
@@ -53,7 +79,13 @@ pub(crate) fn document(
 pub(crate) trait Visitor: Sized {
     fn schema(&self) -> &apollo_compiler::Schema;
 
+    /// mutable state provided by the visitor to clean up unused fragments
+    /// do not modify directly
     fn used_fragments(&mut self) -> &mut HashSet<String>;
+
+    /// mutable state provided by the visitor to clean up unused variables
+    /// do not modify directly
+    fn used_variables(&mut self) -> &mut HashSet<String>;
 
     /// Transform an operation definition.
     ///
@@ -173,6 +205,13 @@ pub(crate) fn field(
     else {
         return Ok(None);
     };
+
+    for argument in def.arguments.iter() {
+        if let Some(var) = argument.value.as_variable() {
+            println!("adding var: {:?}", var);
+            visitor.used_variables().insert(var.as_str().to_string());
+        }
+    }
     Ok(Some(ast::Field {
         alias: def.alias.clone(),
         name: def.name.clone(),
@@ -277,6 +316,7 @@ fn test_add_directive_to_fields() {
     struct AddDirective {
         schema: apollo_compiler::Schema,
         used_fragments: HashSet<String>,
+        used_variables: HashSet<String>,
     }
 
     impl Visitor for AddDirective {
@@ -304,6 +344,10 @@ fn test_add_directive_to_fields() {
 
         fn used_fragments(&mut self) -> &mut HashSet<String> {
             &mut self.used_fragments
+        }
+
+        fn used_variables(&mut self) -> &mut HashSet<String> {
+            &mut self.used_variables
         }
     }
 
@@ -335,6 +379,7 @@ fn test_add_directive_to_fields() {
     let mut visitor = AddDirective {
         schema,
         used_fragments: HashSet::new(),
+        used_variables: HashSet::new(),
     };
     let expected = "fragment F on Query {
   next @added {
