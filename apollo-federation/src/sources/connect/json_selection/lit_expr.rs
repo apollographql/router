@@ -554,4 +554,143 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn test_lit_expr_locations() {
+        fn check_parse(input: &str, expected: Parsed<LitExpr>) {
+            match LitExpr::parse(Span::new(input)) {
+                Ok((remainder, parsed)) => {
+                    assert_eq!(*remainder.fragment(), "");
+                    assert_eq!(parsed, expected);
+                }
+                Err(e) => panic!("Failed to parse '{}': {:?}", input, e),
+            };
+        }
+
+        check_parse(
+            "'hello'",
+            Parsed::new(LitExpr::String("hello".to_string()), Some((0, 7))),
+        );
+        check_parse(
+            " 'hello' ",
+            Parsed::new(LitExpr::String("hello".to_string()), Some((1, 8))),
+        );
+
+        check_parse(
+            "123",
+            Parsed::new(LitExpr::Number(serde_json::Number::from(123)), Some((0, 3))),
+        );
+        check_parse(
+            "  123   ",
+            Parsed::new(LitExpr::Number(serde_json::Number::from(123)), Some((2, 5))),
+        );
+        check_parse(
+            " - 123 . 4  ",
+            Parsed::new(
+                LitExpr::Number(serde_json::Number::from_f64(-123.4).unwrap()),
+                Some((1, 10)),
+            ),
+        );
+        check_parse(
+            " - 123 .  ",
+            Parsed::new(
+                LitExpr::Number(serde_json::Number::from_f64(-123.0).unwrap()),
+                Some((1, 8)),
+            ),
+        );
+        check_parse(
+            " 123 .  ",
+            Parsed::new(
+                LitExpr::Number(serde_json::Number::from_f64(123.0).unwrap()),
+                Some((1, 6)),
+            ),
+        );
+        check_parse(
+            " . 321 ",
+            Parsed::new(
+                LitExpr::Number(serde_json::Number::from_f64(0.321).unwrap()),
+                Some((1, 6)),
+            ),
+        );
+
+        check_parse("true", Parsed::new(LitExpr::Bool(true), Some((0, 4))));
+        check_parse(" true ", Parsed::new(LitExpr::Bool(true), Some((1, 5))));
+        check_parse("false", Parsed::new(LitExpr::Bool(false), Some((0, 5))));
+        check_parse(" false ", Parsed::new(LitExpr::Bool(false), Some((1, 6))));
+        check_parse("null", Parsed::new(LitExpr::Null, Some((0, 4))));
+        check_parse(" null ", Parsed::new(LitExpr::Null, Some((1, 5))));
+
+        check_parse(
+            "{a:1}",
+            Parsed::new(
+                LitExpr::Object({
+                    let mut map = IndexMap::default();
+                    map.insert(
+                        Parsed::new(Key::field("a"), Some((1, 2))),
+                        Parsed::new(LitExpr::Number(serde_json::Number::from(1)), Some((3, 4))),
+                    );
+                    map
+                }),
+                Some((0, 5)),
+            ),
+        );
+        check_parse(
+            " { a : 1 } ",
+            Parsed::new(
+                LitExpr::Object({
+                    let mut map = IndexMap::default();
+                    map.insert(
+                        Parsed::new(Key::field("a"), Some((3, 4))),
+                        Parsed::new(LitExpr::Number(serde_json::Number::from(1)), Some((7, 8))),
+                    );
+                    map
+                }),
+                Some((1, 10)),
+            ),
+        );
+        check_parse(
+            " { a : 1 , 'b'  : true } ",
+            Parsed::new(
+                LitExpr::Object({
+                    let mut map = IndexMap::default();
+                    map.insert(
+                        Parsed::new(Key::field("a"), Some((3, 4))),
+                        Parsed::new(LitExpr::Number(serde_json::Number::from(1)), Some((7, 8))),
+                    );
+                    map.insert(
+                        Parsed::new(Key::quoted("b"), Some((11, 14))),
+                        Parsed::new(LitExpr::Bool(true), Some((18, 22))),
+                    );
+                    map
+                }),
+                Some((1, 24)),
+            ),
+        );
+
+        check_parse(
+            "[1, 2]",
+            Parsed::new(
+                LitExpr::Array(vec![
+                    Parsed::new(LitExpr::Number(serde_json::Number::from(1)), Some((1, 2))),
+                    Parsed::new(LitExpr::Number(serde_json::Number::from(2)), Some((4, 5))),
+                ]),
+                Some((0, 6)),
+            ),
+        );
+        check_parse(
+            " [ 1 , 'two' , false , 1234 , ] ",
+            Parsed::new(
+                LitExpr::Array(vec![
+                    Parsed::new(LitExpr::Number(serde_json::Number::from(1)), Some((3, 4))),
+                    Parsed::new(LitExpr::String("two".to_string()), Some((7, 12))),
+                    Parsed::new(LitExpr::Bool(false), Some((15, 20))),
+                    Parsed::new(
+                        LitExpr::Number(serde_json::Number::from(1234)),
+                        Some((23, 27)),
+                    ),
+                ]),
+                Some((1, 31)),
+            ),
+        );
+    }
 }
