@@ -189,7 +189,9 @@ pub(crate) fn fragment_spread(
     visitor: &mut impl Visitor,
     def: &ast::FragmentSpread,
 ) -> Result<Option<ast::FragmentSpread>, BoxError> {
-    let _ = visitor; // Unused, but matches trait method signature
+    visitor
+        .used_fragments()
+        .insert(def.fragment_name.as_str().to_string());
     Ok(Some(def.clone()))
 }
 

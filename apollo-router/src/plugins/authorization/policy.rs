@@ -576,15 +576,11 @@ impl<'a> transform::Visitor for PolicyFilteringVisitor<'a> {
             self.unauthorized_paths.push(self.current_path.clone());
 
             if self.dry_run {
-                self.used_fragments()
-                    .insert(node.fragment_name.as_str().to_string());
                 transform::fragment_spread(self, node)
             } else {
                 Ok(None)
             }
         } else {
-            self.used_fragments()
-                .insert(node.fragment_name.as_str().to_string());
             transform::fragment_spread(self, node)
         };
 
