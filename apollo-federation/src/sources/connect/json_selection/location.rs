@@ -281,3 +281,40 @@ pub(super) mod strip_loc {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use insta::assert_snapshot;
+
+    use super::*;
+    use crate::sources::connect::JSONSelection;
+
+    #[test]
+    fn test_merge_locs() {
+        assert_eq!(merge_locs(None, None), None);
+        assert_eq!(merge_locs(Some((0, 1)), None), Some((0, 1)));
+        assert_eq!(merge_locs(None, Some((0, 1))), Some((0, 1)));
+        assert_eq!(merge_locs(Some((0, 1)), Some((1, 2))), Some((0, 2)));
+    }
+
+    #[test]
+    fn test_parse_with_loc_snapshots() {
+        let (remainder, parsed) = JSONSelection::parse(
+            r#"
+        path: some.nested.path { isbn author { name }}
+        alias: "not an identifier" {
+            # Inject "Frog" as the __typename
+            __typename: @->echo( "Frog" , )
+            wrapped: $->echo({ wrapped : @ , })
+            group: { a b c }
+            arg: $args . arg
+            field
+            rest: * { data }
+        }
+        "#,
+        )
+        .unwrap();
+        assert_eq!(remainder, "");
+        assert_snapshot!(format!("{:#?}", parsed));
+    }
+}
