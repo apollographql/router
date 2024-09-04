@@ -2479,7 +2479,8 @@ impl FetchDependencyGraphNode {
         })?;
 
         // this function removes unnecessary pieces of the query plan requires selection set.
-        fn trim_requires_selection_node(
+        // PORT NOTE: this function was called trimSelectioNodes in the JS implementation
+        fn trim_requires_selection_set(
             selection_set: &executable::SelectionSet,
         ) -> Vec<executable::Selection> {
             selection_set
@@ -2488,7 +2489,7 @@ impl FetchDependencyGraphNode {
                 .filter_map(|s| match s {
                     executable::Selection::Field(field) => Some(executable::Selection::from(
                         executable::Field::new(field.name.clone(), field.definition.clone())
-                            .with_selections(trim_requires_selection_node(&field.selection_set)),
+                            .with_selections(trim_requires_selection_set(&field.selection_set)),
                     )),
                     executable::Selection::InlineFragment(inline_fragment) => {
                         let new_fragment = if inline_fragment.type_condition.is_some() {
@@ -2500,7 +2501,7 @@ impl FetchDependencyGraphNode {
                                 inline_fragment.selection_set.ty.clone(),
                             )
                         }
-                        .with_selections(trim_requires_selection_node(
+                        .with_selections(trim_requires_selection_set(
                             &inline_fragment.selection_set,
                         ));
                         Some(executable::Selection::from(new_fragment))
@@ -2517,7 +2518,7 @@ impl FetchDependencyGraphNode {
                 .as_ref()
                 .map(executable::SelectionSet::try_from)
                 .transpose()?
-                .map(|selection_set| trim_requires_selection_node(&selection_set)),
+                .map(|selection_set| trim_requires_selection_set(&selection_set)),
             operation_document,
             operation_name,
             operation_kind: self.root_kind.into(),
