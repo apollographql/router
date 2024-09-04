@@ -1689,4 +1689,85 @@ mod tests {
 
         assert!(response.next_response().await.is_none());
     }
+
+    static AUTHENTICATED_ROOT_TYPE_SCHEMA: &str = r#"
+    schema
+      @link(url: "https://specs.apollo.dev/link/v1.0")
+      @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+      @link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY)
+    {
+      query: Query
+    }
+    directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+    directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+    directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
+    scalar link__Import
+      enum link__Purpose {
+      """
+      `SECURITY` features provide metadata necessary to securely resolve fields.
+      """
+      SECURITY
+
+      """
+      `EXECUTION` features provide metadata necessary for operation execution.
+      """
+      EXECUTION
+    }
+
+    type Query @authenticated {
+        t: T
+    }
+
+    type T {
+        f: String
+    }
+    "#;
+
+    #[test]
+    fn named_fragment_nested_in_authenticated_type() {
+        static QUERY: &str = r#"
+        query {
+            t {
+                ... F
+            }
+        }
+
+        fragment F on T {
+            f
+        }
+        "#;
+
+        let (doc, paths) = filter(AUTHENTICATED_ROOT_TYPE_SCHEMA, QUERY);
+
+        insta::assert_snapshot!(TestResult {
+            query: QUERY,
+            result: doc,
+            paths
+        });
+    }
+
+    #[test]
+    fn introspection_fragment_with_authenticated_root_query() {
+        static QUERY: &str = r#"
+        query {
+            __schema {
+                types {
+                    ... TypeDef
+                }
+            }
+        }
+
+        fragment TypeDef on __Type {
+            name
+        }
+        "#;
+
+        let (doc, paths) = filter(AUTHENTICATED_ROOT_TYPE_SCHEMA, QUERY);
+
+        insta::assert_snapshot!(TestResult {
+            query: QUERY,
+            result: doc,
+            paths
+        });
+    }
 }
