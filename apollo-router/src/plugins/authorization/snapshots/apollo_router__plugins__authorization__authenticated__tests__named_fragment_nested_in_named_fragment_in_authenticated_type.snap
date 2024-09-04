@@ -25,7 +25,7 @@ query:
         }
 
         fragment F3 on Query {
-            ...F3
+            ...F4
         }
 
         fragment F4 on Query {
@@ -42,7 +42,7 @@ query B($u: Int, $include: Boolean) {
 }
 
 fragment F3 on Query {
-  ...F3
+  ...F4
 }
 
 paths: ["/t"]

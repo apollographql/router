@@ -1818,7 +1818,7 @@ mod tests {
         }
 
         fragment F3 on Query {
-            ...F3
+            ...F4
         }
 
         fragment F4 on Query {
