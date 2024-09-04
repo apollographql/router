@@ -207,7 +207,7 @@ where
                             _,
                         )| WarmUpCachingQueryKey {
                             query: query.clone(),
-                            operation: operation.clone(),
+                            operation_name: operation.clone(),
                             hash: Some(hash.clone()),
                             metadata: metadata.clone(),
                             plan_options: plan_options.clone(),
@@ -252,7 +252,7 @@ where
                 for query in queries {
                     all_cache_keys.push(WarmUpCachingQueryKey {
                         query,
-                        operation: None,
+                        operation_name: None,
                         hash: None,
                         metadata: CacheKeyMetadata::default(),
                         plan_options: PlanOptions::default(),
@@ -269,7 +269,7 @@ where
         let mut reused = 0usize;
         for WarmUpCachingQueryKey {
             mut query,
-            operation,
+            operation_name,
             hash,
             metadata,
             plan_options,
@@ -278,8 +278,8 @@ where
         } in all_cache_keys
         {
             let context = Context::new();
-            let doc = match query_analysis
-                .parse_document(&query, operation.as_deref())
+            let (doc, _operation_def) = match query_analysis
+                .parse_document(&query, operation_name.as_deref())
                 .await
             {
                 Ok(doc) => doc,
@@ -288,7 +288,7 @@ where
 
             let caching_key = CachingQueryKey {
                 query: query.clone(),
-                operation: operation.clone(),
+                operation: operation_name.clone(),
                 hash: doc.hash.clone(),
                 schema_id: Arc::clone(&self.schema.schema_id),
                 metadata,
@@ -322,8 +322,8 @@ where
                 })
                 .await;
             if entry.is_first() {
-                let doc = match query_analysis
-                    .parse_document(&query, operation.as_deref())
+                let (doc, _operation_def) = match query_analysis
+                    .parse_document(&query, operation_name.as_deref())
                     .await
                 {
                     Ok(doc) => doc,
@@ -348,7 +348,7 @@ where
 
                 let request = QueryPlannerRequest {
                     query,
-                    operation_name: operation,
+                    operation_name,
                     context: context.clone(),
                 };
 
@@ -546,7 +546,7 @@ where
                                 }
                             }
 
-                            // This will be overridden when running in ApolloMetricsGenerationMode::New mode
+                            // This will be overridden by the Rust usage reporting implementation
                             if let Some(QueryPlannerContent::Plan { plan, .. }) = &content {
                                 context.extensions().with_lock(|mut lock| {
                                     lock.insert::<Arc<UsageReporting>>(plan.usage_reporting.clone())
@@ -685,7 +685,7 @@ impl Hash for CachingQueryKey {
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub(crate) struct WarmUpCachingQueryKey {
     pub(crate) query: String,
-    pub(crate) operation: Option<String>,
+    pub(crate) operation_name: Option<String>,
     pub(crate) hash: Option<Arc<QueryHash>>,
     pub(crate) metadata: CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
