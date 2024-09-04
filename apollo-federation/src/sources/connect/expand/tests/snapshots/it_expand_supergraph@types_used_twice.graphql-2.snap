@@ -55,7 +55,12 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                                     node: Field(
                                         "a",
                                     ),
-                                    loc: None,
+                                    loc: Some(
+                                        (
+                                            0,
+                                            1,
+                                        ),
+                                    ),
                                 },
                                 Some(
                                     Parsed {
@@ -68,20 +73,40 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                                                             node: Field(
                                                                 "id",
                                                             ),
-                                                            loc: None,
+                                                            loc: Some(
+                                                                (
+                                                                    4,
+                                                                    6,
+                                                                ),
+                                                            ),
                                                         },
                                                         None,
                                                     ),
-                                                    loc: None,
+                                                    loc: Some(
+                                                        (
+                                                            4,
+                                                            6,
+                                                        ),
+                                                    ),
                                                 },
                                             ],
                                             star: None,
                                         },
-                                        loc: None,
+                                        loc: Some(
+                                            (
+                                                2,
+                                                8,
+                                            ),
+                                        ),
                                     },
                                 ),
                             ),
-                            loc: None,
+                            loc: Some(
+                                (
+                                    0,
+                                    8,
+                                ),
+                            ),
                         },
                         Parsed {
                             node: Field(
@@ -90,7 +115,12 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                                     node: Field(
                                         "b",
                                     ),
-                                    loc: None,
+                                    loc: Some(
+                                        (
+                                            9,
+                                            10,
+                                        ),
+                                    ),
                                 },
                                 Some(
                                     Parsed {
@@ -103,7 +133,12 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                                                             node: Field(
                                                                 "a",
                                                             ),
-                                                            loc: None,
+                                                            loc: Some(
+                                                                (
+                                                                    13,
+                                                                    14,
+                                                                ),
+                                                            ),
                                                         },
                                                         Some(
                                                             Parsed {
@@ -116,34 +151,69 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                                                                                     node: Field(
                                                                                         "id",
                                                                                     ),
-                                                                                    loc: None,
+                                                                                    loc: Some(
+                                                                                        (
+                                                                                            17,
+                                                                                            19,
+                                                                                        ),
+                                                                                    ),
                                                                                 },
                                                                                 None,
                                                                             ),
-                                                                            loc: None,
+                                                                            loc: Some(
+                                                                                (
+                                                                                    17,
+                                                                                    19,
+                                                                                ),
+                                                                            ),
                                                                         },
                                                                     ],
                                                                     star: None,
                                                                 },
-                                                                loc: None,
+                                                                loc: Some(
+                                                                    (
+                                                                        15,
+                                                                        21,
+                                                                    ),
+                                                                ),
                                                             },
                                                         ),
                                                     ),
-                                                    loc: None,
+                                                    loc: Some(
+                                                        (
+                                                            13,
+                                                            21,
+                                                        ),
+                                                    ),
                                                 },
                                             ],
                                             star: None,
                                         },
-                                        loc: None,
+                                        loc: Some(
+                                            (
+                                                11,
+                                                23,
+                                            ),
+                                        ),
                                     },
                                 ),
                             ),
-                            loc: None,
+                            loc: Some(
+                                (
+                                    9,
+                                    23,
+                                ),
+                            ),
                         },
                     ],
                     star: None,
                 },
-                loc: None,
+                loc: Some(
+                    (
+                        0,
+                        23,
+                    ),
+                ),
             },
         ),
         config: None,

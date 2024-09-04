@@ -65,7 +65,12 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                 node: Var(
                                     Parsed {
                                         node: $args,
-                                        loc: None,
+                                        loc: Some(
+                                            (
+                                                0,
+                                                5,
+                                            ),
+                                        ),
                                     },
                                     Parsed {
                                         node: Key(
@@ -73,7 +78,12 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                 node: Field(
                                                     "input",
                                                 ),
-                                                loc: None,
+                                                loc: Some(
+                                                    (
+                                                        6,
+                                                        11,
+                                                    ),
+                                                ),
                                             },
                                             Parsed {
                                                 node: Selection(
@@ -87,11 +97,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                             node: Field(
                                                                                 "name",
                                                                             ),
-                                                                            loc: None,
+                                                                            loc: Some(
+                                                                                (
+                                                                                    14,
+                                                                                    18,
+                                                                                ),
+                                                                            ),
                                                                         },
                                                                         None,
                                                                     ),
-                                                                    loc: None,
+                                                                    loc: Some(
+                                                                        (
+                                                                            14,
+                                                                            18,
+                                                                        ),
+                                                                    ),
                                                                 },
                                                                 Parsed {
                                                                     node: Field(
@@ -100,11 +120,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                             node: Field(
                                                                                 "username",
                                                                             ),
-                                                                            loc: None,
+                                                                            loc: Some(
+                                                                                (
+                                                                                    19,
+                                                                                    27,
+                                                                                ),
+                                                                            ),
                                                                         },
                                                                         None,
                                                                     ),
-                                                                    loc: None,
+                                                                    loc: Some(
+                                                                        (
+                                                                            19,
+                                                                            27,
+                                                                        ),
+                                                                    ),
                                                                 },
                                                                 Parsed {
                                                                     node: Field(
@@ -113,11 +143,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                             node: Field(
                                                                                 "email",
                                                                             ),
-                                                                            loc: None,
+                                                                            loc: Some(
+                                                                                (
+                                                                                    28,
+                                                                                    33,
+                                                                                ),
+                                                                            ),
                                                                         },
                                                                         None,
                                                                     ),
-                                                                    loc: None,
+                                                                    loc: Some(
+                                                                        (
+                                                                            28,
+                                                                            33,
+                                                                        ),
+                                                                    ),
                                                                 },
                                                                 Parsed {
                                                                     node: Field(
@@ -126,11 +166,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                             node: Field(
                                                                                 "status",
                                                                             ),
-                                                                            loc: None,
+                                                                            loc: Some(
+                                                                                (
+                                                                                    34,
+                                                                                    40,
+                                                                                ),
+                                                                            ),
                                                                         },
                                                                         None,
                                                                     ),
-                                                                    loc: None,
+                                                                    loc: Some(
+                                                                        (
+                                                                            34,
+                                                                            40,
+                                                                        ),
+                                                                    ),
                                                                 },
                                                                 Parsed {
                                                                     node: Field(
@@ -139,7 +189,12 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                             node: Field(
                                                                                 "address",
                                                                             ),
-                                                                            loc: None,
+                                                                            loc: Some(
+                                                                                (
+                                                                                    41,
+                                                                                    48,
+                                                                                ),
+                                                                            ),
                                                                         },
                                                                         Some(
                                                                             Parsed {
@@ -152,11 +207,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                                                     node: Field(
                                                                                                         "street",
                                                                                                     ),
-                                                                                                    loc: None,
+                                                                                                    loc: Some(
+                                                                                                        (
+                                                                                                            51,
+                                                                                                            57,
+                                                                                                        ),
+                                                                                                    ),
                                                                                                 },
                                                                                                 None,
                                                                                             ),
-                                                                                            loc: None,
+                                                                                            loc: Some(
+                                                                                                (
+                                                                                                    51,
+                                                                                                    57,
+                                                                                                ),
+                                                                                            ),
                                                                                         },
                                                                                         Parsed {
                                                                                             node: Field(
@@ -165,11 +230,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                                                     node: Field(
                                                                                                         "suite",
                                                                                                     ),
-                                                                                                    loc: None,
+                                                                                                    loc: Some(
+                                                                                                        (
+                                                                                                            58,
+                                                                                                            63,
+                                                                                                        ),
+                                                                                                    ),
                                                                                                 },
                                                                                                 None,
                                                                                             ),
-                                                                                            loc: None,
+                                                                                            loc: Some(
+                                                                                                (
+                                                                                                    58,
+                                                                                                    63,
+                                                                                                ),
+                                                                                            ),
                                                                                         },
                                                                                         Parsed {
                                                                                             node: Field(
@@ -178,11 +253,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                                                     node: Field(
                                                                                                         "city",
                                                                                                     ),
-                                                                                                    loc: None,
+                                                                                                    loc: Some(
+                                                                                                        (
+                                                                                                            64,
+                                                                                                            68,
+                                                                                                        ),
+                                                                                                    ),
                                                                                                 },
                                                                                                 None,
                                                                                             ),
-                                                                                            loc: None,
+                                                                                            loc: Some(
+                                                                                                (
+                                                                                                    64,
+                                                                                                    68,
+                                                                                                ),
+                                                                                            ),
                                                                                         },
                                                                                         Parsed {
                                                                                             node: Field(
@@ -191,11 +276,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                                                     node: Field(
                                                                                                         "zipcode",
                                                                                                     ),
-                                                                                                    loc: None,
+                                                                                                    loc: Some(
+                                                                                                        (
+                                                                                                            69,
+                                                                                                            76,
+                                                                                                        ),
+                                                                                                    ),
                                                                                                 },
                                                                                                 None,
                                                                                             ),
-                                                                                            loc: None,
+                                                                                            loc: Some(
+                                                                                                (
+                                                                                                    69,
+                                                                                                    76,
+                                                                                                ),
+                                                                                            ),
                                                                                         },
                                                                                         Parsed {
                                                                                             node: Field(
@@ -204,7 +299,12 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                                                     node: Field(
                                                                                                         "geo",
                                                                                                     ),
-                                                                                                    loc: None,
+                                                                                                    loc: Some(
+                                                                                                        (
+                                                                                                            77,
+                                                                                                            80,
+                                                                                                        ),
+                                                                                                    ),
                                                                                                 },
                                                                                                 Some(
                                                                                                     Parsed {
@@ -217,11 +317,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                                                                             node: Field(
                                                                                                                                 "lat",
                                                                                                                             ),
-                                                                                                                            loc: None,
+                                                                                                                            loc: Some(
+                                                                                                                                (
+                                                                                                                                    83,
+                                                                                                                                    86,
+                                                                                                                                ),
+                                                                                                                            ),
                                                                                                                         },
                                                                                                                         None,
                                                                                                                     ),
-                                                                                                                    loc: None,
+                                                                                                                    loc: Some(
+                                                                                                                        (
+                                                                                                                            83,
+                                                                                                                            86,
+                                                                                                                        ),
+                                                                                                                    ),
                                                                                                                 },
                                                                                                                 Parsed {
                                                                                                                     node: Field(
@@ -230,46 +340,101 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                                                                             node: Field(
                                                                                                                                 "lng",
                                                                                                                             ),
-                                                                                                                            loc: None,
+                                                                                                                            loc: Some(
+                                                                                                                                (
+                                                                                                                                    87,
+                                                                                                                                    90,
+                                                                                                                                ),
+                                                                                                                            ),
                                                                                                                         },
                                                                                                                         None,
                                                                                                                     ),
-                                                                                                                    loc: None,
+                                                                                                                    loc: Some(
+                                                                                                                        (
+                                                                                                                            87,
+                                                                                                                            90,
+                                                                                                                        ),
+                                                                                                                    ),
                                                                                                                 },
                                                                                                             ],
                                                                                                             star: None,
                                                                                                         },
-                                                                                                        loc: None,
+                                                                                                        loc: Some(
+                                                                                                            (
+                                                                                                                81,
+                                                                                                                92,
+                                                                                                            ),
+                                                                                                        ),
                                                                                                     },
                                                                                                 ),
                                                                                             ),
-                                                                                            loc: None,
+                                                                                            loc: Some(
+                                                                                                (
+                                                                                                    77,
+                                                                                                    92,
+                                                                                                ),
+                                                                                            ),
                                                                                         },
                                                                                     ],
                                                                                     star: None,
                                                                                 },
-                                                                                loc: None,
+                                                                                loc: Some(
+                                                                                    (
+                                                                                        49,
+                                                                                        94,
+                                                                                    ),
+                                                                                ),
                                                                             },
                                                                         ),
                                                                     ),
-                                                                    loc: None,
+                                                                    loc: Some(
+                                                                        (
+                                                                            41,
+                                                                            94,
+                                                                        ),
+                                                                    ),
                                                                 },
                                                             ],
                                                             star: None,
                                                         },
-                                                        loc: None,
+                                                        loc: Some(
+                                                            (
+                                                                12,
+                                                                96,
+                                                            ),
+                                                        ),
                                                     },
                                                 ),
-                                                loc: None,
+                                                loc: Some(
+                                                    (
+                                                        12,
+                                                        96,
+                                                    ),
+                                                ),
                                             },
                                         ),
-                                        loc: None,
+                                        loc: Some(
+                                            (
+                                                5,
+                                                96,
+                                            ),
+                                        ),
                                     },
                                 ),
-                                loc: None,
+                                loc: Some(
+                                    (
+                                        0,
+                                        96,
+                                    ),
+                                ),
                             },
                         },
-                        loc: None,
+                        loc: Some(
+                            (
+                                0,
+                                96,
+                            ),
+                        ),
                     },
                 ),
             ),
@@ -285,16 +450,31 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                     node: Field(
                                         "id",
                                     ),
-                                    loc: None,
+                                    loc: Some(
+                                        (
+                                            0,
+                                            2,
+                                        ),
+                                    ),
                                 },
                                 None,
                             ),
-                            loc: None,
+                            loc: Some(
+                                (
+                                    0,
+                                    2,
+                                ),
+                            ),
                         },
                     ],
                     star: None,
                 },
-                loc: None,
+                loc: Some(
+                    (
+                        0,
+                        2,
+                    ),
+                ),
             },
         ),
         config: None,
@@ -367,10 +547,20 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                     node: Field(
                                                         "emailDomain",
                                                     ),
-                                                    loc: None,
+                                                    loc: Some(
+                                                        (
+                                                            0,
+                                                            11,
+                                                        ),
+                                                    ),
                                                 },
                                             },
-                                            loc: None,
+                                            loc: Some(
+                                                (
+                                                    0,
+                                                    12,
+                                                ),
+                                            ),
                                         },
                                         Parsed {
                                             node: PathSelection {
@@ -378,7 +568,12 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                     node: Var(
                                                         Parsed {
                                                             node: $args,
-                                                            loc: None,
+                                                            loc: Some(
+                                                                (
+                                                                    13,
+                                                                    18,
+                                                                ),
+                                                            ),
                                                         },
                                                         Parsed {
                                                             node: Key(
@@ -386,28 +581,58 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                     node: Field(
                                                                         "email",
                                                                     ),
-                                                                    loc: None,
+                                                                    loc: Some(
+                                                                        (
+                                                                            19,
+                                                                            24,
+                                                                        ),
+                                                                    ),
                                                                 },
                                                                 Parsed {
                                                                     node: Empty,
                                                                     loc: None,
                                                                 },
                                                             ),
-                                                            loc: None,
+                                                            loc: Some(
+                                                                (
+                                                                    18,
+                                                                    24,
+                                                                ),
+                                                            ),
                                                         },
                                                     ),
-                                                    loc: None,
+                                                    loc: Some(
+                                                        (
+                                                            13,
+                                                            24,
+                                                        ),
+                                                    ),
                                                 },
                                             },
-                                            loc: None,
+                                            loc: Some(
+                                                (
+                                                    13,
+                                                    24,
+                                                ),
+                                            ),
                                         },
                                     ),
-                                    loc: None,
+                                    loc: Some(
+                                        (
+                                            0,
+                                            24,
+                                        ),
+                                    ),
                                 },
                             ],
                             star: None,
                         },
-                        loc: None,
+                        loc: Some(
+                            (
+                                0,
+                                24,
+                            ),
+                        ),
                     },
                 ),
             ),
@@ -423,11 +648,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                     node: Field(
                                         "id",
                                     ),
-                                    loc: None,
+                                    loc: Some(
+                                        (
+                                            0,
+                                            2,
+                                        ),
+                                    ),
                                 },
                                 None,
                             ),
-                            loc: None,
+                            loc: Some(
+                                (
+                                    0,
+                                    2,
+                                ),
+                            ),
                         },
                         Parsed {
                             node: Field(
@@ -436,16 +671,31 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                     node: Field(
                                         "name",
                                     ),
-                                    loc: None,
+                                    loc: Some(
+                                        (
+                                            3,
+                                            7,
+                                        ),
+                                    ),
                                 },
                                 None,
                             ),
-                            loc: None,
+                            loc: Some(
+                                (
+                                    3,
+                                    7,
+                                ),
+                            ),
                         },
                     ],
                     star: None,
                 },
-                loc: None,
+                loc: Some(
+                    (
+                        0,
+                        7,
+                    ),
+                ),
             },
         ),
         config: None,
@@ -522,11 +772,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                     node: Field(
                                         "id",
                                     ),
-                                    loc: None,
+                                    loc: Some(
+                                        (
+                                            0,
+                                            2,
+                                        ),
+                                    ),
                                 },
                                 None,
                             ),
-                            loc: None,
+                            loc: Some(
+                                (
+                                    0,
+                                    2,
+                                ),
+                            ),
                         },
                         Parsed {
                             node: Field(
@@ -535,11 +795,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                     node: Field(
                                         "name",
                                     ),
-                                    loc: None,
+                                    loc: Some(
+                                        (
+                                            3,
+                                            7,
+                                        ),
+                                    ),
                                 },
                                 None,
                             ),
-                            loc: None,
+                            loc: Some(
+                                (
+                                    3,
+                                    7,
+                                ),
+                            ),
                         },
                         Parsed {
                             node: Field(
@@ -548,7 +818,12 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                     node: Field(
                                         "company",
                                     ),
-                                    loc: None,
+                                    loc: Some(
+                                        (
+                                            8,
+                                            15,
+                                        ),
+                                    ),
                                 },
                                 Some(
                                     Parsed {
@@ -561,11 +836,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                             node: Field(
                                                                 "name",
                                                             ),
-                                                            loc: None,
+                                                            loc: Some(
+                                                                (
+                                                                    20,
+                                                                    24,
+                                                                ),
+                                                            ),
                                                         },
                                                         None,
                                                     ),
-                                                    loc: None,
+                                                    loc: Some(
+                                                        (
+                                                            20,
+                                                            24,
+                                                        ),
+                                                    ),
                                                 },
                                                 Parsed {
                                                     node: Field(
@@ -574,11 +859,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                             node: Field(
                                                                 "catchPhrase",
                                                             ),
-                                                            loc: None,
+                                                            loc: Some(
+                                                                (
+                                                                    27,
+                                                                    38,
+                                                                ),
+                                                            ),
                                                         },
                                                         None,
                                                     ),
-                                                    loc: None,
+                                                    loc: Some(
+                                                        (
+                                                            27,
+                                                            38,
+                                                        ),
+                                                    ),
                                                 },
                                                 Parsed {
                                                     node: Field(
@@ -587,25 +882,50 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                             node: Field(
                                                                 "bs",
                                                             ),
-                                                            loc: None,
+                                                            loc: Some(
+                                                                (
+                                                                    41,
+                                                                    43,
+                                                                ),
+                                                            ),
                                                         },
                                                         None,
                                                     ),
-                                                    loc: None,
+                                                    loc: Some(
+                                                        (
+                                                            41,
+                                                            43,
+                                                        ),
+                                                    ),
                                                 },
                                             ],
                                             star: None,
                                         },
-                                        loc: None,
+                                        loc: Some(
+                                            (
+                                                16,
+                                                45,
+                                            ),
+                                        ),
                                     },
                                 ),
                             ),
-                            loc: None,
+                            loc: Some(
+                                (
+                                    8,
+                                    45,
+                                ),
+                            ),
                         },
                     ],
                     star: None,
                 },
-                loc: None,
+                loc: Some(
+                    (
+                        0,
+                        45,
+                    ),
+                ),
             },
         ),
         config: None,
@@ -675,11 +995,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                     node: Field(
                                         "id",
                                     ),
-                                    loc: None,
+                                    loc: Some(
+                                        (
+                                            0,
+                                            2,
+                                        ),
+                                    ),
                                 },
                                 None,
                             ),
-                            loc: None,
+                            loc: Some(
+                                (
+                                    0,
+                                    2,
+                                ),
+                            ),
                         },
                         Parsed {
                             node: Field(
@@ -688,11 +1018,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                     node: Field(
                                         "name",
                                     ),
-                                    loc: None,
+                                    loc: Some(
+                                        (
+                                            3,
+                                            7,
+                                        ),
+                                    ),
                                 },
                                 None,
                             ),
-                            loc: None,
+                            loc: Some(
+                                (
+                                    3,
+                                    7,
+                                ),
+                            ),
                         },
                         Parsed {
                             node: Field(
@@ -701,11 +1041,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                     node: Field(
                                         "username",
                                     ),
-                                    loc: None,
+                                    loc: Some(
+                                        (
+                                            8,
+                                            16,
+                                        ),
+                                    ),
                                 },
                                 None,
                             ),
-                            loc: None,
+                            loc: Some(
+                                (
+                                    8,
+                                    16,
+                                ),
+                            ),
                         },
                         Parsed {
                             node: Field(
@@ -714,11 +1064,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                     node: Field(
                                         "email",
                                     ),
-                                    loc: None,
+                                    loc: Some(
+                                        (
+                                            17,
+                                            22,
+                                        ),
+                                    ),
                                 },
                                 None,
                             ),
-                            loc: None,
+                            loc: Some(
+                                (
+                                    17,
+                                    22,
+                                ),
+                            ),
                         },
                         Parsed {
                             node: Field(
@@ -727,7 +1087,12 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                     node: Field(
                                         "address",
                                     ),
-                                    loc: None,
+                                    loc: Some(
+                                        (
+                                            23,
+                                            30,
+                                        ),
+                                    ),
                                 },
                                 Some(
                                     Parsed {
@@ -740,11 +1105,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                             node: Field(
                                                                 "street",
                                                             ),
-                                                            loc: None,
+                                                            loc: Some(
+                                                                (
+                                                                    35,
+                                                                    41,
+                                                                ),
+                                                            ),
                                                         },
                                                         None,
                                                     ),
-                                                    loc: None,
+                                                    loc: Some(
+                                                        (
+                                                            35,
+                                                            41,
+                                                        ),
+                                                    ),
                                                 },
                                                 Parsed {
                                                     node: Field(
@@ -753,11 +1128,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                             node: Field(
                                                                 "suite",
                                                             ),
-                                                            loc: None,
+                                                            loc: Some(
+                                                                (
+                                                                    44,
+                                                                    49,
+                                                                ),
+                                                            ),
                                                         },
                                                         None,
                                                     ),
-                                                    loc: None,
+                                                    loc: Some(
+                                                        (
+                                                            44,
+                                                            49,
+                                                        ),
+                                                    ),
                                                 },
                                                 Parsed {
                                                     node: Field(
@@ -766,11 +1151,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                             node: Field(
                                                                 "city",
                                                             ),
-                                                            loc: None,
+                                                            loc: Some(
+                                                                (
+                                                                    52,
+                                                                    56,
+                                                                ),
+                                                            ),
                                                         },
                                                         None,
                                                     ),
-                                                    loc: None,
+                                                    loc: Some(
+                                                        (
+                                                            52,
+                                                            56,
+                                                        ),
+                                                    ),
                                                 },
                                                 Parsed {
                                                     node: Field(
@@ -779,11 +1174,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                             node: Field(
                                                                 "zipcode",
                                                             ),
-                                                            loc: None,
+                                                            loc: Some(
+                                                                (
+                                                                    59,
+                                                                    66,
+                                                                ),
+                                                            ),
                                                         },
                                                         None,
                                                     ),
-                                                    loc: None,
+                                                    loc: Some(
+                                                        (
+                                                            59,
+                                                            66,
+                                                        ),
+                                                    ),
                                                 },
                                                 Parsed {
                                                     node: Field(
@@ -792,7 +1197,12 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                             node: Field(
                                                                 "geo",
                                                             ),
-                                                            loc: None,
+                                                            loc: Some(
+                                                                (
+                                                                    69,
+                                                                    72,
+                                                                ),
+                                                            ),
                                                         },
                                                         Some(
                                                             Parsed {
@@ -805,11 +1215,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                                     node: Field(
                                                                                         "lat",
                                                                                     ),
-                                                                                    loc: None,
+                                                                                    loc: Some(
+                                                                                        (
+                                                                                            79,
+                                                                                            82,
+                                                                                        ),
+                                                                                    ),
                                                                                 },
                                                                                 None,
                                                                             ),
-                                                                            loc: None,
+                                                                            loc: Some(
+                                                                                (
+                                                                                    79,
+                                                                                    82,
+                                                                                ),
+                                                                            ),
                                                                         },
                                                                         Parsed {
                                                                             node: Field(
@@ -818,29 +1238,59 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                                     node: Field(
                                                                                         "lng",
                                                                                     ),
-                                                                                    loc: None,
+                                                                                    loc: Some(
+                                                                                        (
+                                                                                            87,
+                                                                                            90,
+                                                                                        ),
+                                                                                    ),
                                                                                 },
                                                                                 None,
                                                                             ),
-                                                                            loc: None,
+                                                                            loc: Some(
+                                                                                (
+                                                                                    87,
+                                                                                    90,
+                                                                                ),
+                                                                            ),
                                                                         },
                                                                     ],
                                                                     star: None,
                                                                 },
-                                                                loc: None,
+                                                                loc: Some(
+                                                                    (
+                                                                        73,
+                                                                        94,
+                                                                    ),
+                                                                ),
                                                             },
                                                         ),
                                                     ),
-                                                    loc: None,
+                                                    loc: Some(
+                                                        (
+                                                            69,
+                                                            94,
+                                                        ),
+                                                    ),
                                                 },
                                             ],
                                             star: None,
                                         },
-                                        loc: None,
+                                        loc: Some(
+                                            (
+                                                31,
+                                                96,
+                                            ),
+                                        ),
                                     },
                                 ),
                             ),
-                            loc: None,
+                            loc: Some(
+                                (
+                                    23,
+                                    96,
+                                ),
+                            ),
                         },
                         Parsed {
                             node: Field(
@@ -849,11 +1299,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                     node: Field(
                                         "phone",
                                     ),
-                                    loc: None,
+                                    loc: Some(
+                                        (
+                                            97,
+                                            102,
+                                        ),
+                                    ),
                                 },
                                 None,
                             ),
-                            loc: None,
+                            loc: Some(
+                                (
+                                    97,
+                                    102,
+                                ),
+                            ),
                         },
                         Parsed {
                             node: Field(
@@ -862,11 +1322,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                     node: Field(
                                         "website",
                                     ),
-                                    loc: None,
+                                    loc: Some(
+                                        (
+                                            103,
+                                            110,
+                                        ),
+                                    ),
                                 },
                                 None,
                             ),
-                            loc: None,
+                            loc: Some(
+                                (
+                                    103,
+                                    110,
+                                ),
+                            ),
                         },
                         Parsed {
                             node: Field(
@@ -875,7 +1345,12 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                     node: Field(
                                         "company",
                                     ),
-                                    loc: None,
+                                    loc: Some(
+                                        (
+                                            111,
+                                            118,
+                                        ),
+                                    ),
                                 },
                                 Some(
                                     Parsed {
@@ -888,11 +1363,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                             node: Field(
                                                                 "name",
                                                             ),
-                                                            loc: None,
+                                                            loc: Some(
+                                                                (
+                                                                    123,
+                                                                    127,
+                                                                ),
+                                                            ),
                                                         },
                                                         None,
                                                     ),
-                                                    loc: None,
+                                                    loc: Some(
+                                                        (
+                                                            123,
+                                                            127,
+                                                        ),
+                                                    ),
                                                 },
                                                 Parsed {
                                                     node: Field(
@@ -901,11 +1386,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                             node: Field(
                                                                 "catchPhrase",
                                                             ),
-                                                            loc: None,
+                                                            loc: Some(
+                                                                (
+                                                                    130,
+                                                                    141,
+                                                                ),
+                                                            ),
                                                         },
                                                         None,
                                                     ),
-                                                    loc: None,
+                                                    loc: Some(
+                                                        (
+                                                            130,
+                                                            141,
+                                                        ),
+                                                    ),
                                                 },
                                                 Parsed {
                                                     node: Field(
@@ -914,11 +1409,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                             node: Field(
                                                                 "bs",
                                                             ),
-                                                            loc: None,
+                                                            loc: Some(
+                                                                (
+                                                                    144,
+                                                                    146,
+                                                                ),
+                                                            ),
                                                         },
                                                         None,
                                                     ),
-                                                    loc: None,
+                                                    loc: Some(
+                                                        (
+                                                            144,
+                                                            146,
+                                                        ),
+                                                    ),
                                                 },
                                                 Parsed {
                                                     node: Field(
@@ -927,25 +1432,50 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                             node: Field(
                                                                 "email",
                                                             ),
-                                                            loc: None,
+                                                            loc: Some(
+                                                                (
+                                                                    149,
+                                                                    154,
+                                                                ),
+                                                            ),
                                                         },
                                                         None,
                                                     ),
-                                                    loc: None,
+                                                    loc: Some(
+                                                        (
+                                                            149,
+                                                            154,
+                                                        ),
+                                                    ),
                                                 },
                                             ],
                                             star: None,
                                         },
-                                        loc: None,
+                                        loc: Some(
+                                            (
+                                                119,
+                                                156,
+                                            ),
+                                        ),
                                     },
                                 ),
                             ),
-                            loc: None,
+                            loc: Some(
+                                (
+                                    111,
+                                    156,
+                                ),
+                            ),
                         },
                     ],
                     star: None,
                 },
-                loc: None,
+                loc: Some(
+                    (
+                        0,
+                        156,
+                    ),
+                ),
             },
         ),
         config: None,

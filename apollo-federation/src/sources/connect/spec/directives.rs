@@ -594,11 +594,21 @@ mod tests {
                                             node: Field(
                                                 "id",
                                             ),
-                                            loc: None,
+                                            loc: Some(
+                                                (
+                                                    0,
+                                                    2,
+                                                ),
+                                            ),
                                         },
                                         None,
                                     ),
-                                    loc: None,
+                                    loc: Some(
+                                        (
+                                            0,
+                                            2,
+                                        ),
+                                    ),
                                 },
                                 Parsed {
                                     node: Field(
@@ -607,16 +617,31 @@ mod tests {
                                             node: Field(
                                                 "name",
                                             ),
-                                            loc: None,
+                                            loc: Some(
+                                                (
+                                                    3,
+                                                    7,
+                                                ),
+                                            ),
                                         },
                                         None,
                                     ),
-                                    loc: None,
+                                    loc: Some(
+                                        (
+                                            3,
+                                            7,
+                                        ),
+                                    ),
                                 },
                             ],
                             star: None,
                         },
-                        loc: None,
+                        loc: Some(
+                            (
+                                0,
+                                7,
+                            ),
+                        ),
                     },
                 ),
                 entity: false,
@@ -654,11 +679,21 @@ mod tests {
                                             node: Field(
                                                 "id",
                                             ),
-                                            loc: None,
+                                            loc: Some(
+                                                (
+                                                    0,
+                                                    2,
+                                                ),
+                                            ),
                                         },
                                         None,
                                     ),
-                                    loc: None,
+                                    loc: Some(
+                                        (
+                                            0,
+                                            2,
+                                        ),
+                                    ),
                                 },
                                 Parsed {
                                     node: Field(
@@ -667,11 +702,21 @@ mod tests {
                                             node: Field(
                                                 "title",
                                             ),
-                                            loc: None,
+                                            loc: Some(
+                                                (
+                                                    3,
+                                                    8,
+                                                ),
+                                            ),
                                         },
                                         None,
                                     ),
-                                    loc: None,
+                                    loc: Some(
+                                        (
+                                            3,
+                                            8,
+                                        ),
+                                    ),
                                 },
                                 Parsed {
                                     node: Field(
@@ -680,16 +725,31 @@ mod tests {
                                             node: Field(
                                                 "body",
                                             ),
-                                            loc: None,
+                                            loc: Some(
+                                                (
+                                                    9,
+                                                    13,
+                                                ),
+                                            ),
                                         },
                                         None,
                                     ),
-                                    loc: None,
+                                    loc: Some(
+                                        (
+                                            9,
+                                            13,
+                                        ),
+                                    ),
                                 },
                             ],
                             star: None,
                         },
-                        loc: None,
+                        loc: Some(
+                            (
+                                0,
+                                13,
+                            ),
+                        ),
                     },
                 ),
                 entity: false,

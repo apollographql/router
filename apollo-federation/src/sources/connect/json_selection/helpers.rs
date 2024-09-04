@@ -1,8 +1,10 @@
 use nom::character::complete::multispace0;
 use nom::IResult;
+use nom::Slice;
 use serde_json_bytes::Value as JSON;
 
 use super::location::Parsed;
+use super::location::Span;
 
 // This macro is handy for tests, but it absolutely should never be used with
 // dynamic input at runtime, since it panics if the selection string fails to
@@ -24,22 +26,35 @@ macro_rules! selection {
 
 // Consumes any amount of whitespace and/or comments starting with # until the
 // end of the line.
-pub fn spaces_or_comments(input: &str) -> IResult<&str, Parsed<&str>> {
+pub fn spaces_or_comments(input: Span) -> IResult<Span, Parsed<&str>> {
     let mut suffix = input;
     loop {
-        (suffix, _) = multispace0(suffix)?;
-        let mut chars = suffix.chars();
-        if let Some('#') = chars.next() {
-            for c in chars.by_ref() {
-                if c == '\n' {
-                    break;
-                }
+        let mut made_progress = false;
+        let suffix_and_spaces = multispace0(suffix)?;
+        suffix = suffix_and_spaces.0;
+        if !suffix_and_spaces.1.fragment().is_empty() {
+            made_progress = true;
+        }
+        let suffix_len = suffix.fragment().len();
+        if suffix.fragment().starts_with('#') {
+            if let Some(newline) = suffix.fragment().find('\n') {
+                suffix = suffix.slice(newline + 1..);
+            } else {
+                suffix = suffix.slice(suffix_len..);
             }
-            suffix = chars.as_str();
-        } else {
+            made_progress = true;
+        }
+        if !made_progress {
+            let end_of_slice = input.fragment().len() - suffix_len;
+            let start = input.location_offset();
+            let end = suffix.location_offset();
             return Ok((
                 suffix,
-                Parsed::new(&input[0..input.len() - suffix.len()], None),
+                Parsed::new(
+                    input.slice(0..end_of_slice).fragment(),
+                    // The location of the parsed spaces and comments
+                    Some((start, end)),
+                ),
             ));
         }
     }
@@ -63,9 +78,9 @@ mod tests {
     #[test]
     fn test_spaces_or_comments() {
         fn check(input: &str, (exp_remainder, exp_spaces): (&str, &str)) {
-            match spaces_or_comments(input) {
+            match spaces_or_comments(Span::new(input)) {
                 Ok((remainder, parsed)) => {
-                    assert_eq!(remainder, exp_remainder);
+                    assert_eq!(*remainder.fragment(), exp_remainder);
                     assert_eq!(*parsed.node(), exp_spaces);
                 }
                 Err(e) => panic!("error: {:?}", e),

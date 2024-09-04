@@ -74,16 +74,31 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ci
                                     node: Field(
                                         "id",
                                     ),
-                                    loc: None,
+                                    loc: Some(
+                                        (
+                                            0,
+                                            2,
+                                        ),
+                                    ),
                                 },
                                 None,
                             ),
-                            loc: None,
+                            loc: Some(
+                                (
+                                    0,
+                                    2,
+                                ),
+                            ),
                         },
                     ],
                     star: None,
                 },
-                loc: None,
+                loc: Some(
+                    (
+                        0,
+                        2,
+                    ),
+                ),
             },
         ),
         config: None,
@@ -167,16 +182,31 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ci
                                     node: Field(
                                         "id",
                                     ),
-                                    loc: None,
+                                    loc: Some(
+                                        (
+                                            0,
+                                            2,
+                                        ),
+                                    ),
                                 },
                                 None,
                             ),
-                            loc: None,
+                            loc: Some(
+                                (
+                                    0,
+                                    2,
+                                ),
+                            ),
                         },
                     ],
                     star: None,
                 },
-                loc: None,
+                loc: Some(
+                    (
+                        0,
+                        2,
+                    ),
+                ),
             },
         ),
         config: None,

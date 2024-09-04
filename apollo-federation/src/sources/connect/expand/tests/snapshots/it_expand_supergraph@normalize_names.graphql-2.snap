@@ -55,11 +55,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/no
                                     node: Field(
                                         "id",
                                     ),
-                                    loc: None,
+                                    loc: Some(
+                                        (
+                                            0,
+                                            2,
+                                        ),
+                                    ),
                                 },
                                 None,
                             ),
-                            loc: None,
+                            loc: Some(
+                                (
+                                    0,
+                                    2,
+                                ),
+                            ),
                         },
                         Parsed {
                             node: Field(
@@ -68,16 +78,31 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/no
                                     node: Field(
                                         "a",
                                     ),
-                                    loc: None,
+                                    loc: Some(
+                                        (
+                                            3,
+                                            4,
+                                        ),
+                                    ),
                                 },
                                 None,
                             ),
-                            loc: None,
+                            loc: Some(
+                                (
+                                    3,
+                                    4,
+                                ),
+                            ),
                         },
                     ],
                     star: None,
                 },
-                loc: None,
+                loc: Some(
+                    (
+                        0,
+                        4,
+                    ),
+                ),
             },
         ),
         config: None,
@@ -147,11 +172,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/no
                                     node: Field(
                                         "id",
                                     ),
-                                    loc: None,
+                                    loc: Some(
+                                        (
+                                            0,
+                                            2,
+                                        ),
+                                    ),
                                 },
                                 None,
                             ),
-                            loc: None,
+                            loc: Some(
+                                (
+                                    0,
+                                    2,
+                                ),
+                            ),
                         },
                         Parsed {
                             node: Field(
@@ -160,11 +195,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/no
                                     node: Field(
                                         "a",
                                     ),
-                                    loc: None,
+                                    loc: Some(
+                                        (
+                                            3,
+                                            4,
+                                        ),
+                                    ),
                                 },
                                 None,
                             ),
-                            loc: None,
+                            loc: Some(
+                                (
+                                    3,
+                                    4,
+                                ),
+                            ),
                         },
                         Parsed {
                             node: Field(
@@ -173,16 +218,31 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/no
                                     node: Field(
                                         "b",
                                     ),
-                                    loc: None,
+                                    loc: Some(
+                                        (
+                                            5,
+                                            6,
+                                        ),
+                                    ),
                                 },
                                 None,
                             ),
-                            loc: None,
+                            loc: Some(
+                                (
+                                    5,
+                                    6,
+                                ),
+                            ),
                         },
                     ],
                     star: None,
                 },
-                loc: None,
+                loc: Some(
+                    (
+                        0,
+                        6,
+                    ),
+                ),
             },
         ),
         config: None,

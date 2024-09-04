@@ -39,6 +39,7 @@ url = "2"
 either = "1.12"
 tracing = "0.1.40"
 ron = { version = "0.8.1", optional = true }
+nom_locate = "4.2.0"
 
 [dev-dependencies]
 hex.workspace = true

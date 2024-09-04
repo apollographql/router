@@ -85,17 +85,32 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ne
                         node: Var(
                             Parsed {
                                 node: $,
-                                loc: None,
+                                loc: Some(
+                                    (
+                                        0,
+                                        1,
+                                    ),
+                                ),
                             },
                             Parsed {
                                 node: Empty,
                                 loc: None,
                             },
                         ),
-                        loc: None,
+                        loc: Some(
+                            (
+                                0,
+                                1,
+                            ),
+                        ),
                     },
                 },
-                loc: None,
+                loc: Some(
+                    (
+                        0,
+                        1,
+                    ),
+                ),
             },
         ),
         config: None,

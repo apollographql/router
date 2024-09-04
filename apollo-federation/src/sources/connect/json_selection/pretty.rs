@@ -337,6 +337,7 @@ impl PrettyPrintable for Parsed<StarSelection> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::location::Span;
     use crate::sources::connect::json_selection::pretty::indent_chars;
     use crate::sources::connect::json_selection::NamedSelection;
     use crate::sources::connect::json_selection::PrettyPrintable;
@@ -377,7 +378,7 @@ mod tests {
 
     #[test]
     fn it_prints_a_star_selection() {
-        let (unmatched, star_selection) = StarSelection::parse("rest: *").unwrap();
+        let (unmatched, star_selection) = StarSelection::parse(Span::new("rest: *")).unwrap();
         assert!(unmatched.is_empty());
 
         test_permutations(star_selection, "rest: *");
@@ -385,7 +386,8 @@ mod tests {
 
     #[test]
     fn it_prints_a_star_selection_with_subselection() {
-        let (unmatched, star_selection) = StarSelection::parse("rest: * { a b }").unwrap();
+        let (unmatched, star_selection) =
+            StarSelection::parse(Span::new("rest: * { a b }")).unwrap();
         assert!(unmatched.is_empty());
 
         test_permutations(star_selection, "rest: * {\n  a\n  b\n}");
@@ -407,7 +409,7 @@ mod tests {
             "cool: {\n  a\n  b\n}",
         ];
         for selection in selections {
-            let (unmatched, named_selection) = NamedSelection::parse(selection).unwrap();
+            let (unmatched, named_selection) = NamedSelection::parse(Span::new(selection)).unwrap();
             assert!(
                 unmatched.is_empty(),
                 "static named selection was not fully parsed: '{selection}' ({named_selection:?}) had unmatched '{unmatched}'"
@@ -431,7 +433,7 @@ mod tests {
             ".single {\n  x\n}",
         ];
         for path in paths {
-            let (unmatched, path_selection) = PathSelection::parse(path).unwrap();
+            let (unmatched, path_selection) = PathSelection::parse(Span::new(path)).unwrap();
             assert!(
                 unmatched.is_empty(),
                 "static path was not fully parsed: '{path}' ({path_selection:?}) had unmatched '{unmatched}'"
@@ -444,7 +446,7 @@ mod tests {
     #[test]
     fn it_prints_a_sub_selection() {
         let sub = "{\n  a\n  b\n}";
-        let (unmatched, sub_selection) = SubSelection::parse(sub).unwrap();
+        let (unmatched, sub_selection) = SubSelection::parse(Span::new(sub)).unwrap();
         assert!(
             unmatched.is_empty(),
             "static path was not fully parsed: '{sub}' ({sub_selection:?}) had unmatched '{unmatched}'"
@@ -465,7 +467,8 @@ mod tests {
         let sub_indented = "{\n  a {\n    b {\n      c\n    }\n  }\n}";
         let sub_super_indented = "        {\n          a {\n            b {\n              c\n            }\n          }\n        }";
 
-        let (unmatched, sub_selection) = SubSelection::parse(sub).unwrap();
+        let (unmatched, sub_selection) = SubSelection::parse(Span::new(sub)).unwrap();
+
         assert!(
             unmatched.is_empty(),
             "static nested sub was not fully parsed: '{sub}' ({sub_selection:?}) had unmatched '{unmatched}'"
