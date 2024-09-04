@@ -17,6 +17,7 @@ use crate::plugins::connectors::make_requests::ResponseTypeName;
 use crate::plugins::connectors::plugin::ConnectorContext;
 use crate::plugins::connectors::plugin::SelectionData;
 use crate::services::connect::Response;
+use crate::services::fetch::AddSubgraphNameExt;
 
 const ENTITIES: &str = "_entities";
 const TYPENAME: &str = "__typename";
@@ -163,7 +164,8 @@ pub(crate) async fn handle_responses<T: HttpBody>(
                                 parts.status.canonical_reason().unwrap_or("Unknown")
                             ),
                         }
-                        .to_graphql_error(None),
+                        .to_graphql_error(None)
+                        .add_subgraph_name(&connector.id.subgraph_name),
                     );
                     if let Some(ref debug) = debug {
                         match serde_json::from_slice(body) {
@@ -701,6 +703,9 @@ mod tests {
                                 "http": Object({
                                     "status": Number(404),
                                 }),
+                                "fetch_subgraph_name": String(
+                                    "subgraph_name",
+                                ),
                             },
                         },
                         Error {
@@ -720,6 +725,9 @@ mod tests {
                                 "http": Object({
                                     "status": Number(500),
                                 }),
+                                "fetch_subgraph_name": String(
+                                    "subgraph_name",
+                                ),
                             },
                         },
                     ],

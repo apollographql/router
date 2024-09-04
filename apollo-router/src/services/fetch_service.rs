@@ -15,6 +15,7 @@ use tracing::instrument::Instrumented;
 use tracing::Instrument;
 
 use super::connector_service::ConnectorServiceFactory;
+use super::fetch::AddSubgraphNameExt;
 use super::fetch::BoxService;
 use super::fetch::SubscriptionRequest;
 use super::new_service::ServiceFactory;
@@ -147,7 +148,8 @@ impl FetchService {
                         .build(),
                 )
                 .await
-                .map_to_graphql_error(subgraph_name, &current_dir.to_owned())
+                .map_to_graphql_error(subgraph_name.clone(), &current_dir.to_owned())
+                .add_subgraph_name(subgraph_name.as_str())
             {
                 Err(e) => {
                     return Ok((Value::default(), vec![e]));

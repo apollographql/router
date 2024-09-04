@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use serde_json_bytes::json;
 use serde_json_bytes::Value;
 use tokio::sync::mpsc;
 use tower::BoxError;
@@ -16,6 +17,8 @@ use crate::query_planner::fetch::Variables;
 use crate::query_planner::subscription::SubscriptionHandle;
 use crate::query_planner::subscription::SubscriptionNode;
 use crate::Context;
+
+const FETCH_SUBGRAPH_NAME_EXTENSION_KEY: &str = "fetch_subgraph_name";
 
 pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 
@@ -125,5 +128,43 @@ impl<T> ErrorMapping<T> for Result<T, BoxError> {
             },
         })
         .map_err(|e| e.to_graphql_error(Some(current_dir.to_owned())))
+    }
+}
+
+/// Extension trait for adding a subgraph name associated with an error.
+pub(crate) trait AddSubgraphNameExt {
+    /// Add the subgraph name associated with an error
+    fn add_subgraph_name(self, subgraph_name: &str) -> Self;
+}
+
+impl AddSubgraphNameExt for Error {
+    fn add_subgraph_name(mut self, subgraph_name: &str) -> Self {
+        self.extensions
+            .insert(FETCH_SUBGRAPH_NAME_EXTENSION_KEY, json!(subgraph_name));
+        self
+    }
+}
+
+impl<T> AddSubgraphNameExt for Result<T, Error> {
+    fn add_subgraph_name(self, subgraph_name: &str) -> Self {
+        self.map_err(|e| e.add_subgraph_name(subgraph_name))
+    }
+}
+
+/// Extension trait for getting the subgraph name associated with an error, if any.
+pub(crate) trait SubgraphNameExt {
+    /// Get the subgraph name associated with an error, if any
+    fn subgraph_name(&mut self) -> Option<String>;
+}
+
+impl SubgraphNameExt for Error {
+    fn subgraph_name(&mut self) -> Option<String> {
+        if let Some(subgraph_name) = self.extensions.remove(FETCH_SUBGRAPH_NAME_EXTENSION_KEY) {
+            subgraph_name
+                .as_str()
+                .map(|subgraph_name| subgraph_name.to_string())
+        } else {
+            None
+        }
     }
 }
