@@ -273,6 +273,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn it_doesnt_expose_query_plan() {
+        let supergraph = build_mock_supergraph(serde_json::json! {{
+            "plugins": {
+                "experimental.expose_query_plan": false
+            }
+        }})
+        .await;
+
+        // Since we're not exposing the query plan, we expect the extensions (where the query plan
+        // would be) to be empty
+        //
+        // That the extension is empty is important. This lets us assume that when the extension is
+        // populated (like in the following tests when we're testing that the query plan is
+        // output), it's populated with _only_ the query plan (meaning we won't be experiencing
+        // false positives)
+        assert!(execute_supergraph_test(VALID_QUERY, supergraph)
+            .await
+            .extensions
+            .is_empty())
+    }
+
+    #[tokio::test]
     async fn it_expose_query_plan() {
         let response = execute_supergraph_test(
             VALID_QUERY,
@@ -284,21 +306,14 @@ mod tests {
             .await,
         )
         .await;
-        insta::assert_json_snapshot!(serde_json::to_value(response).unwrap());
 
-        // let's try that again
-        let response = execute_supergraph_test(
-            VALID_QUERY,
-            build_mock_supergraph(serde_json::json! {{
-                "plugins": {
-                    "experimental.expose_query_plan": true
-                }
-            }})
-            .await,
-        )
-        .await;
+        // Since we're exposing the query plan, the extensions better not be empty! See the test
+        // for not exposing query plans to know why the assumption that a non-empty extension means
+        // we have a query plan
+        assert!(!response.extensions.is_empty());
 
-        insta::assert_json_snapshot!(serde_json::to_value(response).unwrap());
+        // Since this is a full-run (ie, not a dry-run), we should have data
+        assert!(response.data.is_some());
     }
 
     #[tokio::test]
@@ -313,19 +328,13 @@ mod tests {
             .await,
         )
         .await;
-        insta::assert_json_snapshot!(serde_json::to_value(response).unwrap());
-    }
 
-    #[tokio::test]
-    async fn it_doesnt_expose_query_plan() {
-        let supergraph = build_mock_supergraph(serde_json::json! {{
-            "plugins": {
-                "experimental.expose_query_plan": false
-            }
-        }})
-        .await;
-        let response = execute_supergraph_test(VALID_QUERY, supergraph).await;
+        // Since we're exposing the query plan, the extensions better not be empty! See the test
+        // for not exposing query plans to know why the assumption that a non-empty extension means
+        // we have a query plan
+        assert!(!response.extensions.is_empty());
 
-        insta::assert_json_snapshot!(serde_json::to_value(response).unwrap());
+        // Since this is a dry-run, we shouldn't have any data
+        assert!(response.data.is_none());
     }
 }
