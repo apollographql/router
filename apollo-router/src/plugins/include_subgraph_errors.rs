@@ -80,6 +80,7 @@ impl Plugin for IncludeSubgraphErrors {
         service
     }
 
+    // TODO: promote fetch_service to a plugin hook
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
         let all = self.config.all;
         let subgraphs = self.config.subgraphs.clone();
