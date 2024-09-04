@@ -2881,6 +2881,9 @@ impl FetchSelectionSet {
 
     fn add_selections(&mut self, selection_set: &Arc<SelectionSet>) -> Result<(), FederationError> {
         Arc::make_mut(&mut self.selection_set).add_selection_set(selection_set)?;
+        // TODO: when calling this multiple times, maybe only re-compute conditions at the end?
+        // Or make it lazily-initialized and computed on demand?
+        self.conditions = self.selection_set.conditions()?;
         Ok(())
     }
 }
