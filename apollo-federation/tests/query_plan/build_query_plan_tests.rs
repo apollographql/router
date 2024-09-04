@@ -1080,7 +1080,6 @@ fn test_merging_fetches_reset_cached_costs() {
     );
 }
 
-
 #[test]
 fn handles_multiple_conditions_on_abstract_types() {
     let planner = planner!(
