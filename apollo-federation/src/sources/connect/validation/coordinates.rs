@@ -122,27 +122,39 @@ pub(super) fn connect_directive_name_coordinate(
     format!("`@{connect_directive_name}({CONNECT_SOURCE_ARGUMENT_NAME}: {source})` on `{object_name}.{field_name}`")
 }
 
-pub(super) fn http_argument_coordinate(
-    directive_name: &DirectiveName,
-    argument_name: &Name,
-) -> String {
-    format!("`@{directive_name}({argument_name}:)`")
+/// Coordinate for an `HTTP.headers` argument in `@source` or `@connect`.
+#[derive(Clone, Copy)]
+pub(super) enum HttpHeadersCoordinate<'a> {
+    Source {
+        directive_name: &'a Name,
+    },
+    Connect {
+        directive_name: &'a Name,
+        object: &'a Name,
+        field: &'a Name,
+    },
 }
 
-pub(super) fn http_header_argument_coordinate(
-    directive_name: &Name,
-    object: Option<&Name>,
-    field: Option<&Name>,
-) -> String {
-    match (object, field) {
-        (Some(object), Some(field)) => {
-            format!(
-                "`@{directive_name}({HTTP_ARGUMENT_NAME}.{HEADERS_ARGUMENT_NAME}:)` on `{}.{}`",
-                object, field
-            )
-        }
-        _ => {
-            format!("`@{directive_name}({HTTP_ARGUMENT_NAME}.{HEADERS_ARGUMENT_NAME}:)`")
+impl Display for HttpHeadersCoordinate<'_> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self {
+            Self::Connect {
+                directive_name,
+                object,
+                field,
+            } => {
+                write!(
+                    f,
+                    "`@{directive_name}({HTTP_ARGUMENT_NAME}.{HEADERS_ARGUMENT_NAME}:)` on `{}.{}`",
+                    object, field
+                )
+            }
+            Self::Source { directive_name } => {
+                write!(
+                    f,
+                    "`@{directive_name}({HTTP_ARGUMENT_NAME}.{HEADERS_ARGUMENT_NAME}:)`"
+                )
+            }
         }
     }
 }

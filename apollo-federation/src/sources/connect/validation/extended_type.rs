@@ -18,6 +18,7 @@ use itertools::Itertools;
 use super::coordinates::connect_directive_coordinate;
 use super::coordinates::connect_directive_url_coordinate;
 use super::coordinates::HTTPCoordinate;
+use super::coordinates::HttpHeadersCoordinate;
 use super::entity::validate_entity_arg;
 use super::http::headers;
 use super::http::method;
@@ -321,10 +322,12 @@ fn validate_field(
         errors.extend(
             headers::validate_arg(
                 http_arg,
-                connect_directive_name,
                 source_map,
-                Some(&object.name),
-                Some(&field.name),
+            HttpHeadersCoordinate::Connect {
+                directive_name: connect_directive_name,
+                object: &object.name,
+                field: &field.name,
+            },
             )
             .into_iter()
             .flatten(),

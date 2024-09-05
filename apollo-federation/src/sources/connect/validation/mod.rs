@@ -22,6 +22,7 @@ mod selection;
 mod source_name;
 
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::ops::Range;
 
 use apollo_compiler::ast::OperationType;
@@ -50,6 +51,7 @@ use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
 use crate::sources::connect::spec::schema::SOURCE_NAME_ARGUMENT_NAME;
+use crate::sources::connect::validation::coordinates::HttpHeadersCoordinate;
 use crate::sources::connect::validation::http::headers;
 use crate::sources::connect::ConnectSpecDefinition;
 use crate::subgraph::spec::CONTEXT_DIRECTIVE_NAME;
@@ -306,9 +308,15 @@ fn validate_source(directive: &Component<Directive>, sources: &SourceMap) -> Sou
         }
 
         errors.extend(
-            headers::validate_arg(http_arg, &directive.name, sources, None, None)
-                .into_iter()
-                .flatten(),
+            headers::validate_arg(
+                http_arg,
+                sources,
+                HttpHeadersCoordinate::Source {
+                    directive_name: &directive.name,
+                },
+            )
+            .into_iter()
+            .flatten(),
         );
     } else {
         errors.push(Message {
@@ -355,9 +363,9 @@ fn parse_url(value: &Node<Value>, coordinate: &str, sources: &SourceMap) -> Resu
     Ok(url)
 }
 
-fn require_value_is_str<'a>(
+fn require_value_is_str<'a, Coordinate: Display>(
     value: &'a Node<Value>,
-    coordinate: &str,
+    coordinate: Coordinate,
     sources: &SourceMap,
 ) -> Result<&'a str, Message> {
     value.as_str().ok_or_else(|| Message {
