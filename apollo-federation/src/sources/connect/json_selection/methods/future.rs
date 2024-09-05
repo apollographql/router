@@ -379,6 +379,7 @@ pub(super) fn get_method(
                         }
                     }
                     _ => {
+                        println!("method ->{} got parsed_args.range() of {:?}", method_name.node(), parsed_args.range());
                         errors.insert(ApplyToError::new(
                             format!("Method ->{}({}) requires an object input", method_name.node(), key),
                             input_path.to_vec(),

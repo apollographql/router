@@ -55,7 +55,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                                     node: Field(
                                         "a",
                                     ),
-                                    loc: Some(
+                                    range: Some(
                                         (
                                             0,
                                             1,
@@ -73,7 +73,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                                                             node: Field(
                                                                 "id",
                                                             ),
-                                                            loc: Some(
+                                                            range: Some(
                                                                 (
                                                                     4,
                                                                     6,
@@ -82,7 +82,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                                                         },
                                                         None,
                                                     ),
-                                                    loc: Some(
+                                                    range: Some(
                                                         (
                                                             4,
                                                             6,
@@ -92,7 +92,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                                             ],
                                             star: None,
                                         },
-                                        loc: Some(
+                                        range: Some(
                                             (
                                                 2,
                                                 8,
@@ -101,7 +101,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                                     },
                                 ),
                             ),
-                            loc: Some(
+                            range: Some(
                                 (
                                     0,
                                     8,
@@ -115,7 +115,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                                     node: Field(
                                         "b",
                                     ),
-                                    loc: Some(
+                                    range: Some(
                                         (
                                             9,
                                             10,
@@ -133,7 +133,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                                                             node: Field(
                                                                 "a",
                                                             ),
-                                                            loc: Some(
+                                                            range: Some(
                                                                 (
                                                                     13,
                                                                     14,
@@ -151,7 +151,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                                                                                     node: Field(
                                                                                         "id",
                                                                                     ),
-                                                                                    loc: Some(
+                                                                                    range: Some(
                                                                                         (
                                                                                             17,
                                                                                             19,
@@ -160,7 +160,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                                                                                 },
                                                                                 None,
                                                                             ),
-                                                                            loc: Some(
+                                                                            range: Some(
                                                                                 (
                                                                                     17,
                                                                                     19,
@@ -170,7 +170,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                                                                     ],
                                                                     star: None,
                                                                 },
-                                                                loc: Some(
+                                                                range: Some(
                                                                     (
                                                                         15,
                                                                         21,
@@ -179,7 +179,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                                                             },
                                                         ),
                                                     ),
-                                                    loc: Some(
+                                                    range: Some(
                                                         (
                                                             13,
                                                             21,
@@ -189,7 +189,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                                             ],
                                             star: None,
                                         },
-                                        loc: Some(
+                                        range: Some(
                                             (
                                                 11,
                                                 23,
@@ -198,7 +198,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                                     },
                                 ),
                             ),
-                            loc: Some(
+                            range: Some(
                                 (
                                     9,
                                     23,
@@ -208,7 +208,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                     ],
                     star: None,
                 },
-                loc: Some(
+                range: Some(
                     (
                         0,
                         23,

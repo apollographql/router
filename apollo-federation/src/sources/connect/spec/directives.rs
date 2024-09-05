@@ -594,7 +594,7 @@ mod tests {
                                             node: Field(
                                                 "id",
                                             ),
-                                            loc: Some(
+                                            range: Some(
                                                 (
                                                     0,
                                                     2,
@@ -603,7 +603,7 @@ mod tests {
                                         },
                                         None,
                                     ),
-                                    loc: Some(
+                                    range: Some(
                                         (
                                             0,
                                             2,
@@ -617,7 +617,7 @@ mod tests {
                                             node: Field(
                                                 "name",
                                             ),
-                                            loc: Some(
+                                            range: Some(
                                                 (
                                                     3,
                                                     7,
@@ -626,7 +626,7 @@ mod tests {
                                         },
                                         None,
                                     ),
-                                    loc: Some(
+                                    range: Some(
                                         (
                                             3,
                                             7,
@@ -636,7 +636,7 @@ mod tests {
                             ],
                             star: None,
                         },
-                        loc: Some(
+                        range: Some(
                             (
                                 0,
                                 7,
@@ -679,7 +679,7 @@ mod tests {
                                             node: Field(
                                                 "id",
                                             ),
-                                            loc: Some(
+                                            range: Some(
                                                 (
                                                     0,
                                                     2,
@@ -688,7 +688,7 @@ mod tests {
                                         },
                                         None,
                                     ),
-                                    loc: Some(
+                                    range: Some(
                                         (
                                             0,
                                             2,
@@ -702,7 +702,7 @@ mod tests {
                                             node: Field(
                                                 "title",
                                             ),
-                                            loc: Some(
+                                            range: Some(
                                                 (
                                                     3,
                                                     8,
@@ -711,7 +711,7 @@ mod tests {
                                         },
                                         None,
                                     ),
-                                    loc: Some(
+                                    range: Some(
                                         (
                                             3,
                                             8,
@@ -725,7 +725,7 @@ mod tests {
                                             node: Field(
                                                 "body",
                                             ),
-                                            loc: Some(
+                                            range: Some(
                                                 (
                                                     9,
                                                     13,
@@ -734,7 +734,7 @@ mod tests {
                                         },
                                         None,
                                     ),
-                                    loc: Some(
+                                    range: Some(
                                         (
                                             9,
                                             13,
@@ -744,7 +744,7 @@ mod tests {
                             ],
                             star: None,
                         },
-                        loc: Some(
+                        range: Some(
                             (
                                 0,
                                 13,

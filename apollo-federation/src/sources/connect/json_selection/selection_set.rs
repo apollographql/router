@@ -43,7 +43,7 @@ impl JSONSelection {
         match self {
             Self::Named(sub) => Self::Named(Parsed::new(
                 sub.apply_selection_set(selection_set),
-                sub.loc(),
+                sub.range(),
             )),
             Self::Path(path) => Self::Path(path.apply_selection_set(selection_set)),
         }
@@ -121,7 +121,7 @@ impl SubSelection {
                                     sub.as_ref().map(|sub| {
                                         Parsed::new(
                                             sub.apply_selection_set(&field.selection_set),
-                                            sub.loc(),
+                                            sub.range(),
                                         )
                                     }),
                                 ),
@@ -164,7 +164,7 @@ impl SubSelection {
                                     Parsed::new(Alias::new(field.response_key().as_str()), None),
                                     Parsed::new(
                                         sub.apply_selection_set(&field.selection_set),
-                                        sub.loc(),
+                                        sub.range(),
                                     ),
                                 ),
                                 None,
@@ -205,7 +205,7 @@ impl PathSelection {
         Self {
             path: Parsed::new(
                 self.path.apply_selection_set(selection_set),
-                self.path.loc(),
+                self.path.range(),
             ),
         }
     }
@@ -216,20 +216,20 @@ impl PathList {
         match self {
             Self::Var(name, path) => Self::Var(
                 name.clone(),
-                Parsed::new(path.apply_selection_set(selection_set), path.loc()),
+                Parsed::new(path.apply_selection_set(selection_set), path.range()),
             ),
             Self::Key(key, path) => Self::Key(
                 key.clone(),
-                Parsed::new(path.apply_selection_set(selection_set), path.loc()),
+                Parsed::new(path.apply_selection_set(selection_set), path.range()),
             ),
             Self::Method(method_name, args, path) => Self::Method(
                 method_name.clone(),
                 args.clone(),
-                Parsed::new(path.apply_selection_set(selection_set), path.loc()),
+                Parsed::new(path.apply_selection_set(selection_set), path.range()),
             ),
             Self::Selection(sub) => Self::Selection(Parsed::new(
                 sub.apply_selection_set(selection_set),
-                sub.loc(),
+                sub.range(),
             )),
             Self::Empty => Self::Empty,
         }

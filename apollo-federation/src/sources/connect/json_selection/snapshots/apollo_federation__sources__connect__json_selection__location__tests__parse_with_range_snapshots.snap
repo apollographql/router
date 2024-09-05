@@ -14,7 +14,7 @@ Named(
                                     node: Field(
                                         "path",
                                     ),
-                                    loc: Some(
+                                    range: Some(
                                         (
                                             9,
                                             13,
@@ -22,7 +22,7 @@ Named(
                                     ),
                                 },
                             },
-                            loc: Some(
+                            range: Some(
                                 (
                                     9,
                                     14,
@@ -36,7 +36,7 @@ Named(
                                         node: Field(
                                             "some",
                                         ),
-                                        loc: Some(
+                                        range: Some(
                                             (
                                                 15,
                                                 19,
@@ -49,7 +49,7 @@ Named(
                                                 node: Field(
                                                     "nested",
                                                 ),
-                                                loc: Some(
+                                                range: Some(
                                                     (
                                                         20,
                                                         26,
@@ -62,7 +62,7 @@ Named(
                                                         node: Field(
                                                             "path",
                                                         ),
-                                                        loc: Some(
+                                                        range: Some(
                                                             (
                                                                 27,
                                                                 31,
@@ -81,7 +81,7 @@ Named(
                                                                                     node: Field(
                                                                                         "isbn",
                                                                                     ),
-                                                                                    loc: Some(
+                                                                                    range: Some(
                                                                                         (
                                                                                             34,
                                                                                             38,
@@ -90,7 +90,7 @@ Named(
                                                                                 },
                                                                                 None,
                                                                             ),
-                                                                            loc: Some(
+                                                                            range: Some(
                                                                                 (
                                                                                     34,
                                                                                     38,
@@ -104,7 +104,7 @@ Named(
                                                                                     node: Field(
                                                                                         "author",
                                                                                     ),
-                                                                                    loc: Some(
+                                                                                    range: Some(
                                                                                         (
                                                                                             39,
                                                                                             45,
@@ -122,7 +122,7 @@ Named(
                                                                                                             node: Field(
                                                                                                                 "name",
                                                                                                             ),
-                                                                                                            loc: Some(
+                                                                                                            range: Some(
                                                                                                                 (
                                                                                                                     48,
                                                                                                                     52,
@@ -131,7 +131,7 @@ Named(
                                                                                                         },
                                                                                                         None,
                                                                                                     ),
-                                                                                                    loc: Some(
+                                                                                                    range: Some(
                                                                                                         (
                                                                                                             48,
                                                                                                             52,
@@ -141,7 +141,7 @@ Named(
                                                                                             ],
                                                                                             star: None,
                                                                                         },
-                                                                                        loc: Some(
+                                                                                        range: Some(
                                                                                             (
                                                                                                 46,
                                                                                                 54,
@@ -150,7 +150,7 @@ Named(
                                                                                     },
                                                                                 ),
                                                                             ),
-                                                                            loc: Some(
+                                                                            range: Some(
                                                                                 (
                                                                                     39,
                                                                                     54,
@@ -160,7 +160,7 @@ Named(
                                                                     ],
                                                                     star: None,
                                                                 },
-                                                                loc: Some(
+                                                                range: Some(
                                                                     (
                                                                         32,
                                                                         55,
@@ -168,7 +168,7 @@ Named(
                                                                 ),
                                                             },
                                                         ),
-                                                        loc: Some(
+                                                        range: Some(
                                                             (
                                                                 32,
                                                                 55,
@@ -176,7 +176,7 @@ Named(
                                                         ),
                                                     },
                                                 ),
-                                                loc: Some(
+                                                range: Some(
                                                     (
                                                         26,
                                                         55,
@@ -184,7 +184,7 @@ Named(
                                                 ),
                                             },
                                         ),
-                                        loc: Some(
+                                        range: Some(
                                             (
                                                 19,
                                                 55,
@@ -192,7 +192,7 @@ Named(
                                         ),
                                     },
                                 ),
-                                loc: Some(
+                                range: Some(
                                     (
                                         15,
                                         55,
@@ -201,7 +201,7 @@ Named(
                             },
                         },
                     ),
-                    loc: Some(
+                    range: Some(
                         (
                             9,
                             55,
@@ -217,7 +217,7 @@ Named(
                                         node: Field(
                                             "alias",
                                         ),
-                                        loc: Some(
+                                        range: Some(
                                             (
                                                 64,
                                                 69,
@@ -225,7 +225,7 @@ Named(
                                         ),
                                     },
                                 },
-                                loc: Some(
+                                range: Some(
                                     (
                                         64,
                                         70,
@@ -237,7 +237,7 @@ Named(
                             node: Quoted(
                                 "not an identifier",
                             ),
-                            loc: Some(
+                            range: Some(
                                 (
                                     71,
                                     90,
@@ -256,7 +256,7 @@ Named(
                                                             node: Field(
                                                                 "__typename",
                                                             ),
-                                                            loc: Some(
+                                                            range: Some(
                                                                 (
                                                                     151,
                                                                     161,
@@ -264,7 +264,7 @@ Named(
                                                             ),
                                                         },
                                                     },
-                                                    loc: Some(
+                                                    range: Some(
                                                         (
                                                             151,
                                                             162,
@@ -276,7 +276,7 @@ Named(
                                                         node: Var(
                                                             Parsed {
                                                                 node: @,
-                                                                loc: Some(
+                                                                range: Some(
                                                                     (
                                                                         163,
                                                                         164,
@@ -287,7 +287,7 @@ Named(
                                                                 node: Method(
                                                                     Parsed {
                                                                         node: "echo",
-                                                                        loc: Some(
+                                                                        range: Some(
                                                                             (
                                                                                 166,
                                                                                 170,
@@ -302,7 +302,7 @@ Named(
                                                                                         node: String(
                                                                                             "Frog",
                                                                                         ),
-                                                                                        loc: Some(
+                                                                                        range: Some(
                                                                                             (
                                                                                                 172,
                                                                                                 178,
@@ -311,15 +311,20 @@ Named(
                                                                                     },
                                                                                 ],
                                                                             ),
-                                                                            loc: None,
+                                                                            range: Some(
+                                                                                (
+                                                                                    170,
+                                                                                    182,
+                                                                                ),
+                                                                            ),
                                                                         },
                                                                     ),
                                                                     Parsed {
                                                                         node: Empty,
-                                                                        loc: None,
+                                                                        range: None,
                                                                     },
                                                                 ),
-                                                                loc: Some(
+                                                                range: Some(
                                                                     (
                                                                         164,
                                                                         166,
@@ -327,7 +332,7 @@ Named(
                                                                 ),
                                                             },
                                                         ),
-                                                        loc: Some(
+                                                        range: Some(
                                                             (
                                                                 163,
                                                                 166,
@@ -336,7 +341,7 @@ Named(
                                                     },
                                                 },
                                             ),
-                                            loc: Some(
+                                            range: Some(
                                                 (
                                                     151,
                                                     166,
@@ -351,7 +356,7 @@ Named(
                                                             node: Field(
                                                                 "wrapped",
                                                             ),
-                                                            loc: Some(
+                                                            range: Some(
                                                                 (
                                                                     195,
                                                                     202,
@@ -359,7 +364,7 @@ Named(
                                                             ),
                                                         },
                                                     },
-                                                    loc: Some(
+                                                    range: Some(
                                                         (
                                                             195,
                                                             203,
@@ -371,7 +376,7 @@ Named(
                                                         node: Var(
                                                             Parsed {
                                                                 node: $,
-                                                                loc: Some(
+                                                                range: Some(
                                                                     (
                                                                         204,
                                                                         205,
@@ -382,7 +387,7 @@ Named(
                                                                 node: Method(
                                                                     Parsed {
                                                                         node: "echo",
-                                                                        loc: Some(
+                                                                        range: Some(
                                                                             (
                                                                                 207,
                                                                                 211,
@@ -400,7 +405,7 @@ Named(
                                                                                                     node: Field(
                                                                                                         "wrapped",
                                                                                                     ),
-                                                                                                    loc: Some(
+                                                                                                    range: Some(
                                                                                                         (
                                                                                                             214,
                                                                                                             221,
@@ -413,7 +418,7 @@ Named(
                                                                                                                 node: Var(
                                                                                                                     Parsed {
                                                                                                                         node: @,
-                                                                                                                        loc: Some(
+                                                                                                                        range: Some(
                                                                                                                             (
                                                                                                                                 224,
                                                                                                                                 225,
@@ -422,10 +427,10 @@ Named(
                                                                                                                     },
                                                                                                                     Parsed {
                                                                                                                         node: Empty,
-                                                                                                                        loc: None,
+                                                                                                                        range: None,
                                                                                                                     },
                                                                                                                 ),
-                                                                                                                loc: Some(
+                                                                                                                range: Some(
                                                                                                                     (
                                                                                                                         224,
                                                                                                                         225,
@@ -434,7 +439,7 @@ Named(
                                                                                                             },
                                                                                                         },
                                                                                                     ),
-                                                                                                    loc: Some(
+                                                                                                    range: Some(
                                                                                                         (
                                                                                                             224,
                                                                                                             225,
@@ -443,7 +448,7 @@ Named(
                                                                                                 },
                                                                                             },
                                                                                         ),
-                                                                                        loc: Some(
+                                                                                        range: Some(
                                                                                             (
                                                                                                 212,
                                                                                                 229,
@@ -452,15 +457,20 @@ Named(
                                                                                     },
                                                                                 ],
                                                                             ),
-                                                                            loc: None,
+                                                                            range: Some(
+                                                                                (
+                                                                                    211,
+                                                                                    230,
+                                                                                ),
+                                                                            ),
                                                                         },
                                                                     ),
                                                                     Parsed {
                                                                         node: Empty,
-                                                                        loc: None,
+                                                                        range: None,
                                                                     },
                                                                 ),
-                                                                loc: Some(
+                                                                range: Some(
                                                                     (
                                                                         205,
                                                                         207,
@@ -468,7 +478,7 @@ Named(
                                                                 ),
                                                             },
                                                         ),
-                                                        loc: Some(
+                                                        range: Some(
                                                             (
                                                                 204,
                                                                 207,
@@ -477,7 +487,7 @@ Named(
                                                     },
                                                 },
                                             ),
-                                            loc: Some(
+                                            range: Some(
                                                 (
                                                     195,
                                                     207,
@@ -492,7 +502,7 @@ Named(
                                                             node: Field(
                                                                 "group",
                                                             ),
-                                                            loc: Some(
+                                                            range: Some(
                                                                 (
                                                                     243,
                                                                     248,
@@ -500,7 +510,7 @@ Named(
                                                             ),
                                                         },
                                                     },
-                                                    loc: Some(
+                                                    range: Some(
                                                         (
                                                             243,
                                                             249,
@@ -517,7 +527,7 @@ Named(
                                                                         node: Field(
                                                                             "a",
                                                                         ),
-                                                                        loc: Some(
+                                                                        range: Some(
                                                                             (
                                                                                 252,
                                                                                 253,
@@ -526,7 +536,7 @@ Named(
                                                                     },
                                                                     None,
                                                                 ),
-                                                                loc: Some(
+                                                                range: Some(
                                                                     (
                                                                         252,
                                                                         253,
@@ -540,7 +550,7 @@ Named(
                                                                         node: Field(
                                                                             "b",
                                                                         ),
-                                                                        loc: Some(
+                                                                        range: Some(
                                                                             (
                                                                                 254,
                                                                                 255,
@@ -549,7 +559,7 @@ Named(
                                                                     },
                                                                     None,
                                                                 ),
-                                                                loc: Some(
+                                                                range: Some(
                                                                     (
                                                                         254,
                                                                         255,
@@ -563,7 +573,7 @@ Named(
                                                                         node: Field(
                                                                             "c",
                                                                         ),
-                                                                        loc: Some(
+                                                                        range: Some(
                                                                             (
                                                                                 256,
                                                                                 257,
@@ -572,7 +582,7 @@ Named(
                                                                     },
                                                                     None,
                                                                 ),
-                                                                loc: Some(
+                                                                range: Some(
                                                                     (
                                                                         256,
                                                                         257,
@@ -582,7 +592,7 @@ Named(
                                                         ],
                                                         star: None,
                                                     },
-                                                    loc: Some(
+                                                    range: Some(
                                                         (
                                                             250,
                                                             259,
@@ -590,7 +600,7 @@ Named(
                                                     ),
                                                 },
                                             ),
-                                            loc: Some(
+                                            range: Some(
                                                 (
                                                     243,
                                                     259,
@@ -605,7 +615,7 @@ Named(
                                                             node: Field(
                                                                 "arg",
                                                             ),
-                                                            loc: Some(
+                                                            range: Some(
                                                                 (
                                                                     272,
                                                                     275,
@@ -613,7 +623,7 @@ Named(
                                                             ),
                                                         },
                                                     },
-                                                    loc: Some(
+                                                    range: Some(
                                                         (
                                                             272,
                                                             276,
@@ -625,7 +635,7 @@ Named(
                                                         node: Var(
                                                             Parsed {
                                                                 node: $args,
-                                                                loc: Some(
+                                                                range: Some(
                                                                     (
                                                                         277,
                                                                         282,
@@ -638,7 +648,7 @@ Named(
                                                                         node: Field(
                                                                             "arg",
                                                                         ),
-                                                                        loc: Some(
+                                                                        range: Some(
                                                                             (
                                                                                 285,
                                                                                 288,
@@ -647,10 +657,10 @@ Named(
                                                                     },
                                                                     Parsed {
                                                                         node: Empty,
-                                                                        loc: None,
+                                                                        range: None,
                                                                     },
                                                                 ),
-                                                                loc: Some(
+                                                                range: Some(
                                                                     (
                                                                         283,
                                                                         288,
@@ -658,7 +668,7 @@ Named(
                                                                 ),
                                                             },
                                                         ),
-                                                        loc: Some(
+                                                        range: Some(
                                                             (
                                                                 277,
                                                                 288,
@@ -667,7 +677,7 @@ Named(
                                                     },
                                                 },
                                             ),
-                                            loc: Some(
+                                            range: Some(
                                                 (
                                                     272,
                                                     288,
@@ -681,7 +691,7 @@ Named(
                                                     node: Field(
                                                         "field",
                                                     ),
-                                                    loc: Some(
+                                                    range: Some(
                                                         (
                                                             301,
                                                             306,
@@ -690,7 +700,7 @@ Named(
                                                 },
                                                 None,
                                             ),
-                                            loc: Some(
+                                            range: Some(
                                                 (
                                                     301,
                                                     306,
@@ -708,7 +718,7 @@ Named(
                                                                 node: Field(
                                                                     "rest",
                                                                 ),
-                                                                loc: Some(
+                                                                range: Some(
                                                                     (
                                                                         319,
                                                                         323,
@@ -716,7 +726,7 @@ Named(
                                                                 ),
                                                             },
                                                         },
-                                                        loc: Some(
+                                                        range: Some(
                                                             (
                                                                 319,
                                                                 324,
@@ -735,7 +745,7 @@ Named(
                                                                             node: Field(
                                                                                 "data",
                                                                             ),
-                                                                            loc: Some(
+                                                                            range: Some(
                                                                                 (
                                                                                     329,
                                                                                     333,
@@ -744,7 +754,7 @@ Named(
                                                                         },
                                                                         None,
                                                                     ),
-                                                                    loc: Some(
+                                                                    range: Some(
                                                                         (
                                                                             329,
                                                                             333,
@@ -754,7 +764,7 @@ Named(
                                                             ],
                                                             star: None,
                                                         },
-                                                        loc: Some(
+                                                        range: Some(
                                                             (
                                                                 327,
                                                                 335,
@@ -763,7 +773,7 @@ Named(
                                                     },
                                                 ),
                                             ),
-                                            loc: Some(
+                                            range: Some(
                                                 (
                                                     319,
                                                     335,
@@ -772,7 +782,7 @@ Named(
                                         },
                                     ),
                                 },
-                                loc: Some(
+                                range: Some(
                                     (
                                         91,
                                         345,
@@ -781,7 +791,7 @@ Named(
                             },
                         ),
                     ),
-                    loc: Some(
+                    range: Some(
                         (
                             64,
                             345,
@@ -791,7 +801,7 @@ Named(
             ],
             star: None,
         },
-        loc: Some(
+        range: Some(
             (
                 9,
                 345,

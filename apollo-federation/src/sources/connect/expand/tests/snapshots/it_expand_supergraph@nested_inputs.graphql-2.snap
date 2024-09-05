@@ -84,7 +84,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ne
                     node: Var(
                         Parsed {
                             node: $,
-                            loc: Some(
+                            range: Some(
                                 (
                                     0,
                                     1,
@@ -93,10 +93,10 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ne
                         },
                         Parsed {
                             node: Empty,
-                            loc: None,
+                            range: None,
                         },
                     ),
-                    loc: Some(
+                    range: Some(
                         (
                             0,
                             1,

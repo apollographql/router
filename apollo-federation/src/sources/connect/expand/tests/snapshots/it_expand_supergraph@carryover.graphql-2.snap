@@ -63,7 +63,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                                     node: Field(
                                         "id",
                                     ),
-                                    loc: Some(
+                                    range: Some(
                                         (
                                             0,
                                             2,
@@ -72,7 +72,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                                 },
                                 None,
                             ),
-                            loc: Some(
+                            range: Some(
                                 (
                                     0,
                                     2,
@@ -86,7 +86,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                                     node: Field(
                                         "tagged",
                                     ),
-                                    loc: Some(
+                                    range: Some(
                                         (
                                             3,
                                             9,
@@ -95,7 +95,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                                 },
                                 None,
                             ),
-                            loc: Some(
+                            range: Some(
                                 (
                                     3,
                                     9,
@@ -109,7 +109,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                                     node: Field(
                                         "hidden",
                                     ),
-                                    loc: Some(
+                                    range: Some(
                                         (
                                             10,
                                             16,
@@ -118,7 +118,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                                 },
                                 None,
                             ),
-                            loc: Some(
+                            range: Some(
                                 (
                                     10,
                                     16,
@@ -132,7 +132,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                                     node: Field(
                                         "custom",
                                     ),
-                                    loc: Some(
+                                    range: Some(
                                         (
                                             17,
                                             23,
@@ -141,7 +141,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                                 },
                                 None,
                             ),
-                            loc: Some(
+                            range: Some(
                                 (
                                     17,
                                     23,
@@ -155,7 +155,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                                     node: Field(
                                         "authenticated",
                                     ),
-                                    loc: Some(
+                                    range: Some(
                                         (
                                             24,
                                             37,
@@ -164,7 +164,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                                 },
                                 None,
                             ),
-                            loc: Some(
+                            range: Some(
                                 (
                                     24,
                                     37,
@@ -178,7 +178,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                                     node: Field(
                                         "requiresScopes",
                                     ),
-                                    loc: Some(
+                                    range: Some(
                                         (
                                             38,
                                             52,
@@ -187,7 +187,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                                 },
                                 None,
                             ),
-                            loc: Some(
+                            range: Some(
                                 (
                                     38,
                                     52,
@@ -201,7 +201,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                                     node: Field(
                                         "policy",
                                     ),
-                                    loc: Some(
+                                    range: Some(
                                         (
                                             53,
                                             59,
@@ -210,7 +210,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                                 },
                                 None,
                             ),
-                            loc: Some(
+                            range: Some(
                                 (
                                     53,
                                     59,
@@ -224,7 +224,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                                     node: Field(
                                         "overridden",
                                     ),
-                                    loc: Some(
+                                    range: Some(
                                         (
                                             60,
                                             70,
@@ -233,7 +233,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                                 },
                                 None,
                             ),
-                            loc: Some(
+                            range: Some(
                                 (
                                     60,
                                     70,
@@ -243,7 +243,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                     ],
                     star: None,
                 },
-                loc: Some(
+                range: Some(
                     (
                         0,
                         70,
@@ -325,7 +325,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                                     node: Field(
                                         "id",
                                     ),
-                                    loc: Some(
+                                    range: Some(
                                         (
                                             0,
                                             2,
@@ -334,7 +334,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                                 },
                                 None,
                             ),
-                            loc: Some(
+                            range: Some(
                                 (
                                     0,
                                     2,
@@ -348,7 +348,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                                     node: Field(
                                         "tagged",
                                     ),
-                                    loc: Some(
+                                    range: Some(
                                         (
                                             3,
                                             9,
@@ -357,7 +357,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                                 },
                                 None,
                             ),
-                            loc: Some(
+                            range: Some(
                                 (
                                     3,
                                     9,
@@ -371,7 +371,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                                     node: Field(
                                         "hidden",
                                     ),
-                                    loc: Some(
+                                    range: Some(
                                         (
                                             10,
                                             16,
@@ -380,7 +380,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                                 },
                                 None,
                             ),
-                            loc: Some(
+                            range: Some(
                                 (
                                     10,
                                     16,
@@ -394,7 +394,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                                     node: Field(
                                         "custom",
                                     ),
-                                    loc: Some(
+                                    range: Some(
                                         (
                                             17,
                                             23,
@@ -403,7 +403,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                                 },
                                 None,
                             ),
-                            loc: Some(
+                            range: Some(
                                 (
                                     17,
                                     23,
@@ -417,7 +417,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                                     node: Field(
                                         "authenticated",
                                     ),
-                                    loc: Some(
+                                    range: Some(
                                         (
                                             24,
                                             37,
@@ -426,7 +426,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                                 },
                                 None,
                             ),
-                            loc: Some(
+                            range: Some(
                                 (
                                     24,
                                     37,
@@ -440,7 +440,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                                     node: Field(
                                         "requiresScopes",
                                     ),
-                                    loc: Some(
+                                    range: Some(
                                         (
                                             38,
                                             52,
@@ -449,7 +449,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                                 },
                                 None,
                             ),
-                            loc: Some(
+                            range: Some(
                                 (
                                     38,
                                     52,
@@ -463,7 +463,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                                     node: Field(
                                         "policy",
                                     ),
-                                    loc: Some(
+                                    range: Some(
                                         (
                                             53,
                                             59,
@@ -472,7 +472,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                                 },
                                 None,
                             ),
-                            loc: Some(
+                            range: Some(
                                 (
                                     53,
                                     59,
@@ -486,7 +486,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                                     node: Field(
                                         "overridden",
                                     ),
-                                    loc: Some(
+                                    range: Some(
                                         (
                                             60,
                                             70,
@@ -495,7 +495,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                                 },
                                 None,
                             ),
-                            loc: Some(
+                            range: Some(
                                 (
                                     60,
                                     70,
@@ -505,7 +505,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                     ],
                     star: None,
                 },
-                loc: Some(
+                range: Some(
                     (
                         0,
                         70,
@@ -596,7 +596,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                                     node: Field(
                                         "id",
                                     ),
-                                    loc: Some(
+                                    range: Some(
                                         (
                                             0,
                                             2,
@@ -605,7 +605,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                                 },
                                 None,
                             ),
-                            loc: Some(
+                            range: Some(
                                 (
                                     0,
                                     2,
@@ -615,7 +615,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                     ],
                     star: None,
                 },
-                loc: Some(
+                range: Some(
                     (
                         0,
                         2,

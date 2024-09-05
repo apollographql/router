@@ -74,7 +74,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ci
                                     node: Field(
                                         "id",
                                     ),
-                                    loc: Some(
+                                    range: Some(
                                         (
                                             0,
                                             2,
@@ -83,7 +83,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ci
                                 },
                                 None,
                             ),
-                            loc: Some(
+                            range: Some(
                                 (
                                     0,
                                     2,
@@ -93,7 +93,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ci
                     ],
                     star: None,
                 },
-                loc: Some(
+                range: Some(
                     (
                         0,
                         2,
@@ -182,7 +182,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ci
                                     node: Field(
                                         "id",
                                     ),
-                                    loc: Some(
+                                    range: Some(
                                         (
                                             0,
                                             2,
@@ -191,7 +191,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ci
                                 },
                                 None,
                             ),
-                            loc: Some(
+                            range: Some(
                                 (
                                     0,
                                     2,
@@ -201,7 +201,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ci
                     ],
                     star: None,
                 },
-                loc: Some(
+                range: Some(
                     (
                         0,
                         2,

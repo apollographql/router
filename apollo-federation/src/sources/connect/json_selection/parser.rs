@@ -19,7 +19,7 @@ use serde_json_bytes::Value as JSON;
 use super::helpers::spaces_or_comments;
 use super::known_var::KnownVariable;
 use super::lit_expr::LitExpr;
-use super::location::merge_locs;
+use super::location::merge_ranges;
 use super::location::parsed_span;
 use super::location::Parsed;
 use super::location::Span;
@@ -148,35 +148,35 @@ impl NamedSelection {
             opt(SubSelection::parse),
         ))(input)
         .map(|(remainder, (alias, name, selection))| {
-            let loc = name.loc();
-            let loc = if let Some(alias) = alias.as_ref() {
-                merge_locs(alias.loc(), loc)
+            let range = name.range();
+            let range = if let Some(alias) = alias.as_ref() {
+                merge_ranges(alias.range(), range)
             } else {
-                loc
+                range
             };
-            let loc = if let Some(selection) = selection.as_ref() {
-                merge_locs(loc, selection.loc())
+            let range = if let Some(selection) = selection.as_ref() {
+                merge_ranges(range, selection.range())
             } else {
-                loc
+                range
             };
             (
                 remainder,
-                Parsed::new(Self::Field(alias, name, selection), loc),
+                Parsed::new(Self::Field(alias, name, selection), range),
             )
         })
     }
 
     fn parse_path(input: Span) -> IResult<Span, Parsed<Self>> {
         tuple((Alias::parse, PathSelection::parse))(input).map(|(input, (alias, path))| {
-            let loc = merge_locs(alias.loc(), path.path.loc());
-            (input, Parsed::new(Self::Path(alias, path), loc))
+            let range = merge_ranges(alias.range(), path.path.range());
+            (input, Parsed::new(Self::Path(alias, path), range))
         })
     }
 
     fn parse_group(input: Span) -> IResult<Span, Parsed<Self>> {
         tuple((Alias::parse, SubSelection::parse))(input).map(|(input, (alias, group))| {
-            let loc = merge_locs(alias.loc(), group.loc());
-            (input, Parsed::new(Self::Group(alias, group), loc))
+            let range = merge_ranges(alias.range(), group.range());
+            (input, Parsed::new(Self::Group(alias, group), range))
         })
     }
 
@@ -376,17 +376,17 @@ impl PathList {
                 spaces_or_comments,
             ))(input)
             {
-                let dollar_loc = dollar.loc();
+                let dollar_range = dollar.range();
                 let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
-                let full_loc = merge_locs(dollar_loc, rest.loc());
+                let full_range = merge_ranges(dollar_range, rest.range());
                 return if let Some(var) = opt_var {
                     let full_name = format!("{}{}", dollar.node(), var.as_str());
                     if let Some(known_var) = KnownVariable::from_str(full_name.as_str()) {
-                        let var_loc = merge_locs(dollar_loc, var.loc());
-                        let parsed_known_var = Parsed::new(known_var, var_loc);
+                        let var_range = merge_ranges(dollar_range, var.range());
+                        let parsed_known_var = Parsed::new(known_var, var_range);
                         Ok((
                             remainder,
-                            Parsed::new(Self::Var(parsed_known_var, rest), full_loc),
+                            Parsed::new(Self::Var(parsed_known_var, rest), full_range),
                         ))
                     } else {
                         // Reject unknown variables at parse time.
@@ -397,10 +397,10 @@ impl PathList {
                         )))
                     }
                 } else {
-                    let parsed_dollar_var = Parsed::new(KnownVariable::Dollar, dollar_loc);
+                    let parsed_dollar_var = Parsed::new(KnownVariable::Dollar, dollar_range);
                     Ok((
                         remainder,
-                        Parsed::new(Self::Var(parsed_dollar_var, rest), full_loc),
+                        Parsed::new(Self::Var(parsed_dollar_var, rest), full_range),
                     ))
                 };
             }
@@ -409,7 +409,7 @@ impl PathList {
                 tuple((spaces_or_comments, parsed_span("@"), spaces_or_comments))(input)
             {
                 let (input, rest) = Self::parse_with_depth(suffix, depth + 1)?;
-                let full_loc = merge_locs(at.loc(), rest.loc());
+                let full_range = merge_ranges(at.range(), rest.range());
                 // Because we include the $ in the variable name for ordinary
                 // variables, we have the freedom to store other symbols as
                 // special variables, such as @ for the current value. In fact,
@@ -418,8 +418,8 @@ impl PathList {
                 return Ok((
                     input,
                     Parsed::new(
-                        Self::Var(Parsed::new(KnownVariable::AtSign, at.loc()), rest),
-                        full_loc,
+                        Self::Var(Parsed::new(KnownVariable::AtSign, at.range()), rest),
+                        full_range,
                     ),
                 ));
             }
@@ -431,8 +431,8 @@ impl PathList {
                         nom::error::Error::new(input, nom::error::ErrorKind::IsNot),
                     )),
                     _ => {
-                        let full_loc = merge_locs(key.loc(), rest.loc());
-                        Ok((input, Parsed::new(Self::Key(key, rest), full_loc)))
+                        let full_range = merge_ranges(key.range(), rest.range());
+                        Ok((input, Parsed::new(Self::Key(key, rest), full_range)))
                     }
                 };
             }
@@ -449,9 +449,9 @@ impl PathList {
         ))(input)
         {
             let (input, rest) = Self::parse_with_depth(suffix, depth + 1)?;
-            let dot_key_loc = merge_locs(dot.loc(), key.loc());
-            let full_loc = merge_locs(dot_key_loc, rest.loc());
-            return Ok((input, Parsed::new(Self::Key(key, rest), full_loc)));
+            let dot_key_range = merge_ranges(dot.range(), key.range());
+            let full_range = merge_ranges(dot_key_range, rest.range());
+            return Ok((input, Parsed::new(Self::Key(key, rest), full_range)));
         }
 
         if depth == 0 {
@@ -474,20 +474,20 @@ impl PathList {
         ))(input)
         {
             let (input, rest) = Self::parse_with_depth(suffix, depth + 1)?;
-            let full_loc = merge_locs(arrow.loc(), rest.loc());
+            let full_range = merge_ranges(arrow.range(), rest.range());
             return Ok((
                 input,
-                Parsed::new(Self::Method(method, args, rest), full_loc),
+                Parsed::new(Self::Method(method, args, rest), full_range),
             ));
         }
 
         // Likewise, if the PathSelection has a SubSelection, it must appear at
         // the end of a non-empty path.
         if let Ok((suffix, selection)) = SubSelection::parse(input) {
-            let selection_loc = selection.loc();
+            let selection_range = selection.range();
             return Ok((
                 suffix,
-                Parsed::new(Self::Selection(selection), selection_loc),
+                Parsed::new(Self::Selection(selection), selection_range),
             ));
         }
 
@@ -593,8 +593,8 @@ impl SubSelection {
             spaces_or_comments,
         ))(input)
         .map(|(remainder, (_, open_brace, sub, close_brace, _))| {
-            let loc = merge_locs(open_brace.loc(), close_brace.loc());
-            (remainder, Parsed::new(sub.node().clone(), loc))
+            let range = merge_ranges(open_brace.range(), close_brace.range());
+            (remainder, Parsed::new(sub.node().clone(), range))
         })
     }
 
@@ -610,16 +610,16 @@ impl SubSelection {
             spaces_or_comments,
         ))(input)
         .map(|(input, (_, selections, star, _))| {
-            let loc = merge_locs(
-                selections.first().and_then(|first| first.loc()),
-                selections.last().and_then(|last| last.loc()),
+            let range = merge_ranges(
+                selections.first().and_then(|first| first.range()),
+                selections.last().and_then(|last| last.range()),
             );
-            let loc = if let Some(star) = star.as_ref() {
-                merge_locs(loc, star.loc())
+            let range = if let Some(star) = star.as_ref() {
+                merge_ranges(range, star.range())
             } else {
-                loc
+                range
             };
-            (input, Parsed::new(Self { selections, star }, loc))
+            (input, Parsed::new(Self { selections, star }, range))
         })
     }
 
@@ -716,18 +716,18 @@ impl StarSelection {
             opt(SubSelection::parse),
         ))(input)
         .map(|(remainder, (alias, _, star, _, selection))| {
-            let loc = star.loc();
-            let loc = if let Some(alias) = alias.as_ref() {
-                merge_locs(alias.loc(), loc)
+            let range = star.range();
+            let range = if let Some(alias) = alias.as_ref() {
+                merge_ranges(alias.range(), range)
             } else {
-                loc
+                range
             };
-            let loc = if let Some(selection) = selection.as_ref() {
-                merge_locs(loc, selection.loc())
+            let range = if let Some(selection) = selection.as_ref() {
+                merge_ranges(range, selection.range())
             } else {
-                loc
+                range
             };
-            (remainder, Parsed::new(Self(alias, selection), loc))
+            (remainder, Parsed::new(Self(alias, selection), range))
         })
     }
 
@@ -750,9 +750,9 @@ impl Alias {
         }
     }
 
-    pub fn new_with_loc(name: &str, loc: (usize, usize)) -> Self {
+    pub fn new_with_range(name: &str, range: (usize, usize)) -> Self {
         Self {
-            name: Parsed::new(Key::field(name), Some(loc)),
+            name: Parsed::new(Key::field(name), Some(range)),
         }
     }
 
@@ -762,26 +762,26 @@ impl Alias {
         }
     }
 
-    pub fn quoted_with_loc(name: &str, loc: (usize, usize)) -> Self {
+    pub fn quoted_with_range(name: &str, range: (usize, usize)) -> Self {
         Self {
-            name: Parsed::new(Key::quoted(name), Some(loc)),
+            name: Parsed::new(Key::quoted(name), Some(range)),
         }
     }
 
     pub fn quoted_span(name: Span) -> Self {
         let start = name.location_offset();
         let end = start + name.fragment().len();
-        let loc = Some((start, end));
+        let range = Some((start, end));
         Self {
-            name: Parsed::new(Key::quoted(name.fragment()), loc),
+            name: Parsed::new(Key::quoted(name.fragment()), range),
         }
     }
 
     fn parse(input: Span) -> IResult<Span, Parsed<Self>> {
         tuple((Key::parse, parsed_span(":"), spaces_or_comments))(input).map(
             |(input, (name, colon, _))| {
-                let loc = merge_locs(name.loc(), colon.loc());
-                (input, Parsed::new(Self { name }, loc))
+                let range = merge_ranges(name.range(), colon.range());
+                (input, Parsed::new(Self { name }, range))
             },
         )
     }
@@ -895,8 +895,8 @@ fn parse_identifier_no_space(input: Span) -> IResult<Span, Parsed<String>> {
         )),
     ))(input)
     .map(|(remainder, name)| {
-        let loc = Some((name.location_offset(), remainder.location_offset()));
-        (remainder, Parsed::new(name.to_string(), loc))
+        let range = Some((name.location_offset(), remainder.location_offset()));
+        (remainder, Parsed::new(name.to_string(), range))
     })
 }
 
@@ -993,7 +993,7 @@ impl MethodArgs {
 
 #[cfg(test)]
 mod tests {
-    use super::super::location::strip_loc::StripLoc;
+    use super::super::location::strip_ranges::StripRanges;
     use super::*;
     use crate::selection;
 
@@ -1077,11 +1077,11 @@ mod tests {
         fn assert_result_and_name(input: &str, expected: NamedSelection, name: &str) {
             let (remainder, selection) = NamedSelection::parse(Span::new(input)).unwrap();
             assert_eq!(*remainder.fragment(), "");
-            let selection = selection.strip_loc();
+            let selection = selection.strip_ranges();
             assert_eq!(selection.node(), &expected);
             assert_eq!(selection.node().name(), name);
             assert_eq!(
-                selection!(input).strip_loc(),
+                selection!(input).strip_ranges(),
                 JSONSelection::Named(Parsed::new(
                     SubSelection {
                         selections: vec![Parsed::new(expected, None)],
@@ -1226,7 +1226,7 @@ mod tests {
     #[test]
     fn test_selection() {
         assert_eq!(
-            selection!("").strip_loc(),
+            selection!("").strip_ranges(),
             JSONSelection::Named(
                 SubSelection {
                     selections: vec![],
@@ -1237,7 +1237,7 @@ mod tests {
         );
 
         assert_eq!(
-            selection!("   ").strip_loc(),
+            selection!("   ").strip_ranges(),
             JSONSelection::Named(
                 SubSelection {
                     selections: vec![],
@@ -1248,7 +1248,7 @@ mod tests {
         );
 
         assert_eq!(
-            selection!("hello").strip_loc(),
+            selection!("hello").strip_ranges(),
             JSONSelection::Named(
                 SubSelection {
                     selections: vec![NamedSelection::Field(
@@ -1264,7 +1264,7 @@ mod tests {
         );
 
         assert_eq!(
-            selection!(".hello").strip_loc(),
+            selection!(".hello").strip_ranges(),
             JSONSelection::Path(PathSelection::from_slice(
                 &[Key::Field("hello".to_string())],
                 None
@@ -1290,14 +1290,14 @@ mod tests {
                 .into_parsed(),
             );
 
-            assert_eq!(selection!("hi: .hello.world").strip_loc(), expected);
-            assert_eq!(selection!("hi: .hello .world").strip_loc(), expected);
-            assert_eq!(selection!("hi: . hello. world").strip_loc(), expected);
-            assert_eq!(selection!("hi: .hello . world").strip_loc(), expected);
-            assert_eq!(selection!("hi: hello.world").strip_loc(), expected);
-            assert_eq!(selection!("hi: hello. world").strip_loc(), expected);
-            assert_eq!(selection!("hi: hello .world").strip_loc(), expected);
-            assert_eq!(selection!("hi: hello . world").strip_loc(), expected);
+            assert_eq!(selection!("hi: .hello.world").strip_ranges(), expected);
+            assert_eq!(selection!("hi: .hello .world").strip_ranges(), expected);
+            assert_eq!(selection!("hi: . hello. world").strip_ranges(), expected);
+            assert_eq!(selection!("hi: .hello . world").strip_ranges(), expected);
+            assert_eq!(selection!("hi: hello.world").strip_ranges(), expected);
+            assert_eq!(selection!("hi: hello. world").strip_ranges(), expected);
+            assert_eq!(selection!("hi: hello .world").strip_ranges(), expected);
+            assert_eq!(selection!("hi: hello . world").strip_ranges(), expected);
         }
 
         {
@@ -1326,51 +1326,51 @@ mod tests {
             );
 
             assert_eq!(
-                selection!("before hi: .hello.world after").strip_loc(),
+                selection!("before hi: .hello.world after").strip_ranges(),
                 expected
             );
             assert_eq!(
-                selection!("before hi: .hello .world after").strip_loc(),
+                selection!("before hi: .hello .world after").strip_ranges(),
                 expected
             );
             assert_eq!(
-                selection!("before hi: .hello. world after").strip_loc(),
+                selection!("before hi: .hello. world after").strip_ranges(),
                 expected
             );
             assert_eq!(
-                selection!("before hi: .hello . world after").strip_loc(),
+                selection!("before hi: .hello . world after").strip_ranges(),
                 expected
             );
             assert_eq!(
-                selection!("before hi: . hello.world after").strip_loc(),
+                selection!("before hi: . hello.world after").strip_ranges(),
                 expected
             );
             assert_eq!(
-                selection!("before hi: . hello .world after").strip_loc(),
+                selection!("before hi: . hello .world after").strip_ranges(),
                 expected
             );
             assert_eq!(
-                selection!("before hi: . hello. world after").strip_loc(),
+                selection!("before hi: . hello. world after").strip_ranges(),
                 expected
             );
             assert_eq!(
-                selection!("before hi: . hello . world after").strip_loc(),
+                selection!("before hi: . hello . world after").strip_ranges(),
                 expected
             );
             assert_eq!(
-                selection!("before hi: hello.world after").strip_loc(),
+                selection!("before hi: hello.world after").strip_ranges(),
                 expected
             );
             assert_eq!(
-                selection!("before hi: hello .world after").strip_loc(),
+                selection!("before hi: hello .world after").strip_ranges(),
                 expected
             );
             assert_eq!(
-                selection!("before hi: hello. world after").strip_loc(),
+                selection!("before hi: hello. world after").strip_ranges(),
                 expected
             );
             assert_eq!(
-                selection!("before hi: hello . world after").strip_loc(),
+                selection!("before hi: hello . world after").strip_ranges(),
                 expected
             );
         }
@@ -1417,19 +1417,19 @@ mod tests {
             );
 
             assert_eq!(
-                selection!("before hi: .hello.world { nested names } after").strip_loc(),
+                selection!("before hi: .hello.world { nested names } after").strip_ranges(),
                 expected
             );
             assert_eq!(
-                selection!("before hi:.hello.world{nested names}after").strip_loc(),
+                selection!("before hi:.hello.world{nested names}after").strip_ranges(),
                 expected
             );
             assert_eq!(
-                selection!("before hi: hello.world { nested names } after").strip_loc(),
+                selection!("before hi: hello.world { nested names } after").strip_ranges(),
                 expected
             );
             assert_eq!(
-                selection!("before hi:hello.world{nested names}after").strip_loc(),
+                selection!("before hi:hello.world{nested names}after").strip_ranges(),
                 expected
             );
         }
@@ -1456,7 +1456,7 @@ mod tests {
                 siblingGroup: { brother sister }
             }"
             )
-            .strip_loc(),
+            .strip_ranges(),
             JSONSelection::Named(
                 SubSelection {
                     selections: vec![NamedSelection::Field(
@@ -1557,8 +1557,11 @@ mod tests {
     fn check_path_selection(input: &str, expected: PathSelection) {
         let (remainder, path_selection) = PathSelection::parse(Span::new(input)).unwrap();
         assert_eq!(*remainder.fragment(), "");
-        assert_eq!(&path_selection.strip_loc(), &expected);
-        assert_eq!(selection!(input).strip_loc(), JSONSelection::Path(expected));
+        assert_eq!(&path_selection.strip_ranges(), &expected);
+        assert_eq!(
+            selection!(input).strip_ranges(),
+            JSONSelection::Path(expected)
+        );
     }
 
     #[test]
@@ -2056,7 +2059,7 @@ mod tests {
         }
 
         assert_eq!(
-            selection!("$").strip_loc(),
+            selection!("$").strip_ranges(),
             JSONSelection::Path(PathSelection {
                 path: PathList::Var(
                     KnownVariable::Dollar.into_parsed(),
@@ -2067,7 +2070,7 @@ mod tests {
         );
 
         assert_eq!(
-            selection!("$this").strip_loc(),
+            selection!("$this").strip_ranges(),
             JSONSelection::Path(PathSelection {
                 path: PathList::Var(
                     KnownVariable::This.into_parsed(),
@@ -2078,7 +2081,7 @@ mod tests {
         );
 
         assert_eq!(
-            selection!("value: $ a { b c }").strip_loc(),
+            selection!("value: $ a { b c }").strip_ranges(),
             JSONSelection::Named(
                 SubSelection {
                     selections: vec![
@@ -2125,7 +2128,7 @@ mod tests {
             ),
         );
         assert_eq!(
-            selection!("value: $this { b c }").strip_loc(),
+            selection!("value: $this { b c }").strip_ranges(),
             JSONSelection::Named(
                 SubSelection {
                     selections: vec![NamedSelection::Path(
@@ -2429,7 +2432,7 @@ mod tests {
         fn check_parsed(input: &str, expected: Parsed<SubSelection>) {
             let (remainder, parsed) = SubSelection::parse(Span::new(input)).unwrap();
             assert_eq!(*remainder.fragment(), "");
-            assert_eq!(parsed.strip_loc(), expected);
+            assert_eq!(parsed.strip_ranges(), expected);
         }
 
         check_parsed(
@@ -2528,7 +2531,7 @@ mod tests {
         fn check_parsed(input: &str, expected: Parsed<StarSelection>) {
             let (remainder, parsed) = StarSelection::parse(Span::new(input)).unwrap();
             assert_eq!(*remainder.fragment(), "");
-            assert_eq!(parsed.strip_loc(), expected);
+            assert_eq!(parsed.strip_ranges(), expected);
         }
 
         check_parsed(
@@ -2606,7 +2609,7 @@ mod tests {
         );
 
         assert_eq!(
-            selection!(" before alias: * { * { a b c } } ").strip_loc(),
+            selection!(" before alias: * { * { a b c } } ").strip_ranges(),
             JSONSelection::Named(
                 SubSelection {
                     selections: vec![NamedSelection::Field(
@@ -2665,7 +2668,7 @@ mod tests {
         );
 
         assert_eq!(
-            selection!(" before group: { * { a b c } } after ").strip_loc(),
+            selection!(" before group: { * { a b c } } after ").strip_ranges(),
             JSONSelection::Named(
                 SubSelection {
                     selections: vec![
@@ -2727,7 +2730,7 @@ mod tests {
             PathSelection::parse(Span::new(input))
                 .unwrap()
                 .1
-                .strip_loc()
+                .strip_ranges()
         }
 
         {
@@ -2736,7 +2739,7 @@ mod tests {
                 $->echo([$args.arg1, $args.arg2, @.items->first])
             "#
             )
-            .strip_loc();
+            .strip_ranges();
             let args_arg1_path = parse("$args.arg1");
             let args_arg2_path = parse("$args.arg2");
             assert_eq!(
@@ -2755,7 +2758,7 @@ mod tests {
                 )
             "#
             )
-            .strip_loc();
+            .strip_ranges();
             let this_kind_path = match &sel {
                 JSONSelection::Path(path) => path,
                 _ => panic!("Expected PathSelection"),
@@ -2777,7 +2780,7 @@ mod tests {
                 }
             "#
             )
-            .strip_loc();
+            .strip_ranges();
             let start_path = parse("$args.start");
             let end_path = parse("$args.end");
             let args_type_path = parse("$args.type");
@@ -2938,7 +2941,10 @@ mod tests {
                         ),
                         Parsed::new(
                             NamedSelection::Path(
-                                Parsed::new(Alias::new_with_loc("product", (7, 14)), Some((7, 15))),
+                                Parsed::new(
+                                    Alias::new_with_range("product", (7, 14)),
+                                    Some((7, 15)),
+                                ),
                                 PathSelection {
                                     path: Parsed::new(
                                         PathList::Var(

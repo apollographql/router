@@ -8,10 +8,10 @@ pub type Span<'a> = LocatedSpan<&'a str>;
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct Parsed<T> {
     node: Box<T>,
-    loc: Option<(usize, usize)>,
+    range: Option<(usize, usize)>,
 }
 
-pub(super) fn merge_locs(
+pub(super) fn merge_ranges(
     left: Option<(usize, usize)>,
     right: Option<(usize, usize)>,
 ) -> Option<(usize, usize)> {
@@ -19,8 +19,8 @@ pub(super) fn merge_locs(
         (Some((left_start, _left_end)), Some((_right_start, right_end))) => {
             Some((left_start, right_end))
         }
-        (Some(left_loc), None) => Some(left_loc),
-        (None, Some(right_loc)) => Some(right_loc),
+        (Some(left_range), None) => Some(left_range),
+        (None, Some(right_range)) => Some(right_range),
         (None, None) => None,
     }
 }
@@ -60,10 +60,10 @@ where
 }
 
 impl<T> Parsed<T> {
-    pub(super) fn new(node: T, loc: Option<(usize, usize)>) -> Self {
+    pub(super) fn new(node: T, range: Option<(usize, usize)>) -> Self {
         Self {
             node: Box::new(node),
-            loc,
+            range,
         }
     }
 
@@ -72,15 +72,15 @@ impl<T> Parsed<T> {
     }
 
     pub(crate) fn take_as<U>(self, f: impl FnOnce(T) -> U) -> Parsed<U> {
-        Parsed::new(f(*self.node), self.loc)
+        Parsed::new(f(*self.node), self.range)
     }
 
     pub(crate) fn node(&self) -> &T {
         self.node.as_ref()
     }
 
-    pub(crate) fn loc(&self) -> Option<(usize, usize)> {
-        self.loc
+    pub(crate) fn range(&self) -> Option<(usize, usize)> {
+        self.range
     }
 }
 
@@ -92,13 +92,13 @@ where
 {
     map(tag(s), |t: Span<'b>| {
         let start = t.location_offset();
-        let loc = Some((start, start + s.len()));
-        Parsed::new(*t.fragment(), loc)
+        let range = Some((start, start + s.len()));
+        Parsed::new(*t.fragment(), range)
     })
 }
 
 #[cfg(test)]
-pub(super) mod strip_loc {
+pub(super) mod strip_ranges {
     use apollo_compiler::collections::IndexMap;
 
     use super::super::known_var::KnownVariable;
@@ -111,51 +111,51 @@ pub(super) mod strip_loc {
     /// participating AST nodes to remove their own and their descendants'
     /// location information, thereby normalizing the AST for assert_eq!
     /// comparisons.
-    pub trait StripLoc {
-        fn strip_loc(&self) -> Self;
+    pub trait StripRanges {
+        fn strip_ranges(&self) -> Self;
     }
 
-    impl StripLoc for Parsed<String> {
-        fn strip_loc(&self) -> Self {
+    impl StripRanges for Parsed<String> {
+        fn strip_ranges(&self) -> Self {
             Parsed::new(self.node().clone(), None)
         }
     }
 
-    impl StripLoc for JSONSelection {
-        fn strip_loc(&self) -> Self {
+    impl StripRanges for JSONSelection {
+        fn strip_ranges(&self) -> Self {
             match self {
-                JSONSelection::Named(subselect) => JSONSelection::Named(subselect.strip_loc()),
-                JSONSelection::Path(path) => JSONSelection::Path(path.strip_loc()),
+                JSONSelection::Named(subselect) => JSONSelection::Named(subselect.strip_ranges()),
+                JSONSelection::Path(path) => JSONSelection::Path(path.strip_ranges()),
             }
         }
     }
 
-    impl StripLoc for Parsed<JSONSelection> {
-        fn strip_loc(&self) -> Self {
+    impl StripRanges for Parsed<JSONSelection> {
+        fn strip_ranges(&self) -> Self {
             Parsed::new(
                 match self.as_ref() {
-                    JSONSelection::Named(subselect) => JSONSelection::Named(subselect.strip_loc()),
-                    JSONSelection::Path(path) => JSONSelection::Path(path.strip_loc()),
+                    JSONSelection::Named(subselect) => JSONSelection::Named(subselect.strip_ranges()),
+                    JSONSelection::Path(path) => JSONSelection::Path(path.strip_ranges()),
                 },
                 None,
             )
         }
     }
 
-    impl StripLoc for Parsed<NamedSelection> {
-        fn strip_loc(&self) -> Self {
+    impl StripRanges for Parsed<NamedSelection> {
+        fn strip_ranges(&self) -> Self {
             Parsed::new(
                 match self.as_ref() {
                     NamedSelection::Field(alias, key, sub) => NamedSelection::Field(
-                        alias.as_ref().map(|a| a.strip_loc()),
-                        key.strip_loc(),
-                        sub.as_ref().map(|s| s.strip_loc()),
+                        alias.as_ref().map(|a| a.strip_ranges()),
+                        key.strip_ranges(),
+                        sub.as_ref().map(|s| s.strip_ranges()),
                     ),
                     NamedSelection::Path(alias, path) => {
-                        NamedSelection::Path(alias.strip_loc(), path.strip_loc())
+                        NamedSelection::Path(alias.strip_ranges(), path.strip_ranges())
                     }
                     NamedSelection::Group(alias, sub) => {
-                        NamedSelection::Group(alias.strip_loc(), sub.strip_loc())
+                        NamedSelection::Group(alias.strip_ranges(), sub.strip_ranges())
                     }
                 },
                 None,
@@ -163,26 +163,26 @@ pub(super) mod strip_loc {
         }
     }
 
-    impl StripLoc for PathSelection {
-        fn strip_loc(&self) -> Self {
+    impl StripRanges for PathSelection {
+        fn strip_ranges(&self) -> Self {
             Self {
-                path: self.path.strip_loc(),
+                path: self.path.strip_ranges(),
             }
         }
     }
 
-    impl StripLoc for Parsed<PathList> {
-        fn strip_loc(&self) -> Self {
+    impl StripRanges for Parsed<PathList> {
+        fn strip_ranges(&self) -> Self {
             Parsed::new(
                 match self.as_ref() {
-                    PathList::Var(var, rest) => PathList::Var(var.strip_loc(), rest.strip_loc()),
-                    PathList::Key(key, rest) => PathList::Key(key.strip_loc(), rest.strip_loc()),
+                    PathList::Var(var, rest) => PathList::Var(var.strip_ranges(), rest.strip_ranges()),
+                    PathList::Key(key, rest) => PathList::Key(key.strip_ranges(), rest.strip_ranges()),
                     PathList::Method(method, opt_args, rest) => PathList::Method(
-                        method.strip_loc(),
-                        opt_args.as_ref().map(|args| args.strip_loc()),
-                        rest.strip_loc(),
+                        method.strip_ranges(),
+                        opt_args.as_ref().map(|args| args.strip_ranges()),
+                        rest.strip_ranges(),
                     ),
-                    PathList::Selection(sub) => PathList::Selection(sub.strip_loc()),
+                    PathList::Selection(sub) => PathList::Selection(sub.strip_ranges()),
                     PathList::Empty => PathList::Empty,
                 },
                 None,
@@ -190,58 +190,58 @@ pub(super) mod strip_loc {
         }
     }
 
-    impl StripLoc for Parsed<SubSelection> {
-        fn strip_loc(&self) -> Self {
+    impl StripRanges for Parsed<SubSelection> {
+        fn strip_ranges(&self) -> Self {
             Parsed::new(
                 SubSelection {
-                    selections: self.selections.iter().map(|s| s.strip_loc()).collect(),
-                    star: self.star.as_ref().map(|s| s.strip_loc()),
+                    selections: self.selections.iter().map(|s| s.strip_ranges()).collect(),
+                    star: self.star.as_ref().map(|s| s.strip_ranges()),
                 },
                 None,
             )
         }
     }
 
-    impl StripLoc for Parsed<StarSelection> {
-        fn strip_loc(&self) -> Self {
+    impl StripRanges for Parsed<StarSelection> {
+        fn strip_ranges(&self) -> Self {
             Parsed::new(
                 StarSelection(
-                    self.0.as_ref().map(|a| a.strip_loc()),
-                    self.1.as_ref().map(|s| s.strip_loc()),
+                    self.0.as_ref().map(|a| a.strip_ranges()),
+                    self.1.as_ref().map(|s| s.strip_ranges()),
                 ),
                 None,
             )
         }
     }
 
-    impl StripLoc for Parsed<Alias> {
-        fn strip_loc(&self) -> Self {
+    impl StripRanges for Parsed<Alias> {
+        fn strip_ranges(&self) -> Self {
             Parsed::new(
                 Alias {
-                    name: self.name.strip_loc(),
+                    name: self.name.strip_ranges(),
                 },
                 None,
             )
         }
     }
 
-    impl StripLoc for Parsed<Key> {
-        fn strip_loc(&self) -> Self {
+    impl StripRanges for Parsed<Key> {
+        fn strip_ranges(&self) -> Self {
             Parsed::new(self.node().clone(), None)
         }
     }
 
-    impl StripLoc for Parsed<MethodArgs> {
-        fn strip_loc(&self) -> Self {
+    impl StripRanges for Parsed<MethodArgs> {
+        fn strip_ranges(&self) -> Self {
             Parsed::new(
-                MethodArgs(self.0.iter().map(|arg| arg.strip_loc()).collect()),
+                MethodArgs(self.0.iter().map(|arg| arg.strip_ranges()).collect()),
                 None,
             )
         }
     }
 
-    impl StripLoc for Parsed<LitExpr> {
-        fn strip_loc(&self) -> Self {
+    impl StripRanges for Parsed<LitExpr> {
+        fn strip_ranges(&self) -> Self {
             Parsed::new(
                 match self.as_ref() {
                     LitExpr::String(s) => LitExpr::String(s.clone()),
@@ -251,26 +251,26 @@ pub(super) mod strip_loc {
                     LitExpr::Object(map) => {
                         let mut new_map = IndexMap::default();
                         for (key, value) in map {
-                            new_map.insert(key.strip_loc(), value.strip_loc());
+                            new_map.insert(key.strip_ranges(), value.strip_ranges());
                         }
                         LitExpr::Object(new_map)
                     }
                     LitExpr::Array(vec) => {
                         let mut new_vec = vec![];
                         for value in vec {
-                            new_vec.push(value.strip_loc());
+                            new_vec.push(value.strip_ranges());
                         }
                         LitExpr::Array(new_vec)
                     }
-                    LitExpr::Path(path) => LitExpr::Path(path.strip_loc()),
+                    LitExpr::Path(path) => LitExpr::Path(path.strip_ranges()),
                 },
                 None,
             )
         }
     }
 
-    impl StripLoc for Parsed<KnownVariable> {
-        fn strip_loc(&self) -> Self {
+    impl StripRanges for Parsed<KnownVariable> {
+        fn strip_ranges(&self) -> Self {
             Parsed::new(self.node().clone(), None)
         }
     }
@@ -284,15 +284,15 @@ mod tests {
     use crate::sources::connect::JSONSelection;
 
     #[test]
-    fn test_merge_locs() {
-        assert_eq!(merge_locs(None, None), None);
-        assert_eq!(merge_locs(Some((0, 1)), None), Some((0, 1)));
-        assert_eq!(merge_locs(None, Some((0, 1))), Some((0, 1)));
-        assert_eq!(merge_locs(Some((0, 1)), Some((1, 2))), Some((0, 2)));
+    fn test_merge_ranges() {
+        assert_eq!(merge_ranges(None, None), None);
+        assert_eq!(merge_ranges(Some((0, 1)), None), Some((0, 1)));
+        assert_eq!(merge_ranges(None, Some((0, 1))), Some((0, 1)));
+        assert_eq!(merge_ranges(Some((0, 1)), Some((1, 2))), Some((0, 2)));
     }
 
     #[test]
-    fn test_parse_with_loc_snapshots() {
+    fn test_parse_with_range_snapshots() {
         let (remainder, parsed) = JSONSelection::parse(
             r#"
         path: some.nested.path { isbn author { name }}

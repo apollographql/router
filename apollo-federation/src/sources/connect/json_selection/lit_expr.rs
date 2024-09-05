@@ -19,7 +19,7 @@ use nom::sequence::tuple;
 use nom::IResult;
 
 use super::helpers::spaces_or_comments;
-use super::location::merge_locs;
+use super::location::merge_ranges;
 use super::location::parsed_span;
 use super::location::Parsed;
 use super::location::Span;
@@ -49,17 +49,17 @@ impl LitExpr {
                 map(parse_string_literal, |s| s.take_as(Self::String)),
                 Self::parse_number,
                 map(parsed_span("true"), |t| {
-                    Parsed::new(Self::Bool(true), t.loc())
+                    Parsed::new(Self::Bool(true), t.range())
                 }),
                 map(parsed_span("false"), |f| {
-                    Parsed::new(Self::Bool(false), f.loc())
+                    Parsed::new(Self::Bool(false), f.range())
                 }),
-                map(parsed_span("null"), |n| Parsed::new(Self::Null, n.loc())),
+                map(parsed_span("null"), |n| Parsed::new(Self::Null, n.range())),
                 Self::parse_object,
                 Self::parse_array,
                 map(PathSelection::parse, |p| {
-                    let loc = p.path.loc();
-                    Parsed::new(Self::Path(p), loc)
+                    let range = p.path.range();
+                    Parsed::new(Self::Path(p), range)
                 }),
             )),
             spaces_or_comments,
@@ -85,7 +85,7 @@ impl LitExpr {
                         ))),
                     ),
                     |(int, frac)| {
-                        let int_loc = Some((
+                        let int_range = Some((
                             int.location_offset(),
                             int.location_offset() + int.fragment().len(),
                         ));
@@ -93,9 +93,9 @@ impl LitExpr {
                         let mut s = String::new();
                         s.push_str(int.fragment());
 
-                        let full_loc = if let Some((_, dot, _, frac)) = frac {
-                            let frac_loc = merge_locs(
-                                dot.loc(),
+                        let full_range = if let Some((_, dot, _, frac)) = frac {
+                            let frac_range = merge_ranges(
+                                dot.range(),
                                 if frac.len() > 0 {
                                     Some((
                                         frac.location_offset(),
@@ -111,12 +111,12 @@ impl LitExpr {
                             } else {
                                 s.push_str(frac.fragment());
                             }
-                            merge_locs(int_loc, frac_loc)
+                            merge_ranges(int_range, frac_range)
                         } else {
-                            int_loc
+                            int_range
                         };
 
-                        Parsed::new(s, full_loc)
+                        Parsed::new(s, full_range)
                     },
                 ),
                 map(
@@ -127,12 +127,12 @@ impl LitExpr {
                         recognize(many1(one_of("0123456789"))),
                     )),
                     |(_, dot, _, frac)| {
-                        let frac_loc = Some((
+                        let frac_range = Some((
                             frac.location_offset(),
                             frac.location_offset() + frac.fragment().len(),
                         ));
-                        let full_loc = merge_locs(dot.loc(), frac_loc);
-                        Parsed::new(format!("0.{}", frac.fragment()), full_loc)
+                        let full_range = merge_ranges(dot.range(), frac_range);
+                        Parsed::new(format!("0.{}", frac.fragment()), full_range)
                     },
                 ),
             )),
@@ -146,8 +146,8 @@ impl LitExpr {
         number.push_str(num.as_str());
 
         if let Ok(lit_number) = number.parse().map(Self::Number) {
-            let loc = merge_locs(neg.and_then(|n| n.loc()), num.loc());
-            Ok((suffix, Parsed::new(lit_number, loc)))
+            let range = merge_ranges(neg.and_then(|n| n.range()), num.range());
+            Ok((suffix, Parsed::new(lit_number, range)))
         } else {
             Err(nom::Err::Failure(nom::error::Error::new(
                 input,
@@ -184,8 +184,8 @@ impl LitExpr {
             spaces_or_comments,
         ))(input)
         .map(|(input, (_, open_brace, _, output, _, close_brace, _))| {
-            let loc = merge_locs(open_brace.loc(), close_brace.loc());
-            (input, Parsed::new(output, loc))
+            let range = merge_ranges(open_brace.range(), close_brace.range());
+            (input, Parsed::new(output, range))
         })
     }
 
@@ -222,8 +222,8 @@ impl LitExpr {
         ))(input)
         .map(
             |(input, (_, open_bracket, _, output, _, close_bracket, _))| {
-                let loc = merge_locs(open_bracket.loc(), close_bracket.loc());
-                (input, Parsed::new(output, loc))
+                let range = merge_ranges(open_bracket.range(), close_bracket.range());
+                (input, Parsed::new(output, range))
             },
         )
     }
@@ -266,7 +266,7 @@ impl ExternalVarPaths for LitExpr {
 #[cfg(test)]
 mod tests {
     use super::super::known_var::KnownVariable;
-    use super::super::location::strip_loc::StripLoc;
+    use super::super::location::strip_ranges::StripRanges;
     use super::*;
     use crate::sources::connect::json_selection::PathList;
 
@@ -274,7 +274,7 @@ mod tests {
         match LitExpr::parse(Span::new(input)) {
             Ok((remainder, parsed)) => {
                 assert_eq!(*remainder.fragment(), "");
-                assert_eq!(parsed.strip_loc(), Parsed::new(expected, None));
+                assert_eq!(parsed.strip_ranges(), Parsed::new(expected, None));
             }
             Err(e) => panic!("Failed to parse '{}': {:?}", input, e),
         };
