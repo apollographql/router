@@ -265,7 +265,6 @@ async fn test_with_parent_span() -> Result<(), BoxError> {
         String::from("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"),
     );
     let (id, result) = router.execute_query_with_headers(&query, headers).await;
-    dbg!(&result);
     assert_eq!(
         result
             .headers()
@@ -633,7 +632,6 @@ impl TraceSpec {
     }
 
     fn verify_operation_name(&self, trace: &Value) -> Result<(), BoxError> {
-        dbg!(trace);
         if let Some(expected_operation_name) = &self.operation_name {
             let binding =
                 trace.select_path("$..[?(@.name == 'supergraph')]..['graphql.operation.name']")?;
