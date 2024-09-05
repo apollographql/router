@@ -52,6 +52,7 @@ async fn test_default_span_names() -> Result<(), BoxError> {
             .unwrap(),
         id.to_datadog()
     );
+    router.graceful_shutdown().await;
     TraceSpec::builder()
         .services(["client", "router", "subgraph"].into())
         .span_names(
@@ -73,7 +74,6 @@ async fn test_default_span_names() -> Result<(), BoxError> {
         .build()
         .validate_trace(id)
         .await?;
-    router.graceful_shutdown().await;
     Ok(())
 }
 
@@ -104,6 +104,7 @@ async fn test_override_span_names() -> Result<(), BoxError> {
             .unwrap(),
         id.to_datadog()
     );
+    router.graceful_shutdown().await;
     TraceSpec::builder()
         .services(["client", "router", "subgraph"].into())
         .span_names(
@@ -125,7 +126,6 @@ async fn test_override_span_names() -> Result<(), BoxError> {
         .build()
         .validate_trace(id)
         .await?;
-    router.graceful_shutdown().await;
     Ok(())
 }
 
@@ -156,6 +156,7 @@ async fn test_override_span_names_late() -> Result<(), BoxError> {
             .unwrap(),
         id.to_datadog()
     );
+    router.graceful_shutdown().await;
     TraceSpec::builder()
         .services(["client", "router", "subgraph"].into())
         .span_names(
@@ -177,7 +178,6 @@ async fn test_override_span_names_late() -> Result<(), BoxError> {
         .build()
         .validate_trace(id)
         .await?;
-    router.graceful_shutdown().await;
     Ok(())
 }
 
@@ -206,6 +206,7 @@ async fn test_basic() -> Result<(), BoxError> {
             .unwrap(),
         id.to_datadog()
     );
+    router.graceful_shutdown().await;
     TraceSpec::builder()
         .operation_name("ExampleQuery")
         .services(["client", "router", "subgraph"].into())
@@ -240,7 +241,6 @@ async fn test_basic() -> Result<(), BoxError> {
         .build()
         .validate_trace(id)
         .await?;
-    router.graceful_shutdown().await;
     Ok(())
 }
 
@@ -383,6 +383,7 @@ async fn test_resource_mapping_override() -> Result<(), BoxError> {
         .get("apollo-custom-trace-id")
         .unwrap()
         .is_empty());
+    router.graceful_shutdown().await;
     TraceSpec::builder()
         .services(["client", "router", "subgraph"].into())
         .span_names(
@@ -403,7 +404,6 @@ async fn test_resource_mapping_override() -> Result<(), BoxError> {
         .build()
         .validate_trace(id)
         .await?;
-    router.graceful_shutdown().await;
     Ok(())
 }
 
@@ -428,6 +428,7 @@ async fn test_span_metrics() -> Result<(), BoxError> {
         .get("apollo-custom-trace-id")
         .unwrap()
         .is_empty());
+    router.graceful_shutdown().await;
     TraceSpec::builder()
         .operation_name("ExampleQuery")
         .services(["client", "router", "subgraph"].into())
@@ -450,7 +451,6 @@ async fn test_span_metrics() -> Result<(), BoxError> {
         .build()
         .validate_trace(id)
         .await?;
-    router.graceful_shutdown().await;
     Ok(())
 }
 
