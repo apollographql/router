@@ -409,8 +409,6 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
         };
 
         if self.unauthorized_paths.len() > current_unauthorized_paths_index {
-            println!("fragment_definition[{}]", line!());
-
             self.fragments_unauthorized_paths.insert(
                 node.name.as_str().to_string(),
                 self.unauthorized_paths
@@ -446,7 +444,6 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
             Some(condition) => condition,
             None => return Ok(None),
         };
-        println!("fragment_spread[{}]", line!());
 
         let fragment_requires_authentication = self
             .schema

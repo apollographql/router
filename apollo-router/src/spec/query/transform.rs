@@ -528,6 +528,10 @@ impl<'a> FragmentOrderVisitor<'a> {
 
                     println!("fragment {:?} depends on {:?}", self.current, name);
 
+                    // we have already seen this fragment, so we don't need to add it again
+                    if self.rank.get(name.as_str()) == Some(&0) {
+                        continue;
+                    }
                     if let Some(current) = self.current.as_ref() {
                         if let Some(rank) = self.rank.get_mut(current.as_str()) {
                             *rank += 1;
