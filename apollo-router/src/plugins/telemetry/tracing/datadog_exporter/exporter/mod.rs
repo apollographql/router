@@ -442,6 +442,8 @@ async fn send_request(
 impl SpanExporter for DatadogExporter {
     /// Export spans to datadog-agent
     fn export(&mut self, batch: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
+        let span_names: Vec<String> = batch.iter().map(|s| s.name.to_string()).collect();
+        dbg!(span_names);
         let request = match self.build_request(batch) {
             Ok(req) => req,
             Err(err) => return Box::pin(std::future::ready(Err(err))),

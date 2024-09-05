@@ -265,6 +265,7 @@ async fn test_with_parent_span() -> Result<(), BoxError> {
         String::from("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"),
     );
     let (id, result) = router.execute_query_with_headers(&query, headers).await;
+    dbg!(&result);
     assert_eq!(
         result
             .headers()
@@ -274,6 +275,7 @@ async fn test_with_parent_span() -> Result<(), BoxError> {
             .unwrap(),
         id.to_datadog()
     );
+    router.graceful_shutdown().await;
     TraceSpec::builder()
         .operation_name("ExampleQuery")
         .services(["client", "router", "subgraph"].into())
@@ -308,7 +310,6 @@ async fn test_with_parent_span() -> Result<(), BoxError> {
         .build()
         .validate_trace(id)
         .await?;
-    router.graceful_shutdown().await;
     Ok(())
 }
 
@@ -495,12 +496,12 @@ impl TraceSpec {
             .await?;
         tracing::debug!("{}", serde_json::to_string_pretty(&trace)?);
         self.verify_trace_participants(&trace)?;
+        self.verify_spans_present(&trace)?;
+        self.validate_measured_spans(&trace)?;
         self.verify_operation_name(&trace)?;
         self.verify_priority_sampled(&trace)?;
         self.verify_version(&trace)?;
-        self.verify_spans_present(&trace)?;
         self.validate_span_kinds(&trace)?;
-        self.validate_measured_spans(&trace)?;
         Ok(())
     }
 
@@ -632,6 +633,7 @@ impl TraceSpec {
     }
 
     fn verify_operation_name(&self, trace: &Value) -> Result<(), BoxError> {
+        dbg!(trace);
         if let Some(expected_operation_name) = &self.operation_name {
             let binding =
                 trace.select_path("$..[?(@.name == 'supergraph')]..['graphql.operation.name']")?;

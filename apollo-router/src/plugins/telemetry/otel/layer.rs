@@ -1093,6 +1093,7 @@ where
             if let Some(forced_status) = forced_status {
                 builder.status = forced_status;
             }
+            let is_router = builder.name == "router";
             if let Some(forced_span_name) = forced_span_name {
                 // Insert the original span name as an attribute so that we can map it later
                 let attributes = builder
@@ -1101,7 +1102,9 @@ where
                 attributes.insert(OTEL_ORIGINAL_NAME.into(), builder.name.into());
                 builder.name = forced_span_name.into();
             }
-
+            if is_router {
+                println!("is router ---------------------------------");
+            }
             // Assign end time, build and start span, drop span to export
             builder
                 .with_end_time(SystemTime::now())

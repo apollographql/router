@@ -749,6 +749,11 @@ impl IntegrationTest {
     #[allow(dead_code)]
     #[cfg(target_family = "unix")]
     pub async fn graceful_shutdown(&mut self) {
+        for result in self.telemetry.tracer_provider("router").force_flush() {
+            if let Err(err) = result {
+                eprintln!("an error occured when flushing the tracer provider: {err:?}");
+            }
+        }
         // Send a sig term and then wait for the process to finish.
         unsafe {
             libc::kill(self.pid(), libc::SIGTERM);
