@@ -6,25 +6,26 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use http::HeaderName;
 
-use super::coordinates::http_header_argument_coordinate;
-use super::require_value_is_str;
-use super::Code;
-use super::Message;
 use crate::sources::connect::spec::schema::HEADERS_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME as FROM_ARG;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME as NAME_ARG;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME as VALUE_ARG;
+use crate::sources::connect::validation::coordinates::http_header_argument_coordinate;
+use crate::sources::connect::validation::require_value_is_str;
+use crate::sources::connect::validation::Code;
+use crate::sources::connect::validation::Message;
 
-pub(super) fn validate_headers_arg<'a>(
+pub(crate) fn validate_arg<'a>(
+    http_arg: &'a [(Name, Node<Value>)],
     directive_name: &'a Name,
-    headers: &'a Node<Value>,
     source_map: &'a SourceMap,
     object: Option<&'a Name>,
     field: Option<&'a Name>,
-) -> impl Iterator<Item = Message> + 'a {
+) -> Option<impl Iterator<Item = Message> + 'a> {
+    let headers = get_arg(http_arg)?;
     #[allow(clippy::mutable_key_type)]
     let mut names = HashMap::new();
-    headers
+    let messages = headers
         .as_list()
         .into_iter()
         .flat_map(|l| l.iter().filter_map(|o| o.as_object()))
@@ -87,7 +88,7 @@ pub(super) fn validate_headers_arg<'a>(
                     validate_header_name(&FROM_ARG, from_value, headers_coordinate, source_map).err()
                 },
                 (None, Some(value_arg)) => {
-                    validate_header_value(value_arg, headers_coordinate, source_map)
+                    validate_value(value_arg, headers_coordinate, source_map)
                 },
                 (Some(from_arg), Some(value_arg)) => Some(
                     Message {
@@ -113,10 +114,11 @@ pub(super) fn validate_headers_arg<'a>(
             });
 
             messages
-        })
+        });
+    Some(messages)
 }
 
-pub(super) fn validate_header_value(
+pub(super) fn validate_value(
     value: &Node<Value>,
     coordinate: &String,
     source_map: &SourceMap,
@@ -157,7 +159,7 @@ fn validate_header_name(
     })
 }
 
-pub(super) fn get_http_headers_arg(http_arg: &[(Name, Node<Value>)]) -> Option<&Node<Value>> {
+fn get_arg(http_arg: &[(Name, Node<Value>)]) -> Option<&Node<Value>> {
     http_arg
         .iter()
         .find_map(|(key, value)| (*key == HEADERS_ARGUMENT_NAME).then_some(value))

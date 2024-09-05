@@ -19,9 +19,8 @@ use super::coordinates::connect_directive_coordinate;
 use super::coordinates::connect_directive_url_coordinate;
 use super::coordinates::HTTPCoordinate;
 use super::entity::validate_entity_arg;
-use super::http_headers::get_http_headers_arg;
-use super::http_headers::validate_headers_arg;
-use super::http_method::validate_http_method_arg;
+use super::http::headers;
+use super::http::method;
 use super::parse_url;
 use super::selection::validate_body_selection;
 use super::selection::validate_selection;
@@ -232,22 +231,22 @@ fn validate_field(
             return errors;
         };
 
-        let http_method = match validate_http_method_arg(
-        http_arg,
-        HTTPCoordinate {
-            connect_directive_name,
-            object,
-            field_name: &field.name,
-        },
-        http_arg_node,
-        source_map,
-    ) {
-        Ok(method) => Some(method),
-        Err(err) => {
-            errors.push(err);
-            None
-        }
-    };
+        let http_method = match method::validate(
+            http_arg,
+            HTTPCoordinate {
+                connect_directive_name,
+                object,
+                field_name: &field.name,
+            },
+            http_arg_node,
+            source_map,
+        ) {
+            Ok(method) => Some(method),
+            Err(err) => {
+                errors.push(err);
+                None
+            }
+        };
 
         let http_arg_url = http_method.map(|(http_method, url)| {
             (
@@ -290,14 +289,14 @@ fn validate_field(
             if let Some((url, url_coordinate)) = http_arg_url {
                 if parse_url(url, &url_coordinate, source_map).is_ok() {
                     errors.push(Message {
-                    code: Code::AbsoluteConnectUrlWithSource,
-                    message: format!(
-                        "{url_coordinate} contains the absolute URL {url} while also specifying a `{CONNECT_SOURCE_ARGUMENT_NAME}`. Either remove the `{CONNECT_SOURCE_ARGUMENT_NAME}` argument or change the URL to a path.",
-                    ),
-                    locations: url.line_column_range(source_map)
-                        .into_iter()
-                        .collect(),
-                });
+                        code: Code::AbsoluteConnectUrlWithSource,
+                        message: format!(
+                            "{url_coordinate} contains the absolute URL {url} while also specifying a `{CONNECT_SOURCE_ARGUMENT_NAME}`. Either remove the `{CONNECT_SOURCE_ARGUMENT_NAME}` argument or change the URL to a path.",
+                        ),
+                        locations: url.line_column_range(source_map)
+                            .into_iter()
+                            .collect(),
+                    });
                 }
             }
         } else if let Some((url, url_coordinate)) = http_arg_url {
@@ -308,28 +307,29 @@ fn validate_field(
                     .is_some_and(|url| url.starts_with('/') || url.ends_with('/'))
                 {
                     errors.push(Message {
-                    code: Code::RelativeConnectUrlWithoutSource,
-                    message: format!(
-                        "{url_coordinate} specifies the relative URL {url}, but no `{CONNECT_SOURCE_ARGUMENT_NAME}` is defined. Either use an absolute URL, or add a `@{source_directive_name}`."),
-                    locations: url.line_column_range(source_map).into_iter().collect()
-                });
+                        code: Code::RelativeConnectUrlWithoutSource,
+                        message: format!(
+                            "{url_coordinate} specifies the relative URL {url}, but no `{CONNECT_SOURCE_ARGUMENT_NAME}` is defined. Either use an absolute URL, or add a `@{source_directive_name}`."),
+                        locations: url.line_column_range(source_map).into_iter().collect()
+                    });
                 } else {
                     errors.push(err);
                 }
             }
         }
 
-        if let Some(headers) = get_http_headers_arg(http_arg) {
-            errors.extend(validate_headers_arg(
+        errors.extend(
+            headers::validate_arg(
+                http_arg,
                 connect_directive_name,
-                headers,
                 source_map,
                 Some(&object.name),
                 Some(&field.name),
-            ));
-        }
+            )
+            .into_iter()
+            .flatten(),
+        );
     }
-
     errors
 }
 

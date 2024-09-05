@@ -1,18 +1,18 @@
+use apollo_compiler::ast::Value;
 use apollo_compiler::parser::SourceMap;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
 
-use super::Code;
-use super::Message;
-use super::Name;
-use super::Value;
 use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_DELETE_METHOD_NAME;
 use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_GET_METHOD_NAME;
 use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_PATCH_METHOD_NAME;
 use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_POST_METHOD_NAME;
 use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_PUT_METHOD_NAME;
 use crate::sources::connect::validation::coordinates::HTTPCoordinate;
+use crate::sources::connect::validation::Code;
+use crate::sources::connect::validation::Message;
 
-pub(super) fn validate_http_method_arg<'arg>(
+pub(crate) fn validate<'arg>(
     http_arg: &'arg [(Name, Node<Value>)],
     coordinate: HTTPCoordinate,
     http_arg_node: &Node<Value>,
