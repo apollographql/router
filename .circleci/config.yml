@@ -1104,10 +1104,6 @@ workflows:
             tags:
               only: /v.*/
       - test_updated:
-          requires:
-            - lint
-            - check_helm
-            - check_compliance
           matrix:
             parameters:
               platform:
@@ -1118,10 +1114,6 @@ workflows:
             tags:
               only: /v.*/
       - test:
-          requires:
-            - lint
-            - check_helm
-            - check_compliance
           matrix:
             parameters:
               platform:
@@ -1132,10 +1124,6 @@ workflows:
             tags:
               only: /v.*/
       - build_release:
-          requires:
-            - pre_verify_release
-            - test
-            - test_updated
           matrix:
             parameters:
               platform:
@@ -1146,7 +1134,14 @@ workflows:
             tags:
               only: /v.*/
       - publish_github_release:
-          requires: [ build_release ]
+          requires:
+            - build_release
+            - lint
+            - check_helm
+            - check_compliance
+            - pre_verify_release
+            - test
+            - test_updated
           filters:
             branches:
               ignore: /.*/
