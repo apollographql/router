@@ -238,3 +238,211 @@ fn it_handles_an_at_requires_where_multiple_conditional_are_involved() {
         "###
     );
 }
+
+#[test]
+fn todo_give_name_one() {
+    let planner = planner!(
+        Subgraph1: r#"
+            type Query {
+              foo: Foo,
+            }
+
+            type Foo @key(fields: "id") {
+              id: ID,
+              bar: Bar,
+            }
+
+            type Bar @key(fields: "id") {
+              id: ID,
+            }
+        "#,
+        Subgraph2: r#"
+            type Bar @key(fields: "id") {
+              id: ID,
+              a: Int,
+            }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          query foo($test: Boolean!) {
+            foo @include(if: $test) {
+              ... on Foo @include(if: $test) {
+                id
+              }
+            }
+          }
+          "#,
+        @r###"
+        QueryPlan {
+          Include(if: $test) {
+            Fetch(service: "Subgraph1") {
+              {
+                foo {
+                  ... on Foo {
+                    id
+                  }
+                }
+              }
+            },
+          },
+        }
+        "###
+    );
+}
+
+#[test]
+fn todo_give_name_two() {
+    let planner = planner!(
+        Subgraph1: r#"
+            type Query {
+              foo: Foo,
+            }
+
+            type Foo @key(fields: "id") {
+              id: ID,
+              bar: Bar,
+            }
+
+            type Bar @key(fields: "id") {
+              id: ID,
+            }
+        "#,
+        Subgraph2: r#"
+            type Bar @key(fields: "id") {
+              id: ID,
+              a: Int,
+            }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+            query foo($test: Boolean!) {
+              foo @include(if: $test) {
+                ... on Foo @include(if: $test) {
+                  id
+                  bar {
+                    ... on Bar @include(if: $test) {
+                      a
+                    }
+                  }
+                }
+              }
+            }
+          "#,
+        @r###"
+        QueryPlan {
+          Include(if: $test) {
+            Sequence {
+              Fetch(service: "Subgraph1") {
+                {
+                  foo {
+                    ... on Foo {
+                      id
+                      bar {
+                        ... on Bar {
+                          __typename
+                          id
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              Flatten(path: "foo.bar") {
+                Fetch(service: "Subgraph2") {
+                  {
+                    ... on Bar {
+                      ... on Bar {
+                        ... on Bar {
+                          __typename
+                          id
+                        }
+                      }
+                    }
+                  } =>
+                  {
+                    ... on Bar {
+                      ... on Bar {
+                        ... on Bar {
+                          a
+                        }
+                      }
+                    }
+                  }
+                },
+              },
+            },
+          },
+        }
+        "###
+    );
+}
+
+#[test]
+fn todo_give_name_three() {
+    let planner = planner!(
+        Subgraph1: r#"
+            type Query {
+              foo: Foo,
+            }
+
+            type Foo @key(fields: "id") {
+              id: ID,
+              foo: Foo,
+              bar: Bar,
+            }
+
+            type Bar @key(fields: "id") {
+              id: ID,
+            }
+        "#,
+        Subgraph2: r#"
+            type Bar @key(fields: "id") {
+              id: ID,
+              a: Int,
+            }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          query foo($test: Boolean!) {
+            foo @include(if: $test) {
+              ... on Foo {
+                id
+                foo {
+                  ... on Foo @include(if: $test) {
+                    bar {
+                      id
+                    }
+                  }
+                }
+              }
+            }
+          }
+          "#,
+        @r###"
+        QueryPlan {
+          Include(if: $test) {
+            Fetch(service: "Subgraph1") {
+              {
+                foo {
+                  id
+                  foo {
+                    ... on Foo {
+                      bar {
+                        id
+                      }
+                    }
+                  }
+                }
+              }
+            },
+          },
+        }
+        "###
+    );
+}
