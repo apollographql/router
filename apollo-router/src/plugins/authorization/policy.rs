@@ -20,6 +20,7 @@ use tower::BoxError;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::spec::query::transform;
+use crate::spec::query::transform::TransformState;
 use crate::spec::query::traverse;
 use crate::spec::Schema;
 use crate::spec::TYPENAME;
@@ -188,8 +189,7 @@ impl<'a> traverse::Visitor for PolicyExtractionVisitor<'a> {
 pub(crate) struct PolicyFilteringVisitor<'a> {
     schema: &'a schema::Schema,
     fragments: HashMap<&'a Name, &'a ast::FragmentDefinition>,
-    used_fragments: HashSet<String>,
-    used_variables: HashSet<String>,
+    state: TransformState,
     implementers_map: &'a apollo_compiler::collections::HashMap<Name, Implementers>,
     dry_run: bool,
     request_policies: HashSet<String>,
@@ -232,8 +232,7 @@ impl<'a> PolicyFilteringVisitor<'a> {
         Some(Self {
             schema,
             fragments: transform::collect_fragments(executable),
-            used_fragments: HashSet::new(),
-            used_variables: HashSet::new(),
+            state: TransformState::new(),
             implementers_map,
             dry_run,
             request_policies: successful_policies,
@@ -636,12 +635,8 @@ impl<'a> transform::Visitor for PolicyFilteringVisitor<'a> {
         self.schema
     }
 
-    fn used_fragments(&mut self) -> &mut HashSet<String> {
-        &mut self.used_fragments
-    }
-
-    fn used_variables(&mut self) -> &mut HashSet<String> {
-        &mut self.used_variables
+    fn state(&mut self) -> &mut TransformState {
+        &mut self.state
     }
 }
 

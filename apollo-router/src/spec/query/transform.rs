@@ -23,18 +23,18 @@ pub(crate) fn document(
     // remove the spread too
     for definition in &document.definitions {
         if let ast::Definition::FragmentDefinition(def) = definition {
-            visitor.used_fragments().clear();
-            visitor.used_variables().clear();
+            visitor.state().used_fragments.clear();
+            visitor.state().used_variables.clear();
 
             if let Some(new_def) = visitor.fragment_definition(def)? {
                 // keep the list of used variables per fragment, as we need to use it to know which variables are used
                 // in a query
-                let used_variables = visitor.used_variables().clone();
+                let used_variables = visitor.state().used_variables.clone();
 
                 // keep the list of used fragments per fragment, as we need to use it to gather used variables later
                 // unfortunately, we may not know the variable used for those fragments at this point, as they may not
                 // have been processed yet
-                let local_used_fragments = visitor.used_fragments().clone();
+                let local_used_fragments = visitor.state().used_fragments.clone();
 
                 defined_fragments.insert(
                     def.name.as_str(),
@@ -56,10 +56,10 @@ pub(crate) fn document(
                 .clone();
 
             // we reset the used_fragments and used_variables lists for each operation
-            visitor.used_fragments().clear();
-            visitor.used_variables().clear();
+            visitor.state().used_fragments.clear();
+            visitor.state().used_variables.clear();
             if let Some(mut new_def) = visitor.operation(&root_type, def)? {
-                let mut local_used_fragments = visitor.used_fragments().clone();
+                let mut local_used_fragments = visitor.state().used_fragments.clone();
 
                 // gather the entire list of fragments used in this operation
                 loop {
@@ -84,14 +84,17 @@ pub(crate) fn document(
                     if let Some((_fragment, variables, _)) =
                         defined_fragments.get(fragment_name.as_str())
                     {
-                        visitor.used_variables().extend(variables.iter().cloned());
+                        visitor
+                            .state()
+                            .used_variables
+                            .extend(variables.iter().cloned());
                     }
                 }
                 used_fragments.extend(local_used_fragments);
 
                 // remove unused variables
                 new_def.variables.retain(|var| {
-                    let res = visitor.used_variables().contains(var.name.as_str());
+                    let res = visitor.state().used_variables.contains(var.name.as_str());
                     res
                 });
 
@@ -110,16 +113,26 @@ pub(crate) fn document(
     Ok(new)
 }
 
+pub(crate) struct TransformState {
+    used_fragments: HashSet<String>,
+    used_variables: HashSet<String>,
+}
+
+impl TransformState {
+    pub(crate) fn new() -> Self {
+        Self {
+            used_fragments: HashSet::new(),
+            used_variables: HashSet::new(),
+        }
+    }
+}
+
 pub(crate) trait Visitor: Sized {
     fn schema(&self) -> &apollo_compiler::Schema;
 
-    /// mutable state provided by the visitor to clean up unused fragments
+    /// mutable state provided by the visitor to clean up unused fragments and variables
     /// do not modify directly
-    fn used_fragments(&mut self) -> &mut HashSet<String>;
-
-    /// mutable state provided by the visitor to clean up unused variables
-    /// do not modify directly
-    fn used_variables(&mut self) -> &mut HashSet<String>;
+    fn state(&mut self) -> &mut TransformState;
 
     /// Transform an operation definition.
     ///
@@ -167,7 +180,8 @@ pub(crate) trait Visitor: Sized {
     ) -> Result<Option<ast::FragmentSpread>, BoxError> {
         let res = fragment_spread(self, def);
         if let Ok(Some(ref fragment)) = res.as_ref() {
-            self.used_fragments()
+            self.state()
+                .used_fragments
                 .insert(fragment.fragment_name.as_str().to_string());
         }
         res
@@ -242,14 +256,20 @@ pub(crate) fn field(
 
     for argument in def.arguments.iter() {
         if let Some(var) = argument.value.as_variable() {
-            visitor.used_variables().insert(var.as_str().to_string());
+            visitor
+                .state()
+                .used_variables
+                .insert(var.as_str().to_string());
         }
     }
 
     for directive in def.directives.iter() {
         for argument in directive.arguments.iter() {
             if let Some(var) = argument.value.as_variable() {
-                visitor.used_variables().insert(var.as_str().to_string());
+                visitor
+                    .state()
+                    .used_variables
+                    .insert(var.as_str().to_string());
             }
         }
     }
@@ -271,13 +291,17 @@ pub(crate) fn fragment_spread(
     def: &ast::FragmentSpread,
 ) -> Result<Option<ast::FragmentSpread>, BoxError> {
     visitor
-        .used_fragments()
+        .state()
+        .used_fragments
         .insert(def.fragment_name.as_str().to_string());
 
     for directive in def.directives.iter() {
         for argument in directive.arguments.iter() {
             if let Some(var) = argument.value.as_variable() {
-                visitor.used_variables().insert(var.as_str().to_string());
+                visitor
+                    .state()
+                    .used_variables
+                    .insert(var.as_str().to_string());
             }
         }
     }
@@ -300,7 +324,10 @@ pub(crate) fn inline_fragment(
     for directive in def.directives.iter() {
         for argument in directive.arguments.iter() {
             if let Some(var) = argument.value.as_variable() {
-                visitor.used_variables().insert(var.as_str().to_string());
+                visitor
+                    .state()
+                    .used_variables
+                    .insert(var.as_str().to_string());
             }
         }
     }
@@ -378,8 +405,7 @@ mod tests {
     fn test_add_directive_to_fields() {
         struct AddDirective {
             schema: apollo_compiler::Schema,
-            used_fragments: HashSet<String>,
-            used_variables: HashSet<String>,
+            state: TransformState,
         }
 
         impl Visitor for AddDirective {
@@ -405,12 +431,8 @@ mod tests {
                 &self.schema
             }
 
-            fn used_fragments(&mut self) -> &mut HashSet<String> {
-                &mut self.used_fragments
-            }
-
-            fn used_variables(&mut self) -> &mut HashSet<String> {
-                &mut self.used_variables
+            fn state(&mut self) -> &mut TransformState {
+                &mut self.state
             }
         }
 
@@ -441,21 +463,20 @@ mod tests {
         let schema = schema.into_inner();
         let mut visitor = AddDirective {
             schema,
-            used_fragments: HashSet::new(),
-            used_variables: HashSet::new(),
+            state: TransformState::new(),
         };
-        let expected = "fragment F on Query {
-  next @added {
-    a @added
-  }
-}
-
-query($id: ID = null) {
+        let expected = "query($id: ID = null) {
   a(id: $id) @added
   ... @defer {
     b @added
   }
   ...F
+}
+
+fragment F on Query {
+  next @added {
+    a @added
+  }
 }
 ";
         assert_eq!(document(&mut visitor, &ast).unwrap().to_string(), expected)
@@ -463,16 +484,14 @@ query($id: ID = null) {
 
     struct RemoveDirective {
         schema: apollo_compiler::Schema,
-        used_fragments: HashSet<String>,
-        used_variables: HashSet<String>,
+        state: TransformState,
     }
 
     impl RemoveDirective {
         fn new(schema: apollo_compiler::Schema) -> Self {
             Self {
                 schema,
-                used_fragments: HashSet::new(),
-                used_variables: HashSet::new(),
+                state: TransformState::new(),
             }
         }
     }
@@ -515,12 +534,8 @@ query($id: ID = null) {
             &self.schema
         }
 
-        fn used_fragments(&mut self) -> &mut HashSet<String> {
-            &mut self.used_fragments
-        }
-
-        fn used_variables(&mut self) -> &mut HashSet<String> {
-            &mut self.used_variables
+        fn state(&mut self) -> &mut TransformState {
+            &mut self.state
         }
     }
 

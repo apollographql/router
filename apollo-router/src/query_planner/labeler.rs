@@ -1,8 +1,6 @@
 //! Query Transformer implementation adding labels to @defer directives to identify deferred responses
 //!
 
-use std::collections::HashSet;
-
 use apollo_compiler::ast;
 use apollo_compiler::name;
 use apollo_compiler::Name;
@@ -13,6 +11,7 @@ use tower::BoxError;
 use crate::spec::query::subselections::DEFER_DIRECTIVE_NAME;
 use crate::spec::query::transform;
 use crate::spec::query::transform::document;
+use crate::spec::query::transform::TransformState;
 use crate::spec::query::transform::Visitor;
 
 const LABEL_NAME: Name = name!("label");
@@ -27,16 +26,14 @@ pub(crate) fn add_defer_labels(
     let mut visitor = Labeler {
         next_label: 0,
         schema,
-        used_fragments: HashSet::new(),
-        used_variables: HashSet::new(),
+        state: TransformState::new(),
     };
     document(&mut visitor, doc)
 }
 
 pub(crate) struct Labeler<'a> {
     schema: &'a Schema,
-    used_fragments: HashSet<String>,
-    used_variables: HashSet<String>,
+    state: TransformState,
     next_label: u32,
 }
 
@@ -72,12 +69,8 @@ impl Visitor for Labeler<'_> {
         self.schema
     }
 
-    fn used_fragments(&mut self) -> &mut HashSet<String> {
-        &mut self.used_fragments
-    }
-
-    fn used_variables(&mut self) -> &mut HashSet<String> {
-        &mut self.used_variables
+    fn state(&mut self) -> &mut TransformState {
+        &mut self.state
     }
 }
 

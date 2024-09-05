@@ -20,6 +20,7 @@ use tower::BoxError;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::spec::query::transform;
+use crate::spec::query::transform::TransformState;
 use crate::spec::query::traverse;
 use crate::spec::Schema;
 use crate::spec::TYPENAME;
@@ -205,8 +206,7 @@ fn scopes_sets_argument(directive: &ast::Directive) -> impl Iterator<Item = Hash
 pub(crate) struct ScopeFilteringVisitor<'a> {
     schema: &'a schema::Schema,
     fragments: HashMap<&'a Name, &'a ast::FragmentDefinition>,
-    used_fragments: HashSet<String>,
-    used_variables: HashSet<String>,
+    state: TransformState,
     implementers_map: &'a apollo_compiler::collections::HashMap<Name, Implementers>,
     request_scopes: HashSet<String>,
     pub(crate) query_requires_scopes: bool,
@@ -230,8 +230,7 @@ impl<'a> ScopeFilteringVisitor<'a> {
         Some(Self {
             schema,
             fragments: transform::collect_fragments(executable),
-            used_fragments: HashSet::new(),
-            used_variables: HashSet::new(),
+            state: TransformState::new(),
             implementers_map,
             request_scopes: scopes,
             dry_run,
@@ -638,12 +637,8 @@ impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
         self.schema
     }
 
-    fn used_fragments(&mut self) -> &mut HashSet<String> {
-        &mut self.used_fragments
-    }
-
-    fn used_variables(&mut self) -> &mut HashSet<String> {
-        &mut self.used_variables
+    fn state(&mut self) -> &mut TransformState {
+        &mut self.state
     }
 }
 
