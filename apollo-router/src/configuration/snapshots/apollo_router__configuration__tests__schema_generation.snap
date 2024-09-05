@@ -496,7 +496,7 @@ expression: "&schema"
     "CacheAttributes": {
       "additionalProperties": false,
       "properties": {
-        "entity.type": {
+        "graphql.entity.type": {
           "$ref": "#/definitions/StandardAttribute",
           "description": "#/definitions/StandardAttribute",
           "nullable": true
@@ -7803,7 +7803,7 @@ expression: "&schema"
         "description": "#/definitions/SubgraphSelector"
       },
       "properties": {
-        "entity.type": {
+        "graphql.entity.type": {
           "$ref": "#/definitions/StandardAttribute",
           "description": "#/definitions/StandardAttribute",
           "nullable": true

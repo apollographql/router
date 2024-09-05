@@ -211,22 +211,13 @@ telemetry:
       cache: # Cache instruments configuration
         apollo.router.operations.entity.cache: # A counter which counts the number of cache hit and miss for subgraph requests
           attributes:
-            entity.type: true # Include the entity type name. default: false
+            graphql.entity.type: true # Include the entity type name. default: false
             subgraph.name: # Custom attributes to include the subgraph name in the metric
               subgraph_name: true
             supergraph.operation.name: # Add custom attribute to display the supergraph operation name
               supergraph_operation_name: string
             # You can add more custom attributes using subgraph selectors
 ```
-
-<Note>
-There is an issue when using `entity.type` on new relic because it's a reserved attribute name and so it won’t work properly. cf [Learn about New Relic entities](https://docs.newrelic.com/docs/new-relic-solutions/new-relic-one/core-concepts/what-entity-new-relic/#reserved-attributes).
-To avoid this problem, please use an [alias on standard attribute](./telemetry/instrumentation/standard-instruments#alias) by using
-```yaml
-entity.type:
-  alias: entity_type
-```
-</Note>
 
 You can use custom instruments to create metrics for the subgraph service. The following example creates a custom instrument to generate a histogram that measures the subgraph request duration when there's at least one cache hit for the "inventory" subgraph:
 

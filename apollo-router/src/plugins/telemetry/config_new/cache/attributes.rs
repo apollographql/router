@@ -15,7 +15,7 @@ use crate::Context;
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct CacheAttributes {
     /// Entity type
-    #[serde(rename = "entity.type")]
+    #[serde(rename = "graphql.entity.type")]
     pub(crate) entity_type: Option<StandardAttribute>,
 }
 

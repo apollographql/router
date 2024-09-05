@@ -24,7 +24,7 @@ use crate::services::subgraph;
 pub(crate) mod attributes;
 
 pub(crate) const CACHE_METRIC: &str = "apollo.router.operations.entity.cache";
-const ENTITY_TYPE: Key = Key::from_static_str("entity.type");
+const ENTITY_TYPE: Key = Key::from_static_str("graphql.entity.type");
 const CACHE_HIT: Key = Key::from_static_str("cache.hit");
 
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
