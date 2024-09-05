@@ -26,6 +26,7 @@ use crate::plugins::connectors::http::Result as ConnectorResult;
 use crate::plugins::connectors::make_requests::make_requests;
 use crate::plugins::connectors::plugin::ConnectorContext;
 use crate::plugins::connectors::request_limit::RequestLimits;
+use crate::plugins::connectors::tracing::record_connect_metrics;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
 use crate::plugins::connectors::tracing::CONNECT_SPAN_NAME;
 use crate::plugins::subscription::SubscriptionConfig;
@@ -68,6 +69,7 @@ impl tower::Service<ConnectRequest> for ConnectorService {
     }
 
     fn call(&mut self, request: ConnectRequest) -> Self::Future {
+        record_connect_metrics(self.connectors_by_service_name.as_ref());
         let connector = self
             .connectors_by_service_name
             .get(&request.service_name)
