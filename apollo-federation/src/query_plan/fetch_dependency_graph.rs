@@ -2492,18 +2492,18 @@ impl FetchDependencyGraphNode {
                             .with_selections(trim_requires_selection_set(&field.selection_set)),
                     )),
                     executable::Selection::InlineFragment(inline_fragment) => {
-                        let new_fragment = if inline_fragment.type_condition.is_some() {
-                            executable::InlineFragment::with_type_condition(
-                                inline_fragment.type_condition.clone().unwrap(),
-                            )
-                        } else {
-                            executable::InlineFragment::without_type_condition(
-                                inline_fragment.selection_set.ty.clone(),
-                            )
-                        }
-                        .with_selections(trim_requires_selection_set(
-                            &inline_fragment.selection_set,
-                        ));
+                        let new_fragment = inline_fragment
+                            .type_condition
+                            .clone()
+                            .map(executable::InlineFragment::with_type_condition)
+                            .unwrap_or_else(|| {
+                                executable::InlineFragment::without_type_condition(
+                                    inline_fragment.selection_set.ty.clone(),
+                                )
+                            })
+                            .with_selections(trim_requires_selection_set(
+                                &inline_fragment.selection_set,
+                            ));
                         Some(executable::Selection::from(new_fragment))
                     }
                     executable::Selection::FragmentSpread(_) => None,
