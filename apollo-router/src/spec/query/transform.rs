@@ -629,5 +629,43 @@ query($id: ID = null) {
         let doc = ast::Document::parse(query, "query.graphql").unwrap();
         let result = document(&mut visitor, &doc).unwrap();
         insta::assert_snapshot!(TestResult { query, result });
+
+        // test field with variable in fragment nested in removed fragment
+        let query = r#"
+            query($a: String) {
+                ... F @remove
+                c
+            }
+
+            fragment F on Query {
+                ... G
+            }
+
+            fragment G on Query {
+                a(arg: $a)
+            }
+            "#;
+        let doc = ast::Document::parse(query, "query.graphql").unwrap();
+        let result = document(&mut visitor, &doc).unwrap();
+        insta::assert_snapshot!(TestResult { query, result });
+
+        // test removed field with variable in fragment nested in fragment
+        let query = r#"
+            query($a: String) {
+                ... F
+                c
+            }
+
+            fragment F on Query {
+                ... G
+            }
+
+            fragment G on Query {
+                a(arg: $a) @remove
+            }
+            "#;
+        let doc = ast::Document::parse(query, "query.graphql").unwrap();
+        let result = document(&mut visitor, &doc).unwrap();
+        insta::assert_snapshot!(TestResult { query, result });
     }
 }

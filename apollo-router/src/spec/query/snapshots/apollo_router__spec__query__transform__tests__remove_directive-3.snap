@@ -8,7 +8,7 @@ query:
                 ... F
                 c
             }
-            
+
             fragment F on Query {
                 a(arg: $a) @remove
             }

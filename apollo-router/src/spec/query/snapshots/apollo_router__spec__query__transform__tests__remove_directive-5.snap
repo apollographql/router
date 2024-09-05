@@ -10,8 +10,13 @@ query:
             }
 
             fragment F on Query {
+                ... G
+            }
+
+            fragment G on Query {
                 a(arg: $a)
             }
+            
 filtered:
 {
   c

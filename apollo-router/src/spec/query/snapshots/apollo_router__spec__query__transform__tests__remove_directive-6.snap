@@ -5,13 +5,18 @@ expression: "TestResult { query, result }"
 query:
 
             query($a: String) {
-                ... F @remove
+                ... F
                 c
             }
 
             fragment F on Query {
-                a(arg: $a)
+                ... G
             }
+            
+            fragment G on Query {
+                a(arg: $a) @remove
+            }
+            
 filtered:
 {
   c
