@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
@@ -17,7 +18,7 @@ pub(crate) fn document(
     };
 
     // keeps the list of fragments defined in the produced document (the visitor might have removed some of them)
-    let mut defined_fragments = HashMap::new();
+    let mut defined_fragments = BTreeMap::new();
 
     // walk through the fragment first: if a fragment is entirely filtered, we want to
     // remove the spread too
