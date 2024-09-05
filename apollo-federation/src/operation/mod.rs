@@ -632,6 +632,16 @@ mod selection_map {
                 Self::Vacant(entry) => entry.insert(produce()?),
             }
         }
+
+        pub fn try_and_modify(
+            mut self,
+            modify: impl FnOnce(SelectionValue) -> Result<(), FederationError>,
+        ) -> Result<Self, FederationError> {
+            if let Self::Occupied(existing) = &mut self {
+                modify(existing.get_mut())?;
+            }
+            Ok(self)
+        }
     }
 
     pub(crate) struct OccupiedEntry<'a>(indexmap::map::OccupiedEntry<'a, SelectionKey, Selection>);
@@ -2632,12 +2642,30 @@ impl SelectionSet {
         match path.split_first() {
             // If we have a sub-path, recurse.
             Some((ele, path @ &[_, ..])) => {
+                fn add_at_path_inner(
+                    mut selection: SelectionValue,
+                    path: &[Arc<OpPathElement>],
+                    selection_set: Option<&Arc<SelectionSet>>,
+                ) -> Result<(), FederationError> {
+                    match &mut selection {
+                    SelectionValue::Field(field) => match field.get_selection_set_mut() {
+                        Some(sub_selection) => sub_selection.add_at_path(path, selection_set),
+                        None => Err(FederationError::internal("add_at_path encountered a field without a subselection which should never happen".to_string())),
+                    },
+                    SelectionValue::InlineFragment(fragment) => fragment
+                        .get_selection_set_mut()
+                        .add_at_path(path, selection_set),
+                    SelectionValue::FragmentSpread(_fragment) => {
+                        Err(FederationError::internal("add_at_path encountered a named fragment spread which should never happen".to_string()))
+                    }
+                }
+                }
                 let element = ele.rebase_on(&self.type_position, &self.schema)?;
                 let Some(sub_selection_type) = element.sub_selection_type_position()? else {
                     return Err(FederationError::internal("unexpected error: add_at_path encountered a field that is not of a composite type".to_string()));
                 };
                 let target = Arc::make_mut(&mut self.selections);
-                let mut selection = match target.get_mut(&ele.key()) {
+                let selection = match target.get_mut(&ele.key()) {
                     Some(selection) => selection,
                     None => {
                         let unnecessary_directives = op_slice_condition_directives(path);
@@ -2648,23 +2676,15 @@ impl SelectionSet {
                             Some(SelectionSet::empty(self.schema.clone(), sub_selection_type)),
                             Some(&unnecessary_directives),
                         )?;
-                        let key = selection.key();
-                        let _ = target.insert(selection);
-                        target.get_mut(&key).unwrap()
+                        target
+                            .entry(selection.key())
+                            .try_and_modify(|selection| {
+                                add_at_path_inner(selection, path, selection_set)
+                            })?
+                            .or_insert(|| Ok(selection))?
                     }
                 };
-                match &mut selection {
-                    SelectionValue::Field(field) => match field.get_selection_set_mut() {
-                        Some(sub_selection) => sub_selection.add_at_path(path, selection_set)?,
-                        None => return Err(FederationError::internal("add_at_path encountered a field without a subselection which should never happen".to_string())),
-                    },
-                    SelectionValue::InlineFragment(fragment) => fragment
-                        .get_selection_set_mut()
-                        .add_at_path(path, selection_set)?,
-                    SelectionValue::FragmentSpread(_fragment) => {
-                        return Err(FederationError::internal("add_at_path encountered a named fragment spread which should never happen".to_string()));
-                    }
-                };
+                add_at_path_inner(selection, path, selection_set)?;
             }
             // If we have no sub-path, we can add the selection.
             Some((ele, &[])) => {
