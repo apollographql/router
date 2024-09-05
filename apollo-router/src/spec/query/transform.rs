@@ -371,47 +371,50 @@ pub(crate) fn collect_fragments(
         .collect()
 }
 
-#[test]
-fn test_add_directive_to_fields() {
-    struct AddDirective {
-        schema: apollo_compiler::Schema,
-        used_fragments: HashSet<String>,
-        used_variables: HashSet<String>,
-    }
-
-    impl Visitor for AddDirective {
-        fn field(
-            &mut self,
-            _parent_type: &str,
-            field_def: &ast::FieldDefinition,
-            def: &ast::Field,
-        ) -> Result<Option<ast::Field>, BoxError> {
-            Ok(field(self, field_def, def)?.map(|mut new| {
-                new.directives.push(
-                    ast::Directive {
-                        name: apollo_compiler::name!("added"),
-                        arguments: Vec::new(),
-                    }
-                    .into(),
-                );
-                new
-            }))
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_add_directive_to_fields() {
+        struct AddDirective {
+            schema: apollo_compiler::Schema,
+            used_fragments: HashSet<String>,
+            used_variables: HashSet<String>,
         }
 
-        fn schema(&self) -> &apollo_compiler::Schema {
-            &self.schema
+        impl Visitor for AddDirective {
+            fn field(
+                &mut self,
+                _parent_type: &str,
+                field_def: &ast::FieldDefinition,
+                def: &ast::Field,
+            ) -> Result<Option<ast::Field>, BoxError> {
+                Ok(field(self, field_def, def)?.map(|mut new| {
+                    new.directives.push(
+                        ast::Directive {
+                            name: apollo_compiler::name!("added"),
+                            arguments: Vec::new(),
+                        }
+                        .into(),
+                    );
+                    new
+                }))
+            }
+
+            fn schema(&self) -> &apollo_compiler::Schema {
+                &self.schema
+            }
+
+            fn used_fragments(&mut self) -> &mut HashSet<String> {
+                &mut self.used_fragments
+            }
+
+            fn used_variables(&mut self) -> &mut HashSet<String> {
+                &mut self.used_variables
+            }
         }
 
-        fn used_fragments(&mut self) -> &mut HashSet<String> {
-            &mut self.used_fragments
-        }
-
-        fn used_variables(&mut self) -> &mut HashSet<String> {
-            &mut self.used_variables
-        }
-    }
-
-    let graphql = "
+        let graphql = "
         type Query {
             a(id: ID): String
             b: Int
@@ -433,15 +436,15 @@ fn test_add_directive_to_fields() {
             }
         }
     ";
-    let ast = apollo_compiler::ast::Document::parse(graphql, "").unwrap();
-    let (schema, _doc) = ast.to_mixed_validate().unwrap();
-    let schema = schema.into_inner();
-    let mut visitor = AddDirective {
-        schema,
-        used_fragments: HashSet::new(),
-        used_variables: HashSet::new(),
-    };
-    let expected = "fragment F on Query {
+        let ast = apollo_compiler::ast::Document::parse(graphql, "").unwrap();
+        let (schema, _doc) = ast.to_mixed_validate().unwrap();
+        let schema = schema.into_inner();
+        let mut visitor = AddDirective {
+            schema,
+            used_fragments: HashSet::new(),
+            used_variables: HashSet::new(),
+        };
+        let expected = "fragment F on Query {
   next @added {
     a @added
   }
@@ -455,5 +458,137 @@ query($id: ID = null) {
   ...F
 }
 ";
-    assert_eq!(document(&mut visitor, &ast).unwrap().to_string(), expected)
+        assert_eq!(document(&mut visitor, &ast).unwrap().to_string(), expected)
+    }
+
+    struct RemoveDirective {
+        schema: apollo_compiler::Schema,
+        used_fragments: HashSet<String>,
+        used_variables: HashSet<String>,
+    }
+
+    impl RemoveDirective {
+        fn new(schema: apollo_compiler::Schema) -> Self {
+            Self {
+                schema,
+                used_fragments: HashSet::new(),
+                used_variables: HashSet::new(),
+            }
+        }
+    }
+
+    impl Visitor for RemoveDirective {
+        fn field(
+            &mut self,
+            _parent_type: &str,
+            field_def: &ast::FieldDefinition,
+            def: &ast::Field,
+        ) -> Result<Option<ast::Field>, BoxError> {
+            if def.directives.iter().any(|d| d.name == "remove") {
+                return Ok(None);
+            }
+            field(self, field_def, def)
+        }
+
+        fn fragment_spread(
+            &mut self,
+            def: &ast::FragmentSpread,
+        ) -> Result<Option<ast::FragmentSpread>, BoxError> {
+            if def.directives.iter().any(|d| d.name == "remove") {
+                return Ok(None);
+            }
+            fragment_spread(self, def)
+        }
+
+        fn inline_fragment(
+            &mut self,
+            _parent_type: &str,
+            def: &ast::InlineFragment,
+        ) -> Result<Option<ast::InlineFragment>, BoxError> {
+            if def.directives.iter().any(|d| d.name == "remove") {
+                return Ok(None);
+            }
+            inline_fragment(self, _parent_type, def)
+        }
+
+        fn schema(&self) -> &apollo_compiler::Schema {
+            &self.schema
+        }
+
+        fn used_fragments(&mut self) -> &mut HashSet<String> {
+            &mut self.used_fragments
+        }
+
+        fn used_variables(&mut self) -> &mut HashSet<String> {
+            &mut self.used_variables
+        }
+    }
+
+    struct TestResult<'a> {
+        query: &'a str,
+        result: ast::Document,
+    }
+
+    impl<'a> std::fmt::Display for TestResult<'a> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "query:\n{}\nfiltered:\n{}", self.query, self.result,)
+        }
+    }
+
+    static TRANSFORM_REMOVE_SCHEMA: &str = r#"
+    schema
+      @link(url: "https://specs.apollo.dev/link/v1.0")
+      @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+      @link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY)
+    {
+      query: Query
+    }
+    directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+    directive @remove on FIELD | INLINE_FRAGMENT | FRAGMENT_SPREAD
+    scalar link__Import
+      enum link__Purpose {
+      """
+      `SECURITY` features provide metadata necessary to securely resolve fields.
+      """
+      SECURITY
+
+      """
+      `EXECUTION` features provide metadata necessary for operation execution.
+      """
+      EXECUTION
+    }
+
+    type Query  {
+        a(arg: String): String
+        b: Obj
+    }
+
+    type Obj {
+        a: String
+    }
+    "#;
+
+    #[test]
+    fn remove_directive() {
+        let ast = apollo_compiler::ast::Document::parse(TRANSFORM_REMOVE_SCHEMA, "").unwrap();
+        let (schema, _doc) = ast.to_mixed_validate().unwrap();
+        let schema = schema.into_inner();
+        let mut visitor = RemoveDirective::new(schema.clone());
+
+        // test removed fragment
+        let query = r#"
+            query {
+                a
+               ... F @remove
+            }
+
+            fragment F on Query {
+                b {
+                    a
+                }
+            }"#;
+        let doc = ast::Document::parse(query, "query.graphql").unwrap();
+        let result = document(&mut visitor, &doc).unwrap();
+        insta::assert_snapshot!(TestResult { query, result });
+    }
 }
