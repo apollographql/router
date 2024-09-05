@@ -49,11 +49,24 @@ The graph ref for the GraphOS graph and variant that the router fetches its supe
 
 The [graph API key](/graphos/api-keys/#graph-api-keys) that the router should use to authenticate with GraphOS when fetching its supergraph schema.
 
-**Required** when using [managed federation](/federation/managed-federation/overview/), except when using an [offline license](#--license) to run the router.
+**Required** when using [managed federation](/federation/managed-federation/overview/), except when using an [offline license](#--license) to run the router or when using `APOLLO_KEY_PATH`.
 
 </td>
 </tr>
+<tr class="required">
+<td style="min-width: 150px;">
 
+##### `APOLLO_KEY_PATH`
+
+</td>
+<td>
+
+A path to a file containing the [graph API key](/graphos/api-keys/#graph-api-keys) that the router should use to authenticate with GraphOS when fetching its supergraph schema.
+
+**Required** when using [managed federation](/federation/managed-federation/overview/), except when using an [offline license](#--license) to run the router or when using `APOLLO_KEY`.
+
+</td>
+</tr>
 <tr>
 </tr>
 </tbody>
@@ -113,6 +126,21 @@ To learn how to compose your supergraph schema with the Rover CLI, see the [Fede
 <td>
 
 The absolute or relative path to the router's optional [YAML configuration file](#yaml-config-file).
+
+</td>
+
+</tr>
+<tr>
+<td style="min-width: 150px;">
+
+##### `--apollo-key-path`
+
+`APOLLO_KEY_PATH`
+
+</td>
+<td>
+
+The absolute or relative path to a file containing the Apollo graph API key for use with managed federation.
 
 </td>
 </tr>
