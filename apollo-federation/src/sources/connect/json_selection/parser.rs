@@ -967,8 +967,10 @@ pub struct MethodArgs(pub(super) Vec<Parsed<LitExpr>>);
 // using a Vec<LitExpr> in all cases (possibly empty but never missing).
 impl MethodArgs {
     fn parse(input: Span) -> IResult<Span, Parsed<Self>> {
-        delimited(
-            tuple((spaces_or_comments, char('('), spaces_or_comments)),
+        tuple((
+            spaces_or_comments,
+            parsed_span("("),
+            spaces_or_comments,
             opt(map(
                 tuple((
                     LitExpr::parse,
@@ -981,9 +983,14 @@ impl MethodArgs {
                     output
                 },
             )),
-            tuple((spaces_or_comments, char(')'), spaces_or_comments)),
-        )(input)
-        .map(|(input, args)| (input, Parsed::new(Self(args.unwrap_or_default()), None)))
+            spaces_or_comments,
+            parsed_span(")"),
+            spaces_or_comments,
+        ))(input)
+        .map(|(input, (_, open_paren, _, args, _, close_paren, _))| {
+            let range = merge_ranges(open_paren.range(), close_paren.range());
+            (input, Parsed::new(Self(args.unwrap_or_default()), range))
+        })
     }
 
     fn into_parsed(self) -> Parsed<Self> {
