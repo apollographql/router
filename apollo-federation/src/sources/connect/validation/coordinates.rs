@@ -17,36 +17,50 @@ use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_NAME_ARGUMENT_NAME;
 
-pub(super) fn connect_directive_coordinate(
-    connect_directive_name: &Name,
-    object: &Node<ObjectType>,
-    field: &Name,
-) -> String {
-    format!(
-        "`@{connect_directive_name}` on `{object_name}.{field}`",
-        object_name = object.name
-    )
-}
-
-/// The coordinate of an `HTTP` arg within a connect directive.
-pub(super) struct HTTPCoordinate<'a> {
+pub(super) struct ConnectDirectiveCoordinate<'a> {
     pub connect_directive_name: &'a Name,
-    pub object: &'a Node<ObjectType>,
+    pub object_name: &'a Name,
     pub field_name: &'a Name,
 }
 
-impl Display for HTTPCoordinate<'_> {
+impl Display for ConnectDirectiveCoordinate<'_> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let Self {
             connect_directive_name,
-            object,
+            object_name,
             field_name,
         } = self;
         write!(
             f,
-            "`@{connect_directive_name}({HTTP_ARGUMENT_NAME}:)` on `{object_name}.{field_name}`",
-            object_name = object.name
+            "`@{connect_directive_name}` on `{object_name}.{field_name}`",
         )
+    }
+}
+
+/// The coordinate of an `HTTP` arg within a connect directive.
+pub(super) struct ConnectHTTPCoordinate<'a> {
+    connect_directive_coordinate: ConnectDirectiveCoordinate<'a>,
+}
+
+impl Display for ConnectHTTPCoordinate<'_> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        let ConnectDirectiveCoordinate {
+            connect_directive_name,
+            object_name,
+            field_name,
+        } = self.connect_directive_coordinate;
+        write!(
+            f,
+            "`@{connect_directive_name}({HTTP_ARGUMENT_NAME}:)` on `{object_name}.{field_name}`",
+        )
+    }
+}
+
+impl<'a> From<ConnectDirectiveCoordinate<'a>> for ConnectHTTPCoordinate<'a> {
+    fn from(connect_directive_coordinate: ConnectDirectiveCoordinate<'a>) -> Self {
+        Self {
+            connect_directive_coordinate,
+        }
     }
 }
 

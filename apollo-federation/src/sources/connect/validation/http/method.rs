@@ -8,13 +8,13 @@ use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_GET_METHOD_NAME
 use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_PATCH_METHOD_NAME;
 use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_POST_METHOD_NAME;
 use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_PUT_METHOD_NAME;
-use crate::sources::connect::validation::coordinates::HTTPCoordinate;
+use crate::sources::connect::validation::coordinates::ConnectHTTPCoordinate;
 use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
 
 pub(crate) fn validate<'arg>(
     http_arg: &'arg [(Name, Node<Value>)],
-    coordinate: HTTPCoordinate,
+    coordinate: ConnectHTTPCoordinate,
     http_arg_node: &Node<Value>,
     source_map: &SourceMap,
 ) -> Result<&'arg (Name, Node<Value>), Message> {

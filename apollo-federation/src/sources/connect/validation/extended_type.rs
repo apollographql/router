@@ -15,9 +15,9 @@ use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use itertools::Itertools;
 
-use super::coordinates::connect_directive_coordinate;
 use super::coordinates::connect_directive_url_coordinate;
-use super::coordinates::HTTPCoordinate;
+use super::coordinates::ConnectDirectiveCoordinate;
+use super::coordinates::ConnectHTTPCoordinate;
 use super::coordinates::HttpHeadersCoordinate;
 use super::entity::validate_entity_arg;
 use super::http::headers;
@@ -213,32 +213,30 @@ fn validate_field(
             category,
         ));
 
-        let Some((http_arg, http_arg_node)) = connect_directive
-            .argument_by_name(&HTTP_ARGUMENT_NAME)
-            .and_then(|arg| Some((arg.as_object()?, arg)))
-        else {
-            errors.push(Message {
-                code: Code::GraphQLError,
-                message: format!(
-                    "{coordinate} must have a `{HTTP_ARGUMENT_NAME}` argument.",
-                    coordinate =
-                        connect_directive_coordinate(connect_directive_name, object, &field.name),
-                ),
-                locations: connect_directive
-                    .line_column_range(source_map)
-                    .into_iter()
-                    .collect(),
-            });
-            return errors;
-        };
+        let coordinate = ConnectDirectiveCoordinate {
+        connect_directive_name,
+        object_name: &object.name,
+        field_name: &field.name,
+    };
+
+    let Some((http_arg, http_arg_node)) = connect_directive
+        .argument_by_name(&HTTP_ARGUMENT_NAME)
+        .and_then(|arg| Some((arg.as_object()?, arg)))
+    else {
+        errors.push(Message {
+            code: Code::GraphQLError,
+            message: format!("{coordinate} must have a `{HTTP_ARGUMENT_NAME}` argument.",),
+            locations: connect_directive
+                .line_column_range(source_map)
+                .into_iter()
+                .collect(),
+        });
+        return errors;
+    };
 
         let http_method = match method::validate(
             http_arg,
-            HTTPCoordinate {
-                connect_directive_name,
-                object,
-                field_name: &field.name,
-            },
+            ConnectHTTPCoordinate::from(coordinate),
             http_arg_node,
             source_map,
         ) {
