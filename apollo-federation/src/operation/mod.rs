@@ -673,8 +673,8 @@ mod selection_map {
             if *self.key() != value.key() {
                 return Err(Internal {
                     message: format!(
-                        "Key mismatch when inserting selection {} into vacant entry ",
-                        value
+                        "Key mismatch when inserting selection `{value}` into vacant entry. Expected {:?}, found {:?}",
+                        self.key(), value.key()
                     ),
                 }
                 .into());
@@ -2636,18 +2636,23 @@ impl SelectionSet {
                 let Some(sub_selection_type) = element.sub_selection_type_position()? else {
                     return Err(FederationError::internal("unexpected error: add_at_path encountered a field that is not of a composite type".to_string()));
                 };
-                let mut selection = Arc::make_mut(&mut self.selections)
-                    .entry(ele.key())
-                    .or_insert(|| {
+                let target = Arc::make_mut(&mut self.selections);
+                let mut selection = match target.get_mut(&ele.key()) {
+                    Some(selection) => selection,
+                    None => {
                         let unnecessary_directives = op_slice_condition_directives(path);
-                        Selection::from_element(
+                        let selection = Selection::from_element(
                             element,
                             // We immediately add a selection afterward to make this selection set
                             // valid.
                             Some(SelectionSet::empty(self.schema.clone(), sub_selection_type)),
                             Some(&unnecessary_directives),
-                        )
-                    })?;
+                        )?;
+                        let key = selection.key();
+                        let _ = target.insert(selection);
+                        target.get_mut(&key).unwrap()
+                    }
+                };
                 match &mut selection {
                     SelectionValue::Field(field) => match field.get_selection_set_mut() {
                         Some(sub_selection) => sub_selection.add_at_path(path, selection_set)?,
