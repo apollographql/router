@@ -10,43 +10,34 @@ query:
 
         query B($id:String, $u:Int, $include:Boolean, $skip:Boolean) {
             ... F1
-        
             u(u:$u) @include(if: $include)
         }
 
         fragment F1 on Query {
+            ... F2
+        }
+
+        fragment F2 on Query {
             t {
-                ... F2 @skip(if: $skip)
+                ... F3 @skip(if: $skip)
             }
         }
 
-        fragment F2 on T {
+        fragment F3 on T {
             f(id: $id)
         }
 
-        fragment F3 on Query {
-            ...F4
+        fragment F4 on Query {
+            ...F5
         }
 
-        fragment F4 on Query {
+        fragment F5 on Query {
             v(v: $v)
         }
         
 filtered:
-query A($v: Int) {
-  ...F3
-}
-
 query B($u: Int, $include: Boolean) {
   u(u: $u) @include(if: $include)
-}
-
-fragment F3 on Query {
-  ...F4
-}
-
-fragment F4 on Query {
-  v(v: $v)
 }
 
 paths: ["/t"]

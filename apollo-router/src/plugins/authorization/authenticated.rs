@@ -176,14 +176,13 @@ impl<'a> traverse::Visitor for AuthenticatedCheckVisitor<'a> {
 
 pub(crate) struct AuthenticatedVisitor<'a> {
     schema: &'a schema::Schema,
-    fragments: HashMap<&'a Name, &'a ast::FragmentDefinition>,
     state: TransformState,
     implementers_map: &'a apollo_compiler::collections::HashMap<Name, Implementers>,
     pub(crate) query_requires_authentication: bool,
     pub(crate) unauthorized_paths: Vec<Path>,
     // store the error paths from fragments so we can  add them at
     // the point of application
-    fragments_unauthorized_paths: HashMap<&'a Name, Vec<Path>>,
+    fragments_unauthorized_paths: HashMap<String, Vec<Path>>,
     current_path: Path,
     authenticated_directive_name: String,
     dry_run: bool,
@@ -192,13 +191,11 @@ pub(crate) struct AuthenticatedVisitor<'a> {
 impl<'a> AuthenticatedVisitor<'a> {
     pub(crate) fn new(
         schema: &'a schema::Schema,
-        executable: &'a ast::Document,
         implementers_map: &'a apollo_compiler::collections::HashMap<Name, Implementers>,
         dry_run: bool,
     ) -> Option<Self> {
         Some(Self {
             schema,
-            fragments: transform::collect_fragments(executable),
             state: TransformState::new(),
             implementers_map,
             dry_run,
@@ -412,17 +409,13 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
         };
 
         if self.unauthorized_paths.len() > current_unauthorized_paths_index {
-            if let Some((name, _)) = self.fragments.get_key_value(&node.name) {
-                self.fragments_unauthorized_paths.insert(
-                    name,
-                    self.unauthorized_paths
-                        .split_off(current_unauthorized_paths_index),
-                );
-            }
-        }
+            println!("fragment_definition[{}]", line!());
 
-        if let Ok(None) = res {
-            self.fragments.remove(&node.name);
+            self.fragments_unauthorized_paths.insert(
+                node.name.as_str().to_string(),
+                self.unauthorized_paths
+                    .split_off(current_unauthorized_paths_index),
+            );
         }
 
         res
@@ -433,28 +426,36 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
         node: &ast::FragmentSpread,
     ) -> Result<Option<ast::FragmentSpread>, BoxError> {
         // record the fragment errors at the point of application
-        if let Some(paths) = self.fragments_unauthorized_paths.get(&node.fragment_name) {
+        if let Some(paths) = self
+            .fragments_unauthorized_paths
+            .get(node.fragment_name.as_str())
+        {
             for path in paths {
                 let path = self.current_path.join(path);
                 self.unauthorized_paths.push(path);
             }
         }
 
-        let fragment = match self.fragments.get(&node.fragment_name) {
-            Some(fragment) => fragment,
+        println!("fragment_spread[{}] on {}", line!(), node.fragment_name);
+        let condition = match self
+            .state()
+            .fragments()
+            .get(node.fragment_name.as_str())
+            .map(|fragment| fragment.fragment.type_condition.clone())
+        {
+            Some(condition) => condition,
             None => return Ok(None),
         };
-
-        let condition = &fragment.type_condition;
-
-        self.current_path
-            .push(PathElement::Fragment(condition.as_str().into()));
+        println!("fragment_spread[{}]", line!());
 
         let fragment_requires_authentication = self
             .schema
             .types
-            .get(condition)
+            .get(condition.as_str())
             .is_some_and(|type_definition| self.is_type_authenticated(type_definition));
+
+        self.current_path
+            .push(PathElement::Fragment(condition.as_str().into()));
 
         let res = if fragment_requires_authentication {
             self.query_requires_authentication = true;
@@ -616,7 +617,7 @@ mod tests {
         let doc = ast::Document::parse(query, "query.graphql").unwrap();
 
         let map = schema.implementers_map();
-        let mut visitor = AuthenticatedVisitor::new(&schema, &doc, &map, false).unwrap();
+        let mut visitor = AuthenticatedVisitor::new(&schema, &map, false).unwrap();
 
         (
             transform::document(&mut visitor, &doc).unwrap(),
@@ -1797,25 +1798,28 @@ mod tests {
 
         query B($id:String, $u:Int, $include:Boolean, $skip:Boolean) {
             ... F1
-        
             u(u:$u) @include(if: $include)
         }
 
         fragment F1 on Query {
+            ... F2
+        }
+
+        fragment F2 on Query {
             t {
-                ... F2 @skip(if: $skip)
+                ... F3 @skip(if: $skip)
             }
         }
 
-        fragment F2 on T {
+        fragment F3 on T {
             f(id: $id)
         }
 
-        fragment F3 on Query {
-            ...F4
+        fragment F4 on Query {
+            ...F5
         }
 
-        fragment F4 on Query {
+        fragment F5 on Query {
             v(v: $v)
         }
         "#;

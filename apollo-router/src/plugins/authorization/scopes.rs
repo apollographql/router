@@ -552,8 +552,13 @@ impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
             }
         }
 
-        let condition = match self.state().fragments().get(node.fragment_name.as_str()) {
-            Some(fragment) => fragment.fragment.type_condition.as_str().to_string(),
+        let condition = match self
+            .state()
+            .fragments()
+            .get(node.fragment_name.as_str())
+            .map(|fragment| fragment.fragment.type_condition.clone())
+        {
+            Some(condition) => condition,
             None => return Ok(None),
         };
 
@@ -563,7 +568,8 @@ impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
             .get(condition.as_str())
             .is_some_and(|ty| self.is_type_authorized(ty));
 
-        self.current_path.push(PathElement::Fragment(condition));
+        self.current_path
+            .push(PathElement::Fragment(condition.as_str().into()));
 
         let res = if !fragment_is_authorized {
             self.query_requires_scopes = true;

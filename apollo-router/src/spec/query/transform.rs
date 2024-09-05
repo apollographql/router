@@ -4,7 +4,6 @@ use std::collections::HashSet;
 
 use apollo_compiler::ast;
 use apollo_compiler::schema::FieldLookupError;
-use apollo_compiler::Name;
 use tower::BoxError;
 
 /// Transform a document with the given visitor.
@@ -17,34 +16,50 @@ pub(crate) fn document(
         definitions: Vec::new(),
     };
 
+    // go through the fragments and order them, starting with the ones that reference no other fragments
+    // then the ones that depend only on the first one, and so on
+    // This allows visitors like authorization to have all the required information if they encounter
+    // a fragment spread while filtering a fragment
+    let mut fragment_visitor = FragmentOrderVisitor::new();
+    fragment_visitor.visit_document(document);
+    let ordered_fragments = fragment_visitor.ordered_fragments();
+    println!(
+        "ordered_fragments: {:?}",
+        ordered_fragments
+            .iter()
+            .map(|f| f.name.as_str())
+            .collect::<Vec<_>>()
+    );
+
     visitor.state().reset();
 
-    // walk through the fragment first: if a fragment is entirely filtered, we want to
+    // Then walk again through the fragments: if a fragment is entirely filtered, we want to
     // remove the spread too
-    for definition in &document.definitions {
-        if let ast::Definition::FragmentDefinition(def) = definition {
-            visitor.state().used_fragments.clear();
-            visitor.state().used_variables.clear();
+    for def in ordered_fragments {
+        visitor.state().used_fragments.clear();
+        visitor.state().used_variables.clear();
 
-            if let Some(new_def) = visitor.fragment_definition(def)? {
-                // keep the list of used variables per fragment, as we need to use it to know which variables are used
-                // in a query
-                let used_variables = visitor.state().used_variables.clone();
+        println!("fragment_definition, will look at {}", def.name.as_str());
+        if let Some(new_def) = visitor.fragment_definition(def)? {
+            // keep the list of used variables per fragment, as we need to use it to know which variables are used
+            // in a query
+            let used_variables = visitor.state().used_variables.clone();
 
-                // keep the list of used fragments per fragment, as we need to use it to gather used variables later
-                // unfortunately, we may not know the variable used for those fragments at this point, as they may not
-                // have been processed yet
-                let local_used_fragments = visitor.state().used_fragments.clone();
+            // keep the list of used fragments per fragment, as we need to use it to gather used variables later
+            // unfortunately, we may not know the variable used for those fragments at this point, as they may not
+            // have been processed yet
+            let local_used_fragments = visitor.state().used_fragments.clone();
 
-                visitor.state().defined_fragments.insert(
-                    def.name.as_str().to_string(),
-                    DefinedFragment {
-                        fragment: new_def,
-                        used_variables,
-                        used_fragments: local_used_fragments,
-                    },
-                );
-            }
+            visitor.state().defined_fragments.insert(
+                def.name.as_str().to_string(),
+                DefinedFragment {
+                    fragment: new_def,
+                    used_variables,
+                    used_fragments: local_used_fragments,
+                },
+            );
+        } else {
+            println!("fragment {} is removed", def.name.as_str());
         }
     }
 
@@ -419,17 +434,117 @@ pub(crate) fn selection_set(
     Ok((!selections.is_empty()).then_some(selections))
 }
 
-pub(crate) fn collect_fragments(
-    executable: &ast::Document,
-) -> HashMap<&Name, &ast::FragmentDefinition> {
-    executable
-        .definitions
-        .iter()
-        .filter_map(|def| match def {
-            ast::Definition::FragmentDefinition(frag) => Some((&frag.name, frag.as_ref())),
-            _ => None,
-        })
-        .collect()
+/// this visitor goes through the list of fragments in the query, looking at fragment spreads
+/// in their selection, and generates a list of fragments in the order they should be visited
+/// by the transform visitor, to ensure a fragment has already been visited before it is
+/// referenced in a fragment spread
+struct FragmentOrderVisitor<'a> {
+    // the resulting list of ordered fragments
+    ordered_fragments: Vec<String>,
+    // list of fragments in the document
+    fragments: HashMap<String, &'a apollo_compiler::ast::FragmentDefinition>,
+
+    // fragment dependencies. The key is a fragment name, the value is all the fragments that reference it
+    // in a fragment spread
+    dependencies: HashMap<String, Vec<String>>,
+    // name of the fragment currently being visited
+    current: Option<String>,
+
+    // how many fragments are used by each fragment. This is decremented when a referenced fragment
+    // is added to the final list. Once it reaches 0, the fragment is added to the final list too
+    rank: HashMap<String, usize>,
+}
+
+impl<'a> FragmentOrderVisitor<'a> {
+    fn new() -> Self {
+        Self {
+            ordered_fragments: Vec::new(),
+            fragments: HashMap::new(),
+            dependencies: HashMap::new(),
+            current: None,
+            rank: HashMap::new(),
+        }
+    }
+
+    fn rerank(&mut self, name: &str) {
+        if let Some(v) = self.dependencies.remove(name) {
+            for dep in v {
+                if let Some(rank) = self.rank.get_mut(&dep) {
+                    *rank -= 1;
+                    if *rank == 0 {
+                        self.ordered_fragments.push(dep.clone());
+                        self.rerank(&dep);
+                    }
+                }
+            }
+        }
+    }
+
+    fn ordered_fragments(self) -> Vec<&'a ast::FragmentDefinition> {
+        let mut ordered_fragments = Vec::new();
+        for name in self.ordered_fragments {
+            ordered_fragments.push(*self.fragments.get(name.as_str()).unwrap());
+        }
+        ordered_fragments
+    }
+
+    fn visit_document(&mut self, doc: &'a ast::Document) {
+        for definition in &doc.definitions {
+            if let ast::Definition::FragmentDefinition(def) = definition {
+                self.visit_fragment_definition(&def);
+            }
+        }
+    }
+
+    fn visit_fragment_definition(&mut self, def: &'a ast::FragmentDefinition) {
+        let name = def.name.as_str().to_string();
+        self.fragments.insert(name.clone(), def);
+
+        self.current = Some(name.clone());
+        self.rank.insert(name.clone(), 0);
+
+        self.visit_selection_set(&def.selection_set);
+
+        if self.rank.get(&name).unwrap() == &0 {
+            // if the fragment does not reference any other fragments, it is ready to be added to the final list
+            self.ordered_fragments.push(name.clone());
+            // then we rerank all the fragments that reference this one: if any of them reaches the rank 0, they
+            // are added to the final list too
+            self.rerank(&name);
+        }
+        println!(
+            "visited fragment definition for {}, ordered fragments are now: {:?}, ranks: {:?}, dependencies: {:?}",
+            name, self.ordered_fragments, self.rank, self.dependencies
+        );
+    }
+
+    fn visit_selection_set(&mut self, selection_set: &[apollo_compiler::ast::Selection]) {
+        for selection in selection_set {
+            match selection {
+                ast::Selection::Field(def) => self.visit_selection_set(&def.selection_set),
+                ast::Selection::InlineFragment(def) => self.visit_selection_set(&def.selection_set),
+                ast::Selection::FragmentSpread(def) => {
+                    let name = def.fragment_name.as_str().to_string();
+
+                    println!("fragment {:?} depends on {:?}", self.current, name);
+
+                    if let Some(current) = self.current.as_ref() {
+                        if let Some(rank) = self.rank.get_mut(current.as_str()) {
+                            *rank += 1;
+                        }
+                        if !self.dependencies.contains_key(&name) {
+                            self.dependencies.insert(name, vec![current.clone()]);
+                        } else {
+                            self.dependencies
+                                .get_mut(&name)
+                                .expect("membership was just checked")
+                                .push(current.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
