@@ -36,7 +36,7 @@ pub enum LitExpr {
     Null,
     Object(IndexMap<Parsed<Key>, Parsed<LitExpr>>),
     Array(Vec<Parsed<LitExpr>>),
-    Path(Parsed<PathSelection>),
+    Path(PathSelection),
 }
 
 impl LitExpr {
@@ -57,10 +57,10 @@ impl LitExpr {
                 map(parsed_span("null"), |n| Parsed::new(Self::Null, n.loc())),
                 Self::parse_object,
                 Self::parse_array,
-                map(PathSelection::parse, |path| {
-                    let loc = path.path.loc();
-                    Parsed::new(Self::Path(path), loc)
-                })
+                map(PathSelection::parse, |p| {
+                    let loc = p.path.loc();
+                    Parsed::new(Self::Path(p), loc)
+                }),
             )),
             spaces_or_comments,
         ))(input)
@@ -419,7 +419,7 @@ mod tests {
                     .into_parsed(),
                 )
                 .into_parsed(),
-            }.into_parsed());
+            });
 
             check_parse("a.b.c", expected.clone());
             check_parse(" a . b . c ", expected.clone());
@@ -432,7 +432,7 @@ mod tests {
                     PathList::Empty.into_parsed(),
                 )
                 .into_parsed(),
-            }.into_parsed());
+            });
             check_parse(".data", expected.clone());
             check_parse(" . data ", expected.clone());
         }
@@ -445,7 +445,7 @@ mod tests {
                         PathList::Empty.into_parsed(),
                     )
                     .into_parsed(),
-                }.into_parsed())
+                })
                 .into_parsed(),
                 LitExpr::Path(PathSelection {
                     path: PathList::Key(
@@ -454,7 +454,7 @@ mod tests {
                             .into_parsed(),
                     )
                     .into_parsed(),
-                }.into_parsed())
+                })
                 .into_parsed(),
                 LitExpr::Path(PathSelection {
                     path: PathList::Key(
@@ -470,7 +470,7 @@ mod tests {
                         .into_parsed(),
                     )
                     .into_parsed(),
-                }.into_parsed())
+                })
                 .into_parsed(),
             ]);
 
@@ -511,7 +511,7 @@ mod tests {
                             .into_parsed(),
                         )
                         .into_parsed(),
-                    }.into_parsed())
+                    })
                     .into_parsed(),
                 );
                 map.insert(
@@ -526,7 +526,7 @@ mod tests {
                             .into_parsed(),
                         )
                         .into_parsed(),
-                    }.into_parsed())
+                    })
                     .into_parsed(),
                 );
                 map

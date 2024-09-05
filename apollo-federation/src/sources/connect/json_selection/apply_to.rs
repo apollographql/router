@@ -243,7 +243,7 @@ impl ApplyToInternal for Parsed<NamedSelection> {
     }
 }
 
-impl ApplyToInternal for Parsed<PathSelection> {
+impl ApplyToInternal for PathSelection {
     fn apply_to_path(
         &self,
         data: &JSON,
@@ -258,7 +258,9 @@ impl ApplyToInternal for Parsed<PathSelection> {
         // obj references are interpreted as $.obj.
         if matches!(self.path.as_ref(), PathList::Key(_, _)) {
             if let Some((dollar_data, dollar_path)) = vars.get(&KnownVariable::Dollar) {
-                return self.path.apply_to_path(*dollar_data, vars, dollar_path, errors);
+                return self
+                    .path
+                    .apply_to_path(dollar_data, vars, dollar_path, errors);
             }
             // If $ is undefined for some reason, fall back to using data...
         }
@@ -287,7 +289,7 @@ impl ApplyToInternal for Parsed<PathList> {
                     // just the variable name for named $variables other than $.
                     // For the special variable $, the path represents the
                     // sequence of keys from the root input data to the $ data.
-                    tail.apply_to_path(*var_data, vars, var_path, errors)
+                    tail.apply_to_path(var_data, vars, var_path, errors)
                 } else {
                     errors.insert(ApplyToError::new(
                         format!("Variable {} not found", var_name.as_str()),
@@ -348,7 +350,9 @@ impl ApplyToInternal for Parsed<PathList> {
                     None
                 }
             }
-            PathList::Selection(selection) => selection.apply_to_path(data, vars, input_path, errors),
+            PathList::Selection(selection) => {
+                selection.apply_to_path(data, vars, input_path, errors)
+            }
             PathList::Empty => {
                 // If data is not an object here, we want to preserve its value
                 // without an error.

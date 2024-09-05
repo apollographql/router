@@ -37,7 +37,7 @@ pub enum JSONSelection {
     // case, we parse it as a sequence of NamedSelection items without the
     // {...} curly braces that SubSelection::parse expects.
     Named(Parsed<SubSelection>),
-    Path(Parsed<PathSelection>),
+    Path(PathSelection),
 }
 
 impl JSONSelection {
@@ -120,7 +120,7 @@ pub enum NamedSelection {
         Parsed<Key>,
         Option<Parsed<SubSelection>>,
     ),
-    Path(Parsed<Alias>, Parsed<PathSelection>),
+    Path(Parsed<Alias>, PathSelection),
     Group(Parsed<Alias>, Parsed<SubSelection>),
 }
 
@@ -249,16 +249,8 @@ pub struct PathSelection {
 }
 
 impl PathSelection {
-    pub fn parse(input: Span) -> IResult<Span, Parsed<Self>> {
-        PathList::parse(input)
-        .map(|(input, path)| {
-            let loc = path.loc();
-            (input, Parsed::new(Self { path }, loc))
-        })
-    }
-
-    pub(super) fn into_parsed(self) -> Parsed<Self> {
-        Parsed::new(self, None)
+    pub fn parse(input: Span) -> IResult<Span, Self> {
+        PathList::parse(input).map(|(input, path)| (input, Self { path }))
     }
 
     pub(crate) fn var_name_and_nested_keys(&self) -> Option<(&KnownVariable, Vec<&str>)> {
@@ -1273,9 +1265,10 @@ mod tests {
 
         assert_eq!(
             selection!(".hello").strip_loc(),
-            JSONSelection::Path(
-                PathSelection::from_slice(&[Key::Field("hello".to_string())], None).into_parsed()
-            ),
+            JSONSelection::Path(PathSelection::from_slice(
+                &[Key::Field("hello".to_string())],
+                None
+            )),
         );
 
         {
@@ -1289,8 +1282,7 @@ mod tests {
                                 Key::Field("world".to_string()),
                             ],
                             None,
-                        )
-                        .into_parsed(),
+                        ),
                     )
                     .into_parsed()],
                     star: None,
@@ -1322,8 +1314,7 @@ mod tests {
                                     Key::Field("world".to_string()),
                                 ],
                                 None,
-                            )
-                            .into_parsed(),
+                            ),
                         )
                         .into_parsed(),
                         NamedSelection::Field(None, Key::field("after").into_parsed(), None)
@@ -1414,8 +1405,7 @@ mod tests {
                                     ],
                                     star: None,
                                 }),
-                            )
-                            .into_parsed(),
+                            ),
                         )
                         .into_parsed(),
                         NamedSelection::Field(None, Key::field("after").into_parsed(), None)
@@ -1525,8 +1515,7 @@ mod tests {
                                                 ],
                                                 star: None,
                                             })
-                                        )
-                                        .into_parsed(),
+                                        ),
                                     )
                                     .into_parsed(),
                                     NamedSelection::Group(
@@ -1568,11 +1557,8 @@ mod tests {
     fn check_path_selection(input: &str, expected: PathSelection) {
         let (remainder, path_selection) = PathSelection::parse(Span::new(input)).unwrap();
         assert_eq!(*remainder.fragment(), "");
-        assert_eq!(path_selection.strip_loc().node(), &expected);
-        assert_eq!(
-            selection!(input).strip_loc(),
-            JSONSelection::Path(expected.into_parsed())
-        );
+        assert_eq!(&path_selection.strip_loc(), &expected);
+        assert_eq!(selection!(input).strip_loc(), JSONSelection::Path(expected));
     }
 
     #[test]
@@ -1894,8 +1880,7 @@ mod tests {
                                         .into_parsed(),
                                     )
                                     .into_parsed(),
-                                }
-                                .into_parsed(),
+                                },
                             )
                             .into_parsed(),
                             NamedSelection::Field(None, Key::field("after").into_parsed(), None)
@@ -1938,8 +1923,7 @@ mod tests {
                                                 .into_parsed(),
                                             )
                                             .into_parsed(),
-                                        }
-                                        .into_parsed(),
+                                        },
                                     )
                                     .into_parsed(),
                                 ],
@@ -2073,30 +2057,24 @@ mod tests {
 
         assert_eq!(
             selection!("$").strip_loc(),
-            JSONSelection::Path(
-                PathSelection {
-                    path: PathList::Var(
-                        KnownVariable::Dollar.into_parsed(),
-                        PathList::Empty.into_parsed()
-                    )
-                    .into_parsed(),
-                }
-                .into_parsed()
-            ),
+            JSONSelection::Path(PathSelection {
+                path: PathList::Var(
+                    KnownVariable::Dollar.into_parsed(),
+                    PathList::Empty.into_parsed()
+                )
+                .into_parsed(),
+            }),
         );
 
         assert_eq!(
             selection!("$this").strip_loc(),
-            JSONSelection::Path(
-                PathSelection {
-                    path: PathList::Var(
-                        KnownVariable::This.into_parsed(),
-                        PathList::Empty.into_parsed()
-                    )
-                    .into_parsed(),
-                }
-                .into_parsed()
-            ),
+            JSONSelection::Path(PathSelection {
+                path: PathList::Var(
+                    KnownVariable::This.into_parsed(),
+                    PathList::Empty.into_parsed()
+                )
+                .into_parsed(),
+            }),
         );
 
         assert_eq!(
@@ -2112,8 +2090,7 @@ mod tests {
                                     PathList::Empty.into_parsed()
                                 )
                                 .into_parsed(),
-                            }
-                            .into_parsed(),
+                            },
                         )
                         .into_parsed(),
                         NamedSelection::Field(
@@ -2179,8 +2156,7 @@ mod tests {
                                 .into_parsed(),
                             )
                             .into_parsed(),
-                        }
-                        .into_parsed(),
+                        },
                     )
                     .into_parsed()],
                     star: None,
@@ -2258,7 +2234,7 @@ mod tests {
                                 MethodArgs(vec![LitExpr::Path(PathSelection::from_slice(
                                     &[Key::field("data"), Key::field("y")],
                                     None,
-                                ).into_parsed())
+                                ))
                                 .into_parsed()])
                                 .into_parsed(),
                             ),
@@ -2280,11 +2256,11 @@ mod tests {
                         Parsed::new("query".to_string(), None),
                         Some(
                             MethodArgs(vec![
-                                LitExpr::Path(PathSelection::from_slice(&[Key::field("a")], None).into_parsed())
+                                LitExpr::Path(PathSelection::from_slice(&[Key::field("a")], None))
                                     .into_parsed(),
-                                LitExpr::Path(PathSelection::from_slice(&[Key::field("b")], None).into_parsed())
+                                LitExpr::Path(PathSelection::from_slice(&[Key::field("b")], None))
                                     .into_parsed(),
-                                LitExpr::Path(PathSelection::from_slice(&[Key::field("c")], None).into_parsed())
+                                LitExpr::Path(PathSelection::from_slice(&[Key::field("c")], None))
                                     .into_parsed(),
                             ])
                             .into_parsed(),
@@ -2315,12 +2291,12 @@ mod tests {
                                     LitExpr::Path(PathSelection::from_slice(
                                         &[Key::field("data"), Key::field("y")],
                                         None,
-                                    ).into_parsed())
+                                    ))
                                     .into_parsed(),
                                     LitExpr::Path(PathSelection::from_slice(
                                         &[Key::field("data"), Key::field("z")],
                                         None,
-                                    ).into_parsed())
+                                    ))
                                     .into_parsed(),
                                 ])
                                 .into_parsed()])
@@ -2381,8 +2357,7 @@ mod tests {
                                                             .into_parsed(),
                                                         )
                                                         .into_parsed(),
-                                                    }
-                                                    .into_parsed(),
+                                                    },
                                                 )
                                                 .into_parsed()],
                                                 star: None,
@@ -2392,7 +2367,7 @@ mod tests {
                                         .into_parsed(),
                                     )
                                     .into_parsed(),
-                                }.into_parsed())
+                                })
                                 .into_parsed(),
                                 LitExpr::Path(PathSelection {
                                     path: PathList::Var(
@@ -2424,8 +2399,7 @@ mod tests {
                                                             .into_parsed(),
                                                         )
                                                         .into_parsed(),
-                                                    }
-                                                    .into_parsed(),
+                                                    },
                                                 )
                                                 .into_parsed()],
                                                 star: None,
@@ -2435,7 +2409,8 @@ mod tests {
                                         .into_parsed(),
                                     )
                                     .into_parsed(),
-                                }.into_parsed()).into_parsed(),
+                                })
+                                .into_parsed(),
                             ])
                             .into_parsed()])
                             .into_parsed(),
@@ -2748,7 +2723,7 @@ mod tests {
 
     #[test]
     fn test_external_var_paths() {
-        fn parse(input: &str) -> Parsed<PathSelection> {
+        fn parse(input: &str) -> PathSelection {
             PathSelection::parse(Span::new(input))
                 .unwrap()
                 .1
@@ -2766,7 +2741,7 @@ mod tests {
             let args_arg2_path = parse("$args.arg2");
             assert_eq!(
                 sel.external_var_paths(),
-                vec![args_arg1_path.node(), args_arg2_path.node()]
+                vec![&args_arg1_path, &args_arg2_path]
             );
         }
         {
@@ -2782,7 +2757,7 @@ mod tests {
             )
             .strip_loc();
             let this_kind_path = match &sel {
-                JSONSelection::Path(path) => path.node(),
+                JSONSelection::Path(path) => path,
                 _ => panic!("Expected PathSelection"),
             };
             let this_a_path = parse("$this.a");
@@ -2790,12 +2765,7 @@ mod tests {
             let this_c_path = parse("$this.c");
             assert_eq!(
                 sel.external_var_paths(),
-                vec![
-                    this_kind_path,
-                    this_a_path.node(),
-                    this_b_path.node(),
-                    this_c_path.node()
-                ]
+                vec![this_kind_path, &this_a_path, &this_b_path, &this_c_path,]
             );
         }
         {
@@ -2813,7 +2783,7 @@ mod tests {
             let args_type_path = parse("$args.type");
             assert_eq!(
                 sel.external_var_paths(),
-                vec![start_path.node(), end_path.node(), args_type_path.node()]
+                vec![&start_path, &end_path, &args_type_path]
             );
         }
     }
@@ -2905,58 +2875,52 @@ mod tests {
 
         check(
             "$args.product.id",
-            JSONSelection::Path(Parsed::new(
-                PathSelection {
-                    path: Parsed::new(
-                        PathList::Var(
-                            Parsed::new(KnownVariable::Args, Some((0, 5))),
-                            Parsed::new(
-                                PathList::Key(
-                                    Parsed::new(Key::field("product"), Some((6, 13))),
-                                    Parsed::new(
-                                        PathList::Key(
-                                            Parsed::new(Key::field("id"), Some((14, 16))),
-                                            Parsed::new(PathList::Empty, None),
-                                        ),
-                                        Some((13, 16)),
+            JSONSelection::Path(PathSelection {
+                path: Parsed::new(
+                    PathList::Var(
+                        Parsed::new(KnownVariable::Args, Some((0, 5))),
+                        Parsed::new(
+                            PathList::Key(
+                                Parsed::new(Key::field("product"), Some((6, 13))),
+                                Parsed::new(
+                                    PathList::Key(
+                                        Parsed::new(Key::field("id"), Some((14, 16))),
+                                        Parsed::new(PathList::Empty, None),
                                     ),
+                                    Some((13, 16)),
                                 ),
-                                Some((5, 16)),
                             ),
+                            Some((5, 16)),
                         ),
-                        Some((0, 16)),
                     ),
-                },
-                Some((0, 16)),
-            )),
+                    Some((0, 16)),
+                ),
+            }),
         );
 
         check(
             " $args . product . id ",
-            JSONSelection::Path(Parsed::new(
-                PathSelection {
-                    path: Parsed::new(
-                        PathList::Var(
-                            Parsed::new(KnownVariable::Args, Some((1, 6))),
-                            Parsed::new(
-                                PathList::Key(
-                                    Parsed::new(Key::field("product"), Some((9, 16))),
-                                    Parsed::new(
-                                        PathList::Key(
-                                            Parsed::new(Key::field("id"), Some((19, 21))),
-                                            Parsed::new(PathList::Empty, None),
-                                        ),
-                                        Some((17, 21)),
+            JSONSelection::Path(PathSelection {
+                path: Parsed::new(
+                    PathList::Var(
+                        Parsed::new(KnownVariable::Args, Some((1, 6))),
+                        Parsed::new(
+                            PathList::Key(
+                                Parsed::new(Key::field("product"), Some((9, 16))),
+                                Parsed::new(
+                                    PathList::Key(
+                                        Parsed::new(Key::field("id"), Some((19, 21))),
+                                        Parsed::new(PathList::Empty, None),
                                     ),
+                                    Some((17, 21)),
                                 ),
-                                Some((7, 21)),
                             ),
+                            Some((7, 21)),
                         ),
-                        Some((1, 21)),
                     ),
-                },
-                Some((1, 21)),
-            )),
+                    Some((1, 21)),
+                ),
+            }),
         );
 
         check(
@@ -2975,63 +2939,56 @@ mod tests {
                         Parsed::new(
                             NamedSelection::Path(
                                 Parsed::new(Alias::new_with_loc("product", (7, 14)), Some((7, 15))),
-                                Parsed::new(
-                                    PathSelection {
-                                        path: Parsed::new(
-                                            PathList::Var(
-                                                Parsed::new(KnownVariable::Args, Some((15, 20))),
-                                                Parsed::new(
-                                                    PathList::Key(
-                                                        Parsed::new(
-                                                            Key::field("product"),
-                                                            Some((21, 28)),
-                                                        ),
-                                                        Parsed::new(
-                                                            PathList::Selection(Parsed::new(
-                                                                SubSelection {
-                                                                    selections: vec![
-                                                                        Parsed::new(
-                                                                            NamedSelection::Field(
-                                                                                None,
-                                                                                Parsed::new(
-                                                                                    Key::field(
-                                                                                        "id",
-                                                                                    ),
-                                                                                    Some((29, 31)),
-                                                                                ),
-                                                                                None,
-                                                                            ),
-                                                                            Some((29, 31)),
-                                                                        ),
-                                                                        Parsed::new(
-                                                                            NamedSelection::Field(
-                                                                                None,
-                                                                                Parsed::new(
-                                                                                    Key::field(
-                                                                                        "name",
-                                                                                    ),
-                                                                                    Some((32, 36)),
-                                                                                ),
-                                                                                None,
-                                                                            ),
-                                                                            Some((32, 36)),
-                                                                        ),
-                                                                    ],
-                                                                    star: None,
-                                                                },
-                                                                Some((28, 37)),
-                                                            )),
-                                                            Some((28, 37)),
-                                                        ),
+                                PathSelection {
+                                    path: Parsed::new(
+                                        PathList::Var(
+                                            Parsed::new(KnownVariable::Args, Some((15, 20))),
+                                            Parsed::new(
+                                                PathList::Key(
+                                                    Parsed::new(
+                                                        Key::field("product"),
+                                                        Some((21, 28)),
                                                     ),
-                                                    Some((20, 37)),
+                                                    Parsed::new(
+                                                        PathList::Selection(Parsed::new(
+                                                            SubSelection {
+                                                                selections: vec![
+                                                                    Parsed::new(
+                                                                        NamedSelection::Field(
+                                                                            None,
+                                                                            Parsed::new(
+                                                                                Key::field("id"),
+                                                                                Some((29, 31)),
+                                                                            ),
+                                                                            None,
+                                                                        ),
+                                                                        Some((29, 31)),
+                                                                    ),
+                                                                    Parsed::new(
+                                                                        NamedSelection::Field(
+                                                                            None,
+                                                                            Parsed::new(
+                                                                                Key::field("name"),
+                                                                                Some((32, 36)),
+                                                                            ),
+                                                                            None,
+                                                                        ),
+                                                                        Some((32, 36)),
+                                                                    ),
+                                                                ],
+                                                                star: None,
+                                                            },
+                                                            Some((28, 37)),
+                                                        )),
+                                                        Some((28, 37)),
+                                                    ),
                                                 ),
+                                                Some((20, 37)),
                                             ),
-                                            Some((15, 37)),
                                         ),
-                                    },
-                                    Some((15, 37)),
-                                ),
+                                        Some((15, 37)),
+                                    ),
+                                },
                             ),
                             Some((7, 37)),
                         ),

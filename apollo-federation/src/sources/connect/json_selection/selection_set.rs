@@ -45,10 +45,7 @@ impl JSONSelection {
                 sub.apply_selection_set(selection_set),
                 sub.loc(),
             )),
-            Self::Path(path) => Self::Path(Parsed::new(
-                path.apply_selection_set(selection_set),
-                path.loc(),
-            )),
+            Self::Path(path) => Self::Path(path.apply_selection_set(selection_set)),
         }
     }
 }
@@ -73,7 +70,7 @@ impl SubSelection {
             new_selections.push(Parsed::new(
                 NamedSelection::Path(
                     Parsed::new(Alias::new("__typename"), None),
-                    Parsed::new(PathSelection {
+                    PathSelection {
                         path: Parsed::new(
                             PathList::Var(
                                 Parsed::new(KnownVariable::Dollar, None),
@@ -94,7 +91,7 @@ impl SubSelection {
                             ),
                             None,
                         ),
-                    }, None),
+                    },
                 ),
                 None,
             ));
@@ -147,10 +144,7 @@ impl SubSelection {
                             new_selections.push(Parsed::new(
                                 NamedSelection::Path(
                                     Parsed::new(Alias::new(field.response_key().as_str()), None),
-                                    Parsed::new(
-                                        path_selection.apply_selection_set(&field.selection_set),
-                                        path_selection.loc(),
-                                    ),
+                                    path_selection.apply_selection_set(&field.selection_set),
                                 ),
                                 None,
                             ));

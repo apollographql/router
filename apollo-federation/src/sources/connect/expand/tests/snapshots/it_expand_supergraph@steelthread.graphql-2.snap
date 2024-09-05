@@ -326,59 +326,51 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
             body: None,
         },
         selection: Path(
-            Parsed {
-                node: PathSelection {
-                    path: Parsed {
-                        node: Var(
-                            Parsed {
-                                node: $,
-                                loc: Some(
-                                    (
-                                        0,
-                                        1,
-                                    ),
+            PathSelection {
+                path: Parsed {
+                    node: Var(
+                        Parsed {
+                            node: $,
+                            loc: Some(
+                                (
+                                    0,
+                                    1,
                                 ),
-                            },
-                            Parsed {
-                                node: Key(
-                                    Parsed {
-                                        node: Field(
-                                            "phone",
-                                        ),
-                                        loc: Some(
-                                            (
-                                                2,
-                                                7,
-                                            ),
-                                        ),
-                                    },
-                                    Parsed {
-                                        node: Empty,
-                                        loc: None,
-                                    },
-                                ),
-                                loc: Some(
-                                    (
-                                        1,
-                                        7,
-                                    ),
-                                ),
-                            },
-                        ),
-                        loc: Some(
-                            (
-                                0,
-                                7,
                             ),
-                        ),
-                    },
-                },
-                loc: Some(
-                    (
-                        0,
-                        7,
+                        },
+                        Parsed {
+                            node: Key(
+                                Parsed {
+                                    node: Field(
+                                        "phone",
+                                    ),
+                                    loc: Some(
+                                        (
+                                            2,
+                                            7,
+                                        ),
+                                    ),
+                                },
+                                Parsed {
+                                    node: Empty,
+                                    loc: None,
+                                },
+                            ),
+                            loc: Some(
+                                (
+                                    1,
+                                    7,
+                                ),
+                            ),
+                        },
                     ),
-                ),
+                    loc: Some(
+                        (
+                            0,
+                            7,
+                        ),
+                    ),
+                },
             },
         ),
         config: None,

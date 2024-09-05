@@ -336,59 +336,51 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
                                                 ),
                                             ),
                                         },
-                                        Parsed {
-                                            node: PathSelection {
-                                                path: Parsed {
-                                                    node: Var(
-                                                        Parsed {
-                                                            node: $this,
-                                                            loc: Some(
-                                                                (
-                                                                    8,
-                                                                    13,
-                                                                ),
+                                        PathSelection {
+                                            path: Parsed {
+                                                node: Var(
+                                                    Parsed {
+                                                        node: $this,
+                                                        loc: Some(
+                                                            (
+                                                                8,
+                                                                13,
                                                             ),
-                                                        },
-                                                        Parsed {
-                                                            node: Key(
-                                                                Parsed {
-                                                                    node: Field(
-                                                                        "b",
-                                                                    ),
-                                                                    loc: Some(
-                                                                        (
-                                                                            14,
-                                                                            15,
-                                                                        ),
-                                                                    ),
-                                                                },
-                                                                Parsed {
-                                                                    node: Empty,
-                                                                    loc: None,
-                                                                },
-                                                            ),
-                                                            loc: Some(
-                                                                (
-                                                                    13,
-                                                                    15,
-                                                                ),
-                                                            ),
-                                                        },
-                                                    ),
-                                                    loc: Some(
-                                                        (
-                                                            8,
-                                                            15,
                                                         ),
-                                                    ),
-                                                },
-                                            },
-                                            loc: Some(
-                                                (
-                                                    8,
-                                                    15,
+                                                    },
+                                                    Parsed {
+                                                        node: Key(
+                                                            Parsed {
+                                                                node: Field(
+                                                                    "b",
+                                                                ),
+                                                                loc: Some(
+                                                                    (
+                                                                        14,
+                                                                        15,
+                                                                    ),
+                                                                ),
+                                                            },
+                                                            Parsed {
+                                                                node: Empty,
+                                                                loc: None,
+                                                            },
+                                                        ),
+                                                        loc: Some(
+                                                            (
+                                                                13,
+                                                                15,
+                                                            ),
+                                                        ),
+                                                    },
                                                 ),
-                                            ),
+                                                loc: Some(
+                                                    (
+                                                        8,
+                                                        15,
+                                                    ),
+                                                ),
+                                            },
                                         },
                                     ),
                                     loc: Some(
@@ -412,38 +404,30 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
             ),
         },
         selection: Path(
-            Parsed {
-                node: PathSelection {
-                    path: Parsed {
-                        node: Var(
-                            Parsed {
-                                node: $,
-                                loc: Some(
-                                    (
-                                        0,
-                                        1,
-                                    ),
+            PathSelection {
+                path: Parsed {
+                    node: Var(
+                        Parsed {
+                            node: $,
+                            loc: Some(
+                                (
+                                    0,
+                                    1,
                                 ),
-                            },
-                            Parsed {
-                                node: Empty,
-                                loc: None,
-                            },
-                        ),
-                        loc: Some(
-                            (
-                                0,
-                                1,
                             ),
-                        ),
-                    },
-                },
-                loc: Some(
-                    (
-                        0,
-                        1,
+                        },
+                        Parsed {
+                            node: Empty,
+                            loc: None,
+                        },
                     ),
-                ),
+                    loc: Some(
+                        (
+                            0,
+                            1,
+                        ),
+                    ),
+                },
             },
         ),
         config: None,

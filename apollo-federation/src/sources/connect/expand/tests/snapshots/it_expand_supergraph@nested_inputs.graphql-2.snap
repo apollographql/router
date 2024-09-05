@@ -79,38 +79,30 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ne
             body: None,
         },
         selection: Path(
-            Parsed {
-                node: PathSelection {
-                    path: Parsed {
-                        node: Var(
-                            Parsed {
-                                node: $,
-                                loc: Some(
-                                    (
-                                        0,
-                                        1,
-                                    ),
+            PathSelection {
+                path: Parsed {
+                    node: Var(
+                        Parsed {
+                            node: $,
+                            loc: Some(
+                                (
+                                    0,
+                                    1,
                                 ),
-                            },
-                            Parsed {
-                                node: Empty,
-                                loc: None,
-                            },
-                        ),
-                        loc: Some(
-                            (
-                                0,
-                                1,
                             ),
-                        ),
-                    },
-                },
-                loc: Some(
-                    (
-                        0,
-                        1,
+                        },
+                        Parsed {
+                            node: Empty,
+                            loc: None,
+                        },
                     ),
-                ),
+                    loc: Some(
+                        (
+                            0,
+                            1,
+                        ),
+                    ),
+                },
             },
         ),
         config: None,

@@ -59,382 +59,374 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
             headers: {},
             body: Some(
                 Path(
-                    Parsed {
-                        node: PathSelection {
-                            path: Parsed {
-                                node: Var(
-                                    Parsed {
-                                        node: $args,
-                                        loc: Some(
-                                            (
-                                                0,
-                                                5,
-                                            ),
+                    PathSelection {
+                        path: Parsed {
+                            node: Var(
+                                Parsed {
+                                    node: $args,
+                                    loc: Some(
+                                        (
+                                            0,
+                                            5,
                                         ),
-                                    },
-                                    Parsed {
-                                        node: Key(
-                                            Parsed {
-                                                node: Field(
-                                                    "input",
-                                                ),
-                                                loc: Some(
-                                                    (
-                                                        6,
-                                                        11,
-                                                    ),
-                                                ),
-                                            },
-                                            Parsed {
-                                                node: Selection(
-                                                    Parsed {
-                                                        node: SubSelection {
-                                                            selections: [
-                                                                Parsed {
-                                                                    node: Field(
-                                                                        None,
-                                                                        Parsed {
-                                                                            node: Field(
-                                                                                "name",
-                                                                            ),
-                                                                            loc: Some(
-                                                                                (
-                                                                                    14,
-                                                                                    18,
-                                                                                ),
-                                                                            ),
-                                                                        },
-                                                                        None,
-                                                                    ),
-                                                                    loc: Some(
-                                                                        (
-                                                                            14,
-                                                                            18,
-                                                                        ),
-                                                                    ),
-                                                                },
-                                                                Parsed {
-                                                                    node: Field(
-                                                                        None,
-                                                                        Parsed {
-                                                                            node: Field(
-                                                                                "username",
-                                                                            ),
-                                                                            loc: Some(
-                                                                                (
-                                                                                    19,
-                                                                                    27,
-                                                                                ),
-                                                                            ),
-                                                                        },
-                                                                        None,
-                                                                    ),
-                                                                    loc: Some(
-                                                                        (
-                                                                            19,
-                                                                            27,
-                                                                        ),
-                                                                    ),
-                                                                },
-                                                                Parsed {
-                                                                    node: Field(
-                                                                        None,
-                                                                        Parsed {
-                                                                            node: Field(
-                                                                                "email",
-                                                                            ),
-                                                                            loc: Some(
-                                                                                (
-                                                                                    28,
-                                                                                    33,
-                                                                                ),
-                                                                            ),
-                                                                        },
-                                                                        None,
-                                                                    ),
-                                                                    loc: Some(
-                                                                        (
-                                                                            28,
-                                                                            33,
-                                                                        ),
-                                                                    ),
-                                                                },
-                                                                Parsed {
-                                                                    node: Field(
-                                                                        None,
-                                                                        Parsed {
-                                                                            node: Field(
-                                                                                "status",
-                                                                            ),
-                                                                            loc: Some(
-                                                                                (
-                                                                                    34,
-                                                                                    40,
-                                                                                ),
-                                                                            ),
-                                                                        },
-                                                                        None,
-                                                                    ),
-                                                                    loc: Some(
-                                                                        (
-                                                                            34,
-                                                                            40,
-                                                                        ),
-                                                                    ),
-                                                                },
-                                                                Parsed {
-                                                                    node: Field(
-                                                                        None,
-                                                                        Parsed {
-                                                                            node: Field(
-                                                                                "address",
-                                                                            ),
-                                                                            loc: Some(
-                                                                                (
-                                                                                    41,
-                                                                                    48,
-                                                                                ),
-                                                                            ),
-                                                                        },
-                                                                        Some(
-                                                                            Parsed {
-                                                                                node: SubSelection {
-                                                                                    selections: [
-                                                                                        Parsed {
-                                                                                            node: Field(
-                                                                                                None,
-                                                                                                Parsed {
-                                                                                                    node: Field(
-                                                                                                        "street",
-                                                                                                    ),
-                                                                                                    loc: Some(
-                                                                                                        (
-                                                                                                            51,
-                                                                                                            57,
-                                                                                                        ),
-                                                                                                    ),
-                                                                                                },
-                                                                                                None,
-                                                                                            ),
-                                                                                            loc: Some(
-                                                                                                (
-                                                                                                    51,
-                                                                                                    57,
-                                                                                                ),
-                                                                                            ),
-                                                                                        },
-                                                                                        Parsed {
-                                                                                            node: Field(
-                                                                                                None,
-                                                                                                Parsed {
-                                                                                                    node: Field(
-                                                                                                        "suite",
-                                                                                                    ),
-                                                                                                    loc: Some(
-                                                                                                        (
-                                                                                                            58,
-                                                                                                            63,
-                                                                                                        ),
-                                                                                                    ),
-                                                                                                },
-                                                                                                None,
-                                                                                            ),
-                                                                                            loc: Some(
-                                                                                                (
-                                                                                                    58,
-                                                                                                    63,
-                                                                                                ),
-                                                                                            ),
-                                                                                        },
-                                                                                        Parsed {
-                                                                                            node: Field(
-                                                                                                None,
-                                                                                                Parsed {
-                                                                                                    node: Field(
-                                                                                                        "city",
-                                                                                                    ),
-                                                                                                    loc: Some(
-                                                                                                        (
-                                                                                                            64,
-                                                                                                            68,
-                                                                                                        ),
-                                                                                                    ),
-                                                                                                },
-                                                                                                None,
-                                                                                            ),
-                                                                                            loc: Some(
-                                                                                                (
-                                                                                                    64,
-                                                                                                    68,
-                                                                                                ),
-                                                                                            ),
-                                                                                        },
-                                                                                        Parsed {
-                                                                                            node: Field(
-                                                                                                None,
-                                                                                                Parsed {
-                                                                                                    node: Field(
-                                                                                                        "zipcode",
-                                                                                                    ),
-                                                                                                    loc: Some(
-                                                                                                        (
-                                                                                                            69,
-                                                                                                            76,
-                                                                                                        ),
-                                                                                                    ),
-                                                                                                },
-                                                                                                None,
-                                                                                            ),
-                                                                                            loc: Some(
-                                                                                                (
-                                                                                                    69,
-                                                                                                    76,
-                                                                                                ),
-                                                                                            ),
-                                                                                        },
-                                                                                        Parsed {
-                                                                                            node: Field(
-                                                                                                None,
-                                                                                                Parsed {
-                                                                                                    node: Field(
-                                                                                                        "geo",
-                                                                                                    ),
-                                                                                                    loc: Some(
-                                                                                                        (
-                                                                                                            77,
-                                                                                                            80,
-                                                                                                        ),
-                                                                                                    ),
-                                                                                                },
-                                                                                                Some(
-                                                                                                    Parsed {
-                                                                                                        node: SubSelection {
-                                                                                                            selections: [
-                                                                                                                Parsed {
-                                                                                                                    node: Field(
-                                                                                                                        None,
-                                                                                                                        Parsed {
-                                                                                                                            node: Field(
-                                                                                                                                "lat",
-                                                                                                                            ),
-                                                                                                                            loc: Some(
-                                                                                                                                (
-                                                                                                                                    83,
-                                                                                                                                    86,
-                                                                                                                                ),
-                                                                                                                            ),
-                                                                                                                        },
-                                                                                                                        None,
-                                                                                                                    ),
-                                                                                                                    loc: Some(
-                                                                                                                        (
-                                                                                                                            83,
-                                                                                                                            86,
-                                                                                                                        ),
-                                                                                                                    ),
-                                                                                                                },
-                                                                                                                Parsed {
-                                                                                                                    node: Field(
-                                                                                                                        None,
-                                                                                                                        Parsed {
-                                                                                                                            node: Field(
-                                                                                                                                "lng",
-                                                                                                                            ),
-                                                                                                                            loc: Some(
-                                                                                                                                (
-                                                                                                                                    87,
-                                                                                                                                    90,
-                                                                                                                                ),
-                                                                                                                            ),
-                                                                                                                        },
-                                                                                                                        None,
-                                                                                                                    ),
-                                                                                                                    loc: Some(
-                                                                                                                        (
-                                                                                                                            87,
-                                                                                                                            90,
-                                                                                                                        ),
-                                                                                                                    ),
-                                                                                                                },
-                                                                                                            ],
-                                                                                                            star: None,
-                                                                                                        },
-                                                                                                        loc: Some(
-                                                                                                            (
-                                                                                                                81,
-                                                                                                                92,
-                                                                                                            ),
-                                                                                                        ),
-                                                                                                    },
-                                                                                                ),
-                                                                                            ),
-                                                                                            loc: Some(
-                                                                                                (
-                                                                                                    77,
-                                                                                                    92,
-                                                                                                ),
-                                                                                            ),
-                                                                                        },
-                                                                                    ],
-                                                                                    star: None,
-                                                                                },
-                                                                                loc: Some(
-                                                                                    (
-                                                                                        49,
-                                                                                        94,
-                                                                                    ),
-                                                                                ),
-                                                                            },
-                                                                        ),
-                                                                    ),
-                                                                    loc: Some(
-                                                                        (
-                                                                            41,
-                                                                            94,
-                                                                        ),
-                                                                    ),
-                                                                },
-                                                            ],
-                                                            star: None,
-                                                        },
-                                                        loc: Some(
-                                                            (
-                                                                12,
-                                                                96,
-                                                            ),
-                                                        ),
-                                                    },
-                                                ),
-                                                loc: Some(
-                                                    (
-                                                        12,
-                                                        96,
-                                                    ),
-                                                ),
-                                            },
-                                        ),
-                                        loc: Some(
-                                            (
-                                                5,
-                                                96,
-                                            ),
-                                        ),
-                                    },
-                                ),
-                                loc: Some(
-                                    (
-                                        0,
-                                        96,
                                     ),
-                                ),
-                            },
-                        },
-                        loc: Some(
-                            (
-                                0,
-                                96,
+                                },
+                                Parsed {
+                                    node: Key(
+                                        Parsed {
+                                            node: Field(
+                                                "input",
+                                            ),
+                                            loc: Some(
+                                                (
+                                                    6,
+                                                    11,
+                                                ),
+                                            ),
+                                        },
+                                        Parsed {
+                                            node: Selection(
+                                                Parsed {
+                                                    node: SubSelection {
+                                                        selections: [
+                                                            Parsed {
+                                                                node: Field(
+                                                                    None,
+                                                                    Parsed {
+                                                                        node: Field(
+                                                                            "name",
+                                                                        ),
+                                                                        loc: Some(
+                                                                            (
+                                                                                14,
+                                                                                18,
+                                                                            ),
+                                                                        ),
+                                                                    },
+                                                                    None,
+                                                                ),
+                                                                loc: Some(
+                                                                    (
+                                                                        14,
+                                                                        18,
+                                                                    ),
+                                                                ),
+                                                            },
+                                                            Parsed {
+                                                                node: Field(
+                                                                    None,
+                                                                    Parsed {
+                                                                        node: Field(
+                                                                            "username",
+                                                                        ),
+                                                                        loc: Some(
+                                                                            (
+                                                                                19,
+                                                                                27,
+                                                                            ),
+                                                                        ),
+                                                                    },
+                                                                    None,
+                                                                ),
+                                                                loc: Some(
+                                                                    (
+                                                                        19,
+                                                                        27,
+                                                                    ),
+                                                                ),
+                                                            },
+                                                            Parsed {
+                                                                node: Field(
+                                                                    None,
+                                                                    Parsed {
+                                                                        node: Field(
+                                                                            "email",
+                                                                        ),
+                                                                        loc: Some(
+                                                                            (
+                                                                                28,
+                                                                                33,
+                                                                            ),
+                                                                        ),
+                                                                    },
+                                                                    None,
+                                                                ),
+                                                                loc: Some(
+                                                                    (
+                                                                        28,
+                                                                        33,
+                                                                    ),
+                                                                ),
+                                                            },
+                                                            Parsed {
+                                                                node: Field(
+                                                                    None,
+                                                                    Parsed {
+                                                                        node: Field(
+                                                                            "status",
+                                                                        ),
+                                                                        loc: Some(
+                                                                            (
+                                                                                34,
+                                                                                40,
+                                                                            ),
+                                                                        ),
+                                                                    },
+                                                                    None,
+                                                                ),
+                                                                loc: Some(
+                                                                    (
+                                                                        34,
+                                                                        40,
+                                                                    ),
+                                                                ),
+                                                            },
+                                                            Parsed {
+                                                                node: Field(
+                                                                    None,
+                                                                    Parsed {
+                                                                        node: Field(
+                                                                            "address",
+                                                                        ),
+                                                                        loc: Some(
+                                                                            (
+                                                                                41,
+                                                                                48,
+                                                                            ),
+                                                                        ),
+                                                                    },
+                                                                    Some(
+                                                                        Parsed {
+                                                                            node: SubSelection {
+                                                                                selections: [
+                                                                                    Parsed {
+                                                                                        node: Field(
+                                                                                            None,
+                                                                                            Parsed {
+                                                                                                node: Field(
+                                                                                                    "street",
+                                                                                                ),
+                                                                                                loc: Some(
+                                                                                                    (
+                                                                                                        51,
+                                                                                                        57,
+                                                                                                    ),
+                                                                                                ),
+                                                                                            },
+                                                                                            None,
+                                                                                        ),
+                                                                                        loc: Some(
+                                                                                            (
+                                                                                                51,
+                                                                                                57,
+                                                                                            ),
+                                                                                        ),
+                                                                                    },
+                                                                                    Parsed {
+                                                                                        node: Field(
+                                                                                            None,
+                                                                                            Parsed {
+                                                                                                node: Field(
+                                                                                                    "suite",
+                                                                                                ),
+                                                                                                loc: Some(
+                                                                                                    (
+                                                                                                        58,
+                                                                                                        63,
+                                                                                                    ),
+                                                                                                ),
+                                                                                            },
+                                                                                            None,
+                                                                                        ),
+                                                                                        loc: Some(
+                                                                                            (
+                                                                                                58,
+                                                                                                63,
+                                                                                            ),
+                                                                                        ),
+                                                                                    },
+                                                                                    Parsed {
+                                                                                        node: Field(
+                                                                                            None,
+                                                                                            Parsed {
+                                                                                                node: Field(
+                                                                                                    "city",
+                                                                                                ),
+                                                                                                loc: Some(
+                                                                                                    (
+                                                                                                        64,
+                                                                                                        68,
+                                                                                                    ),
+                                                                                                ),
+                                                                                            },
+                                                                                            None,
+                                                                                        ),
+                                                                                        loc: Some(
+                                                                                            (
+                                                                                                64,
+                                                                                                68,
+                                                                                            ),
+                                                                                        ),
+                                                                                    },
+                                                                                    Parsed {
+                                                                                        node: Field(
+                                                                                            None,
+                                                                                            Parsed {
+                                                                                                node: Field(
+                                                                                                    "zipcode",
+                                                                                                ),
+                                                                                                loc: Some(
+                                                                                                    (
+                                                                                                        69,
+                                                                                                        76,
+                                                                                                    ),
+                                                                                                ),
+                                                                                            },
+                                                                                            None,
+                                                                                        ),
+                                                                                        loc: Some(
+                                                                                            (
+                                                                                                69,
+                                                                                                76,
+                                                                                            ),
+                                                                                        ),
+                                                                                    },
+                                                                                    Parsed {
+                                                                                        node: Field(
+                                                                                            None,
+                                                                                            Parsed {
+                                                                                                node: Field(
+                                                                                                    "geo",
+                                                                                                ),
+                                                                                                loc: Some(
+                                                                                                    (
+                                                                                                        77,
+                                                                                                        80,
+                                                                                                    ),
+                                                                                                ),
+                                                                                            },
+                                                                                            Some(
+                                                                                                Parsed {
+                                                                                                    node: SubSelection {
+                                                                                                        selections: [
+                                                                                                            Parsed {
+                                                                                                                node: Field(
+                                                                                                                    None,
+                                                                                                                    Parsed {
+                                                                                                                        node: Field(
+                                                                                                                            "lat",
+                                                                                                                        ),
+                                                                                                                        loc: Some(
+                                                                                                                            (
+                                                                                                                                83,
+                                                                                                                                86,
+                                                                                                                            ),
+                                                                                                                        ),
+                                                                                                                    },
+                                                                                                                    None,
+                                                                                                                ),
+                                                                                                                loc: Some(
+                                                                                                                    (
+                                                                                                                        83,
+                                                                                                                        86,
+                                                                                                                    ),
+                                                                                                                ),
+                                                                                                            },
+                                                                                                            Parsed {
+                                                                                                                node: Field(
+                                                                                                                    None,
+                                                                                                                    Parsed {
+                                                                                                                        node: Field(
+                                                                                                                            "lng",
+                                                                                                                        ),
+                                                                                                                        loc: Some(
+                                                                                                                            (
+                                                                                                                                87,
+                                                                                                                                90,
+                                                                                                                            ),
+                                                                                                                        ),
+                                                                                                                    },
+                                                                                                                    None,
+                                                                                                                ),
+                                                                                                                loc: Some(
+                                                                                                                    (
+                                                                                                                        87,
+                                                                                                                        90,
+                                                                                                                    ),
+                                                                                                                ),
+                                                                                                            },
+                                                                                                        ],
+                                                                                                        star: None,
+                                                                                                    },
+                                                                                                    loc: Some(
+                                                                                                        (
+                                                                                                            81,
+                                                                                                            92,
+                                                                                                        ),
+                                                                                                    ),
+                                                                                                },
+                                                                                            ),
+                                                                                        ),
+                                                                                        loc: Some(
+                                                                                            (
+                                                                                                77,
+                                                                                                92,
+                                                                                            ),
+                                                                                        ),
+                                                                                    },
+                                                                                ],
+                                                                                star: None,
+                                                                            },
+                                                                            loc: Some(
+                                                                                (
+                                                                                    49,
+                                                                                    94,
+                                                                                ),
+                                                                            ),
+                                                                        },
+                                                                    ),
+                                                                ),
+                                                                loc: Some(
+                                                                    (
+                                                                        41,
+                                                                        94,
+                                                                    ),
+                                                                ),
+                                                            },
+                                                        ],
+                                                        star: None,
+                                                    },
+                                                    loc: Some(
+                                                        (
+                                                            12,
+                                                            96,
+                                                        ),
+                                                    ),
+                                                },
+                                            ),
+                                            loc: Some(
+                                                (
+                                                    12,
+                                                    96,
+                                                ),
+                                            ),
+                                        },
+                                    ),
+                                    loc: Some(
+                                        (
+                                            5,
+                                            96,
+                                        ),
+                                    ),
+                                },
                             ),
-                        ),
+                            loc: Some(
+                                (
+                                    0,
+                                    96,
+                                ),
+                            ),
+                        },
                     },
                 ),
             ),
@@ -562,59 +554,51 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                 ),
                                             ),
                                         },
-                                        Parsed {
-                                            node: PathSelection {
-                                                path: Parsed {
-                                                    node: Var(
-                                                        Parsed {
-                                                            node: $args,
-                                                            loc: Some(
-                                                                (
-                                                                    13,
-                                                                    18,
-                                                                ),
+                                        PathSelection {
+                                            path: Parsed {
+                                                node: Var(
+                                                    Parsed {
+                                                        node: $args,
+                                                        loc: Some(
+                                                            (
+                                                                13,
+                                                                18,
                                                             ),
-                                                        },
-                                                        Parsed {
-                                                            node: Key(
-                                                                Parsed {
-                                                                    node: Field(
-                                                                        "email",
-                                                                    ),
-                                                                    loc: Some(
-                                                                        (
-                                                                            19,
-                                                                            24,
-                                                                        ),
-                                                                    ),
-                                                                },
-                                                                Parsed {
-                                                                    node: Empty,
-                                                                    loc: None,
-                                                                },
-                                                            ),
-                                                            loc: Some(
-                                                                (
-                                                                    18,
-                                                                    24,
-                                                                ),
-                                                            ),
-                                                        },
-                                                    ),
-                                                    loc: Some(
-                                                        (
-                                                            13,
-                                                            24,
                                                         ),
-                                                    ),
-                                                },
-                                            },
-                                            loc: Some(
-                                                (
-                                                    13,
-                                                    24,
+                                                    },
+                                                    Parsed {
+                                                        node: Key(
+                                                            Parsed {
+                                                                node: Field(
+                                                                    "email",
+                                                                ),
+                                                                loc: Some(
+                                                                    (
+                                                                        19,
+                                                                        24,
+                                                                    ),
+                                                                ),
+                                                            },
+                                                            Parsed {
+                                                                node: Empty,
+                                                                loc: None,
+                                                            },
+                                                        ),
+                                                        loc: Some(
+                                                            (
+                                                                18,
+                                                                24,
+                                                            ),
+                                                        ),
+                                                    },
                                                 ),
-                                            ),
+                                                loc: Some(
+                                                    (
+                                                        13,
+                                                        24,
+                                                    ),
+                                                ),
+                                            },
                                         },
                                     ),
                                     loc: Some(

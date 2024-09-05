@@ -163,15 +163,9 @@ pub(super) mod strip_loc {
         }
     }
 
-    impl StripLoc for Parsed<PathSelection> {
-        fn strip_loc(&self) -> Self {
-            Parsed::new(self.node().strip_loc(), None)
-        }
-    }
-
     impl StripLoc for PathSelection {
         fn strip_loc(&self) -> Self {
-            PathSelection {
+            Self {
                 path: self.path.strip_loc(),
             }
         }
