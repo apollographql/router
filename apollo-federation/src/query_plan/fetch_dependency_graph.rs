@@ -2468,7 +2468,15 @@ impl FetchDependencyGraphNode {
         };
         let operation =
             operation_compression.compress(&self.subgraph_name, subgraph_schema, operation)?;
-        let operation_document = operation.try_into()?;
+        let operation_document = operation.try_into().map_err(|err| match err {
+            FederationError::SingleFederationError {
+                inner: SingleFederationError::InvalidGraphQL { diagnostics },
+                ..
+            } => FederationError::internal(format!(
+                "Query planning produced an invalid subgraph operation.\n{diagnostics}"
+            )),
+            _ => err,
+        })?;
 
         let node = super::PlanNode::Fetch(Box::new(super::FetchNode {
             subgraph_name: self.subgraph_name.clone(),
@@ -2751,6 +2759,7 @@ fn operation_for_entities_fetch(
             sibling_typename: None,
         })),
         Some(selection_set),
+        None,
     )?;
 
     let type_position: CompositeTypeDefinitionPosition = subgraph_schema
@@ -2862,7 +2871,8 @@ impl FetchSelectionSet {
         path_in_node: &OpPath,
         selection_set: Option<&Arc<SelectionSet>>,
     ) -> Result<(), FederationError> {
-        Arc::make_mut(&mut self.selection_set).add_at_path(path_in_node, selection_set)?;
+        let target = Arc::make_mut(&mut self.selection_set);
+        target.add_at_path(path_in_node, selection_set)?;
         // TODO: when calling this multiple times, maybe only re-compute conditions at the end?
         // Or make it lazily-initialized and computed on demand?
         self.conditions = self.selection_set.conditions()?;

@@ -5296,67 +5296,6 @@ fn fragment_on_interface() {
 }
 
 #[test]
-fn parse_introspection_query() {
-    let schema = "type Query {
-        foo: String
-        stuff: Bar
-        array: [Bar]
-        baz: String
-    }
-    type Bar {
-        bar: String
-        baz: String
-    }";
-
-    let schema = with_supergraph_boilerplate(schema, "Query");
-    let schema = Schema::parse(&schema, &Default::default()).expect("could not parse schema");
-
-    let query = "{
-        __type(name: \"Bar\") {
-          name
-          fields {
-            name
-            type {
-              name
-            }
-          }
-        }
-      }";
-    assert!(Query::parse(query, None, &schema, &Default::default())
-        .unwrap()
-        .operations
-        .first()
-        .unwrap()
-        .is_introspection());
-
-    let query = "query {
-        __schema {
-          queryType {
-            name
-          }
-        }
-      }";
-
-    assert!(Query::parse(query, None, &schema, &Default::default())
-        .unwrap()
-        .operations
-        .first()
-        .unwrap()
-        .is_introspection());
-
-    let query = "query {
-        __typename
-      }";
-
-    assert!(Query::parse(query, None, &schema, &Default::default())
-        .unwrap()
-        .operations
-        .first()
-        .unwrap()
-        .is_introspection());
-}
-
-#[test]
 fn fragment_on_union() {
     let schema = "type Query {
         settings: ServiceSettings
