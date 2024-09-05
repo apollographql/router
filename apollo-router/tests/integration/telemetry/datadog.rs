@@ -495,10 +495,10 @@ impl TraceSpec {
             .await?;
         tracing::debug!("{}", serde_json::to_string_pretty(&trace)?);
         self.verify_trace_participants(&trace)?;
+        self.verify_spans_present(&trace)?;
         self.verify_operation_name(&trace)?;
         self.verify_priority_sampled(&trace)?;
         self.verify_version(&trace)?;
-        self.verify_spans_present(&trace)?;
         self.validate_span_kinds(&trace)?;
         self.validate_measured_spans(&trace)?;
         Ok(())
