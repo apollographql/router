@@ -17,8 +17,7 @@ pub(crate) fn document(
         definitions: Vec::new(),
     };
 
-    // keeps the list of fragments defined in the produced document (the visitor might have removed some of them)
-    let mut defined_fragments = BTreeMap::new();
+    visitor.state().reset();
 
     // walk through the fragment first: if a fragment is entirely filtered, we want to
     // remove the spread too
@@ -37,9 +36,13 @@ pub(crate) fn document(
                 // have been processed yet
                 let local_used_fragments = visitor.state().used_fragments.clone();
 
-                defined_fragments.insert(
-                    def.name.as_str(),
-                    (new_def, used_variables, local_used_fragments),
+                visitor.state().defined_fragments.insert(
+                    def.name.as_str().to_string(),
+                    DefinedFragment {
+                        fragment: new_def,
+                        used_variables,
+                        used_fragments: local_used_fragments,
+                    },
                 );
             }
         }
@@ -66,10 +69,13 @@ pub(crate) fn document(
                 loop {
                     let mut new_local_used_fragments = local_used_fragments.clone();
                     for fragment_name in local_used_fragments.iter() {
-                        if let Some((_, _, fragments_used_by_fragment)) =
-                            defined_fragments.get(fragment_name.as_str())
+                        if let Some(defined_fragment) = visitor
+                            .state()
+                            .defined_fragments
+                            .get(fragment_name.as_str())
                         {
-                            new_local_used_fragments.extend(fragments_used_by_fragment.clone());
+                            new_local_used_fragments
+                                .extend(defined_fragment.used_fragments.clone());
                         }
                     }
 
@@ -82,13 +88,16 @@ pub(crate) fn document(
 
                 // add to the list of used variables all the variables used in the fragment spreads
                 for fragment_name in local_used_fragments.iter() {
-                    if let Some((_fragment, variables, _)) =
-                        defined_fragments.get(fragment_name.as_str())
+                    if let Some(defined_fragment_used_variables) = visitor
+                        .state()
+                        .defined_fragments
+                        .get(fragment_name.as_str())
+                        .map(|defined_fragment| defined_fragment.used_variables.clone())
                     {
                         visitor
                             .state()
                             .used_variables
-                            .extend(variables.iter().cloned());
+                            .extend(defined_fragment_used_variables);
                     }
                 }
                 used_fragments.extend(local_used_fragments);
@@ -105,18 +114,31 @@ pub(crate) fn document(
         }
     }
 
-    for (name, (fragment, _, _)) in defined_fragments.into_iter() {
-        if used_fragments.contains(name) {
-            new.definitions
-                .push(ast::Definition::FragmentDefinition(fragment.into()));
+    for (name, defined_fragment) in visitor.state().defined_fragments.clone().into_iter() {
+        if used_fragments.contains(name.as_str()) {
+            new.definitions.push(ast::Definition::FragmentDefinition(
+                defined_fragment.fragment.into(),
+            ));
         }
     }
     Ok(new)
 }
 
+/// Holds state during the transformation to account for used fragments and variables.
 pub(crate) struct TransformState {
     used_fragments: HashSet<String>,
     used_variables: HashSet<String>,
+    /// keeps the list of fragments defined in the produced document (the visitor might have removed some of them)
+    defined_fragments: BTreeMap<String, DefinedFragment>,
+}
+
+#[derive(Clone)]
+pub(crate) struct DefinedFragment {
+    pub(crate) fragment: ast::FragmentDefinition,
+    /// variables used in the fragment
+    pub(crate) used_variables: HashSet<String>,
+    /// fragments used in the fragment
+    pub(crate) used_fragments: HashSet<String>,
 }
 
 impl TransformState {
@@ -124,7 +146,14 @@ impl TransformState {
         Self {
             used_fragments: HashSet::new(),
             used_variables: HashSet::new(),
+            defined_fragments: BTreeMap::new(),
         }
+    }
+
+    fn reset(&mut self) {
+        self.used_fragments.clear();
+        self.used_variables.clear();
+        self.defined_fragments.clear();
     }
 }
 
