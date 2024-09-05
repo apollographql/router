@@ -2759,6 +2759,7 @@ fn operation_for_entities_fetch(
             sibling_typename: None,
         })),
         Some(selection_set),
+        None,
     )?;
 
     let type_position: CompositeTypeDefinitionPosition = subgraph_schema
@@ -2870,7 +2871,8 @@ impl FetchSelectionSet {
         path_in_node: &OpPath,
         selection_set: Option<&Arc<SelectionSet>>,
     ) -> Result<(), FederationError> {
-        Arc::make_mut(&mut self.selection_set).add_at_path(path_in_node, selection_set)?;
+        let target = Arc::make_mut(&mut self.selection_set);
+        target.add_at_path(path_in_node, selection_set)?;
         // TODO: when calling this multiple times, maybe only re-compute conditions at the end?
         // Or make it lazily-initialized and computed on demand?
         self.conditions = self.selection_set.conditions()?;
