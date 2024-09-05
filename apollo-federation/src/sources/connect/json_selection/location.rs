@@ -134,7 +134,9 @@ pub(super) mod strip_ranges {
         fn strip_ranges(&self) -> Self {
             Parsed::new(
                 match self.as_ref() {
-                    JSONSelection::Named(subselect) => JSONSelection::Named(subselect.strip_ranges()),
+                    JSONSelection::Named(subselect) => {
+                        JSONSelection::Named(subselect.strip_ranges())
+                    }
                     JSONSelection::Path(path) => JSONSelection::Path(path.strip_ranges()),
                 },
                 None,
@@ -175,8 +177,12 @@ pub(super) mod strip_ranges {
         fn strip_ranges(&self) -> Self {
             Parsed::new(
                 match self.as_ref() {
-                    PathList::Var(var, rest) => PathList::Var(var.strip_ranges(), rest.strip_ranges()),
-                    PathList::Key(key, rest) => PathList::Key(key.strip_ranges(), rest.strip_ranges()),
+                    PathList::Var(var, rest) => {
+                        PathList::Var(var.strip_ranges(), rest.strip_ranges())
+                    }
+                    PathList::Key(key, rest) => {
+                        PathList::Key(key.strip_ranges(), rest.strip_ranges())
+                    }
                     PathList::Method(method, opt_args, rest) => PathList::Method(
                         method.strip_ranges(),
                         opt_args.as_ref().map(|args| args.strip_ranges()),

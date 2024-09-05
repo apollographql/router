@@ -6,6 +6,7 @@ use serde_json_bytes::Value as JSON;
 use crate::sources::connect::json_selection::helpers::json_type_name;
 use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::lit_expr::LitExpr;
+use crate::sources::connect::json_selection::location::merge_ranges;
 use crate::sources::connect::json_selection::location::Parsed;
 use crate::sources::connect::json_selection::ApplyToError;
 use crate::sources::connect::json_selection::ApplyToInternal;
@@ -32,6 +33,7 @@ pub(super) fn echo_method(
     errors.insert(ApplyToError::new(
         format!("Method ->{} requires one argument", method_name.node()),
         input_path.to_vec(),
+        method_name.range(),
     ));
     None
 }
@@ -72,6 +74,7 @@ pub(super) fn map_method(
             errors.insert(ApplyToError::new(
                 format!("Method ->{} requires one argument", method_name.node()),
                 input_path.to_vec(),
+                method_name.range(),
             ));
             None
         }
@@ -79,6 +82,7 @@ pub(super) fn map_method(
         errors.insert(ApplyToError::new(
             format!("Method ->{} requires one argument", method_name.node()),
             input_path.to_vec(),
+            method_name.range(),
         ));
         None
     }
@@ -120,6 +124,10 @@ pub(super) fn match_method(
             method_name.node(),
         ),
         input_path.to_vec(),
+        merge_ranges(
+            method_name.range(),
+            method_args.and_then(|args| args.range()),
+        ),
     ));
     None
 }
@@ -135,8 +143,12 @@ pub(super) fn first_method(
 ) -> Option<JSON> {
     if method_args.is_some() {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} does not take any arguments", method_name.node()),
+            format!(
+                "Method ->{} does not take any arguments",
+                method_name.node()
+            ),
             input_path.to_vec(),
+            method_name.range(),
         ));
         return None;
     }
@@ -168,8 +180,12 @@ pub(super) fn last_method(
 ) -> Option<JSON> {
     if method_args.is_some() {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} does not take any arguments", method_name.node()),
+            format!(
+                "Method ->{} does not take any arguments",
+                method_name.node()
+            ),
             input_path.to_vec(),
+            method_name.range(),
         ));
         return None;
     }
@@ -205,21 +221,27 @@ pub(super) fn slice_method(
         s.as_str().len() as i64
     } else {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} requires an array or string input", method_name.node()),
+            format!(
+                "Method ->{} requires an array or string input",
+                method_name.node()
+            ),
             input_path.to_vec(),
+            method_name.range(),
         ));
         return None;
     };
 
     if let Some(parsed_args) = method_args {
-        let start = parsed_args.0
+        let start = parsed_args
+            .0
             .first()
             .and_then(|arg| arg.apply_to_path(data, vars, input_path, errors))
             .and_then(|n| n.as_i64())
             .unwrap_or(0)
             .max(0)
             .min(length) as usize;
-        let end = parsed_args.0
+        let end = parsed_args
+            .0
             .get(1)
             .and_then(|arg| arg.apply_to_path(data, vars, input_path, errors))
             .and_then(|n| n.as_i64())
@@ -269,8 +291,12 @@ pub(super) fn size_method(
 ) -> Option<JSON> {
     if method_args.is_some() {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} does not take any arguments", method_name.node()),
+            format!(
+                "Method ->{} does not take any arguments",
+                method_name.node()
+            ),
             input_path.to_vec(),
+            method_name.range(),
         ));
         return None;
     }
@@ -298,6 +324,7 @@ pub(super) fn size_method(
                     json_type_name(data),
                 ),
                 input_path.to_vec(),
+                method_name.range(),
             ));
             None
         }
@@ -319,8 +346,12 @@ pub(super) fn entries_method(
 ) -> Option<JSON> {
     if method_args.is_some() {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} does not take any arguments", method_name.node()),
+            format!(
+                "Method ->{} does not take any arguments",
+                method_name.node()
+            ),
             input_path.to_vec(),
+            method_name.range(),
         ));
         return None;
     }
@@ -346,6 +377,7 @@ pub(super) fn entries_method(
                     json_type_name(data),
                 ),
                 input_path.to_vec(),
+                method_name.range(),
             ));
             None
         }
