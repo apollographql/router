@@ -1,3 +1,7 @@
+use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
+
 use apollo_compiler::ast::Value;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::Name;
@@ -24,15 +28,26 @@ pub(super) fn connect_directive_coordinate(
     )
 }
 
-pub(super) fn connect_directive_http_coordinate(
-    connect_directive_name: &Name,
-    object: &Node<ObjectType>,
-    field: &Name,
-) -> String {
-    format!(
-        "`@{connect_directive_name}({HTTP_ARGUMENT_NAME}:)` on `{object_name}.{field}`",
-        object_name = object.name
-    )
+/// The coordinate of an `HTTP` arg within a connect directive.
+pub(super) struct HTTPCoordinate<'a> {
+    pub connect_directive_name: &'a Name,
+    pub object: &'a Node<ObjectType>,
+    pub field_name: &'a Name,
+}
+
+impl Display for HTTPCoordinate<'_> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        let Self {
+            connect_directive_name,
+            object,
+            field_name,
+        } = self;
+        write!(
+            f,
+            "`@{connect_directive_name}({HTTP_ARGUMENT_NAME}:)` on `{object_name}.{field_name}`",
+            object_name = object.name
+        )
+    }
 }
 
 pub(super) fn connect_directive_url_coordinate(

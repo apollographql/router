@@ -16,12 +16,11 @@ use apollo_compiler::Schema;
 use itertools::Itertools;
 
 use super::coordinates::connect_directive_coordinate;
-use super::coordinates::connect_directive_http_coordinate;
 use super::coordinates::connect_directive_url_coordinate;
+use super::coordinates::HTTPCoordinate;
 use super::entity::validate_entity_arg;
 use super::http_headers::get_http_headers_arg;
 use super::http_headers::validate_headers_arg;
-use super::http_method::get_http_methods_arg;
 use super::http_method::validate_http_method_arg;
 use super::parse_url;
 use super::selection::validate_body_selection;
@@ -233,16 +232,24 @@ fn validate_field(
             return errors;
         };
 
-        let http_methods: Vec<_> = get_http_methods_arg(http_arg);
+        let http_method = match validate_http_method_arg(
+        http_arg,
+        HTTPCoordinate {
+            connect_directive_name,
+            object,
+            field_name: &field.name,
+        },
+        http_arg_node,
+        source_map,
+    ) {
+        Ok(method) => Some(method),
+        Err(err) => {
+            errors.push(err);
+            None
+        }
+    };
 
-        errors.extend(validate_http_method_arg(
-            &http_methods,
-            connect_directive_http_coordinate(connect_directive_name, object, &field.name),
-            http_arg_node,
-            source_map,
-        ));
-
-        let http_arg_url = http_methods.first().map(|(http_method, url)| {
+        let http_arg_url = http_method.map(|(http_method, url)| {
             (
                 url,
                 connect_directive_url_coordinate(
