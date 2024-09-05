@@ -13,10 +13,7 @@ schema
   @join__directive(
     graphs: [CONNECTORS]
     name: "source"
-    args: {
-      name: "json"
-      http: { baseURL: "https://jsonplaceholder.typicode.com/" }
-    }
+    args: { name: "json", http: { baseURL: "http://localhost:4001" } }
   ) {
   query: Query
 }
@@ -69,14 +66,11 @@ directive @link(
 ) repeatable on SCHEMA
 
 interface Itf
-  @join__type(
-    graph: CONNECTORS
-    key: "id"
-    isInterfaceObject: true
-    resolvable: false
-  )
+  @join__type(graph: CONNECTORS, key: "id", isInterfaceObject: true)
   @join__type(graph: GRAPHQL, key: "id") {
   id: ID!
+  c: Int! @join__field(graph: CONNECTORS)
+  d: Int! @join__field(graph: CONNECTORS)
 }
 
 input join__ContextArgument {
@@ -112,12 +106,24 @@ enum link__Purpose {
 }
 
 type Query @join__type(graph: CONNECTORS) @join__type(graph: GRAPHQL) {
-  x: [Itf]
+  itfs: [Itf]
     @join__field(graph: CONNECTORS)
     @join__directive(
       graphs: [CONNECTORS]
       name: "connect"
-      args: { source: "json", http: { GET: "/itf" }, selection: "id" }
+      args: { source: "json", http: { GET: "/itfs" }, selection: "id c" }
+    )
+  itf(id: ID!): Itf
+    @join__field(graph: CONNECTORS)
+    @join__directive(
+      graphs: [CONNECTORS]
+      name: "connect"
+      args: {
+        source: "json"
+        http: { GET: "/itfs/{$args.id}" }
+        selection: "id c d"
+        entity: true
+      }
     )
 }
 
@@ -126,6 +132,9 @@ type T1 implements Itf
   @join__type(graph: GRAPHQL, key: "id") {
   id: ID!
   a: String
+  c: Int! @join__field
+  d: Int! @join__field
+  e: String @join__field
 }
 
 type T2 implements Itf
@@ -133,4 +142,7 @@ type T2 implements Itf
   @join__type(graph: GRAPHQL, key: "id") {
   id: ID!
   b: String
+  c: Int! @join__field
+  d: Int! @join__field
+  e: String @join__field
 }

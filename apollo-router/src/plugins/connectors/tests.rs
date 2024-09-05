@@ -1199,12 +1199,39 @@ async fn error_redacted() {
 async fn test_interface_object() {
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path("/itf"))
+        .and(path("/itfs"))
         .respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!([{ "id": 1 }, { "id": 2 }])),
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!([{ "id": 1, "c": 10 }, { "id": 2, "c": 11 }])),
         )
         .mount(&mock_server)
         .await;
+    Mock::given(method("GET"))
+        .and(path("/itfs/1"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({ "id": 1, "c": 10, "d": 20 })),
+        )
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/itfs/2"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({ "id": 1, "c": 11, "d": 21 })),
+        )
+        .mount(&mock_server)
+        .await;
+    // Mock::given(method("GET"))
+    //     .and(path("/itfs/1/e"))
+    //     .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!("e1")))
+    //     .mount(&mock_server)
+    //     .await;
+    // Mock::given(method("GET"))
+    //     .and(path("/itfs/2/e"))
+    //     .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!("e2")))
+    //     .mount(&mock_server)
+    //     .await;
     Mock::given(method("POST"))
         .and(path("/graphql"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -1224,7 +1251,8 @@ async fn test_interface_object() {
     let response = execute(
         INTERFACE_OBJECT_SCHEMA,
         &mock_server.uri(),
-        "query { x { __typename id ... on T1 { a } ... on T2 { b } } }",
+        // "query { itfs { __typename id c d e ... on T1 { a } ... on T2 { b } } }",
+        "query { itfs { __typename id c d ... on T1 { a } ... on T2 { b } } }",
         Default::default(),
         None,
         |_| {},
@@ -1234,15 +1262,19 @@ async fn test_interface_object() {
     insta::assert_json_snapshot!(response, @r###"
     {
       "data": {
-        "x": [
+        "itfs": [
           {
             "__typename": "T1",
             "id": 1,
+            "c": 10,
+            "d": 20,
             "a": "a"
           },
           {
             "__typename": "T2",
             "id": 2,
+            "c": 11,
+            "d": 21,
             "b": "b"
           }
         ]
@@ -1253,7 +1285,7 @@ async fn test_interface_object() {
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
         vec![
-          Matcher::new().method("GET").path("/itf").build(),
+          Matcher::new().method("GET").path("/itfs").build(),
           Matcher::new()
             .method("POST")
             .path("/graphql")
@@ -1266,7 +1298,9 @@ async fn test_interface_object() {
                 ]
               }
             }))
-            .build()
+            .build(),
+          Matcher::new().method("GET").path("/itfs/1").build(),
+          Matcher::new().method("GET").path("/itfs/2").build(),
         ],
     );
 }
