@@ -155,6 +155,10 @@ impl TransformState {
         self.used_variables.clear();
         self.defined_fragments.clear();
     }
+
+    pub(crate) fn fragments(&self) -> &BTreeMap<String, DefinedFragment> {
+        &self.defined_fragments
+    }
 }
 
 pub(crate) trait Visitor: Sized {
@@ -546,6 +550,16 @@ fragment F on Query {
             if def.directives.iter().any(|d| d.name == "remove") {
                 return Ok(None);
             }
+
+            // remove the fragment spread if the fragment was removed
+            if !self
+                .state()
+                .fragments()
+                .contains_key(def.fragment_name.as_str())
+            {
+                return Ok(None);
+            }
+
             fragment_spread(self, def)
         }
 
