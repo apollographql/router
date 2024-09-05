@@ -168,7 +168,7 @@ impl NamedSelection {
 
     fn parse_path(input: Span) -> IResult<Span, Parsed<Self>> {
         tuple((Alias::parse, PathSelection::parse))(input).map(|(input, (alias, path))| {
-            let loc = merge_locs(alias.loc(), path.loc());
+            let loc = merge_locs(alias.loc(), path.path.loc());
             (input, Parsed::new(Self::Path(alias, path), loc))
         })
     }
@@ -250,12 +250,14 @@ pub struct PathSelection {
 
 impl PathSelection {
     pub fn parse(input: Span) -> IResult<Span, Parsed<Self>> {
-        let (input, path) = PathList::parse(input)?;
-        let path_loc = path.loc();
-        Ok((input, Parsed::new(Self { path }, path_loc)))
+        PathList::parse(input)
+        .map(|(input, path)| {
+            let loc = path.loc();
+            (input, Parsed::new(Self { path }, loc))
+        })
     }
 
-    fn into_parsed(self) -> Parsed<Self> {
+    pub(super) fn into_parsed(self) -> Parsed<Self> {
         Parsed::new(self, None)
     }
 
@@ -2256,7 +2258,7 @@ mod tests {
                                 MethodArgs(vec![LitExpr::Path(PathSelection::from_slice(
                                     &[Key::field("data"), Key::field("y")],
                                     None,
-                                ))
+                                ).into_parsed())
                                 .into_parsed()])
                                 .into_parsed(),
                             ),
@@ -2278,11 +2280,11 @@ mod tests {
                         Parsed::new("query".to_string(), None),
                         Some(
                             MethodArgs(vec![
-                                LitExpr::Path(PathSelection::from_slice(&[Key::field("a")], None))
+                                LitExpr::Path(PathSelection::from_slice(&[Key::field("a")], None).into_parsed())
                                     .into_parsed(),
-                                LitExpr::Path(PathSelection::from_slice(&[Key::field("b")], None))
+                                LitExpr::Path(PathSelection::from_slice(&[Key::field("b")], None).into_parsed())
                                     .into_parsed(),
-                                LitExpr::Path(PathSelection::from_slice(&[Key::field("c")], None))
+                                LitExpr::Path(PathSelection::from_slice(&[Key::field("c")], None).into_parsed())
                                     .into_parsed(),
                             ])
                             .into_parsed(),
@@ -2313,12 +2315,12 @@ mod tests {
                                     LitExpr::Path(PathSelection::from_slice(
                                         &[Key::field("data"), Key::field("y")],
                                         None,
-                                    ))
+                                    ).into_parsed())
                                     .into_parsed(),
                                     LitExpr::Path(PathSelection::from_slice(
                                         &[Key::field("data"), Key::field("z")],
                                         None,
-                                    ))
+                                    ).into_parsed())
                                     .into_parsed(),
                                 ])
                                 .into_parsed()])
@@ -2390,7 +2392,7 @@ mod tests {
                                         .into_parsed(),
                                     )
                                     .into_parsed(),
-                                })
+                                }.into_parsed())
                                 .into_parsed(),
                                 LitExpr::Path(PathSelection {
                                     path: PathList::Var(
@@ -2433,8 +2435,7 @@ mod tests {
                                         .into_parsed(),
                                     )
                                     .into_parsed(),
-                                })
-                                .into_parsed(),
+                                }.into_parsed()).into_parsed(),
                             ])
                             .into_parsed()])
                             .into_parsed(),

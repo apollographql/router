@@ -14,6 +14,7 @@ use super::helpers::json_type_name;
 use super::immutable::InputPath;
 use super::known_var::KnownVariable;
 use super::lit_expr::LitExpr;
+use super::location::Parsed;
 use super::methods::lookup_arrow_method;
 use super::parser::*;
 
@@ -184,7 +185,7 @@ impl ApplyToInternal for JSONSelection {
     }
 }
 
-impl ApplyToInternal for NamedSelection {
+impl ApplyToInternal for Parsed<NamedSelection> {
     fn apply_to_path(
         &self,
         data: &JSON,
@@ -198,8 +199,8 @@ impl ApplyToInternal for NamedSelection {
 
         let mut output = JSONMap::new();
 
-        match self {
-            Self::Field(alias, key, selection) => {
+        match self.as_ref() {
+            NamedSelection::Field(alias, key, selection) => {
                 let input_path_with_key = input_path.append(key.to_json());
                 let name = key.as_str();
                 if let Some(child) = data.get(name) {
@@ -224,13 +225,13 @@ impl ApplyToInternal for NamedSelection {
                     ));
                 }
             }
-            Self::Path(alias, path_selection) => {
+            NamedSelection::Path(alias, path_selection) => {
                 let value = path_selection.apply_to_path(data, vars, input_path, errors);
                 if let Some(value) = value {
                     output.insert(alias.name(), value);
                 }
             }
-            Self::Group(alias, sub_selection) => {
+            NamedSelection::Group(alias, sub_selection) => {
                 let value = sub_selection.apply_to_path(data, vars, input_path, errors);
                 if let Some(value) = value {
                     output.insert(alias.name(), value);
@@ -242,7 +243,7 @@ impl ApplyToInternal for NamedSelection {
     }
 }
 
-impl ApplyToInternal for PathSelection {
+impl ApplyToInternal for Parsed<PathSelection> {
     fn apply_to_path(
         &self,
         data: &JSON,
@@ -250,39 +251,22 @@ impl ApplyToInternal for PathSelection {
         input_path: &InputPath<JSON>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
-        match self.path.as_ref() {
-            // If this is a KeyPath, instead of using data as given, we need to
-            // evaluate the path starting from the current value of $. To
-            // evaluate the KeyPath against data, prefix it with @. This logic
-            // supports method chaining like obj->has('a')->and(obj->has('b')),
-            // where both obj references are interpreted as $.obj.
-            PathList::Key(key, tail) => {
-                if let Some((dollar_data, dollar_path)) = vars.get(&KnownVariable::Dollar) {
-                    let input_path_with_key = dollar_path.append(key.to_json());
-                    if let Some(child) = dollar_data.get(key.as_str()) {
-                        tail.apply_to_path(child, vars, &input_path_with_key, errors)
-                    } else {
-                        errors.insert(ApplyToError::new(
-                            format!(
-                                "Property {} not found in {}",
-                                key.dotted(),
-                                json_type_name(dollar_data),
-                            ),
-                            input_path_with_key.to_vec(),
-                        ));
-                        None
-                    }
-                } else {
-                    // If $ is undefined for some reason, fall back to using data.
-                    self.path.apply_to_path(data, vars, input_path, errors)
-                }
+        // If this is a KeyPath, instead of using data as given, we need to
+        // evaluate the path starting from the current value of $. To evaluate
+        // the KeyPath against data, prefix it with @. This logic supports
+        // method chaining like obj->has('a')->and(obj->has('b')), where both
+        // obj references are interpreted as $.obj.
+        if matches!(self.path.as_ref(), PathList::Key(_, _)) {
+            if let Some((dollar_data, dollar_path)) = vars.get(&KnownVariable::Dollar) {
+                return self.path.apply_to_path(*dollar_data, vars, dollar_path, errors);
             }
-            path => path.apply_to_path(data, vars, input_path, errors),
+            // If $ is undefined for some reason, fall back to using data...
         }
+        self.path.apply_to_path(data, vars, input_path, errors)
     }
 }
 
-impl ApplyToInternal for PathList {
+impl ApplyToInternal for Parsed<PathList> {
     fn apply_to_path(
         &self,
         data: &JSON,
@@ -290,8 +274,8 @@ impl ApplyToInternal for PathList {
         input_path: &InputPath<JSON>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
-        match self {
-            Self::Var(var_name, tail) => {
+        match self.as_ref() {
+            PathList::Var(var_name, tail) => {
                 let var_name = var_name.as_ref();
                 if var_name == &KnownVariable::AtSign {
                     // We represent @ as a variable name in PathList::Var, but
@@ -303,7 +287,7 @@ impl ApplyToInternal for PathList {
                     // just the variable name for named $variables other than $.
                     // For the special variable $, the path represents the
                     // sequence of keys from the root input data to the $ data.
-                    tail.apply_to_path(var_data, vars, var_path, errors)
+                    tail.apply_to_path(*var_data, vars, var_path, errors)
                 } else {
                     errors.insert(ApplyToError::new(
                         format!("Variable {} not found", var_name.as_str()),
@@ -312,7 +296,7 @@ impl ApplyToInternal for PathList {
                     None
                 }
             }
-            Self::Key(key, tail) => {
+            PathList::Key(key, tail) => {
                 if let JSON::Array(array) = data {
                     return self.apply_to_array(array, vars, input_path, errors);
                 }
@@ -345,15 +329,15 @@ impl ApplyToInternal for PathList {
                     None
                 }
             }
-            Self::Method(method_name, method_args, tail) => {
+            PathList::Method(method_name, method_args, tail) => {
                 if let Some(method) = lookup_arrow_method(method_name) {
                     method(
-                        method_name.as_str(),
-                        method_args.as_ref().map(|args| args.as_ref()),
+                        method_name,
+                        method_args.as_ref(),
                         data,
                         vars,
                         input_path,
-                        tail.as_ref(),
+                        tail,
                         errors,
                     )
                 } else {
@@ -364,8 +348,8 @@ impl ApplyToInternal for PathList {
                     None
                 }
             }
-            Self::Selection(selection) => selection.apply_to_path(data, vars, input_path, errors),
-            Self::Empty => {
+            PathList::Selection(selection) => selection.apply_to_path(data, vars, input_path, errors),
+            PathList::Empty => {
                 // If data is not an object here, we want to preserve its value
                 // without an error.
                 Some(data.clone())
@@ -374,7 +358,7 @@ impl ApplyToInternal for PathList {
     }
 }
 
-impl ApplyToInternal for LitExpr {
+impl ApplyToInternal for Parsed<LitExpr> {
     fn apply_to_path(
         &self,
         data: &JSON,
@@ -382,12 +366,12 @@ impl ApplyToInternal for LitExpr {
         input_path: &InputPath<JSON>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
-        match self {
-            Self::String(s) => Some(JSON::String(s.clone().into())),
-            Self::Number(n) => Some(JSON::Number(n.clone())),
-            Self::Bool(b) => Some(JSON::Bool(*b)),
-            Self::Null => Some(JSON::Null),
-            Self::Object(map) => {
+        match self.as_ref() {
+            LitExpr::String(s) => Some(JSON::String(s.clone().into())),
+            LitExpr::Number(n) => Some(JSON::Number(n.clone())),
+            LitExpr::Bool(b) => Some(JSON::Bool(*b)),
+            LitExpr::Null => Some(JSON::Null),
+            LitExpr::Object(map) => {
                 let mut output = JSONMap::with_capacity(map.len());
                 for (key, value) in map {
                     if let Some(value_json) = value.apply_to_path(data, vars, input_path, errors) {
@@ -396,7 +380,7 @@ impl ApplyToInternal for LitExpr {
                 }
                 Some(JSON::Object(output))
             }
-            Self::Array(vec) => {
+            LitExpr::Array(vec) => {
                 let mut output = Vec::with_capacity(vec.len());
                 for value in vec {
                     output.push(
@@ -407,12 +391,12 @@ impl ApplyToInternal for LitExpr {
                 }
                 Some(JSON::Array(output))
             }
-            Self::Path(path) => path.apply_to_path(data, vars, input_path, errors),
+            LitExpr::Path(path) => path.apply_to_path(data, vars, input_path, errors),
         }
     }
 }
 
-impl ApplyToInternal for SubSelection {
+impl ApplyToInternal for Parsed<SubSelection> {
     fn apply_to_path(
         &self,
         data: &JSON,
@@ -438,7 +422,7 @@ impl ApplyToInternal for SubSelection {
         let mut output = JSONMap::new();
         let mut input_names = IndexSet::default();
 
-        for named_selection in self.selections.iter().map(|s| s.as_ref()) {
+        for named_selection in self.selections.iter() {
             let value = named_selection.apply_to_path(data, &vars, input_path, errors);
 
             // If value is an object, extend output with its keys and their values.
@@ -450,7 +434,7 @@ impl ApplyToInternal for SubSelection {
             // *original* names of the fields that were explicitly selected,
             // because we will need to omit them from what the * matches.
             if self.star.is_some() {
-                match named_selection {
+                match named_selection.as_ref() {
                     NamedSelection::Field(_, name, _) => {
                         input_names.insert(name.as_str());
                     }

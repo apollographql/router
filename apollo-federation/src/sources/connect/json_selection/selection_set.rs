@@ -73,31 +73,28 @@ impl SubSelection {
             new_selections.push(Parsed::new(
                 NamedSelection::Path(
                     Parsed::new(Alias::new("__typename"), None),
-                    Parsed::new(
-                        PathSelection {
-                            path: Parsed::new(
-                                PathList::Var(
-                                    Parsed::new(KnownVariable::Dollar, None),
-                                    Parsed::new(
-                                        PathList::Method(
-                                            Parsed::new("echo".to_string(), None),
-                                            Some(Parsed::new(
-                                                MethodArgs(vec![Parsed::new(
-                                                    LitExpr::String(selection_set.ty.to_string()),
-                                                    None,
-                                                )]),
+                    Parsed::new(PathSelection {
+                        path: Parsed::new(
+                            PathList::Var(
+                                Parsed::new(KnownVariable::Dollar, None),
+                                Parsed::new(
+                                    PathList::Method(
+                                        Parsed::new("echo".to_string(), None),
+                                        Some(Parsed::new(
+                                            MethodArgs(vec![Parsed::new(
+                                                LitExpr::String(selection_set.ty.to_string()),
                                                 None,
-                                            )),
-                                            Parsed::new(PathList::Empty, None),
-                                        ),
-                                        None,
+                                            )]),
+                                            None,
+                                        )),
+                                        Parsed::new(PathList::Empty, None),
                                     ),
+                                    None,
                                 ),
-                                None,
                             ),
-                        },
-                        None,
-                    ),
+                            None,
+                        ),
+                    }, None),
                 ),
                 None,
             ));

@@ -425,30 +425,38 @@ Named(
                                                                                                         ),
                                                                                                     }: Parsed {
                                                                                                         node: Path(
-                                                                                                            PathSelection {
-                                                                                                                path: Parsed {
-                                                                                                                    node: Var(
-                                                                                                                        Parsed {
-                                                                                                                            node: @,
-                                                                                                                            loc: Some(
-                                                                                                                                (
-                                                                                                                                    224,
-                                                                                                                                    225,
+                                                                                                            Parsed {
+                                                                                                                node: PathSelection {
+                                                                                                                    path: Parsed {
+                                                                                                                        node: Var(
+                                                                                                                            Parsed {
+                                                                                                                                node: @,
+                                                                                                                                loc: Some(
+                                                                                                                                    (
+                                                                                                                                        224,
+                                                                                                                                        225,
+                                                                                                                                    ),
                                                                                                                                 ),
-                                                                                                                            ),
-                                                                                                                        },
-                                                                                                                        Parsed {
-                                                                                                                            node: Empty,
-                                                                                                                            loc: None,
-                                                                                                                        },
-                                                                                                                    ),
-                                                                                                                    loc: Some(
-                                                                                                                        (
-                                                                                                                            224,
-                                                                                                                            225,
+                                                                                                                            },
+                                                                                                                            Parsed {
+                                                                                                                                node: Empty,
+                                                                                                                                loc: None,
+                                                                                                                            },
                                                                                                                         ),
-                                                                                                                    ),
+                                                                                                                        loc: Some(
+                                                                                                                            (
+                                                                                                                                224,
+                                                                                                                                225,
+                                                                                                                            ),
+                                                                                                                        ),
+                                                                                                                    },
                                                                                                                 },
+                                                                                                                loc: Some(
+                                                                                                                    (
+                                                                                                                        224,
+                                                                                                                        225,
+                                                                                                                    ),
+                                                                                                                ),
                                                                                                             },
                                                                                                         ),
                                                                                                         loc: Some(
