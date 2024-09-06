@@ -461,7 +461,7 @@ impl EntityCache {
             all: Some(storage),
             subgraphs: HashMap::new(),
         });
-        let invalidation = Invalidation::new(storage.clone(), 1000).await?;
+        let invalidation = Invalidation::new(storage.clone(), 1000, 10).await?;
 
         Ok(Self {
             storage,
@@ -480,6 +480,7 @@ impl EntityCache {
                     4000,
                 )),
                 scan_count: 1000,
+                concurrent_requests: 10,
             })),
             invalidation,
         })
