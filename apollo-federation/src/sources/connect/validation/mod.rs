@@ -37,7 +37,6 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
-use coordinates::source_base_url_argument_coordinate;
 use coordinates::source_http_argument_coordinate;
 use extended_type::validate_extended_type;
 use itertools::Itertools;
@@ -51,6 +50,7 @@ use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
 use crate::sources::connect::spec::schema::SOURCE_NAME_ARGUMENT_NAME;
+use crate::sources::connect::validation::coordinates::BaseUrlCoordinate;
 use crate::sources::connect::validation::coordinates::HttpHeadersCoordinate;
 use crate::sources::connect::validation::http::headers;
 use crate::sources::connect::ConnectSpecDefinition;
@@ -298,7 +298,9 @@ fn validate_source(directive: &Component<Directive>, sources: &SourceMap) -> Sou
         {
             if let Some(url_error) = parse_url(
                 url_value,
-                &source_base_url_argument_coordinate(&directive.name),
+                BaseUrlCoordinate {
+                    source_directive_name: &directive.name,
+                },
                 sources,
             )
             .err()
@@ -343,7 +345,11 @@ struct SourceDirective {
     directive: Component<Directive>,
 }
 
-fn parse_url(value: &Node<Value>, coordinate: &str, sources: &SourceMap) -> Result<Url, Message> {
+fn parse_url<Coordinate: Display + Copy>(
+    value: &Node<Value>,
+    coordinate: Coordinate,
+    sources: &SourceMap,
+) -> Result<Url, Message> {
     let str_value = require_value_is_str(value, coordinate, sources)?;
     let url = Url::parse(str_value).map_err(|inner| Message {
         code: Code::InvalidUrl,

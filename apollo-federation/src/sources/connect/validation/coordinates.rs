@@ -17,6 +17,7 @@ use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_NAME_ARGUMENT_NAME;
 
+#[derive(Clone, Copy)]
 pub(super) struct ConnectDirectiveCoordinate<'a> {
     pub connect_directive_name: &'a Name,
     pub object_name: &'a Name,
@@ -64,13 +65,26 @@ impl<'a> From<ConnectDirectiveCoordinate<'a>> for ConnectHTTPCoordinate<'a> {
     }
 }
 
-pub(super) fn connect_directive_url_coordinate(
-    connect_directive_name: &Name,
-    http_method: &Name,
-    object: &Node<ObjectType>,
-    field: &Name,
-) -> String {
-    format!("`{http_method}` in `@{connect_directive_name}({HTTP_ARGUMENT_NAME}:)` on `{object_name}.{field}`", object_name = object.name)
+/// The coordinate of an `HTTP.method` arg within the `@connect` directive.
+#[derive(Clone, Copy)]
+pub(super) struct HttpMethodCoordinate<'a> {
+    pub(crate) connect: ConnectDirectiveCoordinate<'a>,
+    pub(crate) http_method: &'a Name,
+}
+
+impl Display for HttpMethodCoordinate<'_> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        let Self {
+            connect:
+                ConnectDirectiveCoordinate {
+                    connect_directive_name,
+                    object_name,
+                    field_name,
+                },
+            http_method,
+        } = self;
+        write!(f, "`{http_method}` in `@{connect_directive_name}({HTTP_ARGUMENT_NAME}:)` on `{object_name}.{field_name}`")
+    }
 }
 
 pub(super) fn connect_directive_selection_coordinate(
@@ -123,10 +137,23 @@ pub(super) fn source_name_value_coordinate(
     format!("`@{source_directive_name}({SOURCE_NAME_ARGUMENT_NAME}: {value})`")
 }
 
-pub(super) fn source_base_url_argument_coordinate(source_directive_name: &DirectiveName) -> String {
-    format!("`@{source_directive_name}({SOURCE_BASE_URL_ARGUMENT_NAME}:)`")
+/// The `baseURL` argument for the `@source` directive
+#[derive(Clone, Copy)]
+pub(super) struct BaseUrlCoordinate<'a> {
+    pub(crate) source_directive_name: &'a DirectiveName,
 }
 
+impl Display for BaseUrlCoordinate<'_> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        let Self {
+            source_directive_name,
+        } = self;
+        write!(
+            f,
+            "`@{source_directive_name}({SOURCE_BASE_URL_ARGUMENT_NAME}:)`",
+        )
+    }
+}
 pub(super) fn connect_directive_name_coordinate(
     connect_directive_name: &Name,
     source: &Node<Value>,

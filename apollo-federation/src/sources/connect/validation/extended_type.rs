@@ -15,10 +15,10 @@ use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use itertools::Itertools;
 
-use super::coordinates::connect_directive_url_coordinate;
 use super::coordinates::ConnectDirectiveCoordinate;
 use super::coordinates::ConnectHTTPCoordinate;
 use super::coordinates::HttpHeadersCoordinate;
+use super::coordinates::HttpMethodCoordinate;
 use super::entity::validate_entity_arg;
 use super::http::headers;
 use super::http::method;
@@ -247,28 +247,14 @@ fn validate_field(
             }
         };
 
-        let http_arg_url = http_method.map(|(http_method, url)| {
-            (
-                url,
-                connect_directive_url_coordinate(
-                    connect_directive_name,
-                    http_method,
-                    object,
-                    &field.name,
-                ),
-            )
-        });
-
         if let Some((_, body)) = http_arg
-            .iter()
-            .find(|(name, _)| name == &CONNECT_BODY_ARGUMENT_NAME)
-        {
-            if let Err(err) =
-                validate_body_selection(connect_directive, object, field, schema, body)
-            {
-                errors.push(err);
-            }
+        .iter()
+        .find(|(name, _)| name == &CONNECT_BODY_ARGUMENT_NAME)
+    {
+        if let Err(err) = validate_body_selection(connect_directive, object, field, schema, body) {
+            errors.push(err);
         }
+    }
 
         if let Some(source_name) = connect_directive
             .arguments
@@ -285,12 +271,16 @@ fn validate_field(
                 &connect_directive.name,
             ));
 
-            if let Some((url, url_coordinate)) = http_arg_url {
-                if parse_url(url, &url_coordinate, source_map).is_ok() {
+            if let Some((http_method, url)) = http_method {
+            let coordinate = HttpMethodCoordinate {
+                connect: coordinate,
+                http_method,
+            };
+                if parse_url(url, coordinate, source_map).is_ok() {
                     errors.push(Message {
                         code: Code::AbsoluteConnectUrlWithSource,
                         message: format!(
-                            "{url_coordinate} contains the absolute URL {url} while also specifying a `{CONNECT_SOURCE_ARGUMENT_NAME}`. Either remove the `{CONNECT_SOURCE_ARGUMENT_NAME}` argument or change the URL to a path.",
+                            "{coordinate} contains the absolute URL {url} while also specifying a `{CONNECT_SOURCE_ARGUMENT_NAME}`. Either remove the `{CONNECT_SOURCE_ARGUMENT_NAME}` argument or change the URL to a path.",
                         ),
                         locations: url.line_column_range(source_map)
                             .into_iter()
@@ -298,8 +288,12 @@ fn validate_field(
                     });
                 }
             }
-        } else if let Some((url, url_coordinate)) = http_arg_url {
-            if let Some(err) = parse_url(url, &url_coordinate, source_map).err() {
+        } else if let Some((http_method, url)) = http_method {
+        let coordinate = HttpMethodCoordinate {
+            connect: coordinate,
+            http_method,
+        };
+            if let Some(err) = parse_url(url, coordinate, source_map).err() {
                 // Attempt to detect if they were using a relative path without a source, no way to be perfect with this
                 if url
                     .as_str()
@@ -308,7 +302,7 @@ fn validate_field(
                     errors.push(Message {
                         code: Code::RelativeConnectUrlWithoutSource,
                         message: format!(
-                            "{url_coordinate} specifies the relative URL {url}, but no `{CONNECT_SOURCE_ARGUMENT_NAME}` is defined. Either use an absolute URL, or add a `@{source_directive_name}`."),
+                            "{coordinate} specifies the relative URL {url}, but no `{CONNECT_SOURCE_ARGUMENT_NAME}` is defined. Either use an absolute URL, or add a `@{source_directive_name}`."),
                         locations: url.line_column_range(source_map).into_iter().collect()
                     });
                 } else {
