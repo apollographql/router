@@ -1,0 +1,27 @@
+---
+source: apollo-federation/src/sources/connect/validation/mod.rs
+expression: "format!(\"{:#?}\", errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_entity_arg_field_arg_key_mismatch_composite_key.graphql
+---
+[
+    Message {
+        code: EntityResolverArgumentMismatch,
+        message: "`@connect(entity: true)` on `Query.product` has invalid entity resolver arguments. Field `id` on input type `CountryInput` does not exist as a key field on entity type `Product`.",
+        locations: [
+            LineColumn {
+                line: 50,
+                column: 5,
+            }..LineColumn {
+                line: 50,
+                column: 12,
+            },
+            LineColumn {
+                line: 19,
+                column: 9,
+            }..LineColumn {
+                line: 19,
+                column: 21,
+            },
+        ],
+    },
+]

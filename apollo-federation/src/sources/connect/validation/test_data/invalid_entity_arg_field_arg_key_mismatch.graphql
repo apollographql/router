@@ -14,12 +14,13 @@ type Query {
     ): Product
     @connect(
         http: { GET: "http://myapi/products/{$args.id}" }
-        selection: "not_named_id name"
+        selection: "id key_id name"
         entity: true
     )
 }
 
-type Product {
-    not_named_id: ID!
+type Product @key(fields: "key_id") {
+    id: ID!
+    key_id: ID!
     name: String
 }
