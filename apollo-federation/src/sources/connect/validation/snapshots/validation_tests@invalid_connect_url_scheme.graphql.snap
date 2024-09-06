@@ -1,6 +1,20 @@
 ---
 source: apollo-federation/src/sources/connect/validation/mod.rs
-expression: "format!(\"{:?}\", errors)"
-input_file: apollo-federation/src/sources/connect/validation/test_data/validation/invalid_connect_url_scheme.graphql
+expression: "format!(\"{:#?}\", errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_connect_url_scheme.graphql
 ---
-[Message { code: SourceScheme, message: "The value \"file://data.json\" for `GET` in `@connect(http:)` on `Query.resources` must be http or https, got file.", locations: [LineColumn { line: 6, column: 22 }..LineColumn { line: 6, column: 45 }] }]
+[
+    Message {
+        code: SourceScheme,
+        message: "The value \"file://data.json\" for `GET` in `@connect(http:)` on `Query.resources` must be http or https, got file.",
+        locations: [
+            LineColumn {
+                line: 6,
+                column: 22,
+            }..LineColumn {
+                line: 6,
+                column: 45,
+            },
+        ],
+    },
+]

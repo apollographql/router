@@ -1,6 +1,20 @@
 ---
 source: apollo-federation/src/sources/connect/validation/mod.rs
-expression: "format!(\"{:?}\", errors)"
-input_file: apollo-federation/src/sources/connect/validation/test_data/validation/missing_connect_on_mutation_field.graphql
+expression: "format!(\"{:#?}\", errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/missing_connect_on_mutation_field.graphql
 ---
-[Message { code: MutationFieldMissingConnect, message: "The field `Mutation.setMessage` has no `@connect` directive.", locations: [LineColumn { line: 9, column: 3 }..LineColumn { line: 9, column: 38 }] }]
+[
+    Message {
+        code: MutationFieldMissingConnect,
+        message: "The field `Mutation.setMessage` has no `@connect` directive.",
+        locations: [
+            LineColumn {
+                line: 9,
+                column: 3,
+            }..LineColumn {
+                line: 9,
+                column: 38,
+            },
+        ],
+    },
+]

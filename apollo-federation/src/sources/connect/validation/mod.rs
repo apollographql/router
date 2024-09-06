@@ -493,7 +493,7 @@ mod test_validate_source {
                 let schema = read_to_string(path).unwrap();
                 let schema = Schema::parse(schema, path).unwrap();
                 let errors = validate(schema);
-                assert_snapshot!(format!("{:?}", errors));
+                assert_snapshot!(format!("{:#?}", errors));
             });
         });
     }
