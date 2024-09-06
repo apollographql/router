@@ -5,7 +5,7 @@ telemetry:
       cache:
         apollo.router.operations.entity.cache:
           attributes:
-            graphql.entity.type:
+            graphql.type.name:
               alias: entity_type
             subgraph.name:
               subgraph_name: true

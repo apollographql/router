@@ -211,7 +211,7 @@ telemetry:
       cache: # Cache instruments configuration
         apollo.router.operations.entity.cache: # A counter which counts the number of cache hit and miss for subgraph requests
           attributes:
-            graphql.entity.type: true # Include the entity type name. default: false
+            graphql.type.name: true # Include the entity type name. default: false
             subgraph.name: # Custom attributes to include the subgraph name in the metric
               subgraph_name: true
             supergraph.operation.name: # Add custom attribute to display the supergraph operation name
