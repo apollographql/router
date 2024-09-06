@@ -3656,18 +3656,6 @@ impl ClosedBranch {
     }
 }
 
-pub fn op_slice_condition_directives(path: &[Arc<OpPathElement>]) -> DirectiveList {
-    path.iter()
-        .flat_map(|path_element| {
-            path_element
-                .directives()
-                .iter()
-                .filter(|d| d.name == "include" || d.name == "skip")
-        })
-        .cloned()
-        .collect()
-}
-
 impl OpPath {
     pub fn len(&self) -> usize {
         self.0.len()
@@ -3690,7 +3678,16 @@ impl OpPath {
     }
 
     pub(crate) fn conditional_directives(&self) -> DirectiveList {
-        op_slice_condition_directives(&self.0)
+        self.0
+            .iter()
+            .flat_map(|path_element| {
+                path_element
+                    .directives()
+                    .iter()
+                    .filter(|d| d.name == "include" || d.name == "skip")
+            })
+            .cloned()
+            .collect()
     }
 
     /// Filter any fragment element in the provided path whose type condition does not exist in the provided schema.
