@@ -181,7 +181,7 @@ async fn execute(
             );
 
             u64_counter!(
-                "apollo.router.http.connector.requests.total",
+                "apollo.router.http.connector.requests",
                 "Total number of HTTP requests made through connectors",
                 1,
                 "status" = res.http_response.status().as_u16().to_string(),
