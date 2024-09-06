@@ -294,34 +294,36 @@ impl YamlRouterFactory {
     ) -> Result<SupergraphCreator, BoxError> {
         let query_planner_span = tracing::info_span!("query_planner_creation");
         // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-        let bridge_query_planner =
-            match previous_supergraph.as_ref().map(|router| router.planners()) {
-                None => {
-                    BridgeQueryPlannerPool::new(
-                        schema.clone(),
-                        configuration.clone(),
-                        configuration
-                            .supergraph
-                            .query_planning
-                            .experimental_query_planner_parallelism()?,
-                    )
-                    .instrument(query_planner_span)
-                    .await?
-                }
-                Some(planners) => {
-                    BridgeQueryPlannerPool::new_from_planners(
-                        planners,
-                        schema.clone(),
-                        configuration.clone(),
-                        configuration
-                            .supergraph
-                            .query_planning
-                            .experimental_query_planner_parallelism()?,
-                    )
-                    .instrument(query_planner_span)
-                    .await?
-                }
-            };
+        let bridge_query_planner = match previous_supergraph
+            .as_ref()
+            .map(|router| router.js_planners())
+        {
+            None => {
+                BridgeQueryPlannerPool::new(
+                    schema.clone(),
+                    configuration.clone(),
+                    configuration
+                        .supergraph
+                        .query_planning
+                        .experimental_query_planner_parallelism()?,
+                )
+                .instrument(query_planner_span)
+                .await?
+            }
+            Some(js_planners) => {
+                BridgeQueryPlannerPool::new_from_planners(
+                    js_planners,
+                    schema.clone(),
+                    configuration.clone(),
+                    configuration
+                        .supergraph
+                        .query_planning
+                        .experimental_query_planner_parallelism()?,
+                )
+                .instrument(query_planner_span)
+                .await?
+            }
+        };
 
         let schema_changed = previous_supergraph
             .map(|supergraph_creator| supergraph_creator.schema().raw_sdl == schema.raw_sdl)

@@ -102,9 +102,9 @@ impl BridgeQueryPlannerPool {
             })?
             .subgraph_schemas();
 
-        let planners: Vec<_> = bridge_query_planners
+        let js_planners: Vec<_> = bridge_query_planners
             .iter()
-            .map(|p| p.planner().clone())
+            .filter_map(|p| p.js_planner())
             .collect();
 
         for mut planner in bridge_query_planners.into_iter() {
@@ -140,7 +140,7 @@ impl BridgeQueryPlannerPool {
         let (v8_heap_total, _v8_heap_total_gauge) = Self::create_heap_total_gauge(&meter);
 
         // initialize v8 metrics
-        if let Some(bridge_query_planner) = planners.first().cloned() {
+        if let Some(bridge_query_planner) = js_planners.first().cloned() {
             Self::get_v8_metrics(
                 bridge_query_planner,
                 v8_heap_used.clone(),
@@ -150,7 +150,7 @@ impl BridgeQueryPlannerPool {
         }
 
         Ok(Self {
-            js_planners: planners,
+            js_planners,
             sender,
             schema,
             subgraph_schemas,
@@ -190,7 +190,7 @@ impl BridgeQueryPlannerPool {
         (current_heap_total, heap_total_gauge)
     }
 
-    pub(crate) fn planners(&self) -> Vec<Arc<Planner<QueryPlanResult>>> {
+    pub(crate) fn js_planners(&self) -> Vec<Arc<Planner<QueryPlanResult>>> {
         self.js_planners.clone()
     }
 
