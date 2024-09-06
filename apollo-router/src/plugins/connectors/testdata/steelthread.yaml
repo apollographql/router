@@ -7,7 +7,7 @@ subgraphs:
       sdl: |
         extend schema
           @link(
-            url: "https://specs.apollo.dev/federation/v2.7"
+            url: "https://specs.apollo.dev/federation/v2.10"
             import: ["@key", "@external", "@requires", "@shareable"]
           )
           @link(
@@ -43,7 +43,7 @@ subgraphs:
               }
               selection: "id name"
             )
-        
+
           me: User @connect(
               source: "json"
               http: { GET: "/users/{$$config.id}" }
@@ -62,6 +62,7 @@ subgraphs:
               id
               name
               username
+              rest: *
               """
               entity: true
             )
@@ -78,6 +79,7 @@ subgraphs:
           id: ID!
           name: String
           username: String
+          rest: JSON
           c: String @external
           d: String
             @requires(fields: "c")
@@ -93,6 +95,8 @@ subgraphs:
           title: String
           user: User
         }
+
+        scalar JSON
 
   graphql:
     routing_url: https://localhost:4001

@@ -541,6 +541,10 @@ impl SubSelection {
         self.star = star;
     }
 
+    pub fn star_iter(&self) -> impl Iterator<Item = &StarSelection> {
+        self.star.iter()
+    }
+
     pub fn append_selection(&mut self, selection: NamedSelection) {
         self.selections.push(selection);
     }
@@ -601,6 +605,10 @@ pub struct StarSelection(
 impl StarSelection {
     pub(crate) fn new(alias: Option<Alias>, sub: Option<SubSelection>) -> Self {
         Self(alias, sub.map(Box::new))
+    }
+
+    pub(crate) fn alias(&self) -> Option<&Alias> {
+        self.0.as_ref()
     }
 
     pub(crate) fn parse(input: &str) -> IResult<&str, Self> {

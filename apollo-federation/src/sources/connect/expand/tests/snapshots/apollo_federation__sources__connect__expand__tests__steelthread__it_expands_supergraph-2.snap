@@ -150,7 +150,16 @@ expression: connectors.by_service_name
                         None,
                     ),
                 ],
-                star: None,
+                star: Some(
+                    StarSelection(
+                        Some(
+                            Alias {
+                                name: "rest",
+                            },
+                        ),
+                        None,
+                    ),
+                ),
             },
         ),
         config: None,

@@ -170,6 +170,11 @@ impl GroupVisitor<JSONSelectionGroup, NamedSelection>
             .selections_iter()
             .sorted_by_key(|s| s.name())
             .cloned()
+            .chain(
+                group
+                    .star_iter()
+                    .map(|s| NamedSelection::Field(s.alias().cloned(), String::new(), None)),
+            )
             .collect())
     }
 

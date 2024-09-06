@@ -48,7 +48,7 @@ macro_rules! test_ignores {
                     let ExpansionResult::Unchanged = expand_connectors(to_ignore).unwrap() else {
                         panic!(
                             concat!(
-                                "expected expansion to ignorenon-connector supergraph for schemas/",
+                                "expected expansion to ignore non-connector supergraph for schemas/",
                                 stringify!($name),
                                 ".graphql"
                             )
