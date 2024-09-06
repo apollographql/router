@@ -71,6 +71,17 @@ interface Itf
   id: ID!
   c: Int! @join__field(graph: CONNECTORS)
   d: Int! @join__field(graph: CONNECTORS)
+  e: String
+    @join__field(graph: CONNECTORS)
+    @join__directive(
+      graphs: [CONNECTORS]
+      name: "connect"
+      args: {
+        source: "json"
+        http: { GET: "/itfs/{$this.id}/e" }
+        selection: "$"
+      }
+    )
 }
 
 input join__ContextArgument {

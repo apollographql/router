@@ -2226,6 +2226,49 @@ fn extract_join_directives(
         }
     }
 
+    for intf_field_pos in &join_directives.interface_fields {
+        let intf_field = intf_field_pos.get(supergraph_schema.schema())?;
+        let directives = intf_field
+            .directives
+            .iter()
+            .filter_map(|d| {
+                if d.name == JOIN_DIRECTIVE {
+                    Some(join_directive_to_real_directive(d))
+                } else {
+                    None
+                }
+            })
+            .collect_vec();
+
+        for (directive, subgraph_enum_values) in directives {
+            for subgraph_enum_value in subgraph_enum_values {
+                let subgraph = get_subgraph(
+                    subgraphs,
+                    graph_enum_value_name_to_subgraph_name,
+                    &subgraph_enum_value,
+                )?;
+
+                if subgraph
+                    .schema
+                    .try_get_type(intf_field_pos.type_name.clone())
+                    .map(|t| matches!(t, TypeDefinitionPosition::Interface(_)))
+                    .unwrap_or_default()
+                {
+                    intf_field_pos
+                        .insert_directive(&mut subgraph.schema, Node::new(directive.clone()))?;
+                } else {
+                    // In the subgraph it's defined as an object with @interfaceObject
+                    let object_field_pos = ObjectFieldDefinitionPosition {
+                        type_name: intf_field_pos.type_name.clone(),
+                        field_name: intf_field_pos.field_name.clone(),
+                    };
+                    object_field_pos
+                        .insert_directive(&mut subgraph.schema, Node::new(directive.clone()))?;
+                }
+            }
+        }
+    }
+
     // TODO
     // - join_directives.directive_arguments
     // - join_directives.enum_types
@@ -2233,7 +2276,6 @@ fn extract_join_directives(
     // - join_directives.input_object_fields
     // - join_directives.input_object_types
     // - join_directives.interface_field_arguments
-    // - join_directives.interface_fields
     // - join_directives.interface_types
     // - join_directives.object_field_arguments
     // - join_directives.object_types

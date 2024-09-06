@@ -1222,16 +1222,16 @@ async fn test_interface_object() {
         )
         .mount(&mock_server)
         .await;
-    // Mock::given(method("GET"))
-    //     .and(path("/itfs/1/e"))
-    //     .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!("e1")))
-    //     .mount(&mock_server)
-    //     .await;
-    // Mock::given(method("GET"))
-    //     .and(path("/itfs/2/e"))
-    //     .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!("e2")))
-    //     .mount(&mock_server)
-    //     .await;
+    Mock::given(method("GET"))
+        .and(path("/itfs/1/e"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!("e1")))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/itfs/2/e"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!("e2")))
+        .mount(&mock_server)
+        .await;
     Mock::given(method("POST"))
         .and(path("/graphql"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -1251,8 +1251,7 @@ async fn test_interface_object() {
     let response = execute(
         INTERFACE_OBJECT_SCHEMA,
         &mock_server.uri(),
-        // "query { itfs { __typename id c d e ... on T1 { a } ... on T2 { b } } }",
-        "query { itfs { __typename id c d ... on T1 { a } ... on T2 { b } } }",
+        "query { itfs { __typename id c d e ... on T1 { a } ... on T2 { b } } }",
         Default::default(),
         None,
         |_| {},
@@ -1268,6 +1267,7 @@ async fn test_interface_object() {
             "id": 1,
             "c": 10,
             "d": 20,
+            "e": "e1",
             "a": "a"
           },
           {
@@ -1275,6 +1275,7 @@ async fn test_interface_object() {
             "id": 2,
             "c": 11,
             "d": 21,
+            "e": "e2",
             "b": "b"
           }
         ]
@@ -1301,6 +1302,8 @@ async fn test_interface_object() {
             .build(),
           Matcher::new().method("GET").path("/itfs/1").build(),
           Matcher::new().method("GET").path("/itfs/2").build(),
+          Matcher::new().method("GET").path("/itfs/1/e").build(),
+          Matcher::new().method("GET").path("/itfs/2/e").build(),
         ],
     );
 }

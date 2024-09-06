@@ -10,7 +10,7 @@ subgraphs:
           @link(url: "https://specs.apollo.dev/federation/v2.10",
             import: [
               "@key"
-              "@interfaceObject"
+              # "@interfaceObject"
             ]
           )
           @link(
@@ -20,14 +20,14 @@ subgraphs:
           @source(name: "json", http: { baseURL: "http://localhost:4001" })
 
         type Query {
-          itfs: [Itf]
+          itfs: [Itf2]
             @connect(
               source: "json"
               http: { GET: "/itfs" }
               selection: "id c"
             )
 
-          itf(id: ID!): Itf
+          itf(id: ID!): Itf2
             @connect(
               source: "json"
               http: { GET: "/itfs/{$$args.id}" }
@@ -37,17 +37,16 @@ subgraphs:
         }
 
         # rename this to Itf when interfaceObject is supported
-        type Itf @key(fields: "id") @interfaceObject {
+        type Itf2 @key(fields: "id") @interfaceObject {
           id: ID!
           c: Int!
           d: Int!
-          # doesn't work yet — we don't look for connectors on interfaces
-          # e: String
-          #   @connect(
-          #     source: "json"
-          #     http: { GET: "/itfs/{$$this.id}/e" }
-          #     selection: "$"
-          #   )
+          e: String
+            @connect(
+              source: "json"
+              http: { GET: "/itfs/{$$this.id}/e" }
+              selection: "$"
+            )
         }
   # connectors:
   #   routing_url: none
