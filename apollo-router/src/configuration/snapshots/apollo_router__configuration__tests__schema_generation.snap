@@ -3604,6 +3604,13 @@ expression: "&schema"
         "path": {
           "description": "Specify on which path you want to listen for invalidation endpoint.",
           "type": "string"
+        },
+        "scan_count": {
+          "default": 1000,
+          "description": "Number of keys to return at once from a redis SCAN command",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
         }
       },
       "required": [

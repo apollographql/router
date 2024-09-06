@@ -67,11 +67,14 @@ pub(crate) enum InvalidationOrigin {
 }
 
 impl Invalidation {
-    pub(crate) async fn new(storage: Arc<EntityStorage>) -> Result<Self, BoxError> {
+    pub(crate) async fn new(
+        storage: Arc<EntityStorage>,
+        scan_count: u32,
+    ) -> Result<Self, BoxError> {
         let (tx, rx) = tokio::sync::mpsc::channel(CHANNEL_SIZE);
 
         tokio::task::spawn(async move {
-            start(storage, rx).await;
+            start(storage, scan_count, rx).await;
         });
         Ok(Self { handle: tx })
     }
@@ -106,6 +109,7 @@ impl Invalidation {
 #[allow(clippy::type_complexity)]
 async fn start(
     storage: Arc<EntityStorage>,
+    scan_count: u32,
     mut handle: tokio::sync::mpsc::Receiver<(
         Vec<InvalidationRequest>,
         InvalidationOrigin,
@@ -125,7 +129,7 @@ async fn start(
         );
 
         if let Err(err) = response_tx.send(
-            handle_request_batch(&storage, origin, requests)
+            handle_request_batch(&storage, scan_count, origin, requests)
                 .instrument(tracing::info_span!(
                     "cache.invalidation.batch",
                     "origin" = origin
@@ -139,6 +143,7 @@ async fn start(
 
 async fn handle_request(
     storage: &RedisCacheStorage,
+    scan_count: u32,
     origin: &'static str,
     request: &InvalidationRequest,
 ) -> Result<u64, InvalidationError> {
@@ -149,8 +154,7 @@ async fn handle_request(
         key_prefix
     );
 
-    // FIXME: configurable batch size
-    let mut stream = storage.scan(key_prefix.clone(), Some(100));
+    let mut stream = storage.scan(key_prefix.clone(), Some(scan_count));
     let mut count = 0u64;
     let mut error = None;
 
@@ -203,6 +207,7 @@ async fn handle_request(
 
 async fn handle_request_batch(
     storage: &EntityStorage,
+    scan_count: u32,
     origin: &'static str,
     requests: Vec<InvalidationRequest>,
 ) -> Result<u64, InvalidationError> {
@@ -214,7 +219,7 @@ async fn handle_request_batch(
             Some(s) => s,
             None => continue,
         };
-        match handle_request(redis_storage, origin, &request)
+        match handle_request(redis_storage, scan_count, origin, &request)
             .instrument(tracing::info_span!("cache.invalidation.request"))
             .await
         {
