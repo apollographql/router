@@ -177,7 +177,7 @@ fn main() -> ExitCode {
         } => cmd_expand(
             &supergraph_schema,
             destination_dir.as_ref(),
-            filter_prefix.as_ref().map(String::as_str),
+            filter_prefix.as_deref(),
         ),
     };
     match result {
