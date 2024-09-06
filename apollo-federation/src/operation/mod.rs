@@ -632,16 +632,6 @@ mod selection_map {
                 Self::Vacant(entry) => entry.insert(produce()?),
             }
         }
-
-        pub fn try_and_modify(
-            mut self,
-            modify: impl FnOnce(SelectionValue) -> Result<(), FederationError>,
-        ) -> Result<Self, FederationError> {
-            if let Self::Occupied(existing) = &mut self {
-                modify(existing.get_mut())?;
-            }
-            Ok(self)
-        }
     }
 
     pub(crate) struct OccupiedEntry<'a>(indexmap::map::OccupiedEntry<'a, SelectionKey, Selection>);
