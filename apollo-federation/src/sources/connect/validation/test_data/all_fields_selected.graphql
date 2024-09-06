@@ -20,6 +20,13 @@ type Query {
       unwrapped: .foo.bar
       """
     )
+    @connect(
+      http: { GET: "http://test/v2/ts" }
+      selection: """
+      id
+      secondUsed
+      """
+    )
 }
 
 type T @key(fields: "id") {
@@ -37,6 +44,9 @@ type T @key(fields: "id") {
       }
       selection: "$"
     )
+
+  secondUnused: String
+  secondUsed: String
 }
 
 type C {
