@@ -1,0 +1,53 @@
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.1"
+    import: ["@connect", "@source"]
+  )
+  @source(name: "v2", http: { baseURL: "http://127.0.0.1" })
+
+type Query {
+  good: [Good!]!
+    @connect(source: "v2", http: { GET: "/" }, selection: "id rest: *")
+
+  notScalar: [NotScalar!]!
+    @connect(source: "v2", http: { GET: "/" }, selection: "id rest: *")
+
+  builtIn: [BuiltIn!]!
+    @connect(source: "v2", http: { GET: "/" }, selection: "id rest: *")
+
+  list: [List!]!
+    @connect(source: "v2", http: { GET: "/" }, selection: "id rest: *")
+
+  notFound: [NotFound!]!
+    @connect(source: "v2", http: { GET: "/" }, selection: "id rest: *")
+}
+
+type Good {
+  id: ID!
+  rest: JSON
+}
+
+scalar JSON
+
+type NotScalar {
+  id: ID!
+  rest: Obj
+}
+
+type Obj {
+  hi: String
+}
+
+type BuiltIn {
+  id: ID!
+  rest: String
+}
+
+type List {
+  id: ID!
+  rest: [JSON]
+}
+
+type NotFound {
+  id: ID!
+}

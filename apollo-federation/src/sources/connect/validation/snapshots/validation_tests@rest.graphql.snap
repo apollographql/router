@@ -1,0 +1,59 @@
+---
+source: apollo-federation/src/sources/connect/validation/mod.rs
+expression: "format!(\"{:#?}\", errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/rest.graphql
+---
+[
+    Message {
+        code: InvalidStarSelection,
+        message: "`@connect(selection:)` on `Query.notScalar` contains `rest: *` but the field `NotScalar.rest: Obj` returns an object type. It must be a non-list custom scalar.",
+        locations: [
+            LineColumn {
+                line: 13,
+                column: 59,
+            }..LineColumn {
+                line: 13,
+                column: 71,
+            },
+        ],
+    },
+    Message {
+        code: InvalidStarSelection,
+        message: "`@connect(selection:)` on `Query.builtIn` contains `rest: *` but the field `BuiltIn.rest: String` returns a built-in scalar type. It must be a non-list custom scalar.",
+        locations: [
+            LineColumn {
+                line: 16,
+                column: 59,
+            }..LineColumn {
+                line: 16,
+                column: 71,
+            },
+        ],
+    },
+    Message {
+        code: InvalidStarSelection,
+        message: "`@connect(selection:)` on `Query.list` contains `rest: *` but the field `List.rest: [JSON]` returns a list. It must be a non-list custom scalar.",
+        locations: [
+            LineColumn {
+                line: 19,
+                column: 59,
+            }..LineColumn {
+                line: 19,
+                column: 71,
+            },
+        ],
+    },
+    Message {
+        code: SelectedFieldNotFound,
+        message: "`@connect(selection:)` on `Query.notFound` contains field `rest`, which does not exist on `NotFound`.",
+        locations: [
+            LineColumn {
+                line: 22,
+                column: 59,
+            }..LineColumn {
+                line: 22,
+                column: 71,
+            },
+        ],
+    },
+]

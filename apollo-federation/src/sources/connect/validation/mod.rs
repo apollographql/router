@@ -457,6 +457,8 @@ pub enum Code {
     UnresolvedField,
     /// A field resolved by a connector has arguments defined
     FieldWithArguments,
+    /// Invalid star selection
+    InvalidStarSelection,
 }
 
 impl Code {
