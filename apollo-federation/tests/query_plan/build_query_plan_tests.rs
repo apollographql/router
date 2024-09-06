@@ -32,6 +32,7 @@ fn some_name() {
 */
 
 mod debug_max_evaluated_plans_configuration;
+mod defer;
 mod fetch_operation_names;
 mod field_merging_with_skip_and_include;
 mod fragment_autogeneration;
