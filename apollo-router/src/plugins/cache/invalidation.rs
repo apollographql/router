@@ -128,16 +128,8 @@ impl Invalidation {
                             .map(|k| RedisKey(k.to_string()))
                             .collect::<Vec<_>>();
                         if !keys.is_empty() {
-                            count += keys.len() as u64;
-                            redis_storage.delete(keys).await;
-
-                            u64_counter!(
-                                "apollo.router.operations.entity.invalidation.entry",
-                                "Entity cache counter for invalidated entries",
-                                1u64,
-                                "origin" = origin,
-                                "subgraph.name" = subgraph.clone()
-                            );
+                            let deleted = redis_storage.delete(keys).await.unwrap_or(0) as u64;
+                            count += deleted;
                         }
                     }
                     scan_res.next()?;
@@ -145,9 +137,17 @@ impl Invalidation {
             }
         }
 
+        u64_counter!(
+            "apollo.router.operations.entity.invalidation.entry",
+            "Entity cache counter for invalidated entries",
+            count,
+            "origin" = origin,
+            "subgraph.name" = subgraph.clone()
+        );
+
         u64_histogram!(
             "apollo.router.cache.invalidation.keys",
-            "Number of invalidated keys.",
+            "Number of invalidated keys per invalidation request.",
             count
         );
 
