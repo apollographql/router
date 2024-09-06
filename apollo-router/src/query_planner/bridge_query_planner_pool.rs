@@ -50,14 +50,6 @@ pub(crate) struct BridgeQueryPlannerPool {
 
 impl BridgeQueryPlannerPool {
     pub(crate) async fn new(
-        schema: Arc<Schema>,
-        configuration: Arc<Configuration>,
-        size: NonZeroUsize,
-    ) -> Result<Self, ServiceBuildError> {
-        Self::new_from_planners(Default::default(), schema, configuration, size).await
-    }
-
-    pub(crate) async fn new_from_planners(
         old_js_planners: Vec<Arc<Planner<QueryPlanResult>>>,
         schema: Arc<Schema>,
         configuration: Arc<Configuration>,
@@ -297,6 +289,7 @@ mod tests {
 
         async move {
             let mut pool = BridgeQueryPlannerPool::new(
+                Vec::new(),
                 schema.clone(),
                 config.clone(),
                 NonZeroUsize::new(2).unwrap(),
