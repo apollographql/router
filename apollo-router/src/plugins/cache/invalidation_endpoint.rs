@@ -226,7 +226,10 @@ mod tests {
             all: Some(redis_cache),
             subgraphs: HashMap::new(),
         });
-        let invalidation = Invalidation { storage };
+        let invalidation = Invalidation {
+            storage,
+            scan_count: 1000,
+        };
 
         let config = Arc::new(SubgraphConfiguration {
             all: Subgraph {
@@ -272,7 +275,10 @@ mod tests {
             all: Some(redis_cache),
             subgraphs: HashMap::new(),
         });
-        let invalidation = Invalidation { storage };
+        let invalidation = Invalidation {
+            storage,
+            scan_count: 1000,
+        };
         let config = Arc::new(SubgraphConfiguration {
             all: Subgraph {
                 ttl: None,

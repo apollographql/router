@@ -22,7 +22,7 @@ use crate::plugins::cache::entity::ENTITY_CACHE_VERSION;
 #[derive(Clone)]
 pub(crate) struct Invalidation {
     pub(crate) storage: Arc<EntityStorage>,
-    scan_count: u32,
+    pub(crate) scan_count: u32,
 }
 
 #[derive(Error, Debug, Clone)]
