@@ -83,12 +83,8 @@ impl Selectors for SupergraphCostAttributes {
         if let (Some(true), Ok(Some(cost))) = (self.cost_actual, ctx.get_actual_cost()) {
             attrs.push(KeyValue::new("cost.actual", cost));
         }
-        if let (Some(true), Ok(Some(estimated_cost)), Ok(Some(actual_cost))) = (
-            self.cost_delta,
-            ctx.get_estimated_cost(),
-            ctx.get_actual_cost(),
-        ) {
-            attrs.push(KeyValue::new("cost.delta", estimated_cost - actual_cost));
+        if let (Some(true), Ok(Some(delta))) = (self.cost_delta, ctx.get_cost_delta()) {
+            attrs.push(KeyValue::new("cost.delta", delta));
         }
         if let (Some(true), Ok(Some(result))) = (self.cost_result, ctx.get_cost_result()) {
             attrs.push(KeyValue::new("cost.result", result));

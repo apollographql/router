@@ -1101,11 +1101,10 @@ impl Selector for SupergraphSelector {
                     .flatten()
                     .map(opentelemetry::Value::from),
                 CostValue::Delta => ctx
-                    .get_estimated_cost()
+                    .get_cost_delta()
                     .ok()
                     .flatten()
-                    .zip(ctx.get_actual_cost().ok().flatten())
-                    .map(|(estimated, actual)| (estimated - actual).into()),
+                    .map(opentelemetry::Value::from),
                 CostValue::Result => ctx
                     .get_cost_result()
                     .ok()

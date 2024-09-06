@@ -224,6 +224,12 @@ impl Context {
             .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))
     }
 
+    pub(crate) fn get_cost_delta(&self) -> Result<Option<f64>, DemandControlError> {
+        let estimated = self.get_estimated_cost()?;
+        let actual = self.get_actual_cost()?;
+        Ok(estimated.zip(actual).map(|(est, act)| est - act))
+    }
+
     pub(crate) fn insert_cost_result(&self, result: String) -> Result<(), DemandControlError> {
         self.insert(COST_RESULT_CONTEXT_KEY, result)
             .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))?;
