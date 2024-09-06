@@ -1101,7 +1101,6 @@ where
                 attributes.insert(OTEL_ORIGINAL_NAME.into(), builder.name.into());
                 builder.name = forced_span_name.into();
             }
-
             // Assign end time, build and start span, drop span to export
             builder
                 .with_end_time(SystemTime::now())
