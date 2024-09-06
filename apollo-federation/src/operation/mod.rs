@@ -32,7 +32,6 @@ use itertools::Itertools;
 use serde::Serialize;
 
 use crate::compat::coerce_executable_values;
-use crate::display_helpers::DisplaySlice;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::error::SingleFederationError::Internal;
