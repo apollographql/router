@@ -301,7 +301,7 @@ where
 
             let caching_key = CachingQueryKey {
                 query: query.clone(),
-                operation: operation.clone(),
+                operation: operation_name.clone(),
                 hash: if experimental_reuse_query_plans {
                     CachingQueryHash::Reuse(doc.hash.clone())
                 } else {
@@ -310,7 +310,6 @@ where
                         schema_hash: self.schema.hash.clone(),
                     }
                 },
->>>>>>> dev
                 metadata,
                 plan_options,
                 config_mode: self.config_mode.clone(),
