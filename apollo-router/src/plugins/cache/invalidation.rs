@@ -3,6 +3,7 @@ use std::time::Instant;
 
 use fred::error::RedisError;
 use fred::types::Scanner;
+use futures::stream;
 use futures::StreamExt;
 use itertools::Itertools;
 use serde::Deserialize;
@@ -165,27 +166,37 @@ impl Invalidation {
     ) -> Result<u64, InvalidationError> {
         let mut count = 0;
         let mut errors = Vec::new();
+        let mut futures = Vec::new();
         for request in requests {
-            let start = Instant::now();
             let redis_storage = match self.storage.get(request.subgraph_name()) {
                 Some(s) => s,
                 None => continue,
             };
-            match self
-                .handle_request(redis_storage, origin, &request)
-                .instrument(tracing::info_span!("cache.invalidation.request"))
-                .await
-            {
+            let f = async move {
+                let start = Instant::now();
+
+                let res = self
+                    .handle_request(redis_storage, origin, &request)
+                    .instrument(tracing::info_span!("cache.invalidation.request"))
+                    .await;
+
+                f64_histogram!(
+                    "apollo.router.cache.invalidation.duration",
+                    "Duration of the invalidation event execution.",
+                    start.elapsed().as_secs_f64()
+                );
+                res
+            };
+            futures.push(f);
+        }
+        let mut stream: stream::FuturesUnordered<_> = futures.into_iter().collect();
+        while let Some(res) = stream.next().await {
+            match res {
                 Ok(c) => count += c,
                 Err(err) => {
                     errors.push(err);
                 }
             }
-            f64_histogram!(
-                "apollo.router.cache.invalidation.duration",
-                "Duration of the invalidation event execution.",
-                start.elapsed().as_secs_f64()
-            );
         }
 
         if !errors.is_empty() {
