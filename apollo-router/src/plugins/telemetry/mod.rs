@@ -519,6 +519,8 @@ impl Plugin for Telemetry {
                                     .map(|u| {
                                         u.stats_report_key == "## GraphQLValidationFailure\n"
                                             || u.stats_report_key == "## GraphQLParseFailure\n"
+                                            || u.stats_report_key
+                                                == "## GraphQLUnknownOperationName\n"
                                     })
                                     .unwrap_or(false)
                             }) {
