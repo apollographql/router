@@ -341,9 +341,6 @@ fn cmd_expand(
     // and the expanded subgraph as seen until the error.
     let expanded = Supergraph::new(&raw_sdl)?;
 
-    let should_skip =
-        |name: &str| !matches!(filter_prefix, Some(prefix) if name.starts_with(prefix));
-
     let subgraphs = expanded.extract_subgraphs()?;
     if let Some(dest) = dest {
         fs::create_dir_all(dest).map_err(|_| SingleFederationError::Internal {
@@ -351,8 +348,10 @@ fn cmd_expand(
         })?;
         for (name, subgraph) in subgraphs {
             // Skip any files not matching the prefix, if specified
-            if should_skip(&name) {
-                continue;
+            if let Some(prefix) = filter_prefix {
+                if !name.starts_with(prefix) {
+                    continue;
+                }
             }
 
             let subgraph_path = dest.join(format!("{}.graphql", name));
@@ -363,14 +362,24 @@ fn cmd_expand(
             })?;
         }
     } else {
+        // Print out the schemas as YAML so that it can be piped into rover
+        // TODO: It would be nice to use rover's supergraph type here instead of manually printing
+        println!("federation_version: 2");
+        println!("subgraphs:");
         for (name, subgraph) in subgraphs {
             // Skip any files not matching the prefix, if specified
-            if should_skip(&name) {
-                continue;
+            if let Some(prefix) = filter_prefix {
+                if !name.starts_with(prefix) {
+                    continue;
+                }
             }
 
-            println!("[Subgraph `{}`]", name);
-            println!("{}", subgraph.schema.schema());
+            let schema_str = subgraph.schema.schema().serialize().initial_indent_level(4);
+            println!("  {name}:");
+            println!("    routing_url: none");
+            println!("    schema:");
+            println!("      sdl: |");
+            println!("{schema_str}");
             println!(); // newline
         }
     }
