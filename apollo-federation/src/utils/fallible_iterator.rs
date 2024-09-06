@@ -78,8 +78,6 @@ pub(crate) trait FallibleIterator: Sized + Itertools {
     /// the iterator will yield `Ok(val)`.
     ///
     /// ```ignore
-    /// use apollo_federation::utils::FallibleIterator;
-    ///
     /// // A totally accurate prime checker
     /// fn is_prime(i: usize) -> Result<bool, ()> {
     ///   match i {
@@ -114,8 +112,6 @@ pub(crate) trait FallibleIterator: Sized + Itertools {
     /// fallible.
     ///
     /// ```ignore
-    /// use apollo_federation::utils::FallibleIterator;
-    ///
     /// // A totally accurate prime checker
     /// fn is_prime(i: usize) -> Result<bool, ()> {
     ///   match i {
@@ -148,8 +144,6 @@ pub(crate) trait FallibleIterator: Sized + Itertools {
     /// is returned.
     ///
     /// ```ignore
-    /// use apollo_federation::utils::FallibleIterator;
-    ///
     /// // A totally accurate prime checker
     /// fn is_prime(i: usize) -> Result<bool, ()> {
     ///   match i {
@@ -189,18 +183,10 @@ pub(crate) trait FallibleIterator: Sized + Itertools {
     /// returns `Ok(false)`.
     ///
     /// ```ignore
-    /// use apollo_federation::utils::FallibleIterator;
-    ///
-    /// type Item = Result<usize, ()>;
-    ///
-    /// fn is_even(i: usize) -> bool {
-    ///     i % 2 == 0
-    /// }
-    ///
-    /// let first_values: Vec<Item>  = vec![];
-    /// let second_values: Vec<Item> = vec![Ok(1), Err(())];
-    /// let third_values: Vec<Item>  = vec![Ok(0), Ok(1), Ok(2)];
-    /// let fourth_values: Vec<Item> = vec![Err(()), Ok(0)];
+    /// let first_values = vec![];
+    /// let second_values = vec![Ok(1), Err(())];
+    /// let third_values = vec![Ok(0), Ok(1), Ok(2)];
+    /// let fourth_values = vec![Err(()), Ok(0)];
     ///
     /// assert_eq!(Ok(true), first_values.into_iter().ok_and_all(is_even));
     /// assert_eq!(Ok(false), second_values.into_iter().ok_and_all(is_even));
@@ -225,10 +211,6 @@ pub(crate) trait FallibleIterator: Sized + Itertools {
     /// `Ok(false)` is returned. By default, this function returned `Ok(true)`.
     ///
     /// ```ignore
-    /// use apollo_federation::utils::FallibleIterator;
-    ///
-    /// type Item = Result<usize, ()>;
-    ///
     /// // A totally accurate prime checker
     /// fn is_prime(i: usize) -> Result<bool, ()> {
     ///   match i {
@@ -238,12 +220,12 @@ pub(crate) trait FallibleIterator: Sized + Itertools {
     ///   }
     /// }
     ///
-    /// let first_values: Vec<Item>  = vec![];
-    /// let second_values: Vec<Item> = vec![Ok(0), Err(())];
-    /// let third_values: Vec<Item>  = vec![Ok(2), Ok(3)];
-    /// let fourth_values: Vec<Item> = vec![Err(()), Ok(2)];
-    /// let fifth_values: Vec<Item>  = vec![Ok(2), Err(())];
-    /// let sixth_values: Vec<Item>  = vec![Ok(4), Ok(3)];
+    /// let first_values = vec![];
+    /// let second_values = vec![Ok(0), Err(())];
+    /// let third_values = vec![Ok(2), Ok(3)];
+    /// let fourth_values = vec![Err(()), Ok(2)];
+    /// let fifth_values = vec![Ok(2), Err(())];
+    /// let sixth_values = vec![Ok(4), Ok(3)];
     ///
     /// assert_eq!(Ok(true), first_values.into_iter().and_then_all(is_prime));
     /// assert_eq!(Err(()), second_values.into_iter().and_then_all(is_prime));
@@ -276,8 +258,6 @@ pub(crate) trait FallibleIterator: Sized + Itertools {
     /// is returned.
     ///
     /// ```ignore
-    /// use apollo_federation::utils::FallibleIterator;
-    ///
     /// // A totally accurate prime checker
     /// fn is_prime(i: usize) -> Result<bool, ()> {
     ///   match i {
@@ -317,18 +297,10 @@ pub(crate) trait FallibleIterator: Sized + Itertools {
     /// `Ok(true)`.
     ///
     /// ```ignore
-    /// use apollo_federation::utils::FallibleIterator;
-    ///
-    /// type Item = Result<usize, ()>;
-    ///
-    /// fn is_even(i: usize) -> bool {
-    ///     i % 2 == 0
-    /// }
-    ///
-    /// let first_values: Vec<Item>  = vec![];
-    /// let second_values: Vec<Item> = vec![Ok(0), Err(())];
-    /// let third_values: Vec<Item>  = vec![Ok(1), Ok(3)];
-    /// let fourth_values: Vec<Item> = vec![Err(()), Ok(0)];
+    /// let first_values = vec![];
+    /// let second_values = vec![Ok(0), Err(())];
+    /// let third_values = vec![Ok(1), Ok(3)];
+    /// let fourth_values = vec![Err(()), Ok(0)];
     ///
     /// assert_eq!(Ok(false), first_values.into_iter().ok_and_any(is_even));
     /// assert_eq!(Ok(true), second_values.into_iter().ok_and_any(is_even));
@@ -353,10 +325,6 @@ pub(crate) trait FallibleIterator: Sized + Itertools {
     /// `Ok(true)` is returned. By default, this function returned `Ok(false)`.
     ///
     /// ```ignore
-    /// use apollo_federation::utils::FallibleIterator;
-    ///
-    /// type Item = Result<usize, ()>;
-    ///
     /// // A totally accurate prime checker
     /// fn is_prime(i: usize) -> Result<bool, ()> {
     ///   match i {
@@ -366,12 +334,12 @@ pub(crate) trait FallibleIterator: Sized + Itertools {
     ///   }
     /// }
     ///
-    /// let first_values: Vec<Item>  = vec![];
-    /// let second_values: Vec<Item> = vec![Ok(0), Err(())];
-    /// let third_values: Vec<Item>  = vec![Ok(3), Ok(4)];
-    /// let fourth_values: Vec<Item> = vec![Err(()), Ok(2)];
-    /// let fifth_values: Vec<Item> = vec![Ok(2), Err(())];
-    /// let sixth_values: Vec<Item> = vec![Ok(4), Ok(5)];
+    /// let first_values = vec![];
+    /// let second_values = vec![Ok(0), Err(())];
+    /// let third_values = vec![Ok(3), Ok(4)];
+    /// let fourth_values = vec![Err(()), Ok(2)];
+    /// let fifth_values = vec![Ok(2), Err(())];
+    /// let sixth_values = vec![Ok(4), Ok(5)];
     ///
     /// assert_eq!(Ok(false), first_values.into_iter().and_then_any(is_prime));
     /// assert_eq!(Err(()), second_values.into_iter().and_then_any(is_prime));
@@ -525,5 +493,109 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.next().map(|res| res.or_else(&mut self.map))
+    }
+}
+
+// Ideally, these would be doc tests, but gating access to the `utils` module is messy.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    type Item = Result<usize, ()>;
+
+    fn is_prime(i: usize) -> Result<bool, ()> {
+        match i {
+            0 | 1 => Err(()), // 0 and 1 are neither prime or composite
+            2 | 3 => Ok(true),
+            _ => Ok(false), // Every other number is composite, I guess
+        }
+    }
+
+    fn is_even(i: usize) -> bool {
+        i % 2 == 0
+    }
+
+    fn test_fallible_filter() {
+        let vals = (1..6).fallible_filter(|i| is_prime(*i));
+        itertools::assert_equal(vals, vec![Err(()), Ok(2), Ok(3)]);
+    }
+
+    fn test_and_then_filter() {
+        let vals = vec![Ok(0), Err(()), Err(()), Ok(3), Ok(4)]
+            .into_iter()
+            .and_then_filter(|i| is_prime(*i));
+        itertools::assert_equal(vals, vec![Err(()), Err(()), Err(()), Ok(3)]);
+    }
+
+    fn test_fallible_all() {
+        assert_eq!(Ok(true), [].into_iter().fallible_all(is_prime));
+        assert_eq!(Ok(true), (2..4).fallible_all(is_prime));
+        assert_eq!(Err(()), (1..4).fallible_all(is_prime));
+        assert_eq!(Ok(false), (2..5).fallible_all(is_prime));
+        assert_eq!(Err(()), (1..5).fallible_all(is_prime));
+    }
+
+    fn test_ok_and_all() {
+        let first_values: Vec<Item> = vec![];
+        let second_values: Vec<Item> = vec![Ok(1), Err(())];
+        let third_values: Vec<Item> = vec![Ok(0), Ok(1), Ok(2)];
+        let fourth_values: Vec<Item> = vec![Err(()), Ok(0)];
+
+        assert_eq!(Ok(true), first_values.into_iter().ok_and_all(is_even));
+        assert_eq!(Ok(false), second_values.into_iter().ok_and_all(is_even));
+        assert_eq!(Ok(false), third_values.into_iter().ok_and_all(is_even));
+        assert_eq!(Err(()), fourth_values.into_iter().ok_and_all(is_even));
+    }
+
+    fn test_and_then_all() {
+        let first_values: Vec<Item> = vec![];
+        let second_values: Vec<Item> = vec![Ok(0), Err(())];
+        let third_values: Vec<Item> = vec![Ok(2), Ok(3)];
+        let fourth_values: Vec<Item> = vec![Err(()), Ok(2)];
+        let fifth_values: Vec<Item> = vec![Ok(2), Err(())];
+        let sixth_values: Vec<Item> = vec![Ok(4), Ok(3)];
+
+        assert_eq!(Ok(true), first_values.into_iter().and_then_all(is_prime));
+        assert_eq!(Err(()), second_values.into_iter().and_then_all(is_prime));
+        assert_eq!(Ok(true), third_values.into_iter().and_then_all(is_prime));
+        assert_eq!(Err(()), fourth_values.into_iter().and_then_all(is_prime));
+        assert_eq!(Err(()), fifth_values.into_iter().and_then_all(is_prime));
+        assert_eq!(Ok(false), sixth_values.into_iter().and_then_all(is_prime));
+    }
+
+    fn test_fallible_any() {
+        assert_eq!(Ok(false), [].into_iter().fallible_any(is_prime));
+        assert_eq!(Ok(true), (2..5).fallible_any(is_prime));
+        assert_eq!(Ok(false), (4..5).fallible_any(is_prime));
+        assert_eq!(Err(()), (1..4).fallible_any(is_prime));
+        assert_eq!(Err(()), (1..5).fallible_any(is_prime));
+    }
+
+    fn test_ok_and_any() {
+        let first_values: Vec<Item> = vec![];
+        let second_values: Vec<Item> = vec![Ok(0), Err(())];
+        let third_values: Vec<Item> = vec![Ok(1), Ok(3)];
+        let fourth_values: Vec<Item> = vec![Err(()), Ok(0)];
+
+        assert_eq!(Ok(false), first_values.into_iter().ok_and_any(is_even));
+        assert_eq!(Ok(true), second_values.into_iter().ok_and_any(is_even));
+        assert_eq!(Ok(false), third_values.into_iter().ok_and_any(is_even));
+        assert_eq!(Err(()), fourth_values.into_iter().ok_and_any(is_even));
+    }
+
+    fn test_and_then_any() {
+        let first_values: Vec<Item> = vec![];
+        let second_values: Vec<Item> = vec![Ok(0), Err(())];
+        let third_values: Vec<Item> = vec![Ok(3), Ok(4)];
+        let fourth_values: Vec<Item> = vec![Err(()), Ok(2)];
+        let fifth_values: Vec<Item> = vec![Ok(2), Err(())];
+        let sixth_values: Vec<Item> = vec![Ok(4), Ok(5)];
+
+        assert_eq!(Ok(false), first_values.into_iter().and_then_any(is_prime));
+        assert_eq!(Err(()), second_values.into_iter().and_then_any(is_prime));
+        assert_eq!(Ok(true), third_values.into_iter().and_then_any(is_prime));
+        assert_eq!(Err(()), fourth_values.into_iter().and_then_any(is_prime));
+        assert_eq!(Ok(true), fifth_values.into_iter().and_then_any(is_prime));
+        assert_eq!(Ok(false), sixth_values.into_iter().and_then_any(is_prime));
     }
 }
