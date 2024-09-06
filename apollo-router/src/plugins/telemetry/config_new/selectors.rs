@@ -14,7 +14,10 @@ use crate::plugin::serde::deserialize_json_query;
 use crate::plugin::serde::deserialize_jsonpath;
 use crate::plugins::cache::entity::CacheSubgraph;
 use crate::plugins::cache::metrics::CacheMetricContextKey;
-use crate::plugins::demand_control::CostContext;
+use crate::plugins::demand_control::COST_ACTUAL_CONTEXT_KEY;
+use crate::plugins::demand_control::COST_ESTIMATED_CONTEXT_KEY;
+use crate::plugins::demand_control::COST_RESULT_CONTEXT_KEY;
+use crate::plugins::demand_control::COST_STRATEGY_CONTEXT_KEY;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::TraceIdFormat;
 use crate::plugins::telemetry::config_new::cost::CostValue;
@@ -1090,14 +1093,29 @@ impl Selector for SupergraphSelector {
                 val.maybe_to_otel_value()
             }
             .or_else(|| default.maybe_to_otel_value()),
-            SupergraphSelector::Cost { cost } => ctx.extensions().with_lock(|lock| {
-                lock.get::<CostContext>().map(|cost_result| match cost {
-                    CostValue::Estimated => cost_result.estimated.into(),
-                    CostValue::Actual => cost_result.actual.into(),
-                    CostValue::Delta => cost_result.delta().into(),
-                    CostValue::Result => cost_result.result.into(),
-                })
-            }),
+            SupergraphSelector::Cost { cost } => match cost {
+                CostValue::Estimated => ctx
+                    .get::<&str, f64>(COST_ESTIMATED_CONTEXT_KEY)
+                    .ok()
+                    .flatten()
+                    .map(opentelemetry::Value::from),
+                CostValue::Actual => ctx
+                    .get::<&str, f64>(COST_ACTUAL_CONTEXT_KEY)
+                    .ok()
+                    .flatten()
+                    .map(opentelemetry::Value::from),
+                CostValue::Delta => ctx
+                    .get::<&str, f64>(COST_ESTIMATED_CONTEXT_KEY)
+                    .ok()
+                    .flatten()
+                    .zip(ctx.get::<&str, f64>(COST_ACTUAL_CONTEXT_KEY).ok().flatten())
+                    .map(|(estimated, actual)| (estimated - actual).into()),
+                CostValue::Result => ctx
+                    .get::<&str, String>(COST_RESULT_CONTEXT_KEY)
+                    .ok()
+                    .flatten()
+                    .map(opentelemetry::Value::from),
+            },
             SupergraphSelector::OnGraphQLError { on_graphql_error } if *on_graphql_error => {
                 if ctx.get_json_value(CONTAINS_GRAPHQL_ERROR)
                     == Some(serde_json_bytes::Value::Bool(true))

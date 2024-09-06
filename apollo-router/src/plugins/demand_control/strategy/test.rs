@@ -3,8 +3,8 @@ use apollo_compiler::ExecutableDocument;
 use crate::plugins::demand_control::strategy::StrategyImpl;
 use crate::plugins::demand_control::test::TestError;
 use crate::plugins::demand_control::test::TestStage;
-use crate::plugins::demand_control::CostContext;
 use crate::plugins::demand_control::DemandControlError;
+use crate::plugins::demand_control::COST_RESULT_CONTEXT_KEY;
 use crate::services::execution::Request;
 use crate::services::subgraph::Response;
 
@@ -17,32 +17,38 @@ pub(crate) struct Test {
 
 impl StrategyImpl for Test {
     fn on_execution_request(&self, request: &Request) -> Result<(), DemandControlError> {
-        request.context.extensions().with_lock(|mut lock| {
-            let cost_context = lock.get_or_default_mut::<CostContext>();
-            match self {
-                Test {
-                    stage: TestStage::ExecutionRequest,
-                    error,
-                } => Err(cost_context.result(error.into())),
-                _ => Ok(()),
+        match self {
+            Test {
+                stage: TestStage::ExecutionRequest,
+                error,
+            } => {
+                let error: DemandControlError = error.into();
+                request
+                    .context
+                    .insert(COST_RESULT_CONTEXT_KEY, error.code().to_string());
+                Err(error)
             }
-        })
+            _ => Ok(()),
+        }
     }
 
     fn on_subgraph_request(
         &self,
         request: &crate::services::subgraph::Request,
     ) -> Result<(), DemandControlError> {
-        request.context.extensions().with_lock(|mut lock| {
-            let cost_context = lock.get_or_default_mut::<CostContext>();
-            match self {
-                Test {
-                    stage: TestStage::SubgraphRequest,
-                    error,
-                } => Err(cost_context.result(error.into())),
-                _ => Ok(()),
+        match self {
+            Test {
+                stage: TestStage::SubgraphRequest,
+                error,
+            } => {
+                let error: DemandControlError = error.into();
+                request
+                    .context
+                    .insert(COST_RESULT_CONTEXT_KEY, error.code().to_string());
+                Err(error)
             }
-        })
+            _ => Ok(()),
+        }
     }
 
     fn on_subgraph_response(
@@ -50,16 +56,19 @@ impl StrategyImpl for Test {
         _request: &ExecutableDocument,
         response: &Response,
     ) -> Result<(), DemandControlError> {
-        response.context.extensions().with_lock(|mut lock| {
-            let cost_context = lock.get_or_default_mut::<CostContext>();
-            match self {
-                Test {
-                    stage: TestStage::SubgraphResponse,
-                    error,
-                } => Err(cost_context.result(error.into())),
-                _ => Ok(()),
+        match self {
+            Test {
+                stage: TestStage::SubgraphResponse,
+                error,
+            } => {
+                let error: DemandControlError = error.into();
+                response
+                    .context
+                    .insert(COST_RESULT_CONTEXT_KEY, error.code().to_string());
+                Err(error)
             }
-        })
+            _ => Ok(()),
+        }
     }
 
     fn on_execution_response(
@@ -68,15 +77,16 @@ impl StrategyImpl for Test {
         _request: &ExecutableDocument,
         _response: &crate::graphql::Response,
     ) -> Result<(), DemandControlError> {
-        context.extensions().with_lock(|mut lock| {
-            let cost_context = lock.get_or_default_mut::<CostContext>();
-            match self {
-                Test {
-                    stage: TestStage::ExecutionResponse,
-                    error,
-                } => Err(cost_context.result(error.into())),
-                _ => Ok(()),
+        match self {
+            Test {
+                stage: TestStage::ExecutionResponse,
+                error,
+            } => {
+                let error: DemandControlError = error.into();
+                context.insert(COST_RESULT_CONTEXT_KEY, error.code().to_string());
+                Err(error)
             }
-        })
+            _ => Ok(()),
+        }
     }
 }

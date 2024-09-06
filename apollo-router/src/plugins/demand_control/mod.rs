@@ -42,36 +42,10 @@ use crate::Context;
 pub(crate) mod cost_calculator;
 pub(crate) mod strategy;
 
-/// The cost calculation information stored in context for use in telemetry and other plugins that need to know what cost was calculated.
-#[derive(Debug, Clone)]
-pub(crate) struct CostContext {
-    pub(crate) estimated: f64,
-    pub(crate) actual: f64,
-    pub(crate) result: &'static str,
-    pub(crate) strategy: &'static str,
-}
-
-impl Default for CostContext {
-    fn default() -> Self {
-        Self {
-            estimated: 0.0,
-            actual: 0.0,
-            result: "COST_OK",
-            strategy: "COST_STRATEGY_UNKNOWN",
-        }
-    }
-}
-
-impl CostContext {
-    pub(crate) fn delta(&self) -> f64 {
-        self.estimated - self.actual
-    }
-
-    pub(crate) fn result(&mut self, error: DemandControlError) -> DemandControlError {
-        self.result = error.code();
-        error
-    }
-}
+pub const COST_ESTIMATED_CONTEXT_KEY: &str = "cost.estimated";
+pub const COST_ACTUAL_CONTEXT_KEY: &str = "cost.actual";
+pub const COST_RESULT_CONTEXT_KEY: &str = "cost.result";
+pub const COST_STRATEGY_CONTEXT_KEY: &str = "cost.strategy";
 
 /// Algorithm for calculating the cost of an incoming query.
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -227,8 +201,10 @@ pub(crate) struct DemandControl {
 impl DemandControl {
     fn report_operation_metric(context: Context) {
         let result = context
-            .extensions()
-            .with_lock(|lock| lock.get::<CostContext>().map_or("NO_CONTEXT", |c| c.result));
+            .get(COST_RESULT_CONTEXT_KEY)
+            .ok()
+            .flatten()
+            .unwrap_or("NO_CONTEXT".to_string());
         u64_counter!(
             "apollo.router.operations.demand_control",
             "Total operations with demand control enabled",

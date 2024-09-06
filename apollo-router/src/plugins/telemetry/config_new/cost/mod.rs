@@ -12,7 +12,10 @@ use tower::BoxError;
 use super::instruments::Increment;
 use super::instruments::StaticInstrument;
 use crate::metrics;
-use crate::plugins::demand_control::CostContext;
+use crate::plugins::demand_control::COST_ACTUAL_CONTEXT_KEY;
+use crate::plugins::demand_control::COST_ESTIMATED_CONTEXT_KEY;
+use crate::plugins::demand_control::COST_RESULT_CONTEXT_KEY;
+use crate::plugins::demand_control::COST_STRATEGY_CONTEXT_KEY;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
 use crate::plugins::telemetry::config_new::conditions::Condition;
@@ -78,22 +81,30 @@ impl Selectors for SupergraphCostAttributes {
 
     fn on_response_event(&self, _response: &Self::EventResponse, ctx: &Context) -> Vec<KeyValue> {
         let mut attrs = Vec::with_capacity(4);
-        let cost_result = ctx
-            .extensions()
-            .with_lock(|lock| lock.get::<CostContext>().cloned());
-        if let Some(cost_result) = cost_result {
-            if let Some(true) = self.cost_estimated {
-                attrs.push(KeyValue::new("cost.estimated", cost_result.estimated));
-            }
-            if let Some(true) = self.cost_actual {
-                attrs.push(KeyValue::new("cost.actual", cost_result.actual));
-            }
-            if let Some(true) = self.cost_delta {
-                attrs.push(KeyValue::new("cost.delta", cost_result.delta()));
-            }
-            if let Some(true) = self.cost_result {
-                attrs.push(KeyValue::new("cost.result", cost_result.result));
-            }
+        if let (Some(true), Ok(Some(cost))) = (
+            self.cost_estimated,
+            ctx.get::<&str, f64>(COST_ESTIMATED_CONTEXT_KEY),
+        ) {
+            attrs.push(KeyValue::new("cost.estimated", cost));
+        }
+        if let (Some(true), Ok(Some(cost))) = (
+            self.cost_actual,
+            ctx.get::<&str, f64>(COST_ACTUAL_CONTEXT_KEY),
+        ) {
+            attrs.push(KeyValue::new("cost.actual", cost));
+        }
+        if let (Some(true), Ok(Some(estimated_cost)), Ok(Some(actual_cost))) = (
+            self.cost_delta,
+            ctx.get::<&str, f64>(COST_ESTIMATED_CONTEXT_KEY),
+            ctx.get::<&str, f64>(COST_ESTIMATED_CONTEXT_KEY),
+        ) {
+            attrs.push(KeyValue::new("cost.delta", estimated_cost - actual_cost));
+        }
+        if let (Some(true), Ok(Some(result))) = (
+            self.cost_result,
+            ctx.get::<&str, String>(COST_RESULT_CONTEXT_KEY),
+        ) {
+            attrs.push(KeyValue::new("cost.result", result));
         }
         attrs
     }
@@ -314,26 +325,30 @@ pub(crate) enum CostValue {
 }
 
 pub(crate) fn add_cost_attributes(context: &Context, custom_attributes: &mut Vec<KeyValue>) {
-    context.extensions().with_lock(|c| {
-        if let Some(cost) = c.get::<CostContext>() {
-            custom_attributes.push(KeyValue::new(
-                APOLLO_PRIVATE_COST_ESTIMATED.clone(),
-                AttributeValue::F64(cost.estimated),
-            ));
-            custom_attributes.push(KeyValue::new(
-                APOLLO_PRIVATE_COST_ACTUAL.clone(),
-                AttributeValue::F64(cost.actual),
-            ));
-            custom_attributes.push(KeyValue::new(
-                APOLLO_PRIVATE_COST_RESULT.clone(),
-                AttributeValue::String(cost.result.into()),
-            ));
-            custom_attributes.push(KeyValue::new(
-                APOLLO_PRIVATE_COST_STRATEGY.clone(),
-                AttributeValue::String(cost.strategy.into()),
-            ));
-        }
-    });
+    if let Ok(Some(cost)) = context.get::<&str, f64>(COST_ESTIMATED_CONTEXT_KEY) {
+        custom_attributes.push(KeyValue::new(
+            APOLLO_PRIVATE_COST_ESTIMATED.clone(),
+            AttributeValue::F64(cost),
+        ));
+    }
+    if let Ok(Some(cost)) = context.get::<&str, f64>(COST_ACTUAL_CONTEXT_KEY) {
+        custom_attributes.push(KeyValue::new(
+            APOLLO_PRIVATE_COST_ACTUAL.clone(),
+            AttributeValue::F64(cost),
+        ));
+    }
+    if let Ok(Some(result)) = context.get::<&str, String>(COST_RESULT_CONTEXT_KEY) {
+        custom_attributes.push(KeyValue::new(
+            APOLLO_PRIVATE_COST_RESULT.clone(),
+            AttributeValue::String(result),
+        ));
+    }
+    if let Ok(Some(strategy)) = context.get::<&str, String>(COST_STRATEGY_CONTEXT_KEY) {
+        custom_attributes.push(KeyValue::new(
+            APOLLO_PRIVATE_COST_STRATEGY.clone(),
+            AttributeValue::String(strategy),
+        ));
+    }
 }
 
 #[cfg(test)]
@@ -341,7 +356,9 @@ mod test {
     use std::sync::Arc;
 
     use crate::context::OPERATION_NAME;
-    use crate::plugins::demand_control::CostContext;
+    use crate::plugins::demand_control::COST_ACTUAL_CONTEXT_KEY;
+    use crate::plugins::demand_control::COST_ESTIMATED_CONTEXT_KEY;
+    use crate::plugins::demand_control::COST_RESULT_CONTEXT_KEY;
     use crate::plugins::telemetry::config_new::cost::CostInstruments;
     use crate::plugins::telemetry::config_new::cost::CostInstrumentsConfig;
     use crate::plugins::telemetry::config_new::instruments::Instrumented;
@@ -446,13 +463,11 @@ mod test {
 
     fn make_request(instruments: &CostInstruments) {
         let context = Context::new();
-        context.extensions().with_lock(|mut lock| {
-            lock.insert(CostContext::default());
-            let cost_result = lock.get_or_default_mut::<CostContext>();
-            cost_result.estimated = 100.0;
-            cost_result.actual = 10.0;
-            cost_result.result = "COST_TOO_EXPENSIVE"
-        });
+        context.insert(COST_ESTIMATED_CONTEXT_KEY, 100.0).unwrap();
+        context.insert(COST_ACTUAL_CONTEXT_KEY, 10.0).unwrap();
+        context
+            .insert(COST_RESULT_CONTEXT_KEY, "COST_TOO_EXPENSIVE".to_string())
+            .unwrap();
         let _ = context.insert(OPERATION_NAME, "Test".to_string()).unwrap();
         instruments.on_request(
             &supergraph::Request::fake_builder()
