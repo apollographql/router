@@ -39,6 +39,13 @@ pub(crate) struct InvalidationEndpointConfig {
     pub(crate) path: String,
     /// Listen address on which the invalidation endpoint must listen.
     pub(crate) listen: ListenAddr,
+    #[serde(default = "default_scan_count")]
+    /// Number of keys to return at once from a redis SCAN command
+    pub(crate) scan_count: u32,
+}
+
+fn default_scan_count() -> u32 {
+    1000
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

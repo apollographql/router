@@ -21,6 +21,7 @@ use crate::plugins::cache::entity::ENTITY_CACHE_VERSION;
 #[derive(Clone)]
 pub(crate) struct Invalidation {
     pub(crate) storage: Arc<EntityStorage>,
+    scan_count: u32,
 }
 
 #[derive(Error, Debug, Clone)]
@@ -56,8 +57,14 @@ pub(crate) enum InvalidationOrigin {
 }
 
 impl Invalidation {
-    pub(crate) async fn new(storage: Arc<EntityStorage>) -> Result<Self, BoxError> {
-        Ok(Self { storage })
+    pub(crate) async fn new(
+        storage: Arc<EntityStorage>,
+        scan_count: u32,
+    ) -> Result<Self, BoxError> {
+        Ok(Self {
+            storage,
+            scan_count,
+        })
     }
 
     pub(crate) async fn invalidate(
@@ -98,8 +105,7 @@ impl Invalidation {
             key_prefix
         );
 
-        // FIXME: configurable batch size
-        let mut stream = redis_storage.scan(key_prefix.clone(), Some(100));
+        let mut stream = redis_storage.scan(key_prefix.clone(), Some(self.scan_count));
         let mut count = 0u64;
         let mut error = None;
 

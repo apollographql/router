@@ -3568,6 +3568,32 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "IntrospectionMode": {
+      "description": "Which implementation of GraphQL schema introspection to use, if enabled",
+      "oneOf": [
+        {
+          "description": "Use the new Rust-based implementation.",
+          "enum": [
+            "new"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Use the old JavaScript-based implementation.",
+          "enum": [
+            "legacy"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Use Rust-based and Javascript-based implementations side by side, logging warnings if the implementations disagree.",
+          "enum": [
+            "both"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "InvalidationEndpointConfig": {
       "additionalProperties": false,
       "properties": {
@@ -3578,6 +3604,13 @@ expression: "&schema"
         "path": {
           "description": "Specify on which path you want to listen for invalidation endpoint.",
           "type": "string"
+        },
+        "scan_count": {
+          "default": 1000,
+          "description": "Number of keys to return at once from a redis SCAN command",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
         }
       },
       "required": [
@@ -8288,6 +8321,10 @@ expression: "&schema"
     "experimental_chaos": {
       "$ref": "#/definitions/Chaos",
       "description": "#/definitions/Chaos"
+    },
+    "experimental_introspection_mode": {
+      "$ref": "#/definitions/IntrospectionMode",
+      "description": "#/definitions/IntrospectionMode"
     },
     "experimental_query_planner_mode": {
       "$ref": "#/definitions/QueryPlannerMode",
