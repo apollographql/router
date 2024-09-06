@@ -42,10 +42,11 @@ use crate::Context;
 pub(crate) mod cost_calculator;
 pub(crate) mod strategy;
 
-pub const COST_ESTIMATED_CONTEXT_KEY: &str = "cost.estimated";
-pub const COST_ACTUAL_CONTEXT_KEY: &str = "cost.actual";
-pub const COST_RESULT_CONTEXT_KEY: &str = "cost.result";
-pub const COST_STRATEGY_CONTEXT_KEY: &str = "cost.strategy";
+// TODO: Do these need to be `pub`?
+pub(crate) const COST_ESTIMATED_CONTEXT_KEY: &str = "cost.estimated";
+pub(crate) const COST_ACTUAL_CONTEXT_KEY: &str = "cost.actual";
+pub(crate) const COST_RESULT_CONTEXT_KEY: &str = "cost.result";
+pub(crate) const COST_STRATEGY_CONTEXT_KEY: &str = "cost.strategy";
 
 /// Algorithm for calculating the cost of an incoming query.
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -120,6 +121,8 @@ pub(crate) enum DemandControlError {
     QueryParseFailure(String),
     /// {0}
     SubgraphOperationNotInitialized(crate::query_planner::fetch::SubgraphOperationNotInitialized),
+    /// {0}
+    ContextSerializationError(String),
 }
 
 impl IntoGraphQLErrors for DemandControlError {
@@ -156,6 +159,10 @@ impl IntoGraphQLErrors for DemandControlError {
                 .message(self.to_string())
                 .build()]),
             DemandControlError::SubgraphOperationNotInitialized(e) => Ok(e.into_graphql_errors()),
+            DemandControlError::ContextSerializationError(_) => Ok(vec![graphql::Error::builder()
+                .extension_code(self.code())
+                .message(self.to_string())
+                .build()]),
         }
     }
 }
@@ -167,6 +174,7 @@ impl DemandControlError {
             DemandControlError::ActualCostTooExpensive { .. } => "COST_ACTUAL_TOO_EXPENSIVE",
             DemandControlError::QueryParseFailure(_) => "COST_QUERY_PARSE_FAILURE",
             DemandControlError::SubgraphOperationNotInitialized(e) => e.code(),
+            DemandControlError::ContextSerializationError(_) => "COST_CONTEXT_SERIALIZATION_ERROR",
         }
     }
 }
@@ -190,6 +198,52 @@ impl<'a> From<FieldLookupError<'a>> for DemandControlError {
                 ))
             }
         }
+    }
+}
+
+impl Context {
+    pub(crate) fn insert_estimated_cost(&self, cost: f64) -> Result<(), DemandControlError> {
+        self.insert(COST_ESTIMATED_CONTEXT_KEY, cost)
+            .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))?;
+        Ok(())
+    }
+
+    pub(crate) fn get_estimated_cost(&self) -> Result<Option<f64>, DemandControlError> {
+        self.get::<&str, f64>(COST_ESTIMATED_CONTEXT_KEY)
+            .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))
+    }
+
+    pub(crate) fn insert_actual_cost(&self, cost: f64) -> Result<(), DemandControlError> {
+        self.insert(COST_ACTUAL_CONTEXT_KEY, cost)
+            .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))?;
+        Ok(())
+    }
+
+    pub(crate) fn get_actual_cost(&self) -> Result<Option<f64>, DemandControlError> {
+        self.get::<&str, f64>(COST_ACTUAL_CONTEXT_KEY)
+            .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))
+    }
+
+    pub(crate) fn insert_cost_result(&self, result: String) -> Result<(), DemandControlError> {
+        self.insert(COST_RESULT_CONTEXT_KEY, result)
+            .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))?;
+        Ok(())
+    }
+
+    pub(crate) fn get_cost_result(&self) -> Result<Option<String>, DemandControlError> {
+        self.get::<&str, String>(COST_RESULT_CONTEXT_KEY)
+            .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))
+    }
+
+    pub(crate) fn insert_cost_strategy(&self, strategy: String) -> Result<(), DemandControlError> {
+        self.insert(COST_STRATEGY_CONTEXT_KEY, strategy)
+            .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))?;
+        Ok(())
+    }
+
+    pub(crate) fn get_cost_strategy(&self) -> Result<Option<String>, DemandControlError> {
+        self.get::<&str, String>(COST_STRATEGY_CONTEXT_KEY)
+            .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))
     }
 }
 

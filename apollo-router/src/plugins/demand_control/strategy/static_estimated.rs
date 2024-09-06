@@ -4,10 +4,6 @@ use crate::graphql;
 use crate::plugins::demand_control::cost_calculator::static_cost::StaticCostCalculator;
 use crate::plugins::demand_control::strategy::StrategyImpl;
 use crate::plugins::demand_control::DemandControlError;
-use crate::plugins::demand_control::COST_ACTUAL_CONTEXT_KEY;
-use crate::plugins::demand_control::COST_ESTIMATED_CONTEXT_KEY;
-use crate::plugins::demand_control::COST_RESULT_CONTEXT_KEY;
-use crate::plugins::demand_control::COST_STRATEGY_CONTEXT_KEY;
 use crate::services::execution;
 use crate::services::subgraph;
 
@@ -25,8 +21,8 @@ impl StrategyImpl for StaticEstimated {
             .and_then(|cost| {
                 request
                     .context
-                    .insert(COST_STRATEGY_CONTEXT_KEY, "static_estimated".to_string());
-                request.context.insert(COST_ESTIMATED_CONTEXT_KEY, cost);
+                    .insert_cost_strategy("static_estimated".to_string())?;
+                request.context.insert_estimated_cost(cost)?;
 
                 if cost > self.max {
                     let error = DemandControlError::EstimatedCostTooExpensive {
@@ -35,7 +31,7 @@ impl StrategyImpl for StaticEstimated {
                     };
                     request
                         .context
-                        .insert(COST_RESULT_CONTEXT_KEY, error.code().to_string());
+                        .insert_cost_result(error.code().to_string())?;
                     Err(error)
                 } else {
                     Ok(())
@@ -63,7 +59,7 @@ impl StrategyImpl for StaticEstimated {
     ) -> Result<(), DemandControlError> {
         if response.data.is_some() {
             let cost = self.cost_calculator.actual(request, response)?;
-            context.insert(COST_ACTUAL_CONTEXT_KEY, cost);
+            context.insert_actual_cost(cost)?;
         }
         Ok(())
     }

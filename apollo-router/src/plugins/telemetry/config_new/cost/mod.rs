@@ -12,10 +12,6 @@ use tower::BoxError;
 use super::instruments::Increment;
 use super::instruments::StaticInstrument;
 use crate::metrics;
-use crate::plugins::demand_control::COST_ACTUAL_CONTEXT_KEY;
-use crate::plugins::demand_control::COST_ESTIMATED_CONTEXT_KEY;
-use crate::plugins::demand_control::COST_RESULT_CONTEXT_KEY;
-use crate::plugins::demand_control::COST_STRATEGY_CONTEXT_KEY;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
 use crate::plugins::telemetry::config_new::conditions::Condition;
@@ -81,29 +77,20 @@ impl Selectors for SupergraphCostAttributes {
 
     fn on_response_event(&self, _response: &Self::EventResponse, ctx: &Context) -> Vec<KeyValue> {
         let mut attrs = Vec::with_capacity(4);
-        if let (Some(true), Ok(Some(cost))) = (
-            self.cost_estimated,
-            ctx.get::<&str, f64>(COST_ESTIMATED_CONTEXT_KEY),
-        ) {
+        if let (Some(true), Ok(Some(cost))) = (self.cost_estimated, ctx.get_estimated_cost()) {
             attrs.push(KeyValue::new("cost.estimated", cost));
         }
-        if let (Some(true), Ok(Some(cost))) = (
-            self.cost_actual,
-            ctx.get::<&str, f64>(COST_ACTUAL_CONTEXT_KEY),
-        ) {
+        if let (Some(true), Ok(Some(cost))) = (self.cost_actual, ctx.get_actual_cost()) {
             attrs.push(KeyValue::new("cost.actual", cost));
         }
         if let (Some(true), Ok(Some(estimated_cost)), Ok(Some(actual_cost))) = (
             self.cost_delta,
-            ctx.get::<&str, f64>(COST_ESTIMATED_CONTEXT_KEY),
-            ctx.get::<&str, f64>(COST_ESTIMATED_CONTEXT_KEY),
+            ctx.get_estimated_cost(),
+            ctx.get_actual_cost(),
         ) {
             attrs.push(KeyValue::new("cost.delta", estimated_cost - actual_cost));
         }
-        if let (Some(true), Ok(Some(result))) = (
-            self.cost_result,
-            ctx.get::<&str, String>(COST_RESULT_CONTEXT_KEY),
-        ) {
+        if let (Some(true), Ok(Some(result))) = (self.cost_result, ctx.get_cost_result()) {
             attrs.push(KeyValue::new("cost.result", result));
         }
         attrs
@@ -325,25 +312,25 @@ pub(crate) enum CostValue {
 }
 
 pub(crate) fn add_cost_attributes(context: &Context, custom_attributes: &mut Vec<KeyValue>) {
-    if let Ok(Some(cost)) = context.get::<&str, f64>(COST_ESTIMATED_CONTEXT_KEY) {
+    if let Ok(Some(cost)) = context.get_estimated_cost() {
         custom_attributes.push(KeyValue::new(
             APOLLO_PRIVATE_COST_ESTIMATED.clone(),
             AttributeValue::F64(cost),
         ));
     }
-    if let Ok(Some(cost)) = context.get::<&str, f64>(COST_ACTUAL_CONTEXT_KEY) {
+    if let Ok(Some(cost)) = context.get_actual_cost() {
         custom_attributes.push(KeyValue::new(
             APOLLO_PRIVATE_COST_ACTUAL.clone(),
             AttributeValue::F64(cost),
         ));
     }
-    if let Ok(Some(result)) = context.get::<&str, String>(COST_RESULT_CONTEXT_KEY) {
+    if let Ok(Some(result)) = context.get_cost_result() {
         custom_attributes.push(KeyValue::new(
             APOLLO_PRIVATE_COST_RESULT.clone(),
             AttributeValue::String(result),
         ));
     }
-    if let Ok(Some(strategy)) = context.get::<&str, String>(COST_STRATEGY_CONTEXT_KEY) {
+    if let Ok(Some(strategy)) = context.get_cost_strategy() {
         custom_attributes.push(KeyValue::new(
             APOLLO_PRIVATE_COST_STRATEGY.clone(),
             AttributeValue::String(strategy),
@@ -356,9 +343,6 @@ mod test {
     use std::sync::Arc;
 
     use crate::context::OPERATION_NAME;
-    use crate::plugins::demand_control::COST_ACTUAL_CONTEXT_KEY;
-    use crate::plugins::demand_control::COST_ESTIMATED_CONTEXT_KEY;
-    use crate::plugins::demand_control::COST_RESULT_CONTEXT_KEY;
     use crate::plugins::telemetry::config_new::cost::CostInstruments;
     use crate::plugins::telemetry::config_new::cost::CostInstrumentsConfig;
     use crate::plugins::telemetry::config_new::instruments::Instrumented;
@@ -463,10 +447,10 @@ mod test {
 
     fn make_request(instruments: &CostInstruments) {
         let context = Context::new();
-        context.insert(COST_ESTIMATED_CONTEXT_KEY, 100.0).unwrap();
-        context.insert(COST_ACTUAL_CONTEXT_KEY, 10.0).unwrap();
+        context.insert_estimated_cost(100.0).unwrap();
+        context.insert_actual_cost(10.0).unwrap();
         context
-            .insert(COST_RESULT_CONTEXT_KEY, "COST_TOO_EXPENSIVE".to_string())
+            .insert_cost_result("COST_TOO_EXPENSIVE".to_string())
             .unwrap();
         let _ = context.insert(OPERATION_NAME, "Test".to_string()).unwrap();
         instruments.on_request(

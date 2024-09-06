@@ -151,9 +151,6 @@ use crate::spec::operation_limits::OperationLimits;
 use crate::Context;
 use crate::ListenAddr;
 
-use super::demand_control::COST_ACTUAL_CONTEXT_KEY;
-use super::demand_control::COST_ESTIMATED_CONTEXT_KEY;
-
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
 pub(crate) mod apollo_otlp_exporter;
@@ -1522,14 +1519,8 @@ impl Telemetry {
                     let query_limits = guard.get::<OperationLimits<u32>>();
                     SingleLimitsStats {
                         strategy: strategy.and_then(|s| serde_json::to_string(&s.mode).ok()),
-                        cost_estimated: context
-                            .get::<&str, f64>(COST_ESTIMATED_CONTEXT_KEY)
-                            .ok()
-                            .flatten(),
-                        cost_actual: context
-                            .get::<&str, f64>(COST_ACTUAL_CONTEXT_KEY)
-                            .ok()
-                            .flatten(),
+                        cost_estimated: context.get_estimated_cost().ok().flatten(),
+                        cost_actual: context.get_actual_cost().ok().flatten(),
 
                         // These limits are related to the Traffic Shaping feature, unrelated to the Demand Control plugin
                         depth: query_limits.map_or(0, |ql| ql.depth as u64),

@@ -4,7 +4,6 @@ use crate::plugins::demand_control::strategy::StrategyImpl;
 use crate::plugins::demand_control::test::TestError;
 use crate::plugins::demand_control::test::TestStage;
 use crate::plugins::demand_control::DemandControlError;
-use crate::plugins::demand_control::COST_RESULT_CONTEXT_KEY;
 use crate::services::execution::Request;
 use crate::services::subgraph::Response;
 
@@ -25,7 +24,7 @@ impl StrategyImpl for Test {
                 let error: DemandControlError = error.into();
                 request
                     .context
-                    .insert(COST_RESULT_CONTEXT_KEY, error.code().to_string());
+                    .insert_cost_result(error.code().to_string())?;
                 Err(error)
             }
             _ => Ok(()),
@@ -44,7 +43,7 @@ impl StrategyImpl for Test {
                 let error: DemandControlError = error.into();
                 request
                     .context
-                    .insert(COST_RESULT_CONTEXT_KEY, error.code().to_string());
+                    .insert_cost_result(error.code().to_string())?;
                 Err(error)
             }
             _ => Ok(()),
@@ -64,7 +63,7 @@ impl StrategyImpl for Test {
                 let error: DemandControlError = error.into();
                 response
                     .context
-                    .insert(COST_RESULT_CONTEXT_KEY, error.code().to_string());
+                    .insert_cost_result(error.code().to_string())?;
                 Err(error)
             }
             _ => Ok(()),
@@ -83,7 +82,7 @@ impl StrategyImpl for Test {
                 error,
             } => {
                 let error: DemandControlError = error.into();
-                context.insert(COST_RESULT_CONTEXT_KEY, error.code().to_string());
+                context.insert_cost_result(error.code().to_string())?;
                 Err(error)
             }
             _ => Ok(()),
