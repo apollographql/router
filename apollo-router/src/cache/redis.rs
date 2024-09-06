@@ -169,50 +169,16 @@ impl RedisCacheStorage {
             });
         }
 
-        let pooled_client = RedisPool::new(
+        Self::create_client(
             client_config,
-            Some(PerformanceConfig {
-                default_command_timeout: config.timeout.unwrap_or(Duration::from_millis(500)),
-                ..Default::default()
-            }),
-            None,
-            Some(ReconnectPolicy::new_exponential(0, 1, 2000, 5)),
+            config.timeout.unwrap_or(Duration::from_millis(500)),
             config.pool_size as usize,
-        )?;
-        let _handle = pooled_client.connect();
-
-        for client in pooled_client.clients() {
-            // spawn tasks that listen for connection close or reconnect events
-            let mut error_rx = client.error_rx();
-            let mut reconnect_rx = client.reconnect_rx();
-
-            tokio::spawn(async move {
-                while let Ok(error) = error_rx.recv().await {
-                    tracing::error!("Client disconnected with error: {:?}", error);
-                }
-            });
-            tokio::spawn(async move {
-                while reconnect_rx.recv().await.is_ok() {
-                    tracing::info!("Redis client reconnected.");
-                }
-            });
-        }
-
-        // a TLS connection to a TCP Redis could hang, so we add a timeout
-        tokio::time::timeout(Duration::from_secs(5), pooled_client.wait_for_connect())
-            .await
-            .map_err(|_| {
-                RedisError::new(RedisErrorKind::Timeout, "timeout connecting to Redis")
-            })??;
-
-        tracing::trace!("redis connection established");
-        Ok(Self {
-            inner: Arc::new(pooled_client),
-            namespace: config.namespace.map(Arc::new),
-            ttl: config.ttl,
+            config.namespace,
+            config.ttl,
+            config.reset_ttl,
             is_cluster,
-            reset_ttl: config.reset_ttl,
-        })
+        )
+        .await
     }
 
     #[cfg(test)]
@@ -222,15 +188,36 @@ impl RedisCacheStorage {
             ..Default::default()
         };
 
+        Self::create_client(
+            client_config,
+            Duration::from_millis(2),
+            1,
+            None,
+            None,
+            false,
+            false,
+        )
+        .await
+    }
+
+    async fn create_client(
+        client_config: RedisConfig,
+        timeout: Duration,
+        pool_size: usize,
+        namespace: Option<String>,
+        ttl: Option<Duration>,
+        reset_ttl: bool,
+        is_cluster: bool,
+    ) -> Result<Self, BoxError> {
         let pooled_client = RedisPool::new(
             client_config,
             Some(PerformanceConfig {
-                default_command_timeout: Duration::from_millis(2),
+                default_command_timeout: timeout,
                 ..Default::default()
             }),
             None,
             Some(ReconnectPolicy::new_exponential(0, 1, 2000, 5)),
-            1,
+            pool_size,
         )?;
         let _handle = pooled_client.connect();
 
@@ -261,10 +248,10 @@ impl RedisCacheStorage {
         tracing::trace!("redis connection established");
         Ok(Self {
             inner: Arc::new(pooled_client),
-            ttl: None,
-            namespace: None,
-            is_cluster: false,
-            reset_ttl: false,
+            namespace: namespace.map(Arc::new),
+            ttl,
+            is_cluster,
+            reset_ttl,
         })
     }
 
