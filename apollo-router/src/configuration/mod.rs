@@ -164,6 +164,10 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) experimental_query_planner_mode: QueryPlannerMode,
 
+    /// Set the GraphQL schema introspection implementation to use.
+    #[serde(default)]
+    pub(crate) experimental_introspection_mode: IntrospectionMode,
+
     /// Plugin configuration
     #[serde(default)]
     pub(crate) plugins: UserPlugins,
@@ -226,6 +230,21 @@ pub(crate) enum QueryPlannerMode {
     BothBestEffort,
 }
 
+/// Which implementation of GraphQL schema introspection to use, if enabled
+#[derive(Copy, Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
+#[derivative(Debug)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum IntrospectionMode {
+    /// Use the new Rust-based implementation.
+    New,
+    /// Use the old JavaScript-based implementation.
+    #[default]
+    Legacy,
+    /// Use Rust-based and Javascript-based implementations side by side,
+    /// logging warnings if the implementations disagree.
+    Both,
+}
+
 impl<'de> serde::Deserialize<'de> for Configuration {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -252,6 +271,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             batching: Batching,
             experimental_type_conditioned_fetching: bool,
             experimental_query_planner_mode: QueryPlannerMode,
+            experimental_introspection_mode: IntrospectionMode,
         }
         let mut ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
@@ -279,6 +299,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             experimental_chaos: ad_hoc.experimental_chaos,
             experimental_type_conditioned_fetching: ad_hoc.experimental_type_conditioned_fetching,
             experimental_query_planner_mode: ad_hoc.experimental_query_planner_mode,
+            experimental_introspection_mode: ad_hoc.experimental_introspection_mode,
             plugins: ad_hoc.plugins,
             apollo_plugins: ad_hoc.apollo_plugins,
             batching: ad_hoc.batching,
@@ -325,6 +346,7 @@ impl Configuration {
         experimental_type_conditioned_fetching: Option<bool>,
         batching: Option<Batching>,
         experimental_query_planner_mode: Option<QueryPlannerMode>,
+        experimental_introspection_mode: Option<IntrospectionMode>,
     ) -> Result<Self, ConfigurationError> {
         let notify = Self::notify(&apollo_plugins)?;
 
@@ -340,6 +362,7 @@ impl Configuration {
             limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
             experimental_query_planner_mode: experimental_query_planner_mode.unwrap_or_default(),
+            experimental_introspection_mode: experimental_introspection_mode.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
@@ -442,6 +465,7 @@ impl Configuration {
         batching: Option<Batching>,
         experimental_type_conditioned_fetching: Option<bool>,
         experimental_query_planner_mode: Option<QueryPlannerMode>,
+        experimental_introspection_mode: Option<IntrospectionMode>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
             validated_yaml: Default::default(),
@@ -453,6 +477,7 @@ impl Configuration {
             limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
             experimental_query_planner_mode: experimental_query_planner_mode.unwrap_or_default(),
+            experimental_introspection_mode: experimental_introspection_mode.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
@@ -985,11 +1010,19 @@ pub(crate) struct QueryPlanRedisCache {
     #[serde(default = "default_reset_ttl")]
     /// When a TTL is set on a key, reset it when reading the data from that key
     pub(crate) reset_ttl: bool,
+
+    #[serde(default = "default_query_planner_cache_pool_size")]
+    /// The size of the Redis connection pool
+    pub(crate) pool_size: u32,
 }
 
 fn default_query_plan_cache_ttl() -> Duration {
     // Default TTL set to 30 days
     Duration::from_secs(86400 * 30)
+}
+
+fn default_query_planner_cache_pool_size() -> u32 {
+    1
 }
 
 /// Cache configuration
@@ -1063,10 +1096,18 @@ pub(crate) struct RedisCache {
     #[serde(default = "default_reset_ttl")]
     /// When a TTL is set on a key, reset it when reading the data from that key
     pub(crate) reset_ttl: bool,
+
+    #[serde(default = "default_pool_size")]
+    /// The size of the Redis connection pool
+    pub(crate) pool_size: u32,
 }
 
 fn default_required_to_start() -> bool {
     false
+}
+
+fn default_pool_size() -> u32 {
+    1
 }
 
 impl From<QueryPlanRedisCache> for RedisCache {
@@ -1081,6 +1122,7 @@ impl From<QueryPlanRedisCache> for RedisCache {
             tls: value.tls,
             required_to_start: value.required_to_start,
             reset_ttl: value.reset_ttl,
+            pool_size: value.pool_size,
         }
     }
 }
