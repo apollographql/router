@@ -865,6 +865,20 @@ You won't see an immediate change in checks behavior when you first turn on exte
 
 </Note>
 
+<MinVersion version="1.49.0">
+
+### Enhanced tracing in Studio via OpenTelemetry
+
+</MinVersion>
+
+<ExperimentalFeature />
+
+Beginning in v1.49.0, the router supports sending traces to Studio via the more detailed OTel (OpenTelemetry) protocol.
+Support for OTel traces has historically only been available for 3rd party APM tools. With this option,
+Studio can now provide a much more granular view of Router internals than the legacy Apollo tracing protocol.
+
+See [Enhanced tracing in Studio via OTel](./telemetry/apollo-telemetry#enhanced-tracing-in-studio-via-opentelemetry).
+
 ### Safelisting with persisted queries
 
 You can enhance your graph's security with GraphOS Router by maintaining a persisted query list (PQL), an operation safelist made by your first-party apps. As opposed to automatic persisted queries (APQ) where operations are automatically cached, operations must be preregistered to the PQL. Once configured, the router checks incoming requests against the PQL.
