@@ -19,10 +19,11 @@ use super::coordinates::ConnectDirectiveCoordinate;
 use super::coordinates::ConnectHTTPCoordinate;
 use super::coordinates::HttpHeadersCoordinate;
 use super::coordinates::HttpMethodCoordinate;
+use super::coordinates::UrlCoordinate;
 use super::entity::validate_entity_arg;
 use super::http::headers;
 use super::http::method;
-use super::parse_url;
+use super::http::url;
 use super::selection::validate_body_selection;
 use super::selection::validate_selection;
 use super::source_name::validate_source_name_arg;
@@ -272,12 +273,13 @@ fn validate_field(
             ));
 
             if let Some((http_method, url)) = http_method {
-            let coordinate = HttpMethodCoordinate {
+            let coordinate = UrlCoordinate::Connect(HttpMethodCoordinate {
                 connect: coordinate,
                 http_method,
-            };
-                if parse_url(url, coordinate, source_map).is_ok() {
-                    errors.push(Message {
+            });
+                if let Err(err) = url::validate(url, coordinate, source_map).and_then(|template| {
+                if template.base.is_some() {
+                    Err(Message {
                         code: Code::AbsoluteConnectUrlWithSource,
                         message: format!(
                             "{coordinate} contains the absolute URL {url} while also specifying a `{CONNECT_SOURCE_ARGUMENT_NAME}`. Either remove the `{CONNECT_SOURCE_ARGUMENT_NAME}` argument or change the URL to a path.",
@@ -285,31 +287,34 @@ fn validate_field(
                         locations: url.line_column_range(source_map)
                             .into_iter()
                             .collect(),
-                    });
+                    })
+                } else {
+                    Ok(())
+                }
+            }) {
+                errors.push(err);
                 }
             }
         } else if let Some((http_method, url)) = http_method {
-        let coordinate = HttpMethodCoordinate {
+        let coordinate = UrlCoordinate::Connect(HttpMethodCoordinate {
             connect: coordinate,
             http_method,
-        };
-            if let Some(err) = parse_url(url, coordinate, source_map).err() {
-                // Attempt to detect if they were using a relative path without a source, no way to be perfect with this
-                if url
-                    .as_str()
-                    .is_some_and(|url| url.starts_with('/') || url.ends_with('/'))
-                {
-                    errors.push(Message {
+        });
+            if let Err(err) = url::validate(url, coordinate, source_map).and_then(|template| {
+                if template.base.is_none() {
+                Err(Message {
                         code: Code::RelativeConnectUrlWithoutSource,
                         message: format!(
                             "{coordinate} specifies the relative URL {url}, but no `{CONNECT_SOURCE_ARGUMENT_NAME}` is defined. Either use an absolute URL, or add a `@{source_directive_name}`."),
                         locations: url.line_column_range(source_map).into_iter().collect()
-                    });
+                    })
                 } else {
-                    errors.push(err);
-                }
+                    Ok(())
             }
+        }) {
+            errors.push(err);
         }
+    }
 
         errors.extend(
             headers::validate_arg(

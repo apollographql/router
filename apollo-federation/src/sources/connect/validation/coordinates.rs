@@ -87,6 +87,40 @@ impl Display for HttpMethodCoordinate<'_> {
     }
 }
 
+/// The `baseURL` argument for the `@source` directive
+#[derive(Clone, Copy)]
+pub(super) struct BaseUrlCoordinate<'a> {
+    pub(crate) source_directive_name: &'a DirectiveName,
+}
+
+impl Display for BaseUrlCoordinate<'_> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        let Self {
+            source_directive_name,
+        } = self;
+        write!(
+            f,
+            "`@{source_directive_name}({SOURCE_BASE_URL_ARGUMENT_NAME}:)`",
+        )
+    }
+}
+
+/// Coordinate of a URL argument, either in a `@source` directive or a `@connect` directive.
+#[derive(Clone, Copy)]
+pub(super) enum UrlCoordinate<'a> {
+    Source(BaseUrlCoordinate<'a>),
+    Connect(HttpMethodCoordinate<'a>),
+}
+
+impl Display for UrlCoordinate<'_> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self {
+            Self::Source(base_url) => write!(f, "{}", base_url),
+            Self::Connect(http_method) => write!(f, "{}", http_method),
+        }
+    }
+}
+
 pub(super) fn connect_directive_selection_coordinate(
     connect_directive_name: &Name,
     object: &Node<ObjectType>,
@@ -137,23 +171,6 @@ pub(super) fn source_name_value_coordinate(
     format!("`@{source_directive_name}({SOURCE_NAME_ARGUMENT_NAME}: {value})`")
 }
 
-/// The `baseURL` argument for the `@source` directive
-#[derive(Clone, Copy)]
-pub(super) struct BaseUrlCoordinate<'a> {
-    pub(crate) source_directive_name: &'a DirectiveName,
-}
-
-impl Display for BaseUrlCoordinate<'_> {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        let Self {
-            source_directive_name,
-        } = self;
-        write!(
-            f,
-            "`@{source_directive_name}({SOURCE_BASE_URL_ARGUMENT_NAME}:)`",
-        )
-    }
-}
 pub(super) fn connect_directive_name_coordinate(
     connect_directive_name: &Name,
     source: &Node<Value>,
