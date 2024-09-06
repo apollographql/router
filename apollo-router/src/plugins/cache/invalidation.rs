@@ -10,6 +10,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::Value;
 use thiserror::Error;
+use tokio::sync::Semaphore;
 use tower::BoxError;
 use tracing::Instrument;
 
@@ -23,6 +24,7 @@ use crate::plugins::cache::entity::ENTITY_CACHE_VERSION;
 pub(crate) struct Invalidation {
     pub(crate) storage: Arc<EntityStorage>,
     pub(crate) scan_count: u32,
+    pub(crate) semaphore: Arc<Semaphore>,
 }
 
 #[derive(Error, Debug, Clone)]
@@ -61,10 +63,12 @@ impl Invalidation {
     pub(crate) async fn new(
         storage: Arc<EntityStorage>,
         scan_count: u32,
+        concurrent_requests: u32,
     ) -> Result<Self, BoxError> {
         Ok(Self {
             storage,
             scan_count,
+            semaphore: Arc::new(Semaphore::new(concurrent_requests as usize)),
         })
     }
 
@@ -171,7 +175,12 @@ impl Invalidation {
                 Some(s) => s,
                 None => continue,
             };
+
+            let semaphore = self.semaphore.clone();
             let f = async move {
+                // limit the number of invalidation requests executing at any point in time
+                let _ = semaphore.acquire().await;
+
                 let start = Instant::now();
 
                 let res = self

@@ -42,10 +42,17 @@ pub(crate) struct InvalidationEndpointConfig {
     #[serde(default = "default_scan_count")]
     /// Number of keys to return at once from a redis SCAN command
     pub(crate) scan_count: u32,
+    #[serde(default = "concurrent_requests_count")]
+    /// Number of concurrent invalidation requests
+    pub(crate) concurrent_requests: u32,
 }
 
 fn default_scan_count() -> u32 {
     1000
+}
+
+fn concurrent_requests_count() -> u32 {
+    10
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

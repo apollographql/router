@@ -285,6 +285,11 @@ impl Plugin for EntityCache {
                 .as_ref()
                 .map(|i| i.scan_count)
                 .unwrap_or(1000),
+            init.config
+                .invalidation
+                .as_ref()
+                .map(|i| i.concurrent_requests)
+                .unwrap_or(10),
         )
         .await?;
 
