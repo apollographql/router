@@ -483,7 +483,9 @@ impl<'a> FragmentOrderVisitor<'a> {
     fn ordered_fragments(self) -> Vec<&'a ast::FragmentDefinition> {
         let mut ordered_fragments = Vec::new();
         for name in self.ordered_fragments {
-            ordered_fragments.push(*self.fragments.get(name.as_str()).unwrap());
+            if let Some(fragment) = self.fragments.get(name.as_str()) {
+                ordered_fragments.push(*fragment);
+            }
         }
         ordered_fragments
     }
@@ -491,7 +493,7 @@ impl<'a> FragmentOrderVisitor<'a> {
     fn visit_document(&mut self, doc: &'a ast::Document) {
         for definition in &doc.definitions {
             if let ast::Definition::FragmentDefinition(def) = definition {
-                self.visit_fragment_definition(&def);
+                self.visit_fragment_definition(def);
             }
         }
     }
@@ -505,7 +507,7 @@ impl<'a> FragmentOrderVisitor<'a> {
 
         self.visit_selection_set(&def.selection_set);
 
-        if self.rank.get(&name).unwrap() == &0 {
+        if self.rank.get(&name) == Some(&0) {
             // if the fragment does not reference any other fragments, it is ready to be added to the final list
             self.ordered_fragments.push(name.clone());
             // then we rerank all the fragments that reference this one: if any of them reaches the rank 0, they
@@ -536,14 +538,10 @@ impl<'a> FragmentOrderVisitor<'a> {
                         if let Some(rank) = self.rank.get_mut(current.as_str()) {
                             *rank += 1;
                         }
-                        if !self.dependencies.contains_key(&name) {
-                            self.dependencies.insert(name, vec![current.clone()]);
-                        } else {
-                            self.dependencies
-                                .get_mut(&name)
-                                .expect("membership was just checked")
-                                .push(current.clone());
-                        }
+                        self.dependencies
+                            .entry(name)
+                            .or_default()
+                            .push(current.clone());
                     }
                 }
             }
