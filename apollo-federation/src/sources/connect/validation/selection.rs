@@ -430,6 +430,8 @@ fn validate_star_selection<'schema>(
                 });
             };
 
+            let locations = selection_location.iter().cloned().chain(definition.line_column_range(&schema.sources)).collect();
+
             if definition.ty.is_list() {
                 return Some(Message {
                     code: Code::InvalidStarSelection,
@@ -440,7 +442,7 @@ fn validate_star_selection<'schema>(
                         parent_type = group.ty.name,
                         ty = definition.ty
                     ),
-                    locations: selection_location.iter().cloned().collect(),
+                    locations,
                 });
             }
 
@@ -452,7 +454,7 @@ fn validate_star_selection<'schema>(
                         coordinate = selection_coordinate,
                         type_name = definition.ty.inner_named_type()
                     ),
-                    locations: selection_location.iter().cloned().collect(),
+                    locations,
                 });
             };
 
@@ -465,16 +467,9 @@ fn validate_star_selection<'schema>(
                         field_name = field_name,
                         parent_type = group.ty.name,
                         ty = definition.ty,
-                        ty_kind = match ty {
-                            ExtendedType::Object(_) => "an object",
-                            ExtendedType::Interface(_) => "an interface",
-                            ExtendedType::Union(_) => "a union",
-                            ExtendedType::Enum(_) => "an enum",
-                            ExtendedType::InputObject(_) => "an input object",
-                            ExtendedType::Scalar(_) => "a scalar",
-                        }
+                        ty_kind = type_sentence_part(ty)
                     ),
-                    locations: selection_location.iter().cloned().collect(),
+                    locations,
                 });
             }
 
@@ -488,11 +483,23 @@ fn validate_star_selection<'schema>(
                         parent_type = group.ty.name,
                         ty = definition.ty
                     ),
-                    locations: selection_location.iter().cloned().collect(),
+                    locations,
                 });
             }
 
             None
         })
         .collect()
+}
+
+fn type_sentence_part(ty: &ExtendedType) -> String {
+    match ty {
+        ExtendedType::Object(_) => "an object",
+        ExtendedType::Interface(_) => "an interface",
+        ExtendedType::Union(_) => "a union",
+        ExtendedType::Enum(_) => "an enum",
+        ExtendedType::InputObject(_) => "an input object",
+        ExtendedType::Scalar(_) => "a scalar",
+    }
+    .to_string()
 }

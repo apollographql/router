@@ -15,6 +15,13 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/rest.grap
                 line: 13,
                 column: 71,
             },
+            LineColumn {
+                line: 34,
+                column: 3,
+            }..LineColumn {
+                line: 34,
+                column: 12,
+            },
         ],
     },
     Message {
@@ -28,6 +35,13 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/rest.grap
                 line: 16,
                 column: 71,
             },
+            LineColumn {
+                line: 43,
+                column: 3,
+            }..LineColumn {
+                line: 43,
+                column: 15,
+            },
         ],
     },
     Message {
@@ -40,6 +54,13 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/rest.grap
             }..LineColumn {
                 line: 19,
                 column: 71,
+            },
+            LineColumn {
+                line: 48,
+                column: 3,
+            }..LineColumn {
+                line: 48,
+                column: 15,
             },
         ],
     },
