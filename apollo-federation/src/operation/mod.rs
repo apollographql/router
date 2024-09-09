@@ -20,6 +20,7 @@ use std::ops::Deref;
 use std::sync::atomic;
 use std::sync::Arc;
 
+use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
@@ -34,7 +35,6 @@ use crate::compat::coerce_executable_values;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::error::SingleFederationError::Internal;
-use crate::query_graph::graph_path::op_slice_condition_directives;
 use crate::query_graph::graph_path::OpPathElement;
 use crate::query_plan::conditions::Conditions;
 use crate::query_plan::FetchDataKeyRenamer;
@@ -673,8 +673,8 @@ mod selection_map {
             if *self.key() != value.key() {
                 return Err(Internal {
                     message: format!(
-                        "Key mismatch when inserting selection {} into vacant entry ",
-                        value
+                        "Key mismatch when inserting selection `{value}` into vacant entry. Expected {:?}, found {:?}",
+                        self.key(), value.key()
                     ),
                 }
                 .into());
@@ -789,7 +789,7 @@ impl Selection {
     pub(crate) fn from_element(
         element: OpPathElement,
         sub_selections: Option<SelectionSet>,
-        unnecessary_directives: Option<&DirectiveList>,
+        unnecessary_directives: Option<&HashSet<Node<apollo_compiler::ast::Directive>>>,
     ) -> Result<Selection, FederationError> {
         // PORT_NOTE: This is TODO item is copied from the JS `selectionOfElement` function.
         // TODO: validate that the subSelection is ok for the element
@@ -805,7 +805,7 @@ impl Selection {
                     let directives = inline_fragment
                         .directives
                         .iter()
-                        .filter(|dir| !unnecessary_directives.contains(dir))
+                        .filter(|dir| !unnecessary_directives.contains(dir.as_ref()))
                         .cloned()
                         .collect::<DirectiveList>();
                     Ok(InlineFragmentSelection::new(
@@ -2627,6 +2627,16 @@ impl SelectionSet {
         path: &[Arc<OpPathElement>],
         selection_set: Option<&Arc<SelectionSet>>,
     ) -> Result<(), FederationError> {
+        let mut unnecessary_directives = HashSet::default();
+        self.add_at_path_inner(path, selection_set, &mut unnecessary_directives)
+    }
+
+    fn add_at_path_inner(
+        &mut self,
+        path: &[Arc<OpPathElement>],
+        selection_set: Option<&Arc<SelectionSet>>,
+        unnecessary_directives: &mut HashSet<Node<apollo_compiler::ast::Directive>>,
+    ) -> Result<(), FederationError> {
         // PORT_NOTE: This method was ported from the JS class `SelectionSetUpdates`. Unlike the
         // JS code, this mutates the selection set map in-place.
         match path.split_first() {
@@ -2636,30 +2646,39 @@ impl SelectionSet {
                 let Some(sub_selection_type) = element.sub_selection_type_position()? else {
                     return Err(FederationError::internal("unexpected error: add_at_path encountered a field that is not of a composite type".to_string()));
                 };
-                let mut selection = Arc::make_mut(&mut self.selections)
-                    .entry(ele.key())
-                    .or_insert(|| {
-                        let unnecessary_directives = op_slice_condition_directives(path);
-                        Selection::from_element(
+                let target = Arc::make_mut(&mut self.selections);
+                let mut selection = match target.get_mut(&ele.key()) {
+                    Some(selection) => selection,
+                    None => {
+                        let selection = Selection::from_element(
                             element,
                             // We immediately add a selection afterward to make this selection set
                             // valid.
                             Some(SelectionSet::empty(self.schema.clone(), sub_selection_type)),
-                            Some(&unnecessary_directives),
-                        )
-                    })?;
+                            Some(&*unnecessary_directives),
+                        )?;
+                        target.entry(selection.key()).or_insert(|| Ok(selection))?
+                    }
+                };
+                unnecessary_directives.extend(
+                    selection
+                        .get_directives_mut()
+                        .iter()
+                        .filter(|d| d.name == "include" || d.name == "skip")
+                        .cloned(),
+                );
                 match &mut selection {
                     SelectionValue::Field(field) => match field.get_selection_set_mut() {
-                        Some(sub_selection) => sub_selection.add_at_path(path, selection_set)?,
+                        Some(sub_selection) => sub_selection.add_at_path_inner(path, selection_set, unnecessary_directives),
                         None => return Err(FederationError::internal("add_at_path encountered a field without a subselection which should never happen".to_string())),
                     },
                     SelectionValue::InlineFragment(fragment) => fragment
                         .get_selection_set_mut()
-                        .add_at_path(path, selection_set)?,
+                        .add_at_path_inner(path, selection_set, unnecessary_directives),
                     SelectionValue::FragmentSpread(_fragment) => {
-                        return Err(FederationError::internal("add_at_path encountered a named fragment spread which should never happen".to_string()));
+                        return Err(FederationError::internal("add_at_path encountered a named fragment spread which should never happen".to_string()))
                     }
-                };
+                }?;
             }
             // If we have no sub-path, we can add the selection.
             Some((ele, &[])) => {
@@ -2677,10 +2696,9 @@ impl SelectionSet {
                     if !ele.is_terminal()? {
                         return Ok(());
                     } else {
-                        let unneeded_directives = op_slice_condition_directives(path);
                         // add leaf
                         let selection =
-                            Selection::from_element(element, None, Some(&unneeded_directives))?;
+                            Selection::from_element(element, None, Some(&*unnecessary_directives))?;
                         self.add_local_selection(&selection, true)?
                     }
                 } else {
@@ -2696,11 +2714,10 @@ impl SelectionSet {
                         })
                         .transpose()?
                         .map(|selection_set| selection_set.without_unnecessary_fragments());
-                    let unneeded_directives = op_slice_condition_directives(path);
                     let selection = Selection::from_element(
                         element,
                         selection_set,
-                        Some(&unneeded_directives),
+                        Some(&*unnecessary_directives),
                     )?;
                     self.add_local_selection(&selection, true)?;
                 }
