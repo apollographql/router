@@ -41,6 +41,7 @@ use coordinates::source_http_argument_coordinate;
 use extended_type::validate_extended_type;
 use itertools::Itertools;
 use source_name::SourceName;
+use url::Url;
 
 use crate::link::spec::Identity;
 use crate::link::Import;
@@ -51,7 +52,6 @@ use crate::sources::connect::spec::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
 use crate::sources::connect::spec::schema::SOURCE_NAME_ARGUMENT_NAME;
 use crate::sources::connect::validation::coordinates::BaseUrlCoordinate;
 use crate::sources::connect::validation::coordinates::HttpHeadersCoordinate;
-use crate::sources::connect::validation::coordinates::UrlCoordinate;
 use crate::sources::connect::validation::http::headers;
 use crate::sources::connect::ConnectSpecDefinition;
 use crate::subgraph::spec::CONTEXT_DIRECTIVE_NAME;
@@ -296,11 +296,11 @@ fn validate_source(directive: &Component<Directive>, sources: &SourceMap) -> Sou
             .iter()
             .find_map(|(key, value)| (key == &SOURCE_BASE_URL_ARGUMENT_NAME).then_some(value))
         {
-            if let Some(url_error) = http::url::validate(
+            if let Some(url_error) = parse_url(
                 url_value,
-                UrlCoordinate::Source(BaseUrlCoordinate {
+                BaseUrlCoordinate {
                     source_directive_name: &directive.name,
-                }),
+                },
                 sources,
             )
             .err()
@@ -343,6 +343,21 @@ struct SourceDirective {
     name: SourceName,
     errors: Vec<Message>,
     directive: Component<Directive>,
+}
+
+fn parse_url<Coordinate: Display + Copy>(
+    value: &Node<Value>,
+    coordinate: Coordinate,
+    sources: &SourceMap,
+) -> Result<Url, Message> {
+    let str_value = require_value_is_str(value, coordinate, sources)?;
+    let url = Url::parse(str_value).map_err(|inner| Message {
+        code: Code::InvalidUrl,
+        message: format!("The value {value} for {coordinate} is not a valid URL: {inner}.",),
+        locations: value.line_column_range(sources).into_iter().collect(),
+    })?;
+    http::url::validate_base_url(&url, coordinate, value, sources)?;
+    Ok(url)
 }
 
 fn require_value_is_str<'a, Coordinate: Display>(

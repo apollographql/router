@@ -105,22 +105,6 @@ impl Display for BaseUrlCoordinate<'_> {
     }
 }
 
-/// Coordinate of a URL argument, either in a `@source` directive or a `@connect` directive.
-#[derive(Clone, Copy)]
-pub(super) enum UrlCoordinate<'a> {
-    Source(BaseUrlCoordinate<'a>),
-    Connect(HttpMethodCoordinate<'a>),
-}
-
-impl Display for UrlCoordinate<'_> {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        match self {
-            Self::Source(base_url) => write!(f, "{}", base_url),
-            Self::Connect(http_method) => write!(f, "{}", http_method),
-        }
-    }
-}
-
 pub(super) fn connect_directive_selection_coordinate(
     connect_directive_name: &Name,
     object: &Node<ObjectType>,

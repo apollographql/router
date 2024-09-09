@@ -19,7 +19,6 @@ use super::coordinates::ConnectDirectiveCoordinate;
 use super::coordinates::ConnectHTTPCoordinate;
 use super::coordinates::HttpHeadersCoordinate;
 use super::coordinates::HttpMethodCoordinate;
-use super::coordinates::UrlCoordinate;
 use super::entity::validate_entity_arg;
 use super::http::headers;
 use super::http::method;
@@ -273,11 +272,11 @@ fn validate_field(
             ));
 
             if let Some((http_method, url)) = http_method {
-            let coordinate = UrlCoordinate::Connect(HttpMethodCoordinate {
+            let coordinate = HttpMethodCoordinate {
                 connect: coordinate,
                 http_method,
-            });
-                if let Err(err) = url::validate(url, coordinate, source_map).and_then(|template| {
+            };
+                if let Err(err) = url::validate_template(url, coordinate, source_map).and_then(|template| {
                 if template.base.is_some() {
                     Err(Message {
                         code: Code::AbsoluteConnectUrlWithSource,
@@ -296,16 +295,16 @@ fn validate_field(
                 }
             }
         } else if let Some((http_method, url)) = http_method {
-        let coordinate = UrlCoordinate::Connect(HttpMethodCoordinate {
+        let coordinate = HttpMethodCoordinate {
             connect: coordinate,
             http_method,
-        });
-            if let Err(err) = url::validate(url, coordinate, source_map).and_then(|template| {
+        };
+            if let Err(err) = url::validate_template(url, coordinate, source_map).and_then(|template| {
                 if template.base.is_none() {
                 Err(Message {
                         code: Code::RelativeConnectUrlWithoutSource,
                         message: format!(
-                            "{coordinate} specifies the relative URL {url}, but no `{CONNECT_SOURCE_ARGUMENT_NAME}` is defined. Either use an absolute URL, or add a `@{source_directive_name}`."),
+                            "{coordinate} specifies the relative URL {url}, but no `{CONNECT_SOURCE_ARGUMENT_NAME}` is defined. Either use an absolute URL including scheme (http://), or add a `@{source_directive_name}`."),
                         locations: url.line_column_range(source_map).into_iter().collect()
                     })
                 } else {
