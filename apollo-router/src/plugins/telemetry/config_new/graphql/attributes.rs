@@ -1,11 +1,13 @@
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::NamedType;
+use opentelemetry::Key;
 use opentelemetry_api::KeyValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json_bytes::Value;
 use tower::BoxError;
 
+use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
 use crate::plugins::telemetry::config_new::graphql::selectors::FieldName;
 use crate::plugins::telemetry::config_new::graphql::selectors::FieldType;
 use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector;
@@ -25,19 +27,19 @@ use crate::Context;
 pub(crate) struct GraphQLAttributes {
     /// The GraphQL field name
     #[serde(rename = "graphql.field.name")]
-    pub(crate) field_name: Option<bool>,
+    pub(crate) field_name: Option<StandardAttribute>,
     /// The GraphQL field type
     #[serde(rename = "graphql.field.type")]
-    pub(crate) field_type: Option<bool>,
+    pub(crate) field_type: Option<StandardAttribute>,
     /// If the field is a list, the length of the list
     #[serde(rename = "graphql.list.length")]
-    pub(crate) list_length: Option<bool>,
+    pub(crate) list_length: Option<StandardAttribute>,
     /// The GraphQL operation name
     #[serde(rename = "graphql.operation.name")]
-    pub(crate) operation_name: Option<bool>,
+    pub(crate) operation_name: Option<StandardAttribute>,
     /// The GraphQL type name
     #[serde(rename = "graphql.type.name")]
-    pub(crate) type_name: Option<bool>,
+    pub(crate) type_name: Option<StandardAttribute>,
 }
 
 impl DefaultForLevel for GraphQLAttributes {
@@ -48,9 +50,9 @@ impl DefaultForLevel for GraphQLAttributes {
     ) {
         if let TelemetryDataKind::Metrics = kind {
             if let DefaultAttributeRequirementLevel::Required = requirement_level {
-                self.field_name.get_or_insert(true);
-                self.field_type.get_or_insert(true);
-                self.type_name.get_or_insert(true);
+                self.field_name.get_or_insert(StandardAttribute::Bool(true));
+                self.field_type.get_or_insert(StandardAttribute::Bool(true));
+                self.type_name.get_or_insert(StandardAttribute::Bool(true));
             }
         }
     }
@@ -81,50 +83,70 @@ impl Selectors for GraphQLAttributes {
         value: &Value,
         ctx: &Context,
     ) {
-        if let Some(true) = self.field_name {
+        if let Some(key) = self
+            .field_name
+            .as_ref()
+            .and_then(|a| a.key(Key::from_static_str("graphql.field.name")))
+        {
             if let Some(name) = (GraphQLSelector::FieldName {
                 field_name: FieldName::String,
             })
             .on_response_field(ty, field, value, ctx)
             {
-                attrs.push(KeyValue::new("graphql.field.name", name));
+                attrs.push(KeyValue::new(key, name));
             }
         }
-        if let Some(true) = self.field_type {
+        if let Some(key) = self
+            .field_type
+            .as_ref()
+            .and_then(|a| a.key(Key::from_static_str("graphql.field.type")))
+        {
             if let Some(ty) = (GraphQLSelector::FieldType {
                 field_type: FieldType::Name,
             })
             .on_response_field(ty, field, value, ctx)
             {
-                attrs.push(KeyValue::new("graphql.field.type", ty));
+                attrs.push(KeyValue::new(key, ty));
             }
         }
-        if let Some(true) = self.type_name {
+        if let Some(key) = self
+            .type_name
+            .as_ref()
+            .and_then(|a| a.key(Key::from_static_str("graphql.type.name")))
+        {
             if let Some(ty) = (GraphQLSelector::TypeName {
                 type_name: TypeName::String,
             })
             .on_response_field(ty, field, value, ctx)
             {
-                attrs.push(KeyValue::new("graphql.type.name", ty));
+                attrs.push(KeyValue::new(key, ty));
             }
         }
-        if let Some(true) = self.list_length {
+        if let Some(key) = self
+            .list_length
+            .as_ref()
+            .and_then(|a| a.key(Key::from_static_str("graphql.list.length")))
+        {
             if let Some(length) = (GraphQLSelector::ListLength {
                 list_length: ListLength::Value,
             })
             .on_response_field(ty, field, value, ctx)
             {
-                attrs.push(KeyValue::new("graphql.list.length", length));
+                attrs.push(KeyValue::new(key, length));
             }
         }
-        if let Some(true) = self.operation_name {
+        if let Some(key) = self
+            .operation_name
+            .as_ref()
+            .and_then(|a| a.key(Key::from_static_str("graphql.operation.name")))
+        {
             if let Some(length) = (GraphQLSelector::OperationName {
                 operation_name: OperationName::String,
                 default: None,
             })
             .on_response_field(ty, field, value, ctx)
             {
-                attrs.push(KeyValue::new("graphql.operation.name", length));
+                attrs.push(KeyValue::new(key, length));
             }
         }
     }
@@ -135,6 +157,7 @@ mod test {
     use serde_json_bytes::json;
 
     use crate::context::OPERATION_NAME;
+    use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
     use crate::plugins::telemetry::config_new::test::field;
     use crate::plugins::telemetry::config_new::test::ty;
     use crate::plugins::telemetry::config_new::DefaultForLevel;
@@ -148,9 +171,9 @@ mod test {
             super::DefaultAttributeRequirementLevel::Required,
             super::TelemetryDataKind::Metrics,
         );
-        assert_eq!(attributes.field_name, Some(true));
-        assert_eq!(attributes.field_type, Some(true));
-        assert_eq!(attributes.type_name, Some(true));
+        assert_eq!(attributes.field_name, Some(StandardAttribute::Bool(true)));
+        assert_eq!(attributes.field_type, Some(StandardAttribute::Bool(true)));
+        assert_eq!(attributes.type_name, Some(StandardAttribute::Bool(true)));
         assert_eq!(attributes.list_length, None);
         assert_eq!(attributes.operation_name, None);
     }
@@ -158,11 +181,11 @@ mod test {
     #[test]
     fn test_on_response_field_non_list() {
         let attributes = super::GraphQLAttributes {
-            field_name: Some(true),
-            field_type: Some(true),
-            list_length: Some(true),
-            operation_name: Some(true),
-            type_name: Some(true),
+            field_name: Some(StandardAttribute::Bool(true)),
+            field_type: Some(StandardAttribute::Bool(true)),
+            list_length: Some(StandardAttribute::Bool(true)),
+            operation_name: Some(StandardAttribute::Bool(true)),
+            type_name: Some(StandardAttribute::Bool(true)),
         };
         let ctx = Context::default();
         let _ = ctx.insert(OPERATION_NAME, "operation_name".to_string());
@@ -182,11 +205,11 @@ mod test {
     #[test]
     fn test_on_response_field_list() {
         let attributes = super::GraphQLAttributes {
-            field_name: Some(true),
-            field_type: Some(true),
-            list_length: Some(true),
-            operation_name: Some(true),
-            type_name: Some(true),
+            field_name: Some(StandardAttribute::Bool(true)),
+            field_type: Some(StandardAttribute::Bool(true)),
+            list_length: Some(StandardAttribute::Bool(true)),
+            operation_name: Some(StandardAttribute::Bool(true)),
+            type_name: Some(StandardAttribute::Bool(true)),
         };
         let ctx = Context::default();
         let _ = ctx.insert(OPERATION_NAME, "operation_name".to_string());
