@@ -23,13 +23,6 @@ pub(crate) fn document(
     let mut fragment_visitor = FragmentOrderVisitor::new();
     fragment_visitor.visit_document(document);
     let ordered_fragments = fragment_visitor.ordered_fragments();
-    println!(
-        "ordered_fragments: {:?}",
-        ordered_fragments
-            .iter()
-            .map(|f| f.name.as_str())
-            .collect::<Vec<_>>()
-    );
 
     visitor.state().reset();
 
@@ -39,7 +32,6 @@ pub(crate) fn document(
         visitor.state().used_fragments.clear();
         visitor.state().used_variables.clear();
 
-        println!("fragment_definition, will look at {}", def.name.as_str());
         if let Some(new_def) = visitor.fragment_definition(def)? {
             // keep the list of used variables per fragment, as we need to use it to know which variables are used
             // in a query
@@ -58,8 +50,6 @@ pub(crate) fn document(
                     used_fragments: local_used_fragments,
                 },
             );
-        } else {
-            println!("fragment {} is removed", def.name.as_str());
         }
     }
 
@@ -514,10 +504,6 @@ impl<'a> FragmentOrderVisitor<'a> {
             // are added to the final list too
             self.rerank(&name);
         }
-        println!(
-            "visited fragment definition for {}, ordered fragments are now: {:?}, ranks: {:?}, dependencies: {:?}",
-            name, self.ordered_fragments, self.rank, self.dependencies
-        );
     }
 
     fn visit_selection_set(&mut self, selection_set: &[apollo_compiler::ast::Selection]) {
@@ -527,8 +513,6 @@ impl<'a> FragmentOrderVisitor<'a> {
                 ast::Selection::InlineFragment(def) => self.visit_selection_set(&def.selection_set),
                 ast::Selection::FragmentSpread(def) => {
                     let name = def.fragment_name.as_str().to_string();
-
-                    println!("fragment {:?} depends on {:?}", self.current, name);
 
                     // we have already seen this fragment, so we don't need to add it again
                     if self.rank.get(name.as_str()) == Some(&0) {

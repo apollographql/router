@@ -434,7 +434,6 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
             }
         }
 
-        println!("fragment_spread[{}] on {}", line!(), node.fragment_name);
         let condition = match self
             .state()
             .fragments()
