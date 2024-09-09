@@ -237,7 +237,7 @@ impl PlannerMode {
         Ok(Arc::new(planner))
     }
 
-    async fn js_introspetion(
+    async fn js_introspection(
         &self,
         sdl: &str,
         configuration: &Configuration,
@@ -408,12 +408,12 @@ impl BridgeQueryPlanner {
                 IntrospectionConfig::New => IntrospectionMode::Rust,
                 IntrospectionConfig::Legacy => IntrospectionMode::Js(
                     planner
-                        .js_introspetion(&schema.raw_sdl, &configuration, &old_js_planner)
+                        .js_introspection(&schema.raw_sdl, &configuration, &old_js_planner)
                         .await?,
                 ),
                 IntrospectionConfig::Both => IntrospectionMode::Both(
                     planner
-                        .js_introspetion(&schema.raw_sdl, &configuration, &old_js_planner)
+                        .js_introspection(&schema.raw_sdl, &configuration, &old_js_planner)
                         .await?,
                 ),
             }
