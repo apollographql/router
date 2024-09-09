@@ -543,12 +543,7 @@ impl FetchDependencyGraphNodePath {
         &self,
         element: &Field,
     ) -> Result<Vec<Node<ObjectType>>, FederationError> {
-        if !element
-            .data()
-            .output_base_type()
-            .map(|base_type| base_type.is_composite_type())
-            .unwrap_or_default()
-        {
+        if !element.data().output_base_type()?.is_composite_type() {
             return Ok(Default::default());
         }
 
