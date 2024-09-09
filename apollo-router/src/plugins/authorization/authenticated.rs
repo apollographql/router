@@ -1788,9 +1788,31 @@ mod tests {
     }
     directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
     directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
-    directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
+    directive @join__field(
+        graph: join__Graph
+        requires: join__FieldSet
+        provides: join__FieldSet
+        type: String
+        external: Boolean
+        override: String
+        usedOverridden: Boolean
+        ) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+    directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+    directive @join__implements(
+        graph: join__Graph!
+        interface: String!
+        ) repeatable on OBJECT | INTERFACE
+    directive @join__type(
+        graph: join__Graph!
+        key: join__FieldSet
+        extension: Boolean! = false
+        resolvable: Boolean! = true
+        isInterfaceObject: Boolean! = false
+        ) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+    scalar join__FieldSet
     scalar link__Import
-      enum link__Purpose {
+    enum link__Purpose {
       """
       `SECURITY` features provide metadata necessary to securely resolve fields.
       """
@@ -1802,14 +1824,19 @@ mod tests {
       EXECUTION
     }
 
-    type Query  {
-        t: T
-        u(u:Int): String
-        v(v:Int): Int
+    enum join__Graph {
+      USER @join__graph(name: "user", url: "http://localhost:4001/graphql")
+      ORGA @join__graph(name: "orga", url: "http://localhost:4002/graphql")
     }
 
-    type T @authenticated {
-        f(id: String): String
+    type Query @join__type(graph: USER){
+        t: T @join__field(graph: USER)
+        u(u:Int): String @join__field(graph: USER)
+        v(v:Int): Int @join__field(graph: USER)
+    }
+
+    type T @join__type(graph: USER) @authenticated {
+        f(id: String): String @join__field(graph: USER)
     }
     "#;
 
@@ -1888,6 +1915,64 @@ mod tests {
             }}))
             .unwrap()
             .schema(AUTHENTICATED_ROOT_TYPE_SCHEMA)
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query(QUERY)
+            .build()
+            .unwrap();
+
+        let mut response = service.oneshot(request).await.unwrap();
+
+        let first_response = response.next_response().await.unwrap();
+
+        insta::assert_json_snapshot!(first_response);
+
+        assert!(response.next_response().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn introspection_mixed_with_authenticated_fields() {
+        // Note: in https://github.com/apollographql/router/pull/5952/ we moved introspection handling
+        // before authorization filtering in bridge_query_planner.rs, relying on the fact that queries
+        // mixing introspection and concrete fields are not supported, so introspection answers right
+        // away. If this ever changes, we should make sure that unauthorized fields are still properly
+        // filtered out
+        static QUERY: &str = r#"
+        query {
+            __schema {
+                types {
+                    ... TypeDef
+                }
+            }
+
+            t {
+              f
+            }
+        }
+
+        fragment TypeDef on __Type {
+            name
+        }
+        "#;
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({
+            "supergraph": {
+                "introspection": true
+            },
+            "include_subgraph_errors": {
+                "all": true
+            },
+            "authorization": {
+                "directives": {
+                    "enabled": true
+                }
+            }}))
+            .unwrap()
+            .schema(AUTHENTICATED_TYPE_SCHEMA)
             .build_supergraph()
             .await
             .unwrap();
