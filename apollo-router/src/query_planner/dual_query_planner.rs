@@ -332,7 +332,7 @@ pub fn diff_plan(js_plan: &QueryPlanResult, rust_plan: &QueryPlan) -> String {
     }
 }
 
-fn opt_plan_node_matches(
+pub(crate) fn opt_plan_node_matches(
     this: &Option<impl Borrow<PlanNode>>,
     other: &Option<impl Borrow<PlanNode>>,
 ) -> Result<(), MatchFailure> {

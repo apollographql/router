@@ -23,11 +23,13 @@ use tower::ServiceExt;
 use tower_service::Service;
 use tracing::Instrument;
 
+use super::dual_query_planner::opt_plan_node_matches;
 use super::fetch::QueryHash;
 use crate::cache::estimate_size;
 use crate::cache::storage::InMemoryCache;
 use crate::cache::storage::ValueType;
 use crate::cache::DeduplicatingCache;
+use crate::configuration::QueryPlanReuseMode;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
 use crate::plugins::authorization::AuthorizationPlugin;
@@ -78,7 +80,7 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
     subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     plugins: Arc<Plugins>,
     enable_authorization_directives: bool,
-    experimental_reuse_query_plans: bool,
+    experimental_reuse_query_plans: QueryPlanReuseMode,
     config_mode: Arc<QueryHash>,
     introspection: bool,
     legacy_introspection_caching: bool,
@@ -180,7 +182,7 @@ where
         persisted_query_layer: &PersistedQueryLayer,
         previous_cache: Option<InMemoryCachePlanner>,
         count: Option<usize>,
-        experimental_reuse_query_plans: bool,
+        experimental_reuse_query_plans: QueryPlanReuseMode,
         experimental_pql_prewarm: bool,
     ) {
         let _timer = Timer::new(|duration| {
@@ -280,6 +282,7 @@ where
 
         let mut count = 0usize;
         let mut reused = 0usize;
+        let mut could_have_reused = 0usize;
         for WarmUpCachingQueryKey {
             mut query,
             operation_name,
@@ -302,7 +305,7 @@ where
             let caching_key = CachingQueryKey {
                 query: query.clone(),
                 operation: operation_name.clone(),
-                hash: if experimental_reuse_query_plans {
+                hash: if experimental_reuse_query_plans == QueryPlanReuseMode::Reuse {
                     CachingQueryHash::Reuse(doc.hash.clone())
                 } else {
                     CachingQueryHash::DoNotReuse {
@@ -310,14 +313,15 @@ where
                         schema_hash: self.schema.hash.clone(),
                     }
                 },
-                metadata,
-                plan_options,
+                metadata: metadata.clone(),
+                plan_options: plan_options.clone(),
                 config_mode: self.config_mode.clone(),
                 introspection: self.introspection,
             };
 
-            if let Some(warmup_hash) = hash {
-                if experimental_reuse_query_plans {
+            let mut should_measure = None;
+            if let Some(warmup_hash) = hash.clone() {
+                if experimental_reuse_query_plans == QueryPlanReuseMode::Reuse {
                     if let Some(ref previous_cache) = previous_cache {
                         // if the query hash did not change with the schema update, we can reuse the previously cached entry
                         if warmup_hash.schema_aware_query_hash() == &*doc.hash {
@@ -329,9 +333,19 @@ where
                                 continue;
                             }
                         }
-                    } else if warmup_hash.schema_aware_query_hash() == &*doc.hash {
-                        reused += 1;
                     }
+                } else if self.experimental_reuse_query_plans == QueryPlanReuseMode::Measure
+                    && warmup_hash.schema_aware_query_hash() == &*doc.hash
+                {
+                    should_measure = Some(CachingQueryKey {
+                        query: query.clone(),
+                        operation: operation_name.clone(),
+                        hash: warmup_hash.clone(),
+                        metadata: metadata.clone(),
+                        plan_options: plan_options.clone(),
+                        config_mode: self.config_mode.clone(),
+                        introspection: self.introspection,
+                    });
                 }
             };
 
@@ -367,8 +381,8 @@ where
                 });
 
                 let request = QueryPlannerRequest {
-                    query,
-                    operation_name,
+                    query: query.clone(),
+                    operation_name: operation_name.clone(),
                     context: context.clone(),
                 };
 
@@ -381,6 +395,44 @@ where
                     Ok(QueryPlannerResponse { content, .. }) => {
                         if let Some(content) = content.clone() {
                             count += 1;
+
+                            // we want to measure query plan reuse
+                            if let Some(reused_cache_key) = should_measure {
+                                if let Some(previous) = previous_cache {
+                                    let previous_plan = {
+                                        let mut cache = previous.lock().await;
+                                        cache.get(&reused_cache_key).cloned()
+                                    };
+
+                                    if let Some(previous_content) =
+                                        previous_plan.and_then(|res| res.ok())
+                                    {
+                                        if let (
+                                            QueryPlannerContent::Plan {
+                                                plan: previous_plan,
+                                            },
+                                            QueryPlannerContent::Plan { plan: new_plan },
+                                        ) = (previous_content, &content)
+                                        {
+                                            let matched = opt_plan_node_matches(
+                                                &Some(&*previous_plan.root),
+                                                &Some(&*new_plan.root),
+                                            );
+
+                                            if matched.is_ok() {
+                                                could_have_reused += 1;
+                                            }
+                                            u64_counter!(
+                                                "apollo.router.operations.query_planner.reuse",
+                                                "Measure possible mismatches when reusing query plans",
+                                                1,
+                                                "is_matched" = matched.is_ok()
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+
                             tokio::spawn(async move {
                                 entry.insert(Ok(content.clone())).await;
                             });
@@ -399,12 +451,25 @@ where
 
         tracing::debug!("warmed up the query planner cache with {count} queries planned and {reused} queries reused");
 
-        u64_counter!(
-            "apollo.router.query.planning.warmup.reused",
-            "The number of query plans that were reused instead of regenerated during query planner warm up",
-            reused as u64,
-            query_plan_reuse_active = experimental_reuse_query_plans
-        );
+        match experimental_reuse_query_plans {
+            QueryPlanReuseMode::DoNotReuse => {}
+            QueryPlanReuseMode::Reuse => {
+                u64_counter!(
+                    "apollo.router.query.planning.warmup.reused",
+                    "The number of query plans that were reused instead of regenerated during query planner warm up",
+                    reused as u64,
+                    query_plan_reuse_active = true
+                );
+            }
+            QueryPlanReuseMode::Measure => {
+                u64_counter!(
+                    "apollo.router.query.planning.warmup.reused",
+                    "The number of query plans that were reused instead of regenerated during query planner warm up",
+                    could_have_reused as u64,
+                    query_plan_reuse_active = false
+                );
+            }
+        }
     }
 }
 
@@ -513,7 +578,7 @@ where
         let caching_key = CachingQueryKey {
             query: request.query.clone(),
             operation: request.operation_name.to_owned(),
-            hash: if self.experimental_reuse_query_plans {
+            hash: if self.experimental_reuse_query_plans == QueryPlanReuseMode::Reuse {
                 CachingQueryHash::Reuse(doc.hash.clone())
             } else {
                 CachingQueryHash::DoNotReuse {
