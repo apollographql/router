@@ -144,12 +144,6 @@ async fn test_coprocessor_demand_control_access() -> Result<(), BoxError> {
     router.assert_started().await;
 
     let (_trace_id, response) = router.execute_default_query().await;
-    println!("Received requests:");
-    let received_requests = mock_server.received_requests().await.unwrap();
-    for req in received_requests {
-        let body: serde_json::Value = req.body_json().unwrap();
-        println!("{}", body)
-    }
     assert_eq!(response.status(), 200);
 
     router.graceful_shutdown().await;
