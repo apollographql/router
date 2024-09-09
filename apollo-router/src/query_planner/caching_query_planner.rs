@@ -322,7 +322,7 @@ where
             let mut should_measure = None;
             if let Some(warmup_hash) = hash.clone() {
                 if experimental_reuse_query_plans == QueryPlanReuseMode::Reuse {
-                    if let Some(ref previous_cache) = previous_cache {
+                    if let Some(ref previous_cache) = &previous_cache {
                         // if the query hash did not change with the schema update, we can reuse the previously cached entry
                         if warmup_hash.schema_aware_query_hash() == &*doc.hash {
                             if let Some(entry) =
@@ -398,7 +398,7 @@ where
 
                             // we want to measure query plan reuse
                             if let Some(reused_cache_key) = should_measure {
-                                if let Some(previous) = previous_cache {
+                                if let Some(previous) = &previous_cache {
                                     let previous_plan = {
                                         let mut cache = previous.lock().await;
                                         cache.get(&reused_cache_key).cloned()
