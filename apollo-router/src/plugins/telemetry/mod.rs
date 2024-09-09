@@ -2176,10 +2176,10 @@ mod tests {
     use crate::plugin::test::MockSupergraphService;
     use crate::plugin::DynPlugin;
     use crate::plugins::demand_control::DemandControlError;
-    use crate::plugins::demand_control::COST_ACTUAL_CONTEXT_KEY;
-    use crate::plugins::demand_control::COST_ESTIMATED_CONTEXT_KEY;
-    use crate::plugins::demand_control::COST_RESULT_CONTEXT_KEY;
-    use crate::plugins::demand_control::COST_STRATEGY_CONTEXT_KEY;
+    use crate::plugins::demand_control::COST_ACTUAL_KEY;
+    use crate::plugins::demand_control::COST_ESTIMATED_KEY;
+    use crate::plugins::demand_control::COST_RESULT_KEY;
+    use crate::plugins::demand_control::COST_STRATEGY_KEY;
     use crate::plugins::telemetry::config::TraceIdFormat;
     use crate::plugins::telemetry::handle_error_internal;
     use crate::services::router::body::get_body_bytes;
@@ -3269,16 +3269,16 @@ mod tests {
                     lock.insert(cost_details.clone());
                 });
                 req.context
-                    .insert(COST_ESTIMATED_CONTEXT_KEY, cost_details.estimated)
+                    .insert(COST_ESTIMATED_KEY, cost_details.estimated)
                     .unwrap();
                 req.context
-                    .insert(COST_ACTUAL_CONTEXT_KEY, cost_details.actual)
+                    .insert(COST_ACTUAL_KEY, cost_details.actual)
                     .unwrap();
                 req.context
-                    .insert(COST_RESULT_CONTEXT_KEY, cost_details.result.to_string())
+                    .insert(COST_RESULT_KEY, cost_details.result.to_string())
                     .unwrap();
                 req.context
-                    .insert(COST_STRATEGY_CONTEXT_KEY, cost_details.strategy.to_string())
+                    .insert(COST_STRATEGY_KEY, cost_details.strategy.to_string())
                     .unwrap();
 
                 let errors = if cost_details.result == "COST_ESTIMATED_TOO_EXPENSIVE" {
