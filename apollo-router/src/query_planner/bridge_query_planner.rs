@@ -943,7 +943,24 @@ impl BridgeQueryPlanner {
         mut key: QueryKey,
         mut doc: ParsedDocument,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
-        let filter_res = if self.enable_authorization_directives {
+        // Authorization should not filter introspection queries
+        let operation = doc
+            .executable
+            .operations
+            .get(key.operation_name.as_deref())
+            .ok();
+        let mut has_schema_introspection = false;
+        if let Some(operation) = operation {
+            for field in operation.root_fields(&doc.executable) {
+                match field.name.as_str() {
+                    "__schema" | "__type" if operation.is_query() => {
+                        has_schema_introspection = true
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let filter_res = if self.enable_authorization_directives && !has_schema_introspection {
             match AuthorizationPlugin::filter_query(&self.configuration, &key, &self.schema) {
                 Err(QueryPlannerError::Unauthorized(unauthorized_paths)) => {
                     let response = graphql::Response::builder()

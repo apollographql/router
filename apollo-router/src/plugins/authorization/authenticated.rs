@@ -1875,6 +1875,9 @@ mod tests {
 
         let service = TestHarness::builder()
             .configuration_json(serde_json::json!({
+            "supergraph": {
+                "introspection": true
+            },
             "include_subgraph_errors": {
                 "all": true
             },
