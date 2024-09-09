@@ -1,32 +1,16 @@
 ---
 source: apollo-router/src/plugins/authorization/authenticated.rs
-expression: "TestResult { query: QUERY, result: doc, paths }"
+expression: first_response
 ---
-query:
-
-        query {
-            __schema {
-                types {
-                    ... TypeDef
-                }
-            }
-        }
-
-        fragment TypeDef on __Type {
-            name
-        }
-        
-filtered:
-query {
-    __schema {
-        types {
-            ... TypeDef
-        }
+{
+  "data": {},
+  "errors": [
+    {
+      "message": "Unauthorized field or type",
+      "path": [],
+      "extensions": {
+        "code": "UNAUTHORIZED_FIELD_OR_TYPE"
+      }
     }
+  ]
 }
-
-fragment TypeDef on __Type {
-  name
-}
-
-paths: [""]
