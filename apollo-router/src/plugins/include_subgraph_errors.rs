@@ -195,6 +195,7 @@ mod test {
             include_str!("../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql");
         let schema = Schema::parse(schema, &Default::default()).unwrap();
         let planner = BridgeQueryPlannerPool::new(
+            Vec::new(),
             schema.into(),
             Default::default(),
             NonZeroUsize::new(1).unwrap(),
