@@ -3,7 +3,6 @@ use std::time::Instant;
 
 use fred::error::RedisError;
 use fred::types::Scanner;
-use futures::SinkExt;
 use futures::StreamExt;
 use itertools::Itertools;
 use serde::Deserialize;
@@ -17,23 +16,19 @@ use tracing::Instrument;
 use super::entity::Storage as EntityStorage;
 use crate::cache::redis::RedisCacheStorage;
 use crate::cache::redis::RedisKey;
-use crate::notification::Handle;
-use crate::notification::HandleStream;
 use crate::plugins::cache::entity::hash_entity_key;
 use crate::plugins::cache::entity::ENTITY_CACHE_VERSION;
-use crate::Notify;
+
+const CHANNEL_SIZE: usize = 1024;
 
 #[derive(Clone)]
 pub(crate) struct Invalidation {
     #[allow(clippy::type_complexity)]
-    pub(super) handle: Handle<
-        InvalidationTopic,
-        (
-            Vec<InvalidationRequest>,
-            InvalidationOrigin,
-            broadcast::Sender<Result<u64, InvalidationError>>,
-        ),
-    >,
+    pub(super) handle: tokio::sync::mpsc::Sender<(
+        Vec<InvalidationRequest>,
+        InvalidationOrigin,
+        broadcast::Sender<Result<u64, InvalidationError>>,
+    )>,
 }
 
 #[derive(Error, Debug, Clone)]
@@ -72,16 +67,16 @@ pub(crate) enum InvalidationOrigin {
 }
 
 impl Invalidation {
-    pub(crate) async fn new(storage: Arc<EntityStorage>) -> Result<Self, BoxError> {
-        let mut notify = Notify::new(None, None, None);
-        let (handle, _b) = notify.create_or_subscribe(InvalidationTopic, false).await?;
-
-        let h = handle.clone();
+    pub(crate) async fn new(
+        storage: Arc<EntityStorage>,
+        scan_count: u32,
+    ) -> Result<Self, BoxError> {
+        let (tx, rx) = tokio::sync::mpsc::channel(CHANNEL_SIZE);
 
         tokio::task::spawn(async move {
-            start(storage, h.into_stream()).await;
+            start(storage, scan_count, rx).await;
         });
-        Ok(Self { handle })
+        Ok(Self { handle: tx })
     }
 
     pub(crate) async fn invalidate(
@@ -89,11 +84,11 @@ impl Invalidation {
         origin: InvalidationOrigin,
         requests: Vec<InvalidationRequest>,
     ) -> Result<u64, BoxError> {
-        let mut sink = self.handle.clone().into_sink();
         let (response_tx, mut response_rx) = broadcast::channel(2);
-        sink.send((requests, origin, response_tx.clone()))
+        self.handle
+            .send((requests, origin, response_tx.clone()))
             .await
-            .map_err(|e| format!("cannot send invalidation request: {}", e.message))?;
+            .map_err(|e| format!("cannot send invalidation request: {e}"))?;
 
         let result = response_rx
             .recv()
@@ -114,16 +109,14 @@ impl Invalidation {
 #[allow(clippy::type_complexity)]
 async fn start(
     storage: Arc<EntityStorage>,
-    mut handle: HandleStream<
-        InvalidationTopic,
-        (
-            Vec<InvalidationRequest>,
-            InvalidationOrigin,
-            broadcast::Sender<Result<u64, InvalidationError>>,
-        ),
-    >,
+    scan_count: u32,
+    mut handle: tokio::sync::mpsc::Receiver<(
+        Vec<InvalidationRequest>,
+        InvalidationOrigin,
+        broadcast::Sender<Result<u64, InvalidationError>>,
+    )>,
 ) {
-    while let Some((requests, origin, response_tx)) = handle.next().await {
+    while let Some((requests, origin, response_tx)) = handle.recv().await {
         let origin = match origin {
             InvalidationOrigin::Endpoint => "endpoint",
             InvalidationOrigin::Extensions => "extensions",
@@ -136,7 +129,7 @@ async fn start(
         );
 
         if let Err(err) = response_tx.send(
-            handle_request_batch(&storage, origin, requests)
+            handle_request_batch(&storage, scan_count, origin, requests)
                 .instrument(tracing::info_span!(
                     "cache.invalidation.batch",
                     "origin" = origin
@@ -150,6 +143,7 @@ async fn start(
 
 async fn handle_request(
     storage: &RedisCacheStorage,
+    scan_count: u32,
     origin: &'static str,
     request: &InvalidationRequest,
 ) -> Result<u64, InvalidationError> {
@@ -160,8 +154,7 @@ async fn handle_request(
         key_prefix
     );
 
-    // FIXME: configurable batch size
-    let mut stream = storage.scan(key_prefix.clone(), Some(100));
+    let mut stream = storage.scan(key_prefix.clone(), Some(scan_count));
     let mut count = 0u64;
     let mut error = None;
 
@@ -184,18 +177,18 @@ async fn handle_request(
                         .map(|k| RedisKey(k.to_string()))
                         .collect::<Vec<_>>();
                     if !keys.is_empty() {
-                        count += keys.len() as u64;
-                        storage.delete(keys).await;
+                        count += storage.delete(keys).await.unwrap_or(0) as u64;
 
                         u64_counter!(
                             "apollo.router.operations.entity.invalidation.entry",
                             "Entity cache counter for invalidated entries",
-                            1u64,
+                            count,
                             "origin" = origin,
                             "subgraph.name" = subgraph.clone()
                         );
                     }
                 }
+                scan_res.next()?;
             }
         }
     }
@@ -214,6 +207,7 @@ async fn handle_request(
 
 async fn handle_request_batch(
     storage: &EntityStorage,
+    scan_count: u32,
     origin: &'static str,
     requests: Vec<InvalidationRequest>,
 ) -> Result<u64, InvalidationError> {
@@ -225,7 +219,7 @@ async fn handle_request_batch(
             Some(s) => s,
             None => continue,
         };
-        match handle_request(redis_storage, origin, &request)
+        match handle_request(redis_storage, scan_count, origin, &request)
             .instrument(tracing::info_span!("cache.invalidation.request"))
             .await
         {

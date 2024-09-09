@@ -39,6 +39,13 @@ pub(crate) struct InvalidationEndpointConfig {
     pub(crate) path: String,
     /// Listen address on which the invalidation endpoint must listen.
     pub(crate) listen: ListenAddr,
+    #[serde(default = "default_scan_count")]
+    /// Number of keys to return at once from a redis SCAN command
+    pub(crate) scan_count: u32,
+}
+
+fn default_scan_count() -> u32 {
+    1000
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -203,31 +210,17 @@ fn valid_shared_key(
 mod tests {
     use std::collections::HashMap;
 
-    use tokio::sync::broadcast::Sender;
-    use tokio_stream::StreamExt;
+    use tokio::sync::broadcast;
     use tower::ServiceExt;
 
     use super::*;
     use crate::plugins::cache::invalidation::InvalidationError;
-    use crate::plugins::cache::invalidation::InvalidationTopic;
-    use crate::Notify;
 
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key() {
-        #[allow(clippy::type_complexity)]
-        let mut notify: Notify<
-            InvalidationTopic,
-            (
-                Vec<InvalidationRequest>,
-                InvalidationOrigin,
-                Sender<Result<u64, InvalidationError>>,
-            ),
-        > = Notify::new(None, None, None);
-        let (handle, _b) = notify
-            .create_or_subscribe(InvalidationTopic, false)
-            .await
-            .unwrap();
+        let (handle, _rx) = tokio::sync::mpsc::channel(128);
         let invalidation = Invalidation { handle };
+
         let config = Arc::new(SubgraphConfiguration {
             all: Subgraph {
                 ttl: None,
@@ -265,25 +258,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalidation_service_good_sub_shared_key() {
-        #[allow(clippy::type_complexity)]
-        let mut notify: Notify<
-            InvalidationTopic,
-            (
-                Vec<InvalidationRequest>,
-                InvalidationOrigin,
-                Sender<Result<u64, InvalidationError>>,
-            ),
-        > = Notify::new(None, None, None);
-        let (handle, _b) = notify
-            .create_or_subscribe(InvalidationTopic, false)
-            .await
-            .unwrap();
-        let h = handle.clone();
-
+        let (handle, mut rx) = tokio::sync::mpsc::channel::<(
+            Vec<InvalidationRequest>,
+            InvalidationOrigin,
+            broadcast::Sender<Result<u64, InvalidationError>>,
+        )>(128);
         tokio::task::spawn(async move {
-            let mut handle = h.into_stream();
             let mut called = false;
-            while let Some((requests, origin, response_tx)) = handle.next().await {
+            while let Some((requests, origin, response_tx)) = rx.recv().await {
                 called = true;
                 if requests
                     != [
@@ -366,60 +348,16 @@ mod tests {
             .unwrap();
         let res = service.oneshot(req).await.unwrap();
         assert_eq!(res.response.status(), StatusCode::ACCEPTED);
-        let h = handle.clone();
-
-        tokio::task::spawn(async move {
-            let mut handle = h.into_stream();
-            let mut called = false;
-            while let Some((requests, origin, response_tx)) = handle.next().await {
-                called = true;
-                if requests
-                    != [
-                        InvalidationRequest::Subgraph {
-                            subgraph: String::from("test"),
-                        },
-                        InvalidationRequest::Type {
-                            subgraph: String::from("test"),
-                            r#type: String::from("Test"),
-                        },
-                    ]
-                {
-                    response_tx
-                        .send(Err(InvalidationError::Custom(format!(
-                            "it's not the right invalidation requests : {requests:?}"
-                        ))))
-                        .unwrap();
-                    return;
-                }
-                if origin != InvalidationOrigin::Endpoint {
-                    response_tx
-                        .send(Err(InvalidationError::Custom(format!(
-                            "it's not the right invalidation origin : {origin:?}"
-                        ))))
-                        .unwrap();
-                    return;
-                }
-                response_tx.send(Ok(0)).unwrap();
-            }
-            assert!(called);
-        });
     }
 
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key_subgraph() {
         #[allow(clippy::type_complexity)]
-        let mut notify: Notify<
-            InvalidationTopic,
-            (
-                Vec<InvalidationRequest>,
-                InvalidationOrigin,
-                Sender<Result<u64, InvalidationError>>,
-            ),
-        > = Notify::new(None, None, None);
-        let (handle, _b) = notify
-            .create_or_subscribe(InvalidationTopic, false)
-            .await
-            .unwrap();
+        let (handle, _rx) = tokio::sync::mpsc::channel::<(
+            Vec<InvalidationRequest>,
+            InvalidationOrigin,
+            broadcast::Sender<Result<u64, InvalidationError>>,
+        )>(128);
         let invalidation = Invalidation { handle };
         let config = Arc::new(SubgraphConfiguration {
             all: Subgraph {
@@ -467,25 +405,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalidation_service() {
-        #[allow(clippy::type_complexity)]
-        let mut notify: Notify<
-            InvalidationTopic,
-            (
-                Vec<InvalidationRequest>,
-                InvalidationOrigin,
-                Sender<Result<u64, InvalidationError>>,
-            ),
-        > = Notify::new(None, None, None);
-        let (handle, _b) = notify
-            .create_or_subscribe(InvalidationTopic, false)
-            .await
-            .unwrap();
-        let h = handle.clone();
+        let (handle, mut rx) = tokio::sync::mpsc::channel::<(
+            Vec<InvalidationRequest>,
+            InvalidationOrigin,
+            broadcast::Sender<Result<u64, InvalidationError>>,
+        )>(128);
+        let invalidation = Invalidation { handle };
 
         tokio::task::spawn(async move {
-            let mut handle = h.into_stream();
             let mut called = false;
-            while let Some((requests, origin, response_tx)) = handle.next().await {
+            while let Some((requests, origin, response_tx)) = rx.recv().await {
                 called = true;
                 if requests
                     != [
@@ -518,7 +447,6 @@ mod tests {
             assert!(called);
         });
 
-        let invalidation = Invalidation { handle };
         let config = Arc::new(SubgraphConfiguration {
             all: Subgraph {
                 ttl: None,
