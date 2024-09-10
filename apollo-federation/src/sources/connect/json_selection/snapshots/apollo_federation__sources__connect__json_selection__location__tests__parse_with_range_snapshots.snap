@@ -6,19 +6,17 @@ Named(
     SubSelection {
         selections: [
             Path(
-                Parsed {
-                    node: Alias {
-                        name: Parsed {
-                            node: Field(
-                                "path",
+                Alias {
+                    name: Parsed {
+                        node: Field(
+                            "path",
+                        ),
+                        range: Some(
+                            (
+                                9,
+                                13,
                             ),
-                            range: Some(
-                                (
-                                    9,
-                                    13,
-                                ),
-                            ),
-                        },
+                        ),
                     },
                     range: Some(
                         (
@@ -173,19 +171,17 @@ Named(
             ),
             Field(
                 Some(
-                    Parsed {
-                        node: Alias {
-                            name: Parsed {
-                                node: Field(
-                                    "alias",
+                    Alias {
+                        name: Parsed {
+                            node: Field(
+                                "alias",
+                            ),
+                            range: Some(
+                                (
+                                    64,
+                                    69,
                                 ),
-                                range: Some(
-                                    (
-                                        64,
-                                        69,
-                                    ),
-                                ),
-                            },
+                            ),
                         },
                         range: Some(
                             (
@@ -210,19 +206,17 @@ Named(
                     SubSelection {
                         selections: [
                             Path(
-                                Parsed {
-                                    node: Alias {
-                                        name: Parsed {
-                                            node: Field(
-                                                "__typename",
+                                Alias {
+                                    name: Parsed {
+                                        node: Field(
+                                            "__typename",
+                                        ),
+                                        range: Some(
+                                            (
+                                                151,
+                                                161,
                                             ),
-                                            range: Some(
-                                                (
-                                                    151,
-                                                    161,
-                                                ),
-                                            ),
-                                        },
+                                        ),
                                     },
                                     range: Some(
                                         (
@@ -302,19 +296,17 @@ Named(
                                 },
                             ),
                             Path(
-                                Parsed {
-                                    node: Alias {
-                                        name: Parsed {
-                                            node: Field(
-                                                "wrapped",
+                                Alias {
+                                    name: Parsed {
+                                        node: Field(
+                                            "wrapped",
+                                        ),
+                                        range: Some(
+                                            (
+                                                195,
+                                                202,
                                             ),
-                                            range: Some(
-                                                (
-                                                    195,
-                                                    202,
-                                                ),
-                                            ),
-                                        },
+                                        ),
                                     },
                                     range: Some(
                                         (
@@ -440,19 +432,17 @@ Named(
                                 },
                             ),
                             Group(
-                                Parsed {
-                                    node: Alias {
-                                        name: Parsed {
-                                            node: Field(
-                                                "group",
+                                Alias {
+                                    name: Parsed {
+                                        node: Field(
+                                            "group",
+                                        ),
+                                        range: Some(
+                                            (
+                                                243,
+                                                248,
                                             ),
-                                            range: Some(
-                                                (
-                                                    243,
-                                                    248,
-                                                ),
-                                            ),
-                                        },
+                                        ),
                                     },
                                     range: Some(
                                         (
@@ -519,19 +509,17 @@ Named(
                                 },
                             ),
                             Path(
-                                Parsed {
-                                    node: Alias {
-                                        name: Parsed {
-                                            node: Field(
-                                                "arg",
+                                Alias {
+                                    name: Parsed {
+                                        node: Field(
+                                            "arg",
+                                        ),
+                                        range: Some(
+                                            (
+                                                272,
+                                                275,
                                             ),
-                                            range: Some(
-                                                (
-                                                    272,
-                                                    275,
-                                                ),
-                                            ),
-                                        },
+                                        ),
                                     },
                                     range: Some(
                                         (
@@ -607,19 +595,17 @@ Named(
                             Parsed {
                                 node: StarSelection(
                                     Some(
-                                        Parsed {
-                                            node: Alias {
-                                                name: Parsed {
-                                                    node: Field(
-                                                        "rest",
+                                        Alias {
+                                            name: Parsed {
+                                                node: Field(
+                                                    "rest",
+                                                ),
+                                                range: Some(
+                                                    (
+                                                        319,
+                                                        323,
                                                     ),
-                                                    range: Some(
-                                                        (
-                                                            319,
-                                                            323,
-                                                        ),
-                                                    ),
-                                                },
+                                                ),
                                             },
                                             range: Some(
                                                 (

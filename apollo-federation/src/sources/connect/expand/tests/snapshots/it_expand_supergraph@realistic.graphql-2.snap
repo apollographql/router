@@ -419,19 +419,17 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                     SubSelection {
                         selections: [
                             Path(
-                                Parsed {
-                                    node: Alias {
-                                        name: Parsed {
-                                            node: Field(
-                                                "emailDomain",
+                                Alias {
+                                    name: Parsed {
+                                        node: Field(
+                                            "emailDomain",
+                                        ),
+                                        range: Some(
+                                            (
+                                                0,
+                                                11,
                                             ),
-                                            range: Some(
-                                                (
-                                                    0,
-                                                    11,
-                                                ),
-                                            ),
-                                        },
+                                        ),
                                     },
                                     range: Some(
                                         (

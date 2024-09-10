@@ -66,7 +66,7 @@ impl SubSelection {
         // the user defined a __typename mapping.
         if field_map.contains_key("__typename") {
             new_selections.push(NamedSelection::Path(
-                Parsed::new(Alias::new("__typename"), None),
+                Alias::new("__typename"),
                 PathSelection {
                     path: Parsed::new(
                         PathList::Var(
@@ -109,7 +109,7 @@ impl SubSelection {
                                 if field_response_key == name.as_str() {
                                     None
                                 } else {
-                                    Some(Parsed::new(Alias::new(field_response_key), None))
+                                    Some(Alias::new(field_response_key))
                                 },
                                 name.clone(),
                                 sub.as_ref()
@@ -130,7 +130,7 @@ impl SubSelection {
                         }
                         for field in fields {
                             new_selections.push(NamedSelection::Path(
-                                Parsed::new(Alias::new(field.response_key().as_str()), None),
+                                Alias::new(field.response_key().as_str()),
                                 path_selection.apply_selection_set(&field.selection_set),
                             ));
                         }
@@ -145,7 +145,7 @@ impl SubSelection {
                     if let Some(fields) = field_map.get_vec(key) {
                         for field in fields {
                             new_selections.push(NamedSelection::Group(
-                                Parsed::new(Alias::new(field.response_key().as_str()), None),
+                                Alias::new(field.response_key().as_str()),
                                 sub.apply_selection_set(&field.selection_set),
                             ));
                         }
@@ -161,7 +161,7 @@ impl SubSelection {
             for (dropped, _) in dropped_fields {
                 let name = format!("__unused__{dropped}");
                 new_selections.push(NamedSelection::Field(
-                    Some(Parsed::new(Alias::new(name.as_str()), None)),
+                    Some(Alias::new(name.as_str())),
                     Parsed::new(Key::field(dropped), None),
                     None,
                 ));

@@ -227,14 +227,12 @@ pub(super) mod strip_ranges {
         }
     }
 
-    impl StripRanges for Parsed<Alias> {
+    impl StripRanges for Alias {
         fn strip_ranges(&self) -> Self {
-            Parsed::new(
-                Alias {
-                    name: self.name.strip_ranges(),
-                },
-                None,
-            )
+            Alias {
+                name: self.name.strip_ranges(),
+                range: None,
+            }
         }
     }
 
