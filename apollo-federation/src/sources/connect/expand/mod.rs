@@ -191,6 +191,7 @@ mod helpers {
     use indexmap::IndexSet;
 
     use super::filter_directives;
+    use super::path_to_selection;
     use super::visitors::try_insert;
     use super::visitors::try_pre_insert;
     use super::visitors::GroupVisitor;
@@ -207,7 +208,8 @@ mod helpers {
     use crate::schema::FederationSchema;
     use crate::schema::ValidFederationSchema;
     use crate::sources::connect::json_selection::KnownVariable;
-    use crate::sources::connect::url_template::Parameter;
+    use crate::sources::connect::url_template::Variable;
+    use crate::sources::connect::url_template::VariableType;
     use crate::sources::connect::ConnectSpecDefinition;
     use crate::sources::connect::Connector;
     use crate::sources::connect::EntityResolver;
@@ -448,8 +450,10 @@ mod helpers {
             // We'll need to collect all synthesized keys for the output type, adding a federation
             // `@key` directive once completed.
             let mut keys = Vec::new();
-            for parameter in Iterator::chain(body_parameters.iter(), &parameters) {
-                match parameter {
+            for Variable { var_type, path } in
+                Iterator::chain(body_parameters.into_iter(), parameters)
+            {
+                match var_type {
                     // Arguments should be added to the synthesized key, since they are mandatory
                     // to resolving the output type. The synthesized key should only include the portions
                     // of the inputs actually used throughout the selections of the transport.
@@ -457,54 +461,29 @@ mod helpers {
                     // Note that this only applies to connectors marked as an entity resolver, since only
                     // those should be allowed to fully resolve a type given the required arguments /
                     // synthesized keys.
-                    Parameter::Argument { argument, paths } => {
+                    VariableType::Args => {
                         // Synthesize the key based on the argument. Note that this is only relevant in the
                         // argument case when the connector is marked as being an entity resolved.
                         if matches!(connector.entity_resolver, Some(EntityResolver::Explicit)) {
-                            let mut key = argument.to_string();
-                            if !paths.is_empty() {
-                                // Slight hack to generate nested { a { b { c } } }
-                                let sub_selection = {
-                                    let mut s = format!("{{ {}", paths.join(" { "));
-                                    s.push_str(&" }".repeat(paths.len()));
-
-                                    s
-                                };
-
-                                key.push(' ');
-                                key.push_str(&sub_selection);
-                            }
-
-                            keys.push(key);
+                            let (field, selection) = path_to_selection(path);
+                            keys.push(format!("{field}{selection}"));
                         }
                     }
 
-                    Parameter::Config { item: _, paths: _ } => {
-                        // TODO Implement $config handling
-                    }
+                    VariableType::Config => {} // Expansion doesn't care about config
 
                     // All sibling fields marked by $this in a transport must be carried over to the output type
                     // regardless of its use in the output selection.
-                    Parameter::Sibling { field, paths } => {
+                    VariableType::This => {
                         match parent_type {
                             TypeDefinitionPosition::Object(ref o) => {
-                                let field_name = Name::new(field)?;
+                                let (field, selection) = path_to_selection(path);
+                                let field_name = Name::new(&field)?;
                                 let field = o.field(field_name.clone());
                                 let field_def = field.get(self.original_schema.schema())?;
 
                                 // Mark it as a required key for the output type
-                                let mut key = field_name.to_string();
-                                if !paths.is_empty() {
-                                    // Slight hack to generate nested { a { b { c } } }
-                                    let sub_selection = {
-                                        let mut s = paths.join(" { ").to_string();
-                                        s.push_str(&" }".repeat(paths.len() - 1));
-
-                                        s
-                                    };
-
-                                    key.push_str(&format!("{{ {sub_selection} }}"));
-
+                                if !selection.is_empty() {
                                     // We'll also need to carry over the output type of this sibling if there is a sub
                                     // selection.
                                     let field_output = field_def.ty.inner_named_type();
@@ -517,7 +496,7 @@ mod helpers {
                                             &self.directive_deny_list,
                                         );
                                         let (_, parsed) =
-                                            JSONSelection::parse(&sub_selection).map_err(|e| {
+                                            JSONSelection::parse(&selection).map_err(|e| {
                                                 FederationError::internal(format!("could not parse fake selection for sibling field: {e}"))
                                             })?;
 
@@ -543,7 +522,7 @@ mod helpers {
                                     }
                                 }
 
-                                keys.push(key);
+                                keys.push(format!("{field_name}{selection}"));
 
                                 // Add the field if not already present in the output schema
                                 if field.try_get(to_schema.schema()).is_none() {
@@ -767,7 +746,7 @@ mod helpers {
 
     fn extract_params_from_body(
         connector: &Connector,
-    ) -> Result<HashSet<Parameter>, FederationError> {
+    ) -> Result<HashSet<Variable>, FederationError> {
         let Some(body) = &connector.transport.body else {
             return Ok(HashSet::default());
         };
@@ -775,63 +754,59 @@ mod helpers {
         use crate::sources::connect::json_selection::ExternalVarPaths;
         let var_paths = body.external_var_paths();
 
-        let mut results = HashSet::with_capacity_and_hasher(var_paths.len(), Default::default());
-
-        for var_path in var_paths {
-            match var_path.var_name_and_nested_keys() {
-                Some((KnownVariable::Args, keys)) => {
-                    let mut keys_iter = keys.into_iter();
-                    let first_key = keys_iter.next().ok_or(FederationError::internal(
-                        "expected at least one key in $args",
-                    ))?;
-                    results.insert(Parameter::Argument {
-                        argument: first_key,
-                        paths: keys_iter.collect(),
-                    });
-                }
-                Some((KnownVariable::This, keys)) => {
-                    let mut keys_iter = keys.into_iter();
-                    let first_key = keys_iter.next().ok_or(FederationError::internal(
-                        "expected at least one key in $this",
-                    ))?;
-                    results.insert(Parameter::Sibling {
-                        field: first_key,
-                        paths: keys_iter.collect(),
-                    });
-                }
-                Some((KnownVariable::Config, keys)) => {
-                    let mut keys_iter = keys.into_iter();
-                    let first_key = keys_iter.next().ok_or(FederationError::internal(
-                        "expected at least one key in $config",
-                    ))?;
-                    results.insert(Parameter::Config {
-                        item: first_key,
-                        paths: keys_iter.collect(),
-                    });
-                }
-                // To get the safety benefits of the KnownVariable enum, we need
-                // to enumerate all the cases explicitly, without wildcard
-                // matches. However, body.external_var_paths() only returns free
-                // (externally-provided) variables like $this, $args, and
-                // $config. The $ and @ variables, by contrast, are always bound
-                // to something within the input data.
-                Some((kv @ KnownVariable::Dollar, _)) | Some((kv @ KnownVariable::AtSign, _)) => {
-                    return Err(FederationError::internal(format!(
-                        "got unexpected non-external variable: {:?}",
-                        kv,
-                    )));
-                }
-                None => {
-                    return Err(FederationError::internal(format!(
+        var_paths
+            .into_iter()
+            .map(|var_path| {
+                let (known_type, keys) = var_path.var_name_and_nested_keys().ok_or_else(|| {
+                    // TODO: how does this happen?
+                    FederationError::internal(format!(
                         "could not extract variable from path: {:?}",
                         var_path,
-                    )));
-                }
-            };
-        }
+                    ))
+                })?;
+                let var_type = match known_type {
+                    KnownVariable::Args => VariableType::Args,
+                    KnownVariable::This => VariableType::This,
+                    KnownVariable::Config => VariableType::Config,
+                    // To get the safety benefits of the KnownVariable enum, we need
+                    // to enumerate all the cases explicitly, without wildcard
+                    // matches. However, body.external_var_paths() only returns free
+                    // (externally-provided) variables like $this, $args, and
+                    // $config. The $ and @ variables, by contrast, are always bound
+                    // to something within the input data.
+                    KnownVariable::Dollar | KnownVariable::AtSign => {
+                        return Err(FederationError::internal(format!(
+                            "got unexpected non-external variable: {:?}",
+                            known_type,
+                        )));
+                    }
+                };
 
-        Ok(results)
+                Ok(Variable {
+                    var_type,
+                    path: keys.join("."),
+                })
+            })
+            .collect()
     }
+}
+
+/// Turn a path like a.b.c into a selection like (a,  { b { c } }). Join together to get a key.
+fn path_to_selection(path: String) -> (String, String) {
+    let mut parts = path.split('.').peekable();
+    let field = parts.next().unwrap_or_default().to_string();
+    let mut selection = String::new();
+    let mut closing_braces = 0;
+    for sub_path in parts {
+        // Generate nested { a { b { c } } }
+        selection.push_str(" { ");
+        selection.push_str(sub_path);
+        closing_braces += 1;
+    }
+    for _ in 0..closing_braces {
+        selection.push_str(" }");
+    }
+    (field, selection)
 }
 
 #[cfg(test)]

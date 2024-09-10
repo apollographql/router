@@ -174,9 +174,7 @@ fn make_uri(
                 .map_err(HttpJsonTransportError::TemplateGenerationError)?,
         );
 
-    let query_params = template
-        .interpolate_query(inputs)
-        .map_err(HttpJsonTransportError::TemplateGenerationError)?;
+    let query_params = template.interpolate_query(inputs);
     if !query_params.is_empty() {
         url.query_pairs_mut().extend_pairs(query_params);
     }

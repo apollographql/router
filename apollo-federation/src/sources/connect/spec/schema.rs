@@ -64,19 +64,19 @@ pub(crate) struct SourceHTTPArguments {
 ///
 /// Refer to [ConnectSpecDefinition] for more info.
 #[cfg_attr(test, derive(Debug))]
-pub(crate) struct ConnectDirectiveArguments {
+pub(crate) struct ConnectDirectiveArguments<'schema> {
     pub(crate) position: ObjectOrInterfaceFieldDirectivePosition,
 
     /// The upstream source for shared connector configuration.
     ///
     /// Must match the `name` argument of a @source directive in this schema.
-    pub(crate) source: Option<String>,
+    pub(crate) source: Option<&'schema str>,
 
     /// HTTP options for this connector
     ///
     /// Marked as optional in the GraphQL schema to allow for future transports,
     /// but is currently required.
-    pub(crate) http: Option<ConnectHTTPArguments>,
+    pub(crate) http: Option<ConnectHTTPArguments<'schema>>,
 
     /// Fields to extract from the upstream JSON response.
     ///
@@ -92,14 +92,15 @@ pub(crate) struct ConnectDirectiveArguments {
     pub(crate) entity: bool,
 }
 
+// TODO: use these in validation?
 /// The HTTP arguments needed for a connect request
 #[cfg_attr(test, derive(Debug))]
-pub(crate) struct ConnectHTTPArguments {
-    pub(crate) get: Option<String>,
-    pub(crate) post: Option<String>,
-    pub(crate) patch: Option<String>,
-    pub(crate) put: Option<String>,
-    pub(crate) delete: Option<String>,
+pub(crate) struct ConnectHTTPArguments<'schema> {
+    pub(crate) get: Option<&'schema str>,
+    pub(crate) post: Option<&'schema str>,
+    pub(crate) patch: Option<&'schema str>,
+    pub(crate) put: Option<&'schema str>,
+    pub(crate) delete: Option<&'schema str>,
 
     /// Request body
     ///

@@ -67,7 +67,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
     },
     "connectors_Query_user_0": Connector {
         id: ConnectId {
-            label: "connectors.example http: GET /{$args.id!}",
+            label: "connectors.example http: GET /{$args.id}",
             subgraph_name: "connectors",
             source_name: Some(
                 "example",
@@ -99,13 +99,12 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
             connect_template: URLTemplate {
                 base: None,
                 path: [
-                    ParameterValue {
+                    Component {
                         parts: [
                             Var(
-                                VariableExpression {
-                                    var_path: "$args.id",
-                                    batch_separator: None,
-                                    required: true,
+                                Variable {
+                                    var_type: Args,
+                                    path: "id",
                                 },
                             ),
                         ],
@@ -147,7 +146,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
     },
     "connectors_User_d_1": Connector {
         id: ConnectId {
-            label: "connectors.example http: GET /{$this.c!}/d",
+            label: "connectors.example http: GET /{$this.c}/d",
             subgraph_name: "connectors",
             source_name: Some(
                 "example",
@@ -179,18 +178,17 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
             connect_template: URLTemplate {
                 base: None,
                 path: [
-                    ParameterValue {
+                    Component {
                         parts: [
                             Var(
-                                VariableExpression {
-                                    var_path: "$this.c",
-                                    batch_separator: None,
-                                    required: true,
+                                Variable {
+                                    var_type: This,
+                                    path: "c",
                                 },
                             ),
                         ],
                     },
-                    ParameterValue {
+                    Component {
                         parts: [
                             Text(
                                 "d",

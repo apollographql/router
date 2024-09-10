@@ -295,7 +295,7 @@ mod tests {
                     connect_template: URLTemplate {
                         base: None,
                         path: [
-                            ParameterValue {
+                            Component {
                                 parts: [
                                     Text(
                                         "users",
@@ -388,7 +388,7 @@ mod tests {
                     connect_template: URLTemplate {
                         base: None,
                         path: [
-                            ParameterValue {
+                            Component {
                                 parts: [
                                     Text(
                                         "posts",

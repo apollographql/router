@@ -67,7 +67,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/no
     },
     "connectors-subgraph_Query_user_0": Connector {
         id: ConnectId {
-            label: "connectors-subgraph.example http: GET /{$args.id!}",
+            label: "connectors-subgraph.example http: GET /{$args.id}",
             subgraph_name: "connectors-subgraph",
             source_name: Some(
                 "example",
@@ -99,13 +99,12 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/no
             connect_template: URLTemplate {
                 base: None,
                 path: [
-                    ParameterValue {
+                    Component {
                         parts: [
                             Var(
-                                VariableExpression {
-                                    var_path: "$args.id",
-                                    batch_separator: None,
-                                    required: true,
+                                Variable {
+                                    var_type: Args,
+                                    path: "id",
                                 },
                             ),
                         ],

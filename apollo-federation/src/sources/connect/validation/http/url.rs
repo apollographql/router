@@ -20,7 +20,7 @@ pub(crate) fn validate_template(
     let str_value = require_value_is_str(value, coordinate, sources)?;
     let template = URLTemplate::from_str(str_value).map_err(|err| Message {
         code: Code::InvalidUrl,
-        message: format!("{coordinate} must be a valid URL. {err}",),
+        message: format!("{coordinate} must be a valid URL template. {err}",),
         locations: value.line_column_range(sources).into_iter().collect(),
     })?;
 
