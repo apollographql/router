@@ -61,10 +61,10 @@ pub(crate) fn extract_source_directive_arguments(
         .collect()
 }
 
-pub(crate) fn extract_connect_directive_arguments<'schema>(
-    schema: &'schema FederationSchema,
+pub(crate) fn extract_connect_directive_arguments(
+    schema: &FederationSchema,
     name: &Name,
-) -> Result<Vec<ConnectDirectiveArguments<'schema>>, FederationError> {
+) -> Result<Vec<ConnectDirectiveArguments>, FederationError> {
     let Ok(directive_refs) = schema.referencers().get_directive(name) else {
         return Ok(vec![]);
     };
@@ -256,10 +256,10 @@ fn node_to_header(value: &Node<Value>) -> Result<(HeaderName, HeaderSource), Fed
     }
 }
 
-impl<'schema> ConnectDirectiveArguments<'schema> {
+impl ConnectDirectiveArguments {
     fn from_position_and_directive(
         position: ObjectOrInterfaceFieldDirectivePosition,
-        value: &'schema Node<Directive>,
+        value: &Node<Directive>,
     ) -> Result<Self, FederationError> {
         let args = &value.arguments;
 
@@ -311,7 +311,7 @@ impl<'schema> ConnectDirectiveArguments<'schema> {
 
         Ok(Self {
             position,
-            source,
+            source: source.map(|s| s.to_string()),
             http,
             selection: selection.ok_or(internal!("`@connect` directive is missing a selection"))?,
             entity: entity.unwrap_or_default(),
@@ -319,11 +319,10 @@ impl<'schema> ConnectDirectiveArguments<'schema> {
     }
 }
 
-// TODO: use this in validation
-impl<'schema> TryFrom<&'schema ObjectNode> for ConnectHTTPArguments<'schema> {
+impl TryFrom<&ObjectNode> for ConnectHTTPArguments {
     type Error = FederationError;
 
-    fn try_from(values: &'schema ObjectNode) -> Result<Self, Self::Error> {
+    fn try_from(values: &ObjectNode) -> Result<Self, Self::Error> {
         let mut get = None;
         let mut post = None;
         let mut patch = None;
@@ -353,23 +352,23 @@ impl<'schema> TryFrom<&'schema ObjectNode> for ConnectHTTPArguments<'schema> {
             } else if name == "GET" {
                 get = Some(value.as_str().ok_or(internal!(
                     "supplied HTTP template URL in `@connect` directive's `http` field is not a string"
-                ))?);
+                ))?.to_string());
             } else if name == "POST" {
                 post = Some(value.as_str().ok_or(internal!(
                     "supplied HTTP template URL in `@connect` directive's `http` field is not a string"
-                ))?);
+                ))?.to_string());
             } else if name == "PATCH" {
                 patch = Some(value.as_str().ok_or(internal!(
                     "supplied HTTP template URL in `@connect` directive's `http` field is not a string"
-                ))?);
+                ))?.to_string());
             } else if name == "PUT" {
                 put = Some(value.as_str().ok_or(internal!(
                     "supplied HTTP template URL in `@connect` directive's `http` field is not a string"
-                ))?);
+                ))?.to_string());
             } else if name == "DELETE" {
                 delete = Some(value.as_str().ok_or(internal!(
                     "supplied HTTP template URL in `@connect` directive's `http` field is not a string"
-                ))?);
+                ))?.to_string());
             }
         }
 
