@@ -592,57 +592,55 @@ Named(
                             ),
                         ],
                         star: Some(
-                            Parsed {
-                                node: StarSelection(
-                                    Some(
-                                        Alias {
-                                            name: Parsed {
-                                                node: Field(
-                                                    "rest",
-                                                ),
-                                                range: Some(
-                                                    (
-                                                        319,
-                                                        323,
-                                                    ),
-                                                ),
-                                            },
+                            StarSelection {
+                                alias: Some(
+                                    Alias {
+                                        name: Parsed {
+                                            node: Field(
+                                                "rest",
+                                            ),
                                             range: Some(
                                                 (
                                                     319,
-                                                    324,
+                                                    323,
                                                 ),
                                             ),
                                         },
-                                    ),
-                                    Some(
-                                        SubSelection {
-                                            selections: [
-                                                Field(
-                                                    None,
-                                                    Parsed {
-                                                        node: Field(
-                                                            "data",
-                                                        ),
-                                                        range: Some(
-                                                            (
-                                                                329,
-                                                                333,
-                                                            ),
-                                                        ),
-                                                    },
-                                                    None,
-                                                ),
-                                            ],
-                                            star: None,
-                                            range: Some(
-                                                (
-                                                    327,
-                                                    335,
-                                                ),
+                                        range: Some(
+                                            (
+                                                319,
+                                                324,
                                             ),
-                                        },
-                                    ),
+                                        ),
+                                    },
+                                ),
+                                selection: Some(
+                                    SubSelection {
+                                        selections: [
+                                            Field(
+                                                None,
+                                                Parsed {
+                                                    node: Field(
+                                                        "data",
+                                                    ),
+                                                    range: Some(
+                                                        (
+                                                            329,
+                                                            333,
+                                                        ),
+                                                    ),
+                                                },
+                                                None,
+                                            ),
+                                        ],
+                                        star: None,
+                                        range: Some(
+                                            (
+                                                327,
+                                                335,
+                                            ),
+                                        ),
+                                    },
                                 ),
                                 range: Some(
                                     (

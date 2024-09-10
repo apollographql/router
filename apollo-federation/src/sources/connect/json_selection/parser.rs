@@ -596,7 +596,7 @@ impl ExternalVarPaths for PathList {
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct SubSelection {
     pub(super) selections: Vec<NamedSelection>,
-    pub(super) star: Option<Parsed<StarSelection>>,
+    pub(super) star: Option<StarSelection>,
     pub(super) range: Option<(usize, usize)>,
 }
 
@@ -676,7 +676,7 @@ impl SubSelection {
     }
 
     pub fn set_star(&mut self, star: Option<StarSelection>) {
-        self.star = star.map(|star| Parsed::new(star, None));
+        self.star = star;
     }
 
     pub fn append_selection(&mut self, selection: NamedSelection) {
@@ -730,15 +730,33 @@ impl ExternalVarPaths for SubSelection {
 
 // StarSelection ::= Alias? "*" SubSelection?
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct StarSelection(pub(super) Option<Alias>, pub(super) Option<SubSelection>);
+#[derive(Debug, PartialEq, Eq, Clone, Default)]
+pub struct StarSelection {
+    pub(super) alias: Option<Alias>,
+    pub(super) selection: Option<Box<SubSelection>>,
+    pub(super) range: Option<(usize, usize)>,
+}
 
-impl StarSelection {
-    pub(crate) fn new(alias: Option<Alias>, sub: Option<SubSelection>) -> Self {
-        Self(alias, sub)
+impl Ranged<StarSelection> for StarSelection {
+    fn node(&self) -> &StarSelection {
+        self
     }
 
-    pub(crate) fn parse(input: Span) -> IResult<Span, Parsed<Self>> {
+    fn range(&self) -> Option<(usize, usize)> {
+        self.range
+    }
+}
+
+impl StarSelection {
+    pub(crate) fn new(alias: Option<Alias>, selection: Option<SubSelection>) -> Self {
+        Self {
+            alias,
+            selection: selection.map(Box::new),
+            range: None,
+        }
+    }
+
+    pub(crate) fn parse(input: Span) -> IResult<Span, Self> {
         tuple((
             // The spaces_or_comments separators are necessary here because
             // Alias::parse and SubSelection::parse only consume surrounding
@@ -761,12 +779,15 @@ impl StarSelection {
             } else {
                 range
             };
-            (remainder, Parsed::new(Self(alias, selection), range))
+            (
+                remainder,
+                Self {
+                    alias,
+                    selection: selection.map(Box::new),
+                    range,
+                },
+            )
         })
-    }
-
-    fn into_parsed(self) -> Parsed<Self> {
-        Parsed::new(self, None)
     }
 }
 
@@ -2400,7 +2421,7 @@ mod tests {
 
     #[test]
     fn test_star_selection() {
-        fn check_parsed(input: &str, expected: Parsed<StarSelection>) {
+        fn check_parsed(input: &str, expected: StarSelection) {
             let (remainder, parsed) = StarSelection::parse(Span::new(input)).unwrap();
             assert_eq!(*remainder.fragment(), "");
             assert_eq!(parsed.strip_ranges(), expected);
@@ -2408,60 +2429,74 @@ mod tests {
 
         check_parsed(
             "rest: *",
-            StarSelection(Some(Alias::new("rest")), None).into_parsed(),
+            StarSelection {
+                alias: Some(Alias::new("rest")),
+                ..Default::default()
+            },
         );
 
-        check_parsed("*", StarSelection(None, None).into_parsed());
-
-        check_parsed(" * ", StarSelection(None, None).into_parsed());
+        check_parsed(
+            "*",
+            StarSelection {
+                ..Default::default()
+            },
+        );
 
         check_parsed(
+            " * ",
+            StarSelection {
+                ..Default::default()
+            },
+        );
+        check_parsed(
             " * { hello } ",
-            StarSelection(
-                None,
-                Some(SubSelection {
+            StarSelection {
+                selection: Some(Box::new(SubSelection {
                     selections: vec![NamedSelection::Field(
                         None,
                         Key::field("hello").into_parsed(),
                         None,
                     )],
                     ..Default::default()
-                }),
-            )
-            .into_parsed(),
+                })),
+                ..Default::default()
+            },
         );
 
         check_parsed(
             "hi: * { hello }",
-            StarSelection(
-                Some(Alias::new("hi")),
-                Some(SubSelection {
+            StarSelection {
+                alias: Some(Alias::new("hi")),
+                selection: Some(Box::new(SubSelection {
                     selections: vec![NamedSelection::Field(
                         None,
                         Key::field("hello").into_parsed(),
                         None,
                     )],
                     ..Default::default()
-                }),
-            )
-            .into_parsed(),
+                })),
+                ..Default::default()
+            },
         );
 
         check_parsed(
             "alias: * { x y z rest: * }",
-            StarSelection(
-                Some(Alias::new("alias")),
-                Some(SubSelection {
+            StarSelection {
+                alias: Some(Alias::new("alias")),
+                selection: Some(Box::new(SubSelection {
                     selections: vec![
                         NamedSelection::Field(None, Key::field("x").into_parsed(), None),
                         NamedSelection::Field(None, Key::field("y").into_parsed(), None),
                         NamedSelection::Field(None, Key::field("z").into_parsed(), None),
                     ],
-                    star: Some(StarSelection(Some(Alias::new("rest")), None).into_parsed()),
+                    star: Some(StarSelection {
+                        alias: Some(Alias::new("rest")),
+                        ..Default::default()
+                    }),
                     ..Default::default()
-                }),
-            )
-            .into_parsed(),
+                })),
+                ..Default::default()
+            },
         );
 
         assert_eq!(
@@ -2472,42 +2507,37 @@ mod tests {
                     Key::field("before").into_parsed(),
                     None
                 )],
-                star: Some(
-                    StarSelection(
-                        Some(Alias::new("alias")),
-                        Some(SubSelection {
-                            selections: vec![],
-                            star: Some(
-                                StarSelection(
-                                    None,
-                                    Some(SubSelection {
-                                        selections: vec![
-                                            NamedSelection::Field(
-                                                None,
-                                                Key::field("a").into_parsed(),
-                                                None
-                                            ),
-                                            NamedSelection::Field(
-                                                None,
-                                                Key::field("b").into_parsed(),
-                                                None
-                                            ),
-                                            NamedSelection::Field(
-                                                None,
-                                                Key::field("c").into_parsed(),
-                                                None
-                                            ),
-                                        ],
-                                        ..Default::default()
-                                    }),
-                                )
-                                .into_parsed()
-                            ),
+                star: Some(StarSelection {
+                    alias: Some(Alias::new("alias")),
+                    selection: Some(Box::new(SubSelection {
+                        selections: vec![],
+                        star: Some(StarSelection {
+                            selection: Some(Box::new(SubSelection {
+                                selections: vec![
+                                    NamedSelection::Field(
+                                        None,
+                                        Key::field("a").into_parsed(),
+                                        None
+                                    ),
+                                    NamedSelection::Field(
+                                        None,
+                                        Key::field("b").into_parsed(),
+                                        None
+                                    ),
+                                    NamedSelection::Field(
+                                        None,
+                                        Key::field("c").into_parsed(),
+                                        None
+                                    ),
+                                ],
+                                ..Default::default()
+                            })),
                             ..Default::default()
                         }),
-                    )
-                    .into_parsed()
-                ),
+                        ..Default::default()
+                    })),
+                    ..Default::default()
+                }),
                 ..Default::default()
             }),
         );
@@ -2521,32 +2551,29 @@ mod tests {
                         Alias::new("group"),
                         SubSelection {
                             selections: vec![],
-                            star: Some(
-                                StarSelection(
-                                    None,
-                                    Some(SubSelection {
-                                        selections: vec![
-                                            NamedSelection::Field(
-                                                None,
-                                                Key::field("a").into_parsed(),
-                                                None
-                                            ),
-                                            NamedSelection::Field(
-                                                None,
-                                                Key::field("b").into_parsed(),
-                                                None
-                                            ),
-                                            NamedSelection::Field(
-                                                None,
-                                                Key::field("c").into_parsed(),
-                                                None
-                                            ),
-                                        ],
-                                        ..Default::default()
-                                    }),
-                                )
-                                .into_parsed()
-                            ),
+                            star: Some(StarSelection {
+                                selection: Some(Box::new(SubSelection {
+                                    selections: vec![
+                                        NamedSelection::Field(
+                                            None,
+                                            Key::field("a").into_parsed(),
+                                            None
+                                        ),
+                                        NamedSelection::Field(
+                                            None,
+                                            Key::field("b").into_parsed(),
+                                            None
+                                        ),
+                                        NamedSelection::Field(
+                                            None,
+                                            Key::field("c").into_parsed(),
+                                            None
+                                        ),
+                                    ],
+                                    ..Default::default()
+                                })),
+                                ..Default::default()
+                            }),
                             ..Default::default()
                         },
                     ),

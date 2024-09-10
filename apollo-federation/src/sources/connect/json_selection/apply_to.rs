@@ -474,9 +474,13 @@ impl ApplyToInternal for SubSelection {
             }
         }
 
-        match self.star.as_ref().map(|parsed| parsed.as_ref()) {
+        match &self.star {
             // Aliased but not subselected, e.g. "a b c rest: *"
-            Some(StarSelection(Some(alias), None)) => {
+            Some(StarSelection {
+                alias: Some(alias),
+                selection: None,
+                ..
+            }) => {
                 let mut star_output = JSONMap::new();
                 for (key, value) in &data_map {
                     if !input_names.contains(key.as_str()) {
@@ -486,7 +490,11 @@ impl ApplyToInternal for SubSelection {
                 output.insert(alias.name(), JSON::Object(star_output));
             }
             // Aliased and subselected, e.g. "alias: * { hello }"
-            Some(StarSelection(Some(alias), Some(selection))) => {
+            Some(StarSelection {
+                alias: Some(alias),
+                selection: Some(selection),
+                ..
+            }) => {
                 let mut star_output = JSONMap::new();
                 for (key, value) in &data_map {
                     if !input_names.contains(key.as_str()) {
@@ -500,7 +508,11 @@ impl ApplyToInternal for SubSelection {
                 output.insert(alias.name(), JSON::Object(star_output));
             }
             // Not aliased but subselected, e.g. "parent { * { hello } }"
-            Some(StarSelection(None, Some(selection))) => {
+            Some(StarSelection {
+                alias: None,
+                selection: Some(selection),
+                ..
+            }) => {
                 for (key, value) in &data_map {
                     if !input_names.contains(key.as_str()) {
                         if let Some(selected) =
@@ -512,7 +524,11 @@ impl ApplyToInternal for SubSelection {
                 }
             }
             // Neither aliased nor subselected, e.g. "parent { * }" or just "*"
-            Some(StarSelection(None, None)) => {
+            Some(StarSelection {
+                alias: None,
+                selection: None,
+                ..
+            }) => {
                 for (key, value) in &data_map {
                     if !input_names.contains(key.as_str()) {
                         output.insert(key.clone(), value.clone());

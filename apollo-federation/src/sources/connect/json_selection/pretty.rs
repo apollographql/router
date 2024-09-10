@@ -311,7 +311,7 @@ impl PrettyPrintable for NamedSelection {
     }
 }
 
-impl PrettyPrintable for Parsed<StarSelection> {
+impl PrettyPrintable for StarSelection {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
         let mut result = String::new();
 
@@ -319,14 +319,14 @@ impl PrettyPrintable for Parsed<StarSelection> {
             result.push_str(indent_chars(indentation).as_str());
         }
 
-        if let Some(alias) = self.0.as_ref() {
+        if let Some(alias) = &self.alias {
             result.push_str(alias.name.as_str());
             result.push_str(": ");
         }
 
         result.push('*');
 
-        if let Some(sub) = self.1.as_ref() {
+        if let Some(sub) = &self.selection {
             let sub = sub.pretty_print_with_indentation(true, indentation);
             result.push(' ');
             result.push_str(sub.as_str());

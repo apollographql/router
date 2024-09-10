@@ -215,15 +215,13 @@ pub(super) mod strip_ranges {
         }
     }
 
-    impl StripRanges for Parsed<StarSelection> {
+    impl StripRanges for StarSelection {
         fn strip_ranges(&self) -> Self {
-            Parsed::new(
-                StarSelection(
-                    self.0.as_ref().map(|a| a.strip_ranges()),
-                    self.1.as_ref().map(|s| s.strip_ranges()),
-                ),
-                None,
-            )
+            StarSelection {
+                alias: self.alias.as_ref().map(|a| a.strip_ranges()),
+                selection: self.selection.as_ref().map(|s| Box::new(s.strip_ranges())),
+                range: None,
+            }
         }
     }
 
