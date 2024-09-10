@@ -434,21 +434,37 @@ mod helpers {
 
             // The body of the request might include references to input arguments / sibling fields
             // that will need to be handled, so we extract any referenced variables now
-            let body_parameters = extract_params_from_body(connector)?;
-
-            let parameters = connector
+            let body_parameters = connector
                 .transport
-                .connect_template
-                .parameters()
-                .map_err(|e| {
-                    FederationError::internal(format!(
-                        "could not extract path template parameters: {e}"
-                    ))
-                })?;
+                .body
+                .as_ref()
+                .map(extract_params_from_selection)
+                .transpose()?
+                .unwrap_or_default();
+
+            // The HTTP body might contain references to $this, so we grab those usages as well
+            let path_parameters =
+                connector
+                    .transport
+                    .connect_template
+                    .parameters()
+                    .map_err(|e| {
+                        FederationError::internal(format!(
+                            "could not extract path template parameters: {e}"
+                        ))
+                    })?;
+
+            // Most importantly, the actual selection might make use of the $this variable, so we grab them too
+            let selection_parameters = extract_params_from_selection(&connector.selection)?;
+
             // We'll need to collect all synthesized keys for the output type, adding a federation
             // `@key` directive once completed.
             let mut keys = Vec::new();
-            for parameter in Iterator::chain(body_parameters.iter(), &parameters) {
+            for parameter in body_parameters
+                .iter()
+                .chain(&path_parameters)
+                .chain(&selection_parameters)
+            {
                 match parameter {
                     // Arguments should be added to the synthesized key, since they are mandatory
                     // to resolving the output type. The synthesized key should only include the portions
@@ -765,15 +781,12 @@ mod helpers {
         }
     }
 
-    fn extract_params_from_body(
-        connector: &Connector,
+    /// Extract all seen parameters from a JSONSelection
+    fn extract_params_from_selection(
+        selection: &JSONSelection,
     ) -> Result<HashSet<Parameter>, FederationError> {
-        let Some(body) = &connector.transport.body else {
-            return Ok(HashSet::default());
-        };
-
         use crate::sources::connect::json_selection::ExternalVarPaths;
-        let var_paths = body.external_var_paths();
+        let var_paths = selection.external_var_paths();
 
         let mut results = HashSet::with_capacity_and_hasher(var_paths.len(), Default::default());
 
