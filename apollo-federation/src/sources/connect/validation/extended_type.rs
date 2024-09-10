@@ -214,25 +214,25 @@ fn validate_field(
         ));
 
         let coordinate = ConnectDirectiveCoordinate {
-        connect_directive_name,
-        object_name: &object.name,
-        field_name: &field.name,
-    };
+            connect_directive_name,
+            object_name: &object.name,
+            field_name: &field.name,
+        };
 
-    let Some((http_arg, http_arg_node)) = connect_directive
-        .argument_by_name(&HTTP_ARGUMENT_NAME)
-        .and_then(|arg| Some((arg.as_object()?, arg)))
-    else {
-        errors.push(Message {
-            code: Code::GraphQLError,
-            message: format!("{coordinate} must have a `{HTTP_ARGUMENT_NAME}` argument.",),
-            locations: connect_directive
-                .line_column_range(source_map)
-                .into_iter()
-                .collect(),
-        });
-        return errors;
-    };
+        let Some((http_arg, http_arg_node)) = connect_directive
+            .argument_by_name(&HTTP_ARGUMENT_NAME)
+            .and_then(|arg| Some((arg.as_object()?, arg)))
+        else {
+            errors.push(Message {
+                code: Code::GraphQLError,
+                message: format!("{coordinate} must have a `{HTTP_ARGUMENT_NAME}` argument.",),
+                locations: connect_directive
+                    .line_column_range(source_map)
+                    .into_iter()
+                    .collect(),
+            });
+            return errors;
+        };
 
         let http_method = match method::validate(
             http_arg,
@@ -248,13 +248,15 @@ fn validate_field(
         };
 
         if let Some((_, body)) = http_arg
-        .iter()
-        .find(|(name, _)| name == &CONNECT_BODY_ARGUMENT_NAME)
-    {
-        if let Err(err) = validate_body_selection(connect_directive, object, field, schema, body) {
-            errors.push(err);
+            .iter()
+            .find(|(name, _)| name == &CONNECT_BODY_ARGUMENT_NAME)
+        {
+            if let Err(err) =
+                validate_body_selection(connect_directive, object, field, schema, body)
+            {
+                errors.push(err);
+            }
         }
-    }
 
         if let Some(source_name) = connect_directive
             .arguments
@@ -272,10 +274,10 @@ fn validate_field(
             ));
 
             if let Some((http_method, url)) = http_method {
-            let coordinate = HttpMethodCoordinate {
-                connect: coordinate,
-                http_method,
-            };
+                let coordinate = HttpMethodCoordinate {
+                    connect: coordinate,
+                    http_method,
+                };
                 if let Err(err) = url::validate_template(url, coordinate, source_map).and_then(|template| {
                 if template.base.is_some() {
                     Err(Message {
@@ -295,10 +297,10 @@ fn validate_field(
                 }
             }
         } else if let Some((http_method, url)) = http_method {
-        let coordinate = HttpMethodCoordinate {
-            connect: coordinate,
-            http_method,
-        };
+            let coordinate = HttpMethodCoordinate {
+                connect: coordinate,
+                http_method,
+            };
             if let Err(err) = url::validate_template(url, coordinate, source_map).and_then(|template| {
                 if template.base.is_none() {
                 Err(Message {
@@ -313,17 +315,17 @@ fn validate_field(
         }) {
             errors.push(err);
         }
-    }
+        }
 
         errors.extend(
             headers::validate_arg(
                 http_arg,
                 source_map,
-            HttpHeadersCoordinate::Connect {
-                directive_name: connect_directive_name,
-                object: &object.name,
-                field: &field.name,
-            },
+                HttpHeadersCoordinate::Connect {
+                    directive_name: connect_directive_name,
+                    object: &object.name,
+                    field: &field.name,
+                },
             )
             .into_iter()
             .flatten(),
