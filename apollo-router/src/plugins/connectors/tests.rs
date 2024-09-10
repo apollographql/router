@@ -1112,7 +1112,7 @@ async fn error_not_redacted() {
 
     let response = execute(
         STEEL_THREAD_SCHEMA,
-        &mock_server.uri(),
+        Some(&mock_server.uri()),
         "query { users { id name username } }",
         Default::default(),
         Some(json!({
@@ -1161,7 +1161,7 @@ async fn error_redacted() {
 
     let response = execute(
         STEEL_THREAD_SCHEMA,
-        &mock_server.uri(),
+        Some(&mock_server.uri()),
         "query { users { id name username } }",
         Default::default(),
         Some(json!({

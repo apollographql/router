@@ -27,7 +27,6 @@ use crate::plugins::connectors::http::Request;
 use crate::plugins::connectors::http::Response as ConnectorResponse;
 use crate::plugins::connectors::http::Result as ConnectorResult;
 use crate::plugins::connectors::make_requests::make_requests;
-use crate::plugins::connectors::make_requests::RequestInfo;
 use crate::plugins::connectors::plugin::ConnectorContext;
 use crate::plugins::connectors::plugin::SnapshotConfig;
 use crate::plugins::connectors::request_limit::RequestLimits;
@@ -161,6 +160,7 @@ async fn execute(
     let tasks = requests.into_iter().map(
         move |Request {
                   request: req,
+                  key,
                   body_hash,
                   debug_request,
               }| {
@@ -199,6 +199,7 @@ async fn execute(
                                         snapshot_key: None,
                                         result: http_response,
                                         key,
+                                        debug_request,
                                     });
                                 }
                             } else if snapshot_config.offline {
@@ -208,6 +209,7 @@ async fn execute(
                                     snapshot_key,
                                     result: ConnectorResult::Err(ConnectorError::SnapshotNotFound),
                                     key,
+                                    debug_request,
                                 });
                             }
                         }

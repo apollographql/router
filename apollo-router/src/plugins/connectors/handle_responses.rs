@@ -52,7 +52,6 @@ pub(crate) async fn handle_responses<T: HttpBody>(
         let mut error = None;
         let response_key = response.key;
         let debug_request = response.debug_request;
-        let url = response.url;
         let snapshot_key = response.snapshot_key;
         match response.result {
             ConnectorResult::Err(e) => {

@@ -68,14 +68,21 @@ lazy_static! {
     ]));
 }
 
+#[allow(clippy::type_complexity)]
 pub(crate) fn make_request(
     transport: &HttpJsonTransport,
     inputs: IndexMap<String, Value>,
     original_request: &connect::Request,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
     hash_body: bool,
-) -> Result<(http::Request<RouterBody>, Option<String>, Option<ConnectorDebugHttpRequest>), HttpJsonTransportError>
-{
+) -> Result<
+    (
+        http::Request<RouterBody>,
+        Option<String>,
+        Option<ConnectorDebugHttpRequest>,
+    ),
+    HttpJsonTransportError,
+> {
     let flat_inputs = flatten_keys(&inputs);
     let uri = make_uri(
         transport.source_url.as_ref(),

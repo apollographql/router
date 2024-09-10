@@ -1,5 +1,6 @@
 {
   "key": "GET-https://jsonplaceholder.typicode.com/posts/8",
+  "status": 200,
   "headers": {
     "content-type": [
       "application/json; charset=utf-8"

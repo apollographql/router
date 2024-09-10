@@ -40,5 +40,6 @@ pub(crate) struct Response<T: HttpBody> {
 pub(crate) struct Request {
     pub(crate) request: http::Request<RouterBody>,
     pub(crate) key: ResponseKey,
+    pub(crate) body_hash: Option<String>,
     pub(crate) debug_request: Option<ConnectorDebugHttpRequest>,
 }

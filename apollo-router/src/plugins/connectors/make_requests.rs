@@ -96,13 +96,6 @@ pub(crate) enum ResponseTypeName {
     Omitted,
 }
 
-#[derive(Debug)]
-pub(crate) struct RequestInfo {
-    pub(crate) request: http::Request<RouterBody>,
-    pub(crate) body_hash: Option<String>,
-    pub(crate) response_key: ResponseKey,
-}
-
 pub(crate) fn make_requests(
     request: connect::Request,
     connector: &Connector,
@@ -1719,7 +1712,6 @@ mod tests {
                         Empty,
                     ),
                 },
-                body_hash: None,
                 key: RootField {
                     name: "a",
                     typename: Concrete(
@@ -1740,6 +1732,7 @@ mod tests {
                         this: {},
                     },
                 },
+                body_hash: None,
                 debug_request: None,
             },
         ]
