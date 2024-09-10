@@ -49,13 +49,19 @@ use crate::services::router::body::RouterBody;
 #[derive(Serialize, Deserialize)]
 pub(crate) struct Snapshot<'a> {
     key: Cow<'a, str>,
+    status: u16,
     headers: IndexMap<String, Vec<String>>,
     body: Cow<'a, Value>,
 }
 
 impl<'a> Snapshot<'a> {
     /// Create a new snapshot from an HTTP response.
-    pub(crate) fn new(key: &'a str, body: &'a Value, headers: &'a HeaderMap<HeaderValue>) -> Self {
+    pub(crate) fn new(
+        key: &'a str,
+        status: u16,
+        body: &'a Value,
+        headers: &'a HeaderMap<HeaderValue>,
+    ) -> Self {
         let headers = headers.iter().fold(
             IndexMap::new(),
             |mut map: IndexMap<String, Vec<String>>, (name, value)| {
@@ -67,6 +73,7 @@ impl<'a> Snapshot<'a> {
         );
         Snapshot {
             key: Cow::Borrowed(key),
+            status,
             headers,
             body: Cow::Borrowed(body),
         }
@@ -103,7 +110,7 @@ impl<'a> TryFrom<Snapshot<'a>> for crate::plugins::connectors::http::Result<Rout
     type Error = ();
 
     fn try_from(snapshot: Snapshot) -> Result<Self, Self::Error> {
-        let mut response = http::Response::builder().status(http::StatusCode::OK);
+        let mut response = http::Response::builder().status(snapshot.status);
         if let Some(headers) = response.headers_mut() {
             for (name, values) in snapshot.headers.into_iter() {
                 if let Ok(name) = HeaderName::from_str(&name.clone()) {

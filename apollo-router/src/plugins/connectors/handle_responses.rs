@@ -84,9 +84,13 @@ pub(crate) async fn handle_responses<T: HttpBody>(
                         if snapshot_config.enabled {
                             if let Some(snapshot_key) = snapshot_key {
                                 let snapshot_path = PathBuf::from(&snapshot_config.path);
-                                if let Err(e) =
-                                    Snapshot::new(&snapshot_key, &json_data, &parts.headers)
-                                        .save(snapshot_path)
+                                if let Err(e) = Snapshot::new(
+                                    &snapshot_key,
+                                    parts.status.as_u16(),
+                                    &json_data,
+                                    &parts.headers,
+                                )
+                                .save(snapshot_path)
                                 {
                                     warn!("Failed to save snapshot for {} - {:?}", snapshot_key, e);
                                 }
@@ -206,6 +210,28 @@ pub(crate) async fn handle_responses<T: HttpBody>(
                                 debug
                                     .lock()
                                     .push_invalid_response(debug_request, &parts, body);
+                            }
+                        }
+                    }
+                    if let Some(snapshot_config) = snapshot_config {
+                        if snapshot_config.enabled {
+                            if let Some(snapshot_key) = snapshot_key {
+                                if let Ok(json_data) = serde_json::from_slice(body) {
+                                    let snapshot_path = PathBuf::from(&snapshot_config.path);
+                                    if let Err(e) = Snapshot::new(
+                                        &snapshot_key,
+                                        parts.status.as_u16(),
+                                        &json_data,
+                                        &parts.headers,
+                                    )
+                                    .save(snapshot_path)
+                                    {
+                                        warn!(
+                                            "Failed to save snapshot for {} - {:?}",
+                                            snapshot_key, e
+                                        );
+                                    }
+                                }
                             }
                         }
                     }
