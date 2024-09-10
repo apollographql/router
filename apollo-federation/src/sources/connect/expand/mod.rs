@@ -176,7 +176,6 @@ mod helpers {
     use apollo_compiler::ast::FieldDefinition;
     use apollo_compiler::ast::InputValueDefinition;
     use apollo_compiler::ast::Value;
-    use apollo_compiler::collections::HashSet;
     use apollo_compiler::name;
     use apollo_compiler::schema::Component;
     use apollo_compiler::schema::ComponentName;
@@ -189,6 +188,7 @@ mod helpers {
     use apollo_compiler::Node;
     use indexmap::IndexMap;
     use indexmap::IndexSet;
+    use itertools::Itertools;
 
     use super::filter_directives;
     use super::path_to_selection;
@@ -207,6 +207,7 @@ mod helpers {
     use crate::schema::position::TypeDefinitionPosition;
     use crate::schema::FederationSchema;
     use crate::schema::ValidFederationSchema;
+    use crate::sources::connect::json_selection::ExternalVarPaths;
     use crate::sources::connect::json_selection::KnownVariable;
     use crate::sources::connect::url_template::Variable;
     use crate::sources::connect::url_template::VariableType;
@@ -436,22 +437,14 @@ mod helpers {
 
             // The body of the request might include references to input arguments / sibling fields
             // that will need to be handled, so we extract any referenced variables now
-            let body_parameters = extract_params_from_body(connector)?;
+            let body_parameters = extract_params_from_body(connector);
 
-            let parameters = connector
-                .transport
-                .connect_template
-                .parameters()
-                .map_err(|e| {
-                    FederationError::internal(format!(
-                        "could not extract path template parameters: {e}"
-                    ))
-                })?;
+            let parameters = connector.transport.connect_template.variables().cloned();
             // We'll need to collect all synthesized keys for the output type, adding a federation
             // `@key` directive once completed.
             let mut keys = Vec::new();
             for Variable { var_type, path } in
-                Iterator::chain(body_parameters.into_iter(), parameters)
+                Iterator::chain(body_parameters.into_iter(), parameters).unique()
             {
                 match var_type {
                     // Arguments should be added to the synthesized key, since they are mandatory
@@ -465,7 +458,7 @@ mod helpers {
                         // Synthesize the key based on the argument. Note that this is only relevant in the
                         // argument case when the connector is marked as being an entity resolved.
                         if matches!(connector.entity_resolver, Some(EntityResolver::Explicit)) {
-                            let (field, selection) = path_to_selection(path);
+                            let (field, selection) = path_to_selection(&path);
                             keys.push(format!("{field}{selection}"));
                         }
                     }
@@ -477,7 +470,7 @@ mod helpers {
                     VariableType::This => {
                         match parent_type {
                             TypeDefinitionPosition::Object(ref o) => {
-                                let (field, selection) = path_to_selection(path);
+                                let (field, selection) = path_to_selection(&path);
                                 let field_name = Name::new(&field)?;
                                 let field = o.field(field_name.clone());
                                 let field_def = field.get(self.original_schema.schema())?;
@@ -489,7 +482,7 @@ mod helpers {
                                     let field_output = field_def.ty.inner_named_type();
                                     if to_schema.try_get_type(field_output.clone()).is_none() {
                                         // We use a fake JSONSelection here so that we can reuse the visitor
-                                        // when generating the output types and their required memebers.
+                                        // when generating the output types and their required members.
                                         let visitor = SchemaVisitor::new(
                                             self.original_schema,
                                             to_schema,
@@ -744,26 +737,16 @@ mod helpers {
         }
     }
 
-    fn extract_params_from_body(
-        connector: &Connector,
-    ) -> Result<HashSet<Variable>, FederationError> {
-        let Some(body) = &connector.transport.body else {
-            return Ok(HashSet::default());
-        };
-
-        use crate::sources::connect::json_selection::ExternalVarPaths;
-        let var_paths = body.external_var_paths();
-
-        var_paths
+    fn extract_params_from_body(connector: &Connector) -> impl Iterator<Item = Variable> + '_ {
+        connector
+            .transport
+            .body
+            .as_ref()
+            .map(|body| body.external_var_paths())
             .into_iter()
-            .map(|var_path| {
-                let (known_type, keys) = var_path.var_name_and_nested_keys().ok_or_else(|| {
-                    // TODO: how does this happen?
-                    FederationError::internal(format!(
-                        "could not extract variable from path: {:?}",
-                        var_path,
-                    ))
-                })?;
+            .flatten()
+            .flat_map(|var_path| {
+                let (known_type, keys) = var_path.var_name_and_nested_keys()?;
                 let var_type = match known_type {
                     KnownVariable::Args => VariableType::Args,
                     KnownVariable::This => VariableType::This,
@@ -775,24 +758,20 @@ mod helpers {
                     // $config. The $ and @ variables, by contrast, are always bound
                     // to something within the input data.
                     KnownVariable::Dollar | KnownVariable::AtSign => {
-                        return Err(FederationError::internal(format!(
-                            "got unexpected non-external variable: {:?}",
-                            known_type,
-                        )));
+                        return None;
                     }
                 };
 
-                Ok(Variable {
+                Some(Variable {
                     var_type,
                     path: keys.join("."),
                 })
             })
-            .collect()
     }
 }
 
 /// Turn a path like a.b.c into a selection like (a,  { b { c } }). Join together to get a key.
-fn path_to_selection(path: String) -> (String, String) {
+fn path_to_selection(path: &str) -> (String, String) {
     let mut parts = path.split('.').peekable();
     let field = parts.next().unwrap_or_default().to_string();
     let mut selection = String::new();

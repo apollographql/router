@@ -2,7 +2,6 @@ use std::fmt::Display;
 use std::str::FromStr;
 
 use apollo_compiler::collections::IndexMap;
-use apollo_compiler::collections::IndexSet;
 use itertools::Itertools;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
@@ -40,19 +39,16 @@ pub enum ValuePart {
 
 impl URLTemplate {
     // TODO: enforce that path params come from required schema elements
+    pub fn path_variables(&self) -> impl Iterator<Item = &Variable> {
+        self.path.iter().flat_map(Component::variables)
+    }
 
-    /// Return all parameters in the template by . delimited string
-    pub fn parameters(&self) -> Result<IndexSet<Variable>, String> {
-        let mut parameters = IndexSet::default();
-        for param_value in &self.path {
-            parameters.extend(param_value.variables());
-        }
-        for param_value in self.query.values() {
-            parameters.extend(param_value.variables());
-        }
-
-        // sorted for a stable SDL
-        Ok(parameters.into_iter().sorted().cloned().collect())
+    pub fn query_variables(&self) -> impl Iterator<Item = &Variable> {
+        self.query.values().flat_map(Component::variables)
+    }
+    /// Return all variables in the template in the order they appeared
+    pub fn variables(&self) -> impl Iterator<Item = &Variable> {
+        self.path_variables().chain(self.query_variables())
     }
 
     pub fn interpolate_path(&self, vars: &Map<ByteString, JSON>) -> Result<Vec<String>, String> {
@@ -98,25 +94,22 @@ impl FromStr for URLTemplate {
         let mut prefix_suffix = path.splitn(2, '?');
         let path_prefix = prefix_suffix.next();
         let query_suffix = prefix_suffix.next();
-        let mut path = vec![];
 
-        if let Some(path_prefix) = path_prefix {
-            for path_part in path_prefix.split('/') {
-                if !path_part.is_empty() {
-                    path.push(Component::parse(path_part)?);
-                }
-            }
-        }
+        let path = path_prefix
+            .into_iter()
+            .flat_map(|path_prefix| path_prefix.split('/'))
+            .filter(|path_part| !path_part.is_empty())
+            .map(Component::parse)
+            .try_collect()?;
 
-        let mut query = IndexMap::default();
-
-        if let Some(query_suffix) = query_suffix {
-            for query_part in query_suffix.split('&') {
-                if let Some((key, value)) = query_part.split_once('=') {
-                    query.insert(key.to_string(), Component::parse(value)?);
-                }
-            }
-        }
+        let query = query_suffix
+            .into_iter()
+            .flat_map(|query_suffix| query_suffix.split('&'))
+            .filter_map(|query_part| {
+                let (key, value) = query_part.split_once('=')?;
+                Some(Component::parse(value).map(|value| (key.to_string(), value)))
+            })
+            .try_collect()?;
 
         Ok(URLTemplate { base, path, query })
     }
@@ -320,16 +313,17 @@ impl Serialize for Component {
 }
 
 /// A variable expression, starting with `$`, that can be used in JSONSelection or URLTemplate.
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+///
+/// This is basically a subset of JSONSelection's `PathSelection`, but with fewer features.
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct Variable {
-    // TODO: move this to its own module
     pub var_type: VariableType,
     pub path: String,
 }
 
+/// The supported types of variables for URLs, a subset of `KnownVariable` in JSONSelection
 #[derive(Clone, Copy, Debug, EnumIter, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum VariableType {
-    // TODO: partially merge with KnownVariable?
     Args,
     This,
     Config,
