@@ -21,6 +21,7 @@ use super::new_service::ServiceFactory;
 use crate::error::FetchError;
 use crate::plugins::connectors::error::Error as ConnectorError;
 use crate::plugins::connectors::handle_responses::handle_responses;
+use crate::plugins::connectors::http::Request;
 use crate::plugins::connectors::http::Response as ConnectorResponse;
 use crate::plugins::connectors::http::Result as ConnectorResult;
 use crate::plugins::connectors::make_requests::make_requests;
@@ -143,55 +144,61 @@ async fn execute(
 
     let requests = make_requests(request, connector, &debug).map_err(BoxError::from)?;
 
-    let tasks = requests.into_iter().map(move |(req, key, debug_request)| {
-        // Returning an error from this closure causes all tasks to be cancelled and the operation
-        // to fail. This is the reason for the Result-wrapped-in-a-Result here. An `Err` on the
-        // inner result fails just that one task, but an `Err` on the outer result cancels all the
-        // tasks and fails the whole operation.
-        let context = context.clone();
-        let original_subgraph_name = original_subgraph_name.clone();
-        let request_limit = request_limit.clone();
-        async move {
-            if let Some(request_limit) = request_limit {
-                if !request_limit.allow() {
-                    return Ok(ConnectorResponse {
-                        result: ConnectorResult::Err(ConnectorError::RequestLimitExceeded),
-                        key,
-                        debug_request,
-                    });
+    let tasks = requests.into_iter().map(
+        move |Request {
+                  request: req,
+                  key,
+                  debug_request,
+              }| {
+            // Returning an error from this closure causes all tasks to be cancelled and the operation
+            // to fail. This is the reason for the Result-wrapped-in-a-Result here. An `Err` on the
+            // inner result fails just that one task, but an `Err` on the outer result cancels all the
+            // tasks and fails the whole operation.
+            let context = context.clone();
+            let original_subgraph_name = original_subgraph_name.clone();
+            let request_limit = request_limit.clone();
+            async move {
+                if let Some(request_limit) = request_limit {
+                    if !request_limit.allow() {
+                        return Ok(ConnectorResponse {
+                            result: ConnectorResult::Err(ConnectorError::RequestLimitExceeded),
+                            key,
+                            debug_request,
+                        });
+                    }
                 }
-            }
-            let client = http_client_factory.create(&original_subgraph_name);
-            let req = HttpRequest {
-                http_request: req,
-                context,
-            };
-            let res = client.oneshot(req).await.map_err(|e| {
-                match e.downcast::<FetchError>() {
-                    // Replace the internal subgraph name with the connector label
-                    Ok(inner) => match *inner {
-                        FetchError::SubrequestHttpError {
-                            status_code,
-                            service: _,
-                            reason,
-                        } => Box::new(FetchError::SubrequestHttpError {
-                            status_code,
-                            service: connector.id.label.clone(),
-                            reason,
-                        }),
-                        _ => inner,
-                    },
-                    Err(e) => e,
-                }
-            })?;
+                let client = http_client_factory.create(&original_subgraph_name);
+                let req = HttpRequest {
+                    http_request: req,
+                    context,
+                };
+                let res = client.oneshot(req).await.map_err(|e| {
+                    match e.downcast::<FetchError>() {
+                        // Replace the internal subgraph name with the connector label
+                        Ok(inner) => match *inner {
+                            FetchError::SubrequestHttpError {
+                                status_code,
+                                service: _,
+                                reason,
+                            } => Box::new(FetchError::SubrequestHttpError {
+                                status_code,
+                                service: connector.id.label.clone(),
+                                reason,
+                            }),
+                            _ => inner,
+                        },
+                        Err(e) => e,
+                    }
+                })?;
 
-            Ok::<_, BoxError>(ConnectorResponse {
-                result: ConnectorResult::HttpResponse(res.http_response),
-                key,
-                debug_request,
-            })
-        }
-    });
+                Ok::<_, BoxError>(ConnectorResponse {
+                    result: ConnectorResult::HttpResponse(res.http_response),
+                    key,
+                    debug_request,
+                })
+            }
+        },
+    );
 
     let responses = futures::future::try_join_all(tasks)
         .await

@@ -12,12 +12,11 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 
+use super::http::Request;
 use super::http_json_transport::make_request;
 use super::http_json_transport::HttpJsonTransportError;
 use super::plugin::ConnectorContext;
-use super::plugin::ConnectorDebugHttpRequest;
 use crate::services::connect;
-use crate::services::router::body::RouterBody;
 
 const REPRESENTATIONS_VAR: &str = "representations";
 const ENTITIES: &str = "_entities";
@@ -97,17 +96,11 @@ pub(crate) enum ResponseTypeName {
     Omitted,
 }
 
-type MakeRequestParts = (
-    http::Request<RouterBody>,
-    ResponseKey,
-    Option<ConnectorDebugHttpRequest>,
-);
-
 pub(crate) fn make_requests(
     request: connect::Request,
     connector: &Connector,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
-) -> Result<Vec<MakeRequestParts>, MakeRequestError> {
+) -> Result<Vec<Request>, MakeRequestError> {
     let request_params = match connector.entity_resolver {
         Some(EntityResolver::Explicit) => entities_from_request(connector, &request),
         Some(EntityResolver::Implicit) => entities_with_fields_from_request(connector, &request),
@@ -122,7 +115,7 @@ fn request_params_to_requests(
     request_params: Vec<ResponseKey>,
     original_request: &connect::Request,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
-) -> Result<Vec<MakeRequestParts>, MakeRequestError> {
+) -> Result<Vec<Request>, MakeRequestError> {
     let mut results = vec![];
     let context: Map<ByteString, Value> = original_request
         .context
@@ -139,7 +132,11 @@ fn request_params_to_requests(
             debug,
         )?;
 
-        results.push((request, response_key, debug_request));
+        results.push(Request {
+            request,
+            key: response_key,
+            debug_request,
+        });
     }
 
     Ok(results)
@@ -1701,8 +1698,8 @@ mod tests {
 
         assert_debug_snapshot!(requests, @r###"
         [
-            (
-                Request {
+            Request {
+                request: Request {
                     method: GET,
                     uri: http://localhost/api/path,
                     version: HTTP/1.1,
@@ -1711,7 +1708,7 @@ mod tests {
                         Empty,
                     ),
                 },
-                RootField {
+                key: RootField {
                     name: "a",
                     typename: Concrete(
                         "String",
@@ -1731,8 +1728,8 @@ mod tests {
                         this: {},
                     },
                 },
-                None,
-            ),
+                debug_request: None,
+            },
         ]
         "###);
     }
