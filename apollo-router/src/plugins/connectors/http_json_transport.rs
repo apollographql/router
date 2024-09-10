@@ -32,6 +32,8 @@ use thiserror::Error;
 use url::Url;
 
 use super::form_encoding::encode_json_as_form;
+use super::plugin::serialize_request;
+use super::plugin::ConnectorDebugHttpRequest;
 use crate::plugins::connectors::plugin::ConnectorContext;
 use crate::plugins::connectors::plugin::SelectionData;
 use crate::services::connect;
@@ -69,7 +71,8 @@ pub(crate) fn make_request(
     inputs: IndexMap<String, Value>,
     original_request: &connect::Request,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
-) -> Result<http::Request<RouterBody>, HttpJsonTransportError> {
+) -> Result<(http::Request<RouterBody>, Option<ConnectorDebugHttpRequest>), HttpJsonTransportError>
+{
     let flat_inputs = flatten_keys(&inputs);
     let uri = make_uri(
         transport.source_url.as_ref(),
@@ -117,9 +120,9 @@ pub(crate) fn make_request(
         .body(body.into())
         .map_err(HttpJsonTransportError::InvalidNewRequest)?;
 
-    if let Some(debug) = debug {
+    let debug_request = debug.as_ref().map(|_| {
         if is_form_urlencoded {
-            debug.lock().push_request(
+            serialize_request(
                 &request,
                 "form-urlencoded".to_string(),
                 form_body
@@ -131,9 +134,9 @@ pub(crate) fn make_request(
                     result: json_body,
                     errors: apply_to_errors,
                 }),
-            );
+            )
         } else {
-            debug.lock().push_request(
+            serialize_request(
                 &request,
                 "json".to_string(),
                 json_body.as_ref(),
@@ -143,11 +146,11 @@ pub(crate) fn make_request(
                     result: json_body.clone(),
                     errors: apply_to_errors,
                 }),
-            );
+            )
         }
-    }
+    });
 
-    Ok(request)
+    Ok((request, debug_request))
 }
 
 fn make_uri(
