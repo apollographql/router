@@ -1080,10 +1080,9 @@ impl FetchDependencyGraph {
     /// - Calls `on_modification` if necessary.
     fn remove_useless_nodes(&mut self) -> Result<(), FederationError> {
         let root_nodes: Vec<_> = self.root_node_by_subgraph_iter().map(|(_, i)| *i).collect();
-        for node_index in root_nodes {
-            self.remove_useless_nodes_bottom_up(node_index)?;
-        }
-        Ok(())
+        root_nodes
+            .into_iter()
+            .try_for_each(|node_index| self.remove_useless_nodes_bottom_up(node_index))
     }
 
     /// Recursively collect removable useless nodes from the bottom up.
@@ -1362,10 +1361,9 @@ impl FetchDependencyGraph {
     /// - Calls `on_modification` if necessary.
     fn merge_child_fetches_for_same_subgraph_and_path(&mut self) -> Result<(), FederationError> {
         let root_nodes: Vec<_> = self.root_node_by_subgraph_iter().map(|(_, i)| *i).collect();
-        for node_index in root_nodes {
-            self.recursive_merge_child_fetches_for_same_subgraph_and_path(node_index)?;
-        }
-        Ok(()) // done
+        root_nodes.into_iter().try_for_each(|node_index| {
+            self.recursive_merge_child_fetches_for_same_subgraph_and_path(node_index)
+        })
     }
 
     /// Recursively merge child fetches top-down
@@ -1430,11 +1428,9 @@ impl FetchDependencyGraph {
         // Note: `children_nodes` above may contain invalid nodes at this point.
         //       So, we need to re-collect the children nodes after the merge.
         let children_nodes_after_merge: Vec<_> = self.children_of(node_index).collect();
-        for c in children_nodes_after_merge {
-            self.recursive_merge_child_fetches_for_same_subgraph_and_path(c)?;
-        }
-
-        Ok(())
+        children_nodes_after_merge
+            .into_iter()
+            .try_for_each(|c| self.recursive_merge_child_fetches_for_same_subgraph_and_path(c))
     }
 
     fn merge_fetches_to_same_subgraph_and_same_inputs(&mut self) -> Result<(), FederationError> {
@@ -2051,7 +2047,7 @@ impl FetchDependencyGraph {
 
         if path.is_empty() {
             mutable_node
-                .selection_set
+                .selection_set_mut()
                 .add_selections(&merged.selection_set.selection_set)?;
         } else {
             // The merged nodes might have some @include/@skip at top-level that are already part of the path. If so,
@@ -2061,7 +2057,7 @@ impl FetchDependencyGraph {
                 &path.conditional_directives(),
             )?;
             mutable_node
-                .selection_set
+                .selection_set_mut()
                 .add_at_path(path, Some(&Arc::new(merged_selection_set)))?;
         }
 
@@ -2361,9 +2357,9 @@ impl FetchDependencyGraphNode {
     }
 
     fn remove_inputs_from_selection(&mut self) -> Result<(), FederationError> {
-        let fetch_selection_set = &mut self.selection_set;
         if let Some(inputs) = &mut self.inputs {
             self.cached_cost = None;
+            let fetch_selection_set = &mut self.selection_set;
             for (_, selection) in &inputs.selection_sets_per_parent_type {
                 fetch_selection_set.selection_set =
                     Arc::new(fetch_selection_set.selection_set.minus(selection)?);
@@ -2472,7 +2468,15 @@ impl FetchDependencyGraphNode {
         };
         let operation =
             operation_compression.compress(&self.subgraph_name, subgraph_schema, operation)?;
-        let operation_document = operation.try_into()?;
+        let operation_document = operation.try_into().map_err(|err| match err {
+            FederationError::SingleFederationError {
+                inner: SingleFederationError::InvalidGraphQL { diagnostics },
+                ..
+            } => FederationError::internal(format!(
+                "Query planning produced an invalid subgraph operation.\n{diagnostics}"
+            )),
+            _ => err,
+        })?;
 
         let node = super::PlanNode::Fetch(Box::new(super::FetchNode {
             subgraph_name: self.subgraph_name.clone(),
@@ -2755,6 +2759,7 @@ fn operation_for_entities_fetch(
             sibling_typename: None,
         })),
         Some(selection_set),
+        None,
     )?;
 
     let type_position: CompositeTypeDefinitionPosition = subgraph_schema
@@ -2866,7 +2871,8 @@ impl FetchSelectionSet {
         path_in_node: &OpPath,
         selection_set: Option<&Arc<SelectionSet>>,
     ) -> Result<(), FederationError> {
-        Arc::make_mut(&mut self.selection_set).add_at_path(path_in_node, selection_set)?;
+        let target = Arc::make_mut(&mut self.selection_set);
+        target.add_at_path(path_in_node, selection_set)?;
         // TODO: when calling this multiple times, maybe only re-compute conditions at the end?
         // Or make it lazily-initialized and computed on demand?
         self.conditions = self.selection_set.conditions()?;
@@ -2906,10 +2912,10 @@ impl FetchInputs {
     }
 
     fn add_all(&mut self, other: &Self) -> Result<(), FederationError> {
-        for selections in other.selection_sets_per_parent_type.values() {
-            self.add(selections)?;
-        }
-        Ok(())
+        other
+            .selection_sets_per_parent_type
+            .values()
+            .try_for_each(|selections| self.add(selections))
     }
 
     fn contains(&self, other: &Self) -> bool {

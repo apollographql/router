@@ -4,6 +4,106 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.54.0] - 2024-09-10
+
+## 🚀 Features
+
+### Add configurability of span attributes in logs ([Issue #5540](https://github.com/apollographql/router/issues/5540))
+
+The router supports a new  `telemetry.exporters.logging.stdout.format.json.span_attributes` option that enables you to choose a subset of all span attributes to display in your logs.
+
+When `span_attributes` is specified, the router searches for the first attribute in its input list of span attributes from the root span to the current span and attaches it to the outermost JSON object for the log event. If you set the same attribute name for different spans at different levels, the router chooses the attributes of child spans before the attributes of parent spans.
+
+
+For example, if you have spans that contains `span_attr_1` attribute and you only want to display this span attribute:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+     logging:
+       stdout:
+         enabled: true
+         format: 
+           json:
+             display_span_list: false
+             span_attributes:
+               - span_attr_1
+```
+
+Example output with a list of spans:
+
+```json
+{
+  "timestamp": "2023-10-30T14:09:34.771388Z",
+  "level": "INFO",
+  "fields": {
+    "event_attr_1": "event_attr_1",
+    "event_attr_2": "event_attr_2"
+  },
+  "target": "event_target",
+  "span_attr_1": "span_attr_1"
+}
+```
+
+To learn more, go to [`span_attributes`](https://www.apollographql.com/docs/router/configuration/telemetry/exporters/logging/stdout#span_attributes) docs.
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5867
+
+### Add a histogram metric tracking evaluated query plans ([PR #5875](https://github.com/apollographql/router/pull/5875))
+
+The router supports the new `apollo.router.query_planning.plan.evaluated_plans` histogram metric to track the number of evaluated query plans. 
+
+You can use it to help set an optimal `supergraph.query_planning.experimental_plans_limit` option that limits the number of query plans evaluated for a query and reduces the time spent planning.
+
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/5875
+
+## 🐛 Fixes
+
+### Fix Datadog sampling ([PR #5788](https://github.com/apollographql/router/pull/5788))
+
+The router's Datadog exporter has been fixed so that traces are sampled as intended.
+
+Previously, the Datadog exporter's context may not have been set correctly, causing traces to be undersampled.
+
+By [@BrynCooke](https://github.com/BrynCooke) & [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5788
+
+## 📃 Configuration
+
+###  General availability of Apollo usage report generation ([#5807](https://github.com/apollographql/router/pull/5807))
+
+The router's Apollo usage report generation feature that was previously [experimental](https://www.apollographql.com/docs/resources/product-launch-stages/#experimental-features) is now [generally available](https://www.apollographql.com/docs/resources/product-launch-stages/#general-availability).
+
+If you used its experimental configuration, you should migrate to the new configuration options:
+
+* `telemetry.apollo.experimental_apollo_metrics_reference_mode` is now `telemetry.apollo.metrics_reference_mode`
+* `telemetry.apollo.experimental_apollo_signature_normalization_algorithm` is now `telemetry.apollo.signature_normalization_algorithm`
+* `experimental_apollo_metrics_generation_mode` has been removed because the Rust implementation (the default since router v1.49.0) is generating reports identical to the previous router-bridge implementation
+
+The experimental configuration options are now deprecated. They are functional but will log warnings.
+
+By [@bonnici](https://github.com/bonnici) in https://github.com/apollographql/router/pull/5807
+
+### Helm: Enable easier Kubernetes debugging with heaptrack ([Issue #5789](https://github.com/apollographql/router/issues/5789))
+
+The router's Helm chart has been updated to help make debugging with heaptrack easier.
+
+Previously, when debugging multiple Pods with heaptrack, all Pods wrote to the same file, so they'd overwrite each others' results. This issue has been fixed by adding a `hostname` to each output data file from heaptrack.
+
+Also, the Helm chart now supports a `restartPolicy` that enables you to configure a Pod's [restart policy](https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#container-restarts). The default value of `restartPolicy` is `Always` (the same as the Kubernetes default).
+
+
+By [@cyberhck](https://github.com/cyberhck) in https://github.com/apollographql/router/pull/5850
+
+## 📚 Documentation
+
+### Document OpenTelemetry information for operation limits ([PR #5884](https://github.com/apollographql/router/pull/5884))
+
+The router's docs for operation limits now describe [using telemetry to set operation limits](https://www.apollographql.com/docs/router/configuration/operation-limits#using-telemetry-to-set-operation-limits) and [logging values](https://www.apollographql.com/docs/router/configuration/operation-limits#logging-values).
+
+By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/apollographql/router/pull/5884
+
+
+
 # [1.53.0] - 2024-08-28
 
 > [!IMPORTANT]

@@ -113,32 +113,6 @@ expression: "&schema"
       ],
       "type": "string"
     },
-    "ApolloMetricsGenerationMode": {
-      "description": "Apollo usage report signature and referenced field generation modes.",
-      "oneOf": [
-        {
-          "description": "Use the new Rust-based implementation.",
-          "enum": [
-            "new"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Use the old JavaScript-based implementation.",
-          "enum": [
-            "legacy"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Use Rust-based and Javascript-based implementations side by side, logging warnings if the implementations disagree.",
-          "enum": [
-            "both"
-          ],
-          "type": "string"
-        }
-      ]
-    },
     "ApolloMetricsReferenceMode": {
       "description": "Apollo usage report reference generation modes.",
       "oneOf": [
@@ -1766,14 +1740,6 @@ expression: "&schema"
           "$ref": "#/definitions/ErrorsConfiguration",
           "description": "#/definitions/ErrorsConfiguration"
         },
-        "experimental_apollo_metrics_reference_mode": {
-          "$ref": "#/definitions/ApolloMetricsReferenceMode",
-          "description": "#/definitions/ApolloMetricsReferenceMode"
-        },
-        "experimental_apollo_signature_normalization_algorithm": {
-          "$ref": "#/definitions/ApolloSignatureNormalizationAlgorithm",
-          "description": "#/definitions/ApolloSignatureNormalizationAlgorithm"
-        },
         "experimental_local_field_metrics": {
           "default": false,
           "description": "Enable field metrics that are generated without FTV1 to be sent to Apollo Studio.",
@@ -1796,6 +1762,10 @@ expression: "&schema"
           "$ref": "#/definitions/SamplerOption",
           "description": "#/definitions/SamplerOption"
         },
+        "metrics_reference_mode": {
+          "$ref": "#/definitions/ApolloMetricsReferenceMode",
+          "description": "#/definitions/ApolloMetricsReferenceMode"
+        },
         "send_headers": {
           "$ref": "#/definitions/ForwardHeaders",
           "description": "#/definitions/ForwardHeaders"
@@ -1803,6 +1773,10 @@ expression: "&schema"
         "send_variable_values": {
           "$ref": "#/definitions/ForwardValues",
           "description": "#/definitions/ForwardValues"
+        },
+        "signature_normalization_algorithm": {
+          "$ref": "#/definitions/ApolloSignatureNormalizationAlgorithm",
+          "description": "#/definitions/ApolloSignatureNormalizationAlgorithm"
         }
       },
       "type": "object"
@@ -3593,6 +3567,32 @@ expression: "&schema"
         }
       },
       "type": "object"
+    },
+    "IntrospectionMode": {
+      "description": "Which implementation of GraphQL schema introspection to use, if enabled",
+      "oneOf": [
+        {
+          "description": "Use the new Rust-based implementation.",
+          "enum": [
+            "new"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Use the old JavaScript-based implementation.",
+          "enum": [
+            "legacy"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Use Rust-based and Javascript-based implementations side by side, logging warnings if the implementations disagree.",
+          "enum": [
+            "both"
+          ],
+          "type": "string"
+        }
+      ]
     },
     "InvalidationEndpointConfig": {
       "additionalProperties": false,
@@ -8151,6 +8151,15 @@ expression: "&schema"
                 "display_trace_id": {
                   "$ref": "#/definitions/DisplayTraceIdFormat",
                   "description": "#/definitions/DisplayTraceIdFormat"
+                },
+                "span_attributes": {
+                  "default": [],
+                  "description": "List of span attributes to attach to the json log object",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array",
+                  "uniqueItems": true
                 }
               },
               "type": "object"
@@ -8302,13 +8311,13 @@ expression: "&schema"
       "$ref": "#/definitions/DemandControlConfig",
       "description": "#/definitions/DemandControlConfig"
     },
-    "experimental_apollo_metrics_generation_mode": {
-      "$ref": "#/definitions/ApolloMetricsGenerationMode",
-      "description": "#/definitions/ApolloMetricsGenerationMode"
-    },
     "experimental_chaos": {
       "$ref": "#/definitions/Chaos",
       "description": "#/definitions/Chaos"
+    },
+    "experimental_introspection_mode": {
+      "$ref": "#/definitions/IntrospectionMode",
+      "description": "#/definitions/IntrospectionMode"
     },
     "experimental_query_planner_mode": {
       "$ref": "#/definitions/QueryPlannerMode",

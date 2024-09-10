@@ -1,5 +1,6 @@
 //! Calls out to nodejs query planner
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fmt::Write;
@@ -7,6 +8,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use apollo_compiler::ast;
+use apollo_compiler::execution::InputCoercionError;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_federation::error::FederationError;
@@ -16,20 +18,19 @@ use futures::future::BoxFuture;
 use opentelemetry_api::metrics::MeterProvider as _;
 use opentelemetry_api::metrics::ObservableGauge;
 use opentelemetry_api::KeyValue;
+use router_bridge::introspect::IntrospectionError;
 use router_bridge::planner::PlanOptions;
 use router_bridge::planner::PlanSuccess;
 use router_bridge::planner::Planner;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
-use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 use tower::Service;
 
 use super::PlanNode;
 use super::QueryKey;
 use crate::apollo_studio_interop::generate_usage_reporting;
-use crate::apollo_studio_interop::UsageReportingComparisonResult;
-use crate::configuration::ApolloMetricsGenerationMode;
+use crate::configuration::IntrospectionMode;
 use crate::configuration::QueryPlannerMode;
 use crate::error::PlanErrors;
 use crate::error::QueryPlannerError;
@@ -297,8 +298,6 @@ impl PlannerMode {
                 let plan = result?;
 
                 // Dummy value overwritten below in `BrigeQueryPlanner::plan`
-                // `Configuration::validate` ensures that we only take this path
-                // when we also have `ApolloMetricsGenerationMode::New``
                 let usage_reporting = UsageReporting {
                     stats_report_key: Default::default(),
                     referenced_fields_by_type: Default::default(),
@@ -308,6 +307,7 @@ impl PlannerMode {
                 if let Some(node) = &mut root_node {
                     init_query_plan_root_node(node)?;
                 }
+
                 Ok(PlanSuccess {
                     usage_reporting,
                     data: QueryPlanResult {
@@ -315,6 +315,11 @@ impl PlannerMode {
                         query_plan: QueryPlan {
                             node: root_node.map(Arc::new),
                         },
+                        evaluated_plan_count: plan
+                            .statistics
+                            .evaluated_plan_count
+                            .clone()
+                            .into_inner() as u64,
                     },
                 })
             }
@@ -484,19 +489,226 @@ impl BridgeQueryPlanner {
         })
     }
 
-    async fn introspection(&self, query: String) -> Result<QueryPlannerContent, QueryPlannerError> {
-        match self.introspection.as_ref() {
-            Some(introspection) => {
-                let response = introspection
-                    .execute(query)
+    async fn introspection(
+        &self,
+        key: QueryKey,
+        doc: ParsedDocument,
+    ) -> Result<QueryPlannerContent, QueryPlannerError> {
+        let Some(introspection) = &self.introspection else {
+            return Ok(QueryPlannerContent::IntrospectionDisabled);
+        };
+        let mode = self.configuration.experimental_introspection_mode;
+        let response = if mode != IntrospectionMode::New && doc.executable.operations.len() > 1 {
+            // TODO: add an operation_name parameter to router-bridge to fix this?
+            let error = graphql::Error::builder()
+                .message(
+                    "Schema introspection is currently not supported \
+                     with multiple operations in the same document",
+                )
+                .extension_code("INTROSPECTION_WITH_MULTIPLE_OPERATIONS")
+                .build();
+            return Ok(QueryPlannerContent::Response {
+                response: Box::new(graphql::Response::builder().error(error).build()),
+            });
+        } else {
+            match mode {
+                IntrospectionMode::Legacy => introspection
+                    .execute(key.filtered_query)
                     .await
-                    .map_err(QueryPlannerError::Introspection)?;
-
-                Ok(QueryPlannerContent::Response {
-                    response: Box::new(response),
-                })
+                    .map_err(QueryPlannerError::Introspection)?,
+                IntrospectionMode::New => self.rust_introspection(&key, &doc)?,
+                IntrospectionMode::Both => {
+                    let rust_result = match self.rust_introspection(&key, &doc) {
+                        Ok(response) => {
+                            if response.errors.is_empty() {
+                                Ok(response)
+                            } else {
+                                Err(QueryPlannerError::Introspection(IntrospectionError {
+                                    message: Some(
+                                        response
+                                            .errors
+                                            .into_iter()
+                                            .map(|e| e.to_string())
+                                            .collect::<Vec<_>>()
+                                            .join(", "),
+                                    ),
+                                }))
+                            }
+                        }
+                        Err(e) => Err(e),
+                    };
+                    let js_result = introspection
+                        .execute(key.filtered_query)
+                        .await
+                        .map_err(QueryPlannerError::Introspection);
+                    self.compare_introspection_responses(js_result.clone(), rust_result);
+                    js_result?
+                }
             }
-            None => Ok(QueryPlannerContent::IntrospectionDisabled),
+        };
+
+        Ok(QueryPlannerContent::Response {
+            response: Box::new(response),
+        })
+    }
+
+    fn rust_introspection(
+        &self,
+        key: &QueryKey,
+        doc: &ParsedDocument,
+    ) -> Result<graphql::Response, QueryPlannerError> {
+        let schema = self.schema.api_schema();
+        let operation = doc.get_operation(key.operation_name.as_deref())?;
+        let variable_values = Default::default();
+        let variable_values =
+            apollo_compiler::execution::coerce_variable_values(schema, operation, &variable_values)
+                .map_err(|e| {
+                    let message = match &e {
+                        InputCoercionError::SuspectedValidationBug(e) => &e.message,
+                        InputCoercionError::ValueError { message, .. } => message,
+                    };
+                    QueryPlannerError::Introspection(IntrospectionError {
+                        message: Some(message.clone()),
+                    })
+                })?;
+        let response = apollo_compiler::execution::execute_introspection_only_query(
+            schema,
+            &doc.executable,
+            operation,
+            &variable_values,
+        );
+        Ok(response.into())
+    }
+
+    fn compare_introspection_responses(
+        &self,
+        mut js_result: Result<graphql::Response, QueryPlannerError>,
+        mut rust_result: Result<graphql::Response, QueryPlannerError>,
+    ) {
+        let is_matched;
+        match (&mut js_result, &mut rust_result) {
+            (Err(_), Err(_)) => {
+                is_matched = true;
+            }
+            (Err(err), Ok(_)) => {
+                is_matched = false;
+                tracing::warn!("JS introspection error: {err}")
+            }
+            (Ok(_), Err(err)) => {
+                is_matched = false;
+                tracing::warn!("Rust introspection error: {err}")
+            }
+            (Ok(js_response), Ok(rust_response)) => {
+                if let (Some(js_data), Some(rust_data)) =
+                    (&mut js_response.data, &mut rust_response.data)
+                {
+                    json_sort_arrays(js_data);
+                    json_sort_arrays(rust_data);
+                }
+                is_matched = js_response.data == rust_response.data;
+                if is_matched {
+                    tracing::debug!("Introspection match! 🎉")
+                } else {
+                    tracing::debug!("Introspection mismatch");
+                    tracing::trace!("Introspection diff:\n{}", {
+                        let rust = rust_response
+                            .data
+                            .as_ref()
+                            .map(|d| serde_json::to_string_pretty(&d).unwrap())
+                            .unwrap_or_default();
+                        let js = js_response
+                            .data
+                            .as_ref()
+                            .map(|d| serde_json::to_string_pretty(&d).unwrap())
+                            .unwrap_or_default();
+                        let diff = similar::TextDiff::from_lines(&js, &rust);
+                        diff.unified_diff()
+                            .context_radius(10)
+                            .header("JS", "Rust")
+                            .to_string()
+                    })
+                }
+            }
+        }
+
+        u64_counter!(
+            "apollo.router.operations.introspection.both",
+            "Comparing JS v.s. Rust introspection",
+            1,
+            "generation.is_matched" = is_matched,
+            "generation.js_error" = js_result.is_err(),
+            "generation.rust_error" = rust_result.is_err()
+        );
+
+        fn json_sort_arrays(value: &mut Value) {
+            match value {
+                Value::Array(array) => {
+                    for item in array.iter_mut() {
+                        json_sort_arrays(item)
+                    }
+                    array.sort_by(json_compare)
+                }
+                Value::Object(object) => {
+                    for (_key, value) in object {
+                        json_sort_arrays(value)
+                    }
+                }
+                Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+            }
+        }
+
+        fn json_compare(a: &Value, b: &Value) -> Ordering {
+            match (a, b) {
+                (Value::Null, Value::Null) => Ordering::Equal,
+                (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
+                (Value::Number(a), Value::Number(b)) => {
+                    a.as_f64().unwrap().total_cmp(&b.as_f64().unwrap())
+                }
+                (Value::String(a), Value::String(b)) => a.cmp(b),
+                (Value::Array(a), Value::Array(b)) => iter_cmp(a, b, json_compare),
+                (Value::Object(a), Value::Object(b)) => {
+                    iter_cmp(a, b, |(key_a, a), (key_b, b)| {
+                        debug_assert_eq!(key_a, key_b); // Response object keys are in selection set order
+                        json_compare(a, b)
+                    })
+                }
+                _ => json_discriminant(a).cmp(&json_discriminant(b)),
+            }
+        }
+
+        // TODO: use `Iterator::cmp_by` when available:
+        // https://doc.rust-lang.org/std/iter/trait.Iterator.html#method.cmp_by
+        // https://github.com/rust-lang/rust/issues/64295
+        fn iter_cmp<T>(
+            a: impl IntoIterator<Item = T>,
+            b: impl IntoIterator<Item = T>,
+            cmp: impl Fn(T, T) -> Ordering,
+        ) -> Ordering {
+            use itertools::Itertools;
+            for either_or_both in a.into_iter().zip_longest(b) {
+                match either_or_both {
+                    itertools::EitherOrBoth::Both(a, b) => {
+                        let ordering = cmp(a, b);
+                        if ordering != Ordering::Equal {
+                            return ordering;
+                        }
+                    }
+                    itertools::EitherOrBoth::Left(_) => return Ordering::Less,
+                    itertools::EitherOrBoth::Right(_) => return Ordering::Greater,
+                }
+            }
+            Ordering::Equal
+        }
+
+        fn json_discriminant(value: &Value) -> u8 {
+            match value {
+                Value::Null => 0,
+                Value::Bool(_) => 1,
+                Value::Number(_) => 2,
+                Value::String(_) => 3,
+                Value::Array(_) => 4,
+                Value::Object(_) => 5,
+            }
         }
     }
 
@@ -530,138 +742,48 @@ impl BridgeQueryPlanner {
             )
             .await?;
 
-        // the `statsReportKey` field should match the original query instead of the filtered query, to index them all under the same query
-        let operation_signature = if matches!(
-            self.configuration
-                .experimental_apollo_metrics_generation_mode,
-            ApolloMetricsGenerationMode::Legacy | ApolloMetricsGenerationMode::Both
-        ) && original_query != filtered_query
-        {
-            Some(
-                self.planner
-                    .js_for_api_schema_and_introspection_and_operation_signature()
-                    .operation_signature(original_query.clone(), operation.clone())
-                    .await
-                    .map_err(QueryPlannerError::RouterBridgeError)?,
-            )
-        } else {
-            None
-        };
-
         match plan_success {
             PlanSuccess {
                 data:
                     QueryPlanResult {
                         query_plan: QueryPlan { node: Some(node) },
                         formatted_query_plan,
+                        evaluated_plan_count,
                     },
                 mut usage_reporting,
             } => {
-                if let Some(sig) = operation_signature {
-                    usage_reporting.stats_report_key = sig;
-                }
+                // If the query is filtered, we want to generate the signature using the original query and generate the
+                // reference using the filtered query. To do this, we need to re-parse the original query here.
+                let signature_doc = if original_query != filtered_query {
+                    Query::parse_document(
+                        &original_query,
+                        operation.clone().as_deref(),
+                        &self.schema,
+                        &self.configuration,
+                    )
+                    .unwrap_or(doc.clone())
+                } else {
+                    doc.clone()
+                };
 
-                if matches!(
-                    self.configuration
-                        .experimental_apollo_metrics_generation_mode,
-                    ApolloMetricsGenerationMode::New | ApolloMetricsGenerationMode::Both
-                ) {
-                    // If the query is filtered, we want to generate the signature using the original query and generate the
-                    // reference using the filtered query. To do this, we need to re-parse the original query here.
-                    let signature_doc = if original_query != filtered_query {
-                        Query::parse_document(
-                            &original_query,
-                            operation.clone().as_deref(),
-                            &self.schema,
-                            &self.configuration,
-                        )
-                        .unwrap_or(doc.clone())
-                    } else {
-                        doc.clone()
-                    };
+                u64_histogram!(
+                    "apollo.router.query_planning.plan.evaluated_plans",
+                    "Number of query plans evaluated for a query before choosing the best one",
+                    evaluated_plan_count
+                );
 
-                    let generated_usage_reporting = generate_usage_reporting(
-                        &signature_doc.executable,
-                        &doc.executable,
-                        &operation,
-                        self.schema.supergraph_schema(),
-                        &self.signature_normalization_algorithm,
-                    );
+                let generated_usage_reporting = generate_usage_reporting(
+                    &signature_doc.executable,
+                    &doc.executable,
+                    &operation,
+                    self.schema.supergraph_schema(),
+                    &self.signature_normalization_algorithm,
+                );
 
-                    // Ignore comparison if the operation name is an empty string since there is a known issue where
-                    // router behaviour is incorrect in that case, and it also generates incorrect usage reports.
-                    // https://github.com/apollographql/router/issues/4837
-                    let is_empty_operation_name = operation.map_or(false, |s| s.is_empty());
-                    let is_in_both_metrics_mode = matches!(
-                        self.configuration
-                            .experimental_apollo_metrics_generation_mode,
-                        ApolloMetricsGenerationMode::Both
-                    );
-                    if !is_empty_operation_name && is_in_both_metrics_mode {
-                        let comparison_result = generated_usage_reporting.compare(&usage_reporting);
-
-                        if matches!(
-                            comparison_result,
-                            UsageReportingComparisonResult::StatsReportKeyNotEqual
-                                | UsageReportingComparisonResult::BothNotEqual
-                        ) {
-                            u64_counter!(
-                                "apollo.router.operations.telemetry.studio.signature",
-                                "The match status of the Apollo reporting signature generated by the JS implementation vs the Rust implementation",
-                                1,
-                                "generation.is_matched" = false
-                            );
-                            tracing::debug!(
-                                "Different signatures generated between router and router-bridge.\nQuery:\n{}\nRouter:\n{}\nRouter Bridge:\n{}",
-                                filtered_query,
-                                generated_usage_reporting.result.stats_report_key,
-                                usage_reporting.stats_report_key,
-                            );
-                        } else {
-                            u64_counter!(
-                                "apollo.router.operations.telemetry.studio.signature",
-                                "The match status of the Apollo reporting signature generated by the JS implementation vs the Rust implementation",
-                                1,
-                                "generation.is_matched" = true
-                            );
-                        }
-
-                        if matches!(
-                            comparison_result,
-                            UsageReportingComparisonResult::ReferencedFieldsNotEqual
-                                | UsageReportingComparisonResult::BothNotEqual
-                        ) {
-                            u64_counter!(
-                                "apollo.router.operations.telemetry.studio.references",
-                                "The match status of the Apollo reporting references generated by the JS implementation vs the Rust implementation",
-                                1,
-                                "generation.is_matched" = false
-                            );
-                            tracing::debug!(
-                                "Different referenced fields generated between router and router-bridge.\nQuery:\n{}\nRouter:\n{:?}\nRouter Bridge:\n{:?}",
-                                filtered_query,
-                                generated_usage_reporting.result.referenced_fields_by_type,
-                                usage_reporting.referenced_fields_by_type,
-                            );
-                        } else {
-                            u64_counter!(
-                                "apollo.router.operations.telemetry.studio.references",
-                                "The match status of the Apollo reporting references generated by the JS implementation vs the Rust implementation",
-                                1,
-                                "generation.is_matched" = true
-                            );
-                        }
-                    } else if matches!(
-                        self.configuration
-                            .experimental_apollo_metrics_generation_mode,
-                        ApolloMetricsGenerationMode::New
-                    ) {
-                        usage_reporting.stats_report_key =
-                            generated_usage_reporting.result.stats_report_key;
-                        usage_reporting.referenced_fields_by_type =
-                            generated_usage_reporting.result.referenced_fields_by_type;
-                    }
-                }
+                usage_reporting.stats_report_key =
+                    generated_usage_reporting.result.stats_report_key;
+                usage_reporting.referenced_fields_by_type =
+                    generated_usage_reporting.result.referenced_fields_by_type;
 
                 Ok(QueryPlannerContent::Plan {
                     plan: Arc::new(super::QueryPlan {
@@ -681,13 +803,9 @@ impl BridgeQueryPlanner {
                         query_plan: QueryPlan { node: None },
                         ..
                     },
-                mut usage_reporting,
+                usage_reporting,
             } => {
                 failfast_debug!("empty query plan");
-                if let Some(sig) = operation_signature {
-                    usage_reporting.stats_report_key = sig;
-                }
-
                 Err(QueryPlannerError::EmptyPlan(usage_reporting))
             }
         }
@@ -877,42 +995,83 @@ impl BridgeQueryPlanner {
             selections.unauthorized.paths = unauthorized_paths;
         }
 
-        if selections.contains_introspection() {
-            // It can happen if you have a statically skipped query like { get @skip(if: true) { id name }} because it will be statically filtered with {}
-            if selections
-                .operations
-                .first()
-                .map(|op| op.selection_set.is_empty())
-                .unwrap_or_default()
-            {
+        if selections
+            .operation(key.operation_name.as_deref())
+            .is_some_and(|op| op.selection_set.is_empty())
+        {
+            // All selections have @skip(true) or @include(false)
+            // Return an empty response now to avoid dealing with an empty query plan later
+            return Ok(QueryPlannerContent::Response {
+                response: Box::new(
+                    graphql::Response::builder()
+                        .data(Value::Object(Default::default()))
+                        .build(),
+                ),
+            });
+        }
+
+        let operation = doc
+            .executable
+            .operations
+            .get(key.operation_name.as_deref())
+            .ok();
+        let mut has_root_typename = false;
+        let mut has_schema_introspection = false;
+        let mut has_other_root_fields = false;
+        if let Some(operation) = operation {
+            for field in operation.root_fields(&doc.executable) {
+                match field.name.as_str() {
+                    "__typename" => has_root_typename = true,
+                    "__schema" | "__type" if operation.is_query() => {
+                        has_schema_introspection = true
+                    }
+                    _ => has_other_root_fields = true,
+                }
+            }
+            if has_root_typename && !has_schema_introspection && !has_other_root_fields {
+                // Fast path for __typename alone
+                if operation
+                    .selection_set
+                    .selections
+                    .iter()
+                    .all(|sel| sel.as_field().is_some_and(|f| f.name == "__typename"))
+                {
+                    let root_type_name: serde_json_bytes::ByteString =
+                        operation.object_type().as_str().into();
+                    let data = Value::Object(
+                        operation
+                            .root_fields(&doc.executable)
+                            .filter(|field| field.name == "__typename")
+                            .map(|field| {
+                                (
+                                    field.response_key().as_str().into(),
+                                    Value::String(root_type_name.clone()),
+                                )
+                            })
+                            .collect(),
+                    );
+                    return Ok(QueryPlannerContent::Response {
+                        response: Box::new(graphql::Response::builder().data(data).build()),
+                    });
+                } else {
+                    // fragments might use @include or @skip
+                }
+            }
+        } else {
+            // Should be unreachable as QueryAnalysisLayer would have returned an error
+        }
+
+        if has_schema_introspection {
+            if has_other_root_fields {
+                let error = graphql::Error::builder()
+                    .message("Mixed queries with both schema introspection and concrete fields are not supported")
+                    .extension_code("MIXED_INTROSPECTION")
+                    .build();
                 return Ok(QueryPlannerContent::Response {
-                    response: Box::new(
-                        graphql::Response::builder()
-                            .data(Value::Object(Default::default()))
-                            .build(),
-                    ),
+                    response: Box::new(graphql::Response::builder().error(error).build()),
                 });
             }
-            // If we have only one operation containing only the root field `__typename`
-            // (possibly aliased or repeated). (This does mean we fail to properly support
-            // {"query": "query A {__typename} query B{somethingElse}", "operationName":"A"}.)
-            if let Some(output_keys) = selections
-                .operations
-                .first()
-                .and_then(|op| op.is_only_typenames_with_output_keys())
-            {
-                let operation_name = selections.operations[0].kind().to_string();
-                let data: Value = Value::Object(Map::from_iter(
-                    output_keys
-                        .into_iter()
-                        .map(|key| (key, Value::String(operation_name.clone().into()))),
-                ));
-                return Ok(QueryPlannerContent::Response {
-                    response: Box::new(graphql::Response::builder().data(data).build()),
-                });
-            } else {
-                return self.introspection(key.original_query).await;
-            }
+            return self.introspection(key, doc).await;
         }
 
         if key.filtered_query != key.original_query {
@@ -949,6 +1108,7 @@ impl BridgeQueryPlanner {
 pub struct QueryPlanResult {
     pub(super) formatted_query_plan: Option<Arc<String>>,
     pub(super) query_plan: QueryPlan,
+    pub(super) evaluated_plan_count: u64,
 }
 
 impl QueryPlanResult {
@@ -1699,5 +1859,24 @@ mod tests {
             "init.error_kind" = "internal",
             "init.is_success" = false
         );
+    }
+
+    #[test(tokio::test)]
+    async fn test_evaluated_plans_histogram() {
+        async {
+            let _ = plan(
+                EXAMPLE_SCHEMA,
+                include_str!("testdata/query.graphql"),
+                include_str!("testdata/query.graphql"),
+                None,
+                PlanOptions::default(),
+            )
+            .await
+            .unwrap();
+
+            assert_histogram_exists!("apollo.router.query_planning.plan.evaluated_plans", u64);
+        }
+        .with_metrics()
+        .await;
     }
 }
