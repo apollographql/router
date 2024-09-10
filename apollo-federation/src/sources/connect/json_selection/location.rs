@@ -286,7 +286,16 @@ mod tests {
     use insta::assert_snapshot;
 
     use super::*;
+    use crate::sources::connect::json_selection::lit_expr::LitExpr;
+    use crate::sources::connect::json_selection::Alias;
+    use crate::sources::connect::json_selection::KnownVariable;
+    use crate::sources::connect::json_selection::MethodArgs;
+    use crate::sources::connect::json_selection::NamedSelection;
+    use crate::sources::connect::json_selection::PathList;
     use crate::sources::connect::JSONSelection;
+    use crate::sources::connect::Key;
+    use crate::sources::connect::PathSelection;
+    use crate::sources::connect::SubSelection;
 
     #[test]
     fn test_merge_ranges() {
@@ -294,6 +303,50 @@ mod tests {
         assert_eq!(merge_ranges(Some((0, 1)), None), Some((0, 1)));
         assert_eq!(merge_ranges(None, Some((0, 1))), Some((0, 1)));
         assert_eq!(merge_ranges(Some((0, 1)), Some((1, 2))), Some((0, 2)));
+    }
+
+    #[test]
+    fn test_arrow_path_ranges() {
+        let (remainder, parsed) =
+            JSONSelection::parse("  __typename: @ -> echo ( \"Frog\" , )  ").unwrap();
+
+        assert_eq!(remainder, "");
+
+        assert_eq!(
+            parsed,
+            JSONSelection::Named(SubSelection {
+                selections: vec![NamedSelection::Path(
+                    Alias {
+                        name: WithRange::new(Key::field("__typename"), Some((2, 12))),
+                        range: Some((2, 13)),
+                    },
+                    PathSelection {
+                        path: WithRange::new(
+                            PathList::Var(
+                                WithRange::new(KnownVariable::AtSign, Some((14, 15))),
+                                WithRange::new(
+                                    PathList::Method(
+                                        WithRange::new("echo".to_string(), Some((19, 23))),
+                                        Some(MethodArgs {
+                                            args: vec![WithRange::new(
+                                                LitExpr::String("Frog".to_string()),
+                                                Some((26, 32)),
+                                            )],
+                                            range: Some((24, 36)),
+                                        }),
+                                        WithRange::new(PathList::Empty, None),
+                                    ),
+                                    Some((16, 36))
+                                ),
+                            ),
+                            Some((14, 36))
+                        ),
+                    },
+                ),],
+                star: None,
+                range: Some((2, 36)),
+            }),
+        );
     }
 
     #[test]

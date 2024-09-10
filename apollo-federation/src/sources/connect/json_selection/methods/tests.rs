@@ -690,14 +690,13 @@ fn test_string_methods() {
     );
 
     assert_eq!(
-        // TODO Check this
-        selection!("$->get($->echo(-5)->mul(2))").apply_to(&json!("oyez")),
+        selection!("$->get($->echo(-5)->mul(2)  )").apply_to(&json!("oyez")),
         (
             None,
             vec![ApplyToError::from_json(&json!({
                 "message": "Method ->get(-10) string index out of bounds",
                 "path": [],
-                "range": [7, 20],
+                "range": [7, 26],
             }))]
         ),
     );

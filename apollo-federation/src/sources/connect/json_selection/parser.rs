@@ -396,7 +396,14 @@ impl PathList {
             {
                 let dollar_range = dollar.range();
                 let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
-                let full_range = merge_ranges(dollar_range, rest.range());
+                let full_range = merge_ranges(
+                    dollar_range,
+                    if matches!(rest.node(), Self::Empty) {
+                        None
+                    } else {
+                        rest.range()
+                    },
+                );
                 return if let Some(var) = opt_var {
                     let full_name = format!("{}{}", dollar.node(), var.as_str());
                     if let Some(known_var) = KnownVariable::from_str(full_name.as_str()) {
@@ -427,7 +434,14 @@ impl PathList {
                 tuple((spaces_or_comments, parsed_span("@"), spaces_or_comments))(input)
             {
                 let (input, rest) = Self::parse_with_depth(suffix, depth + 1)?;
-                let full_range = merge_ranges(at.range(), rest.range());
+                let full_range = merge_ranges(
+                    at.range(),
+                    if matches!(rest.node(), Self::Empty) {
+                        None
+                    } else {
+                        rest.range()
+                    },
+                );
                 // Because we include the $ in the variable name for ordinary
                 // variables, we have the freedom to store other symbols as
                 // special variables, such as @ for the current value. In fact,
@@ -449,7 +463,14 @@ impl PathList {
                         nom::error::Error::new(input, nom::error::ErrorKind::IsNot),
                     )),
                     _ => {
-                        let full_range = merge_ranges(key.range(), rest.range());
+                        let full_range = merge_ranges(
+                            key.range(),
+                            if matches!(rest.node(), Self::Empty) {
+                                None
+                            } else {
+                                rest.range()
+                            },
+                        );
                         Ok((input, WithRange::new(Self::Key(key, rest), full_range)))
                     }
                 };
@@ -468,7 +489,14 @@ impl PathList {
         {
             let (input, rest) = Self::parse_with_depth(suffix, depth + 1)?;
             let dot_key_range = merge_ranges(dot.range(), key.range());
-            let full_range = merge_ranges(dot_key_range, rest.range());
+            let full_range = merge_ranges(
+                dot_key_range,
+                if matches!(rest.node(), Self::Empty) {
+                    None
+                } else {
+                    rest.range()
+                },
+            );
             return Ok((input, WithRange::new(Self::Key(key, rest), full_range)));
         }
 
@@ -492,7 +520,18 @@ impl PathList {
         ))(input)
         {
             let (input, rest) = Self::parse_with_depth(suffix, depth + 1)?;
-            let full_range = merge_ranges(arrow.range(), rest.range());
+            let full_range = merge_ranges(
+                arrow.range(),
+                if matches!(rest.node(), Self::Empty) {
+                    if let Some(args) = args.as_ref() {
+                        args.range()
+                    } else {
+                        method.range()
+                    }
+                } else {
+                    rest.range()
+                },
+            );
             return Ok((
                 input,
                 WithRange::new(Self::Method(method, args, rest), full_range),
