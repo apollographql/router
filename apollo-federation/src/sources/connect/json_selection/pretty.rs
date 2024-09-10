@@ -9,6 +9,7 @@ use itertools::Itertools;
 
 use super::lit_expr::LitExpr;
 use super::location::Parsed;
+use super::location::Ranged;
 use crate::sources::connect::json_selection::JSONSelection;
 use crate::sources::connect::json_selection::MethodArgs;
 use crate::sources::connect::json_selection::NamedSelection;

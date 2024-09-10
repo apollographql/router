@@ -22,6 +22,7 @@ use super::helpers::spaces_or_comments;
 use super::location::merge_ranges;
 use super::location::parsed_span;
 use super::location::Parsed;
+use super::location::Ranged;
 use super::location::Span;
 use super::parser::parse_string_literal;
 use super::parser::Key;

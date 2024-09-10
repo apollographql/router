@@ -14,6 +14,7 @@ use super::immutable::InputPath;
 use super::known_var::KnownVariable;
 use super::lit_expr::LitExpr;
 use super::location::Parsed;
+use super::location::Ranged;
 use super::methods::lookup_arrow_method;
 use super::parser::*;
 

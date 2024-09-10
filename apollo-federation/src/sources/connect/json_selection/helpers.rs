@@ -73,6 +73,7 @@ pub fn json_type_name(v: &JSON) -> &str {
 
 #[cfg(test)]
 mod tests {
+    use super::super::location::Ranged;
     use super::*;
 
     #[test]

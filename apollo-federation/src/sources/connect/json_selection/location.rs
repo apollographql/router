@@ -5,6 +5,11 @@ use nom_locate::LocatedSpan;
 
 pub type Span<'a> = LocatedSpan<&'a str>;
 
+pub trait Ranged<T> {
+    fn node(&self) -> &T;
+    fn range(&self) -> Option<(usize, usize)>;
+}
+
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct Parsed<T> {
     node: Box<T>,
@@ -59,8 +64,18 @@ where
     }
 }
 
+impl<T> Ranged<T> for Parsed<T> {
+    fn node(&self) -> &T {
+        self.node.as_ref()
+    }
+
+    fn range(&self) -> Option<(usize, usize)> {
+        self.range
+    }
+}
+
 impl<T> Parsed<T> {
-    pub(super) fn new(node: T, range: Option<(usize, usize)>) -> Self {
+    pub(crate) fn new(node: T, range: Option<(usize, usize)>) -> Self {
         Self {
             node: Box::new(node),
             range,
@@ -73,14 +88,6 @@ impl<T> Parsed<T> {
 
     pub(crate) fn take_as<U>(self, f: impl FnOnce(T) -> U) -> Parsed<U> {
         Parsed::new(f(*self.node), self.range)
-    }
-
-    pub(crate) fn node(&self) -> &T {
-        self.node.as_ref()
-    }
-
-    pub(crate) fn range(&self) -> Option<(usize, usize)> {
-        self.range
     }
 }
 
@@ -105,6 +112,7 @@ pub(super) mod strip_ranges {
     use super::super::lit_expr::LitExpr;
     use super::super::parser::*;
     use super::Parsed;
+    use super::Ranged;
 
     /// Including location information in the AST introduces unnecessary
     /// varation in many tests. StripLoc is a test-only trait allowing

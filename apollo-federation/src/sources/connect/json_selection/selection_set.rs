@@ -28,6 +28,7 @@ use multimap::MultiMap;
 use super::known_var::KnownVariable;
 use super::lit_expr::LitExpr;
 use super::location::Parsed;
+use super::location::Ranged;
 use super::parser::MethodArgs;
 use super::parser::PathList;
 use crate::sources::connect::json_selection::Alias;

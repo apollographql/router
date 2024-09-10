@@ -22,6 +22,7 @@ use super::lit_expr::LitExpr;
 use super::location::merge_ranges;
 use super::location::parsed_span;
 use super::location::Parsed;
+use super::location::Ranged;
 use super::location::Span;
 
 pub(crate) trait ExternalVarPaths {
@@ -246,6 +247,16 @@ impl ExternalVarPaths for NamedSelection {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct PathSelection {
     pub(super) path: Parsed<PathList>,
+}
+
+impl Ranged<PathSelection> for PathSelection {
+    fn node(&self) -> &PathSelection {
+        self
+    }
+
+    fn range(&self) -> Option<(usize, usize)> {
+        self.path.range()
+    }
 }
 
 impl PathSelection {
