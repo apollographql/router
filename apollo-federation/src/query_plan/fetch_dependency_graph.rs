@@ -15,7 +15,6 @@ use apollo_compiler::executable;
 use apollo_compiler::executable::VariableDefinition;
 use apollo_compiler::name;
 use apollo_compiler::schema;
-use apollo_compiler::schema::ObjectType;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use itertools::Itertools;
@@ -260,8 +259,8 @@ pub(crate) struct FetchDependencyGraphNodePath {
     path_in_node: Arc<OpPath>,
     response_path: Vec<FetchDataPathElement>,
     type_conditioned_fetching_enabled: bool,
-    possible_types: Vec<Node<ObjectType>>,
-    possible_types_after_last_field: Vec<Node<ObjectType>>,
+    possible_types: IndexSet<Name>,
+    possible_types_after_last_field: IndexSet<Name>,
 }
 
 #[derive(Debug, Clone)]
@@ -454,14 +453,14 @@ impl FetchDependencyGraphNodePath {
         type_conditioned_fetching_enabled: bool,
         root_type: CompositeTypeDefinitionPosition,
     ) -> Result<Self, FederationError> {
-        let root_possible_types: Vec<_> = if type_conditioned_fetching_enabled {
+        let root_possible_types = if type_conditioned_fetching_enabled {
             schema.possible_runtime_types(root_type)?
         } else {
             Default::default()
         }
         .into_iter()
-        .map(|pos| Ok(pos.get(schema.schema())?.clone()))
-        .collect::<Result<Vec<_>, _>>()
+        .map(|pos| Ok(pos.get(schema.schema())?.name.clone()))
+        .collect::<Result<IndexSet<Name>, _>>()
         .map_err(|e: PositionLookupError| FederationError::from(e))?;
 
         Ok(Self {
@@ -512,7 +511,7 @@ impl FetchDependencyGraphNodePath {
     fn new_possible_types(
         &self,
         element: &OpPathElement,
-    ) -> Result<Vec<Node<ObjectType>>, FederationError> {
+    ) -> Result<IndexSet<Name>, FederationError> {
         if !self.type_conditioned_fetching_enabled {
             return Ok(Default::default());
         }
@@ -522,15 +521,12 @@ impl FetchDependencyGraphNodePath {
                 None => self.possible_types.clone(),
                 Some(tcp) => {
                     let element_possible_types = self.schema.possible_runtime_types(tcp.clone())?;
-                    self.possible_types
+                    element_possible_types
                         .iter()
-                        // TODO: O(n)
-                        .filter(|possible_type| {
-                            element_possible_types
-                                .iter()
-                                .any(|ept| ept.type_name == possible_type.name)
+                        .filter(|&possible_type| {
+                            self.possible_types.contains(&possible_type.type_name)
                         })
-                        .cloned()
+                        .map(|possible_type| possible_type.type_name.clone())
                         .collect()
                 }
             },
@@ -539,11 +535,13 @@ impl FetchDependencyGraphNodePath {
         Ok(res)
     }
 
-    fn advance_field_type(
-        &self,
-        element: &Field,
-    ) -> Result<Vec<Node<ObjectType>>, FederationError> {
-        if !element.data().output_base_type()?.is_composite_type() {
+    fn advance_field_type(&self, element: &Field) -> Result<IndexSet<Name>, FederationError> {
+        if !element
+            .data()
+            .output_base_type()
+            .map(|base_type| base_type.is_composite_type())
+            .unwrap_or_default()
+        {
             return Ok(Default::default());
         }
 
@@ -552,17 +550,16 @@ impl FetchDependencyGraphNodePath {
             .clone()
             .into_iter()
             .map(|pt| {
-                let fd = pt
-                    .fields
-                    .get(element.name()) // TODO: check with the team, we probably want to replace it with something more meaningful.
-                    .ok_or_else(|| {
-                        FederationError::internal(
-                            "element is not a field for type, this cannot happen.",
-                        )
-                    })?;
+                let field = self
+                    .schema
+                    .get_type(pt)?
+                    .as_composite_type()
+                    .unwrap()
+                    .field(element.name().clone())?
+                    .get(self.schema.schema())?;
                 let typ = self
                     .schema
-                    .get_type(fd.ty.inner_named_type().clone())?
+                    .get_type(field.ty.inner_named_type().clone())?
                     .as_composite_type()
                     // TODO: check with the team, we probably want to replace it with something more meaningful.
                     .ok_or_else(|| {
@@ -571,18 +568,18 @@ impl FetchDependencyGraphNodePath {
                 Ok(self
                     .schema
                     .possible_runtime_types(typ)?
-                    .iter()
-                    .map(|ctdp| ctdp.get(self.schema.schema()).cloned())
-                    .collect::<Result<Vec<_>, _>>()?)
+                    .into_iter()
+                    .map(|ctdp| ctdp.type_name)
+                    .collect::<Vec<_>>())
             })
-            .collect::<Result<Vec<Vec<Node<ObjectType>>>, FederationError>>()?
+            .collect::<Result<Vec<Vec<Name>>, FederationError>>()?
             .into_iter()
             .flatten()
             .collect::<Vec<_>>();
 
-        res.sort_by(|a, b| a.name.cmp(&b.name));
+        res.sort();
 
-        Ok(res)
+        Ok(res.into_iter().collect())
     }
 
     fn updated_response_path(
@@ -599,12 +596,12 @@ impl FetchDependencyGraphNodePath {
                     match new_path.pop() {
                         Some(FetchDataPathElement::AnyIndex(_)) => {
                             new_path.push(FetchDataPathElement::AnyIndex(
-                                conditions.iter().map(|c| c.name.clone()).collect(),
+                                conditions.iter().cloned().collect(),
                             ));
                         }
                         Some(FetchDataPathElement::Key(_, name)) => {
                             new_path.push(FetchDataPathElement::Key(
-                                conditions.iter().map(|c| c.name.clone()).collect(),
+                                conditions.iter().cloned().collect(),
                                 name,
                             ));
                         }
