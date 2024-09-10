@@ -1,17 +1,18 @@
 ---
 source: apollo-federation/src/sources/connect/expand/tests/mod.rs
 expression: connectors.by_service_name
+input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/circular.graphql
 ---
 {
-    "connectors_Query_users_0": Connector {
+    "one_Query_t_0": Connector {
         id: ConnectId {
-            label: "connectors.json http: GET /users",
-            subgraph_name: "connectors",
+            label: "one.json http: GET /t/{$args.id!}",
+            subgraph_name: "one",
             source_name: Some(
                 "json",
             ),
             directive: ObjectOrInterfaceFieldDirectivePosition {
-                field: Object(Query.users),
+                field: Object(Query.t),
                 directive_name: "connect",
                 directive_index: 0,
             },
@@ -19,13 +20,13 @@ expression: connectors.by_service_name
         transport: HttpJsonTransport {
             source_url: Some(
                 Url {
-                    scheme: "https",
+                    scheme: "http",
                     cannot_be_a_base: false,
                     username: "",
                     password: None,
                     host: Some(
                         Domain(
-                            "jsonplaceholder.typicode.com",
+                            "example",
                         ),
                     ),
                     port: None,
@@ -40,76 +41,7 @@ expression: connectors.by_service_name
                     ParameterValue {
                         parts: [
                             Text(
-                                "users",
-                            ),
-                        ],
-                    },
-                ],
-                query: {},
-            },
-            method: Get,
-            headers: {},
-            body: None,
-        },
-        selection: Named(
-            SubSelection {
-                selections: [
-                    Field(
-                        None,
-                        "id",
-                        None,
-                    ),
-                    Field(
-                        None,
-                        "name",
-                        None,
-                    ),
-                ],
-                star: None,
-            },
-        ),
-        config: None,
-        max_requests: None,
-        entity_resolver: None,
-    },
-    "connectors_Query_user_0": Connector {
-        id: ConnectId {
-            label: "connectors.json http: GET /users/{$args.id!}",
-            subgraph_name: "connectors",
-            source_name: Some(
-                "json",
-            ),
-            directive: ObjectOrInterfaceFieldDirectivePosition {
-                field: Object(Query.user),
-                directive_name: "connect",
-                directive_index: 0,
-            },
-        },
-        transport: HttpJsonTransport {
-            source_url: Some(
-                Url {
-                    scheme: "https",
-                    cannot_be_a_base: false,
-                    username: "",
-                    password: None,
-                    host: Some(
-                        Domain(
-                            "jsonplaceholder.typicode.com",
-                        ),
-                    ),
-                    port: None,
-                    path: "/",
-                    query: None,
-                    fragment: None,
-                },
-            ),
-            connect_template: URLTemplate {
-                base: None,
-                path: [
-                    ParameterValue {
-                        parts: [
-                            Text(
-                                "users",
+                                "t",
                             ),
                         ],
                     },
@@ -139,49 +71,37 @@ expression: connectors.by_service_name
                         "id",
                         None,
                     ),
-                    Field(
-                        None,
-                        "name",
-                        None,
-                    ),
-                    Field(
-                        None,
-                        "username",
-                        None,
-                    ),
                 ],
                 star: None,
             },
         ),
         config: None,
         max_requests: None,
-        entity_resolver: Some(
-            Explicit,
-        ),
+        entity_resolver: None,
     },
-    "connectors_User_d_1": Connector {
+    "one_T_ts_0": Connector {
         id: ConnectId {
-            label: "connectors.json http: GET /users/{$this.c!}",
-            subgraph_name: "connectors",
+            label: "one.json http: GET /t/{$this.id!}/ts",
+            subgraph_name: "one",
             source_name: Some(
                 "json",
             ),
             directive: ObjectOrInterfaceFieldDirectivePosition {
-                field: Object(User.d),
+                field: Object(T.ts),
                 directive_name: "connect",
-                directive_index: 1,
+                directive_index: 0,
             },
         },
         transport: HttpJsonTransport {
             source_url: Some(
                 Url {
-                    scheme: "https",
+                    scheme: "http",
                     cannot_be_a_base: false,
                     username: "",
                     password: None,
                     host: Some(
                         Domain(
-                            "jsonplaceholder.typicode.com",
+                            "example",
                         ),
                     ),
                     port: None,
@@ -196,7 +116,7 @@ expression: connectors.by_service_name
                     ParameterValue {
                         parts: [
                             Text(
-                                "users",
+                                "t",
                             ),
                         ],
                     },
@@ -204,10 +124,17 @@ expression: connectors.by_service_name
                         parts: [
                             Var(
                                 VariableExpression {
-                                    var_path: "$this.c",
+                                    var_path: "$this.id",
                                     batch_separator: None,
                                     required: true,
                                 },
+                            ),
+                        ],
+                    },
+                    ParameterValue {
+                        parts: [
+                            Text(
+                                "ts",
                             ),
                         ],
                     },
@@ -218,17 +145,16 @@ expression: connectors.by_service_name
             headers: {},
             body: None,
         },
-        selection: Path(
-            PathSelection {
-                path: Var(
-                    $,
-                    Key(
-                        Field(
-                            "phone",
-                        ),
-                        Empty,
+        selection: Named(
+            SubSelection {
+                selections: [
+                    Field(
+                        None,
+                        "id",
+                        None,
                     ),
-                ),
+                ],
+                star: None,
             },
         ),
         config: None,

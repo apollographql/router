@@ -1,6 +1,7 @@
 ---
 source: apollo-federation/src/sources/connect/expand/tests/mod.rs
 expression: raw_sdl
+input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/normalize_names.graphql
 ---
 schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) @join__directive(graphs: [], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1"}) {
   query: Query

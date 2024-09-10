@@ -1,22 +1,15 @@
 ---
 source: apollo-federation/src/sources/connect/expand/tests/mod.rs
 expression: api_schema
+input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/circular.graphql
 ---
 directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
 
-type A {
-  id: ID
-}
-
-type B {
-  a: A
-}
-
 type Query {
-  ts: [T]
+  t(id: ID): T
 }
 
 type T {
-  a: A
-  b: B
+  id: ID!
+  ts: [T]
 }
