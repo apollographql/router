@@ -580,12 +580,6 @@ impl BridgeQueryPlanner {
     ) -> Result<graphql::Response, QueryPlannerError> {
         let schema = self.schema.api_schema();
         let operation = doc.get_operation(key.operation_name.as_deref())?;
-        apollo_compiler::execution::check_introspection_max_depth(&doc.executable, operation)
-            .map_err(|_e| {
-                QueryPlannerError::Introspection(IntrospectionError {
-                    message: Some("Maximum introspection depth exceeded".to_owned()),
-                })
-            })?;
         let variable_values = Default::default();
         let variable_values =
             apollo_compiler::execution::coerce_variable_values(schema, operation, &variable_values)

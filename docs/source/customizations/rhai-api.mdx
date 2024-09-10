@@ -54,10 +54,11 @@ log_trace("trace-level log message");
 
 ## Terminating client requests
 
-Your Rhai script can terminate the associated client request that triggered it. To do so, it throws an exception. This returns an `Internal Server Error` to the client with a `500` response code.
+Your Rhai script can terminate the associated client request that triggered it. To do so, it must throw an exception from the supergraph service. This returns an `Internal Server Error` to the client with a `500` response code.
 
 For example:
 ```rhai
+// Must throw exception from supergraph service
 fn supergraph_service(service) {
     // Define a closure to process our response
     let f = |response| {
@@ -75,6 +76,7 @@ The key must be a number and the message must be something which can be converte
 
 For example:
 ```rhai
+// Must throw exception from supergraph service
 fn supergraph_service(service) {
     // Define a closure to process our response
     let f = |response| {
@@ -93,6 +95,7 @@ You can also `throw` a valid GraphQL response, which will be deserialized and de
 
 For example:
 ```rhai
+// Must throw exception from supergraph service
 fn supergraph_service(service) {
     // Define a closure to process our request
     let f = |request| {
