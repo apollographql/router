@@ -253,7 +253,7 @@ impl YamlRouterFactory {
                         .supergraph
                         .query_planning
                         .experimental_reuse_query_plans,
-                    configuration
+                    &configuration
                         .persisted_queries
                         .experimental_prewarm_query_plan_cache,
                 )
@@ -269,7 +269,7 @@ impl YamlRouterFactory {
                         .supergraph
                         .query_planning
                         .experimental_reuse_query_plans,
-                    configuration
+                    &configuration
                         .persisted_queries
                         .experimental_prewarm_query_plan_cache,
                 )
