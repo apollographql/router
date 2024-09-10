@@ -10,10 +10,10 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid-p
         locations: [
             LineColumn {
                 line: 12,
-                column: 15,
+                column: 23,
             }..LineColumn {
                 line: 12,
-                column: 30,
+                column: 28,
             },
         ],
     },

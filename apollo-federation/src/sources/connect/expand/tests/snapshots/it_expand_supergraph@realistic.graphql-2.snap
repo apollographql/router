@@ -314,6 +314,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                 Variable {
                                     var_type: Args,
                                     path: "company.name",
+                                    location: 13..31,
                                 },
                             ),
                         ],
@@ -412,6 +413,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                 Variable {
                                     var_type: Args,
                                     path: "id",
+                                    location: 2..10,
                                 },
                             ),
                         ],

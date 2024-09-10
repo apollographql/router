@@ -51,6 +51,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ci
                                 Variable {
                                     var_type: Args,
                                     path: "id",
+                                    location: 4..12,
                                 },
                             ),
                         ],
@@ -125,6 +126,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ci
                                 Variable {
                                     var_type: This,
                                     path: "id",
+                                    location: 4..12,
                                 },
                             ),
                         ],

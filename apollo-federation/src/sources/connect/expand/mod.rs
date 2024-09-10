@@ -443,7 +443,7 @@ mod helpers {
             // We'll need to collect all synthesized keys for the output type, adding a federation
             // `@key` directive once completed.
             let mut keys = Vec::new();
-            for Variable { var_type, path } in
+            for Variable { var_type, path, .. } in
                 Iterator::chain(body_parameters.into_iter(), parameters).unique()
             {
                 match var_type {
@@ -765,6 +765,7 @@ mod helpers {
                 Some(Variable {
                     var_type,
                     path: keys.join("."),
+                    location: 0..0, // Doesn't matter for this case, we won't report errors here
                 })
             })
     }

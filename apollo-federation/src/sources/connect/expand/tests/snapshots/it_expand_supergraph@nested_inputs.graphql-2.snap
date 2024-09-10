@@ -44,6 +44,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ne
                                 Variable {
                                     var_type: Args,
                                     path: "bar",
+                                    location: 2..11,
                                 },
                             ),
                         ],
@@ -54,6 +55,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ne
                                 Variable {
                                     var_type: Args,
                                     path: "doubleBaz.buzz",
+                                    location: 14..34,
                                 },
                             ),
                         ],
@@ -64,6 +66,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ne
                                 Variable {
                                     var_type: Args,
                                     path: "baz.quux.quaz",
+                                    location: 37..56,
                                 },
                             ),
                         ],

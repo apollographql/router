@@ -9,6 +9,7 @@ use url::Url;
 
 use super::spec::ConnectHTTPArguments;
 use super::spec::SourceHTTPArguments;
+use super::url_template;
 use super::ConnectId;
 use super::JSONSelection;
 use super::URLTemplate;
@@ -182,9 +183,11 @@ impl HttpJsonTransport {
 
         Ok(Self {
             source_url: source.map(|s| s.base_url.clone()),
-            connect_template: connect_url.parse().map_err(|e| {
-                FederationError::internal(format!("could not parse URL template: {e}"))
-            })?,
+            connect_template: connect_url.parse().map_err(
+                |url_template::Error { message, .. }| {
+                    FederationError::internal(format!("could not parse URL template: {message}"))
+                },
+            )?,
             method,
             headers,
             body: http.body.clone(),

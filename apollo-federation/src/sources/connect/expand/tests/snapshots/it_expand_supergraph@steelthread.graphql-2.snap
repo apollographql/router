@@ -120,6 +120,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
                                 Variable {
                                     var_type: Args,
                                     path: "id",
+                                    location: 8..16,
                                 },
                             ),
                         ],
@@ -206,6 +207,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
                                 Variable {
                                     var_type: This,
                                     path: "c",
+                                    location: 8..15,
                                 },
                             ),
                         ],

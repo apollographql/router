@@ -1,4 +1,5 @@
 use std::fmt::Display;
+use std::ops::Range;
 use std::str::FromStr;
 
 use apollo_compiler::collections::IndexMap;
@@ -71,8 +72,14 @@ impl URLTemplate {
     }
 }
 
+#[derive(Debug)]
+pub struct Error {
+    pub(crate) message: String,
+    pub(crate) location: Option<Range<usize>>,
+}
+
 impl FromStr for URLTemplate {
-    type Err = String;
+    type Err = Error;
 
     /// Top-level parsing entry point for URLTemplate syntax.
     fn from_str(input: &str) -> Result<Self, Self::Err> {
@@ -80,13 +87,21 @@ impl FromStr for URLTemplate {
             if let Some((host, path)) = rest.split_once('/') {
                 (
                     Some(
-                        Url::parse(&format!("{}://{}", scheme, host))
-                            .map_err(|err| err.to_string())?,
+                        Url::parse(&format!("{}://{}", scheme, host)).map_err(|err| Error {
+                            message: err.to_string(),
+                            location: Some(0..(input.len() - path.len())),
+                        })?,
                     ),
                     path,
                 )
             } else {
-                (Some(Url::parse(input).map_err(|err| err.to_string())?), "")
+                (
+                    Some(Url::parse(input).map_err(|err| Error {
+                        message: err.to_string(),
+                        location: None,
+                    })?),
+                    "",
+                )
             }
         } else {
             (None, input)
@@ -99,7 +114,7 @@ impl FromStr for URLTemplate {
             .into_iter()
             .flat_map(|path_prefix| path_prefix.split('/'))
             .filter(|path_part| !path_part.is_empty())
-            .map(Component::parse)
+            .map(|path_part| Component::parse(path_part, input))
             .try_collect()?;
 
         let query = query_suffix
@@ -107,7 +122,7 @@ impl FromStr for URLTemplate {
             .flat_map(|query_suffix| query_suffix.split('&'))
             .filter_map(|query_part| {
                 let (key, value) = query_part.split_once('=')?;
-                Some(Component::parse(value).map(|value| (key.to_string(), value)))
+                Some(Component::parse(value, input).map(|value| (key.to_string(), value)))
             })
             .try_collect()?;
 
@@ -152,7 +167,9 @@ impl Serialize for URLTemplate {
 }
 
 impl Component {
-    fn parse(input: &str) -> Result<Self, String> {
+    /// Parse `input` as a single path component or query parameter. `url_template` is the entire
+    /// string of the URL Template for calculating the position of the variable in the template.
+    fn parse(input: &str, url_template: &str) -> Result<Self, Error> {
         // Split the text around any {...} variable expressions, which must be
         // separated by nonempty text.
         let mut parts = vec![];
@@ -165,36 +182,21 @@ impl Component {
             remaining = suffix;
 
             if let Some((var, suffix)) = remaining.split_once('}') {
-                parts.push(ValuePart::Var(Variable::parse(var)?));
+                parts.push(ValuePart::Var(Variable::parse(var, url_template)?));
                 remaining = suffix;
             } else {
-                return Err(format!(
-                    "Missing closing brace in URL suffix {} of path {}",
-                    remaining, input
-                ));
+                return Err(Error {
+                    message: format!(
+                        "Missing closing brace in URL suffix {} of path {}",
+                        remaining, input
+                    ),
+                    location: None,
+                });
             }
         }
 
         if !remaining.is_empty() {
             parts.push(ValuePart::Text(remaining.to_string()));
-        }
-
-        // Enforce that variable expressions must be separated by nonempty text
-        // delimiters, though the parameter value may start or end with variable
-        // expressions without preceding/following text.
-        let mut prev_part_was_var = false;
-        for part in &parts {
-            if let ValuePart::Var(_) = part {
-                if prev_part_was_var {
-                    return Err(format!(
-                        "Ambiguous adjacent variable expressions in {}",
-                        input,
-                    ));
-                }
-                prev_part_was_var = true;
-            } else {
-                prev_part_was_var = false;
-            }
         }
 
         Ok(Component { parts })
@@ -319,6 +321,8 @@ impl Serialize for Component {
 pub struct Variable {
     pub var_type: VariableType,
     pub path: String,
+    /// Where this variable is in the string template it came from—0-indexed offset.
+    pub location: Range<usize>,
 }
 
 /// The supported types of variables for URLs, a subset of `KnownVariable` in JSONSelection
@@ -383,20 +387,40 @@ impl Display for ValuePart {
 }
 
 impl Variable {
-    fn parse(input: &str) -> Result<Self, String> {
-        let mut parts = input.split('.');
-        let var_type_str = parts
-            .next()
-            .ok_or_else(|| format!("Variable expression {input} can't be empty"))?;
+    /// Parse `input` as a variable. `url_template` should be the _entire_ URL template, for
+    /// example `http.GET`, for calculating the position of the variable in the template.
+    fn parse(input: &str, url_template: &str) -> Result<Self, Error> {
+        let start = input.as_ptr() as usize - url_template.as_ptr() as usize;
+        let end = start + input.len();
+        let location = start..end;
 
-        let var_type = VariableType::from_str(var_type_str)?;
+        let mut parts = input.split('.');
+        let Some(var_type_str) = parts.next() else {
+            return Err(Error {
+                message: format!("Variable expression {input} can't be empty"),
+                location: Some(location),
+            });
+        };
+
+        let var_type = VariableType::from_str(var_type_str).map_err(|message| Error {
+            message,
+            location: Some(location.clone()),
+        })?;
         let path = parts.join(".");
         if path.is_empty() {
-            return Err(format!(
-                "Variable expression {input} must have a path after the variable type",
-            ));
+            return Err(Error {
+                message: format!(
+                    "Variable expression {input} must have a path after the variable type",
+                ),
+                location: Some(location),
+            });
         }
-        Ok(Self { var_type, path })
+
+        Ok(Self {
+            var_type,
+            path,
+            location,
+        })
     }
 
     fn interpolate(&self, vars: &Map<ByteString, JSON>) -> Option<String> {
@@ -422,6 +446,7 @@ impl Display for Variable {
 
 #[cfg(test)]
 mod test_parse {
+    use insta::assert_debug_snapshot;
     use pretty_assertions::assert_eq;
 
     use super::*;
@@ -430,228 +455,44 @@ mod test_parse {
 
     #[test]
     fn test_path_list() {
-        assert_eq!(
-            URLTemplate::from_str("/abc"),
-            Ok(URLTemplate {
-                path: vec![Component {
-                    parts: vec![ValuePart::Text("abc".to_string())],
-                },],
-                ..Default::default()
-            }),
-        );
+        assert_debug_snapshot!(URLTemplate::from_str("/abc"));
 
-        assert_eq!(
-            URLTemplate::from_str("/abc/def"),
-            Ok(URLTemplate {
-                path: vec![
-                    Component {
-                        parts: vec![ValuePart::Text("abc".to_string())],
-                    },
-                    Component {
-                        parts: vec![ValuePart::Text("def".to_string())],
-                    },
-                ],
-                ..Default::default()
-            }),
-        );
+        assert_debug_snapshot!(URLTemplate::from_str("/abc/def"),);
 
-        assert_eq!(
-            URLTemplate::from_str("/abc/{$args.def}"),
-            Ok(URLTemplate {
-                path: vec![
-                    Component {
-                        parts: vec![ValuePart::Text("abc".to_string())],
-                    },
-                    Component {
-                        parts: vec![ValuePart::Var(Variable {
-                            var_type: VariableType::Args,
-                            path: "def".to_string(),
-                        })],
-                    },
-                ],
-                ..Default::default()
-            }),
-        );
+        assert_debug_snapshot!(URLTemplate::from_str("/abc/{$args.def}"),);
 
-        assert_eq!(
-            URLTemplate::from_str("/abc/{$this.def.thing}/ghi"),
-            Ok(URLTemplate {
-                path: vec![
-                    Component {
-                        parts: vec![ValuePart::Text("abc".to_string())],
-                    },
-                    Component {
-                        parts: vec![ValuePart::Var(Variable {
-                            var_type: VariableType::This,
-                            path: "def.thing".to_string(),
-                        })],
-                    },
-                    Component {
-                        parts: vec![ValuePart::Text("ghi".to_string())],
-                    },
-                ],
-                ..Default::default()
-            }),
-        );
+        assert_debug_snapshot!(URLTemplate::from_str("/abc/{$this.def.thing}/ghi"),);
     }
 
     #[test]
     fn test_url_path_template_parse() {
-        assert_eq!(
-            URLTemplate::from_str("/users/{$config.user_id}?a=b"),
-            Ok(URLTemplate {
-                base: None,
-                path: vec![
-                    Component {
-                        parts: vec![ValuePart::Text("users".to_string())],
-                    },
-                    Component {
-                        parts: vec![ValuePart::Var(Variable {
-                            var_type: VariableType::Config,
-                            path: "user_id".to_string(),
-                        })],
-                    },
-                ],
-                query: IndexMap::from_iter([(
-                    "a".to_string(),
-                    Component {
-                        parts: vec![ValuePart::Text("b".to_string())],
-                    }
-                )]),
-            }),
-        );
+        assert_debug_snapshot!(URLTemplate::from_str("/users/{$config.user_id}?a=b"));
 
-        assert_eq!(
-            URLTemplate::from_str("/users/{$this.user_id}?a={$args.b}&c={$args.d}&e={$args.f.g}"),
-            Ok(URLTemplate {
-                base: None,
-                path: vec![
-                    Component {
-                        parts: vec![ValuePart::Text("users".to_string())],
-                    },
-                    Component {
-                        parts: vec![ValuePart::Var(Variable {
-                            var_type: VariableType::This,
-                            path: "user_id".to_string(),
-                        })],
-                    },
-                ],
-                query: IndexMap::from_iter([
-                    (
-                        "e".to_string(),
-                        Component {
-                            parts: vec![ValuePart::Var(Variable {
-                                var_type: VariableType::Args,
-                                path: "f.g".to_string(),
-                            })],
-                        },
-                    ),
-                    (
-                        "a".to_string(),
-                        Component {
-                            parts: vec![ValuePart::Var(Variable {
-                                var_type: VariableType::Args,
-                                path: "b".to_string(),
-                            })],
-                        },
-                    ),
-                    (
-                        "c".to_string(),
-                        Component {
-                            parts: vec![ValuePart::Var(Variable {
-                                var_type: VariableType::Args,
-                                path: "d".to_string(),
-                            })],
-                        },
-                    ),
-                ]),
-            }),
-        );
+        assert_debug_snapshot!(URLTemplate::from_str(
+            "/users/{$this.user_id}?a={$args.b}&c={$args.d}&e={$args.f.g}"
+        ));
 
-        assert_eq!(
-            URLTemplate::from_str("/users/{$this.id}?a={$config.b}#junk"),
-            Ok(URLTemplate {
-                base: None,
-                path: vec![
-                    Component {
-                        parts: vec![ValuePart::Text("users".to_string())],
-                    },
-                    Component {
-                        parts: vec![ValuePart::Var(Variable {
-                            var_type: VariableType::This,
-                            path: "id".to_string(),
-                        })],
-                    },
-                ],
-                query: IndexMap::from_iter([(
-                    "a".to_string(),
-                    Component {
-                        parts: vec![
-                            ValuePart::Var(Variable {
-                                var_type: VariableType::Config,
-                                path: "b".to_string(),
-                            }),
-                            ValuePart::Text("#junk".to_string()),
-                        ],
-                    },
-                )]),
-            }),
-        );
+        assert_debug_snapshot!(URLTemplate::from_str(
+            "/users/{$this.id}?a={$config.b}#junk"
+        ));
 
-        assert_eq!(
-            URLTemplate::from_str("/location/{$this.lat},{$this.lon}"),
-            Ok(URLTemplate {
-                path: vec![
-                    Component {
-                        parts: vec![ValuePart::Text("location".to_string())],
-                    },
-                    Component {
-                        parts: vec![
-                            ValuePart::Var(Variable {
-                                var_type: VariableType::This,
-                                path: "lat".to_string(),
-                            }),
-                            ValuePart::Text(",".to_string()),
-                            ValuePart::Var(Variable {
-                                var_type: VariableType::This,
-                                path: "lon".to_string(),
-                            }),
-                        ],
-                    },
-                ],
-                ..Default::default()
-            }),
-        );
+        assert_debug_snapshot!(URLTemplate::from_str("/location/{$this.lat},{$this.lon}"));
     }
 
     #[test]
-    fn multi_variable_parameter_values() {
+    fn test_invalid_variable_name() {
+        let err = URLTemplate::from_str("/something/{$blah.stuff}/more").unwrap_err();
         assert_eq!(
-            URLTemplate::from_str(
-                "/locations/xyz({$this.x}{$this.y}{$this.z})?required={$this.b},{$this.c};{$this.d}&optional=[{$this.e}{$this.f},{$this.g}]"
-            ),
-            Err("Ambiguous adjacent variable expressions in xyz({$this.x}{$this.y}{$this.z})".to_string()),
+            err.message,
+            "Variable type must be one of $args, $this, $config, got $blah"
         );
-
-        assert_eq!(
-            URLTemplate::from_str(
-                "/locations/xyz({$this.x},{$this.y},{$this.z})?required={$this.b}{$this.c};{$this.d}&optional=[{$this.e}{$this.f},{$this.g}]"
-            ),
-            Err("Ambiguous adjacent variable expressions in {$this.b}{$this.c};{$this.d}".to_string()),
-        );
-
-        assert_eq!(
-            URLTemplate::from_str(
-                "/locations/xyz({$this.x},{$this.y},{$this.z})?required={$this.b},{$this.c};{$this.d}&optional=[{$this.e};{$this.f}{$this.g}]"
-            ),
-            Err("Ambiguous adjacent variable expressions in [{$this.e};{$this.f}{$this.g}]".to_string()),
-        );
+        assert_eq!(err.location, Some(12..23));
     }
 }
 
 #[cfg(test)]
 #[rstest::rstest]
-#[case("/users/{user_id}?a={$this.b}&c={$this.d}&e={$this.f.g}")]
+#[case("/users/{$this.user_id}?a={$this.b}&c={$this.d}&e={$this.f.g}")]
 #[case("/position/{$this.x},{$this.y}")]
 #[case("/position/xyz({$this.x},{$this.y},{$this.z})")]
 #[case("/position?xyz=({$this.x},{$this.y},{$this.z})")]
