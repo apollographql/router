@@ -146,20 +146,6 @@ pub(super) mod strip_ranges {
         }
     }
 
-    impl StripRanges for Parsed<JSONSelection> {
-        fn strip_ranges(&self) -> Self {
-            Parsed::new(
-                match self.as_ref() {
-                    JSONSelection::Named(subselect) => {
-                        JSONSelection::Named(subselect.strip_ranges())
-                    }
-                    JSONSelection::Path(path) => JSONSelection::Path(path.strip_ranges()),
-                },
-                None,
-            )
-        }
-    }
-
     impl StripRanges for NamedSelection {
         fn strip_ranges(&self) -> Self {
             match self {

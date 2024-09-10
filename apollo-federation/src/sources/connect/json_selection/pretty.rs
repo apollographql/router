@@ -55,13 +55,6 @@ impl PrettyPrintable for JSONSelection {
     }
 }
 
-impl PrettyPrintable for Parsed<JSONSelection> {
-    fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
-        self.node()
-            .pretty_print_with_indentation(inline, indentation)
-    }
-}
-
 impl PrettyPrintable for SubSelection {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
         let mut result = String::new();
