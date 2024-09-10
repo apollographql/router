@@ -13,6 +13,7 @@ use super::helpers::json_type_name;
 use super::immutable::InputPath;
 use super::known_var::KnownVariable;
 use super::lit_expr::LitExpr;
+use super::location::OffsetRange;
 use super::location::Ranged;
 use super::location::WithRange;
 use super::methods::lookup_arrow_method;
@@ -103,7 +104,7 @@ pub(super) trait ApplyToInternal {
 pub struct ApplyToError {
     message: String,
     path: Vec<JSON>,
-    range: Option<(usize, usize)>,
+    range: OffsetRange,
 }
 
 impl Hash for ApplyToError {
@@ -122,7 +123,7 @@ impl Hash for ApplyToError {
 }
 
 impl ApplyToError {
-    pub(crate) fn new(message: String, path: Vec<JSON>, range: Option<(usize, usize)>) -> Self {
+    pub(crate) fn new(message: String, path: Vec<JSON>, range: OffsetRange) -> Self {
         Self {
             message,
             path,
@@ -170,7 +171,7 @@ impl ApplyToError {
         self.path.clone()
     }
 
-    pub fn range(&self) -> Option<(usize, usize)> {
+    pub fn range(&self) -> OffsetRange {
         self.range
     }
 }

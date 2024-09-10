@@ -12,8 +12,15 @@ pub type Span<'a> = LocatedSpan<&'a str>;
 // field, so they can implement Ranged<T> without the WithRange<T> wrapper.
 pub trait Ranged<T> {
     fn node(&self) -> &T;
-    fn range(&self) -> Option<(usize, usize)>;
+    fn range(&self) -> OffsetRange;
 }
+
+// The ranges produced by the JSONSelection parser are pairs of character
+// offsets into the original string. The first element of the pair is the offset
+// of the first character, and the second element is the offset of the character
+// just past the end of the range. Offsets start at 0 for the first character in
+// the file, following nom_locate's span.location_offset() convention.
+pub type OffsetRange = Option<(usize, usize)>;
 
 // The most common implementation of the Ranged<T> trait is the WithRange<T>
 // struct, used to wrap any AST node that (a) needs its own location information
@@ -23,7 +30,7 @@ pub trait Ranged<T> {
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct WithRange<T> {
     node: Box<T>,
-    range: Option<(usize, usize)>,
+    range: OffsetRange,
 }
 
 // We can recover some of the ergonomics of working with the inner type T by
@@ -67,13 +74,13 @@ impl<T> Ranged<T> for WithRange<T> {
         self.node.as_ref()
     }
 
-    fn range(&self) -> Option<(usize, usize)> {
+    fn range(&self) -> OffsetRange {
         self.range
     }
 }
 
 impl<T> WithRange<T> {
-    pub(crate) fn new(node: T, range: Option<(usize, usize)>) -> Self {
+    pub(crate) fn new(node: T, range: OffsetRange) -> Self {
         Self {
             node: Box::new(node),
             range,
@@ -89,10 +96,7 @@ impl<T> WithRange<T> {
     }
 }
 
-pub(super) fn merge_ranges(
-    left: Option<(usize, usize)>,
-    right: Option<(usize, usize)>,
-) -> Option<(usize, usize)> {
+pub(super) fn merge_ranges(left: OffsetRange, right: OffsetRange) -> OffsetRange {
     match (left, right) {
         (Some((left_start, _left_end)), Some((_right_start, right_end))) => {
             Some((left_start, right_end))

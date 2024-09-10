@@ -21,6 +21,7 @@ use super::known_var::KnownVariable;
 use super::lit_expr::LitExpr;
 use super::location::merge_ranges;
 use super::location::parsed_span;
+use super::location::OffsetRange;
 use super::location::Ranged;
 use super::location::Span;
 use super::location::WithRange;
@@ -127,7 +128,7 @@ impl Ranged<NamedSelection> for NamedSelection {
         self
     }
 
-    fn range(&self) -> Option<(usize, usize)> {
+    fn range(&self) -> OffsetRange {
         match self {
             Self::Field(alias, key, sub) => {
                 let range = key.range();
@@ -259,7 +260,7 @@ impl Ranged<PathSelection> for PathSelection {
         self
     }
 
-    fn range(&self) -> Option<(usize, usize)> {
+    fn range(&self) -> OffsetRange {
         self.path.range()
     }
 }
@@ -598,7 +599,7 @@ impl ExternalVarPaths for PathList {
 pub struct SubSelection {
     pub(super) selections: Vec<NamedSelection>,
     pub(super) star: Option<StarSelection>,
-    pub(super) range: Option<(usize, usize)>,
+    pub(super) range: OffsetRange,
 }
 
 impl Ranged<SubSelection> for SubSelection {
@@ -609,7 +610,7 @@ impl Ranged<SubSelection> for SubSelection {
     // Since SubSelection is a struct, we can store its range directly as a
     // field of the struct, allowing SubSelection to implement the Ranged trait
     // without a WithRange<SubSelection> wrapper.
-    fn range(&self) -> Option<(usize, usize)> {
+    fn range(&self) -> OffsetRange {
         self.range
     }
 }
@@ -735,7 +736,7 @@ impl ExternalVarPaths for SubSelection {
 pub struct StarSelection {
     pub(super) alias: Option<Alias>,
     pub(super) selection: Option<Box<SubSelection>>,
-    pub(super) range: Option<(usize, usize)>,
+    pub(super) range: OffsetRange,
 }
 
 impl Ranged<StarSelection> for StarSelection {
@@ -743,7 +744,7 @@ impl Ranged<StarSelection> for StarSelection {
         self
     }
 
-    fn range(&self) -> Option<(usize, usize)> {
+    fn range(&self) -> OffsetRange {
         self.range
     }
 }
@@ -797,7 +798,7 @@ impl StarSelection {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Alias {
     pub(super) name: WithRange<Key>,
-    pub(super) range: Option<(usize, usize)>,
+    pub(super) range: OffsetRange,
 }
 
 impl Ranged<Alias> for Alias {
@@ -805,7 +806,7 @@ impl Ranged<Alias> for Alias {
         self
     }
 
-    fn range(&self) -> Option<(usize, usize)> {
+    fn range(&self) -> OffsetRange {
         self.range
     }
 }
@@ -1005,7 +1006,7 @@ pub fn parse_string_literal(input: Span) -> IResult<Span, WithRange<String>> {
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct MethodArgs {
     pub(super) args: Vec<WithRange<LitExpr>>,
-    pub(super) range: Option<(usize, usize)>,
+    pub(super) range: OffsetRange,
 }
 
 impl Ranged<MethodArgs> for MethodArgs {
@@ -1013,7 +1014,7 @@ impl Ranged<MethodArgs> for MethodArgs {
         self
     }
 
-    fn range(&self) -> Option<(usize, usize)> {
+    fn range(&self) -> OffsetRange {
         self.range
     }
 }
