@@ -48,52 +48,36 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/no
             Parsed {
                 node: SubSelection {
                     selections: [
-                        Parsed {
-                            node: Field(
-                                None,
-                                Parsed {
-                                    node: Field(
-                                        "id",
-                                    ),
-                                    range: Some(
-                                        (
-                                            0,
-                                            2,
-                                        ),
-                                    ),
-                                },
-                                None,
-                            ),
-                            range: Some(
-                                (
-                                    0,
-                                    2,
+                        Field(
+                            None,
+                            Parsed {
+                                node: Field(
+                                    "id",
                                 ),
-                            ),
-                        },
-                        Parsed {
-                            node: Field(
-                                None,
-                                Parsed {
-                                    node: Field(
-                                        "a",
+                                range: Some(
+                                    (
+                                        0,
+                                        2,
                                     ),
-                                    range: Some(
-                                        (
-                                            3,
-                                            4,
-                                        ),
-                                    ),
-                                },
-                                None,
-                            ),
-                            range: Some(
-                                (
-                                    3,
-                                    4,
                                 ),
-                            ),
-                        },
+                            },
+                            None,
+                        ),
+                        Field(
+                            None,
+                            Parsed {
+                                node: Field(
+                                    "a",
+                                ),
+                                range: Some(
+                                    (
+                                        3,
+                                        4,
+                                    ),
+                                ),
+                            },
+                            None,
+                        ),
                     ],
                     star: None,
                 },
@@ -165,75 +149,51 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/no
             Parsed {
                 node: SubSelection {
                     selections: [
-                        Parsed {
-                            node: Field(
-                                None,
-                                Parsed {
-                                    node: Field(
-                                        "id",
-                                    ),
-                                    range: Some(
-                                        (
-                                            0,
-                                            2,
-                                        ),
-                                    ),
-                                },
-                                None,
-                            ),
-                            range: Some(
-                                (
-                                    0,
-                                    2,
+                        Field(
+                            None,
+                            Parsed {
+                                node: Field(
+                                    "id",
                                 ),
-                            ),
-                        },
-                        Parsed {
-                            node: Field(
-                                None,
-                                Parsed {
-                                    node: Field(
-                                        "a",
+                                range: Some(
+                                    (
+                                        0,
+                                        2,
                                     ),
-                                    range: Some(
-                                        (
-                                            3,
-                                            4,
-                                        ),
-                                    ),
-                                },
-                                None,
-                            ),
-                            range: Some(
-                                (
-                                    3,
-                                    4,
                                 ),
-                            ),
-                        },
-                        Parsed {
-                            node: Field(
-                                None,
-                                Parsed {
-                                    node: Field(
-                                        "b",
-                                    ),
-                                    range: Some(
-                                        (
-                                            5,
-                                            6,
-                                        ),
-                                    ),
-                                },
-                                None,
-                            ),
-                            range: Some(
-                                (
-                                    5,
-                                    6,
+                            },
+                            None,
+                        ),
+                        Field(
+                            None,
+                            Parsed {
+                                node: Field(
+                                    "a",
                                 ),
-                            ),
-                        },
+                                range: Some(
+                                    (
+                                        3,
+                                        4,
+                                    ),
+                                ),
+                            },
+                            None,
+                        ),
+                        Field(
+                            None,
+                            Parsed {
+                                node: Field(
+                                    "b",
+                                ),
+                                range: Some(
+                                    (
+                                        5,
+                                        6,
+                                    ),
+                                ),
+                            },
+                            None,
+                        ),
                     ],
                     star: None,
                 },

@@ -262,7 +262,7 @@ impl PrettyPrintable for Parsed<LitExpr> {
     }
 }
 
-impl PrettyPrintable for Parsed<NamedSelection> {
+impl PrettyPrintable for NamedSelection {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
         let mut result = String::new();
 
@@ -270,8 +270,8 @@ impl PrettyPrintable for Parsed<NamedSelection> {
             result.push_str(indent_chars(indentation).as_str());
         }
 
-        match self.node() {
-            NamedSelection::Field(alias, field_key, sub) => {
+        match self {
+            Self::Field(alias, field_key, sub) => {
                 if let Some(alias) = alias {
                     result.push_str(alias.name.as_str());
                     result.push_str(": ");
@@ -291,14 +291,14 @@ impl PrettyPrintable for Parsed<NamedSelection> {
                     result.push_str(sub.as_str());
                 }
             }
-            NamedSelection::Path(alias, path) => {
+            Self::Path(alias, path) => {
                 result.push_str(alias.name.as_str());
                 result.push_str(": ");
 
                 let path = path.pretty_print_with_indentation(true, indentation);
                 result.push_str(path.trim_start());
             }
-            NamedSelection::Group(alias, sub) => {
+            Self::Group(alias, sub) => {
                 result.push_str(alias.name.as_str());
                 result.push_str(": ");
 

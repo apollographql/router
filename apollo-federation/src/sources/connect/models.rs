@@ -329,52 +329,36 @@ mod tests {
                     Parsed {
                         node: SubSelection {
                             selections: [
-                                Parsed {
-                                    node: Field(
-                                        None,
-                                        Parsed {
-                                            node: Field(
-                                                "id",
-                                            ),
-                                            range: Some(
-                                                (
-                                                    0,
-                                                    2,
-                                                ),
-                                            ),
-                                        },
-                                        None,
-                                    ),
-                                    range: Some(
-                                        (
-                                            0,
-                                            2,
+                                Field(
+                                    None,
+                                    Parsed {
+                                        node: Field(
+                                            "id",
                                         ),
-                                    ),
-                                },
-                                Parsed {
-                                    node: Field(
-                                        None,
-                                        Parsed {
-                                            node: Field(
-                                                "name",
+                                        range: Some(
+                                            (
+                                                0,
+                                                2,
                                             ),
-                                            range: Some(
-                                                (
-                                                    3,
-                                                    7,
-                                                ),
-                                            ),
-                                        },
-                                        None,
-                                    ),
-                                    range: Some(
-                                        (
-                                            3,
-                                            7,
                                         ),
-                                    ),
-                                },
+                                    },
+                                    None,
+                                ),
+                                Field(
+                                    None,
+                                    Parsed {
+                                        node: Field(
+                                            "name",
+                                        ),
+                                        range: Some(
+                                            (
+                                                3,
+                                                7,
+                                            ),
+                                        ),
+                                    },
+                                    None,
+                                ),
                             ],
                             star: None,
                         },
@@ -466,75 +450,51 @@ mod tests {
                     Parsed {
                         node: SubSelection {
                             selections: [
-                                Parsed {
-                                    node: Field(
-                                        None,
-                                        Parsed {
-                                            node: Field(
-                                                "id",
-                                            ),
-                                            range: Some(
-                                                (
-                                                    0,
-                                                    2,
-                                                ),
-                                            ),
-                                        },
-                                        None,
-                                    ),
-                                    range: Some(
-                                        (
-                                            0,
-                                            2,
+                                Field(
+                                    None,
+                                    Parsed {
+                                        node: Field(
+                                            "id",
                                         ),
-                                    ),
-                                },
-                                Parsed {
-                                    node: Field(
-                                        None,
-                                        Parsed {
-                                            node: Field(
-                                                "title",
+                                        range: Some(
+                                            (
+                                                0,
+                                                2,
                                             ),
-                                            range: Some(
-                                                (
-                                                    3,
-                                                    8,
-                                                ),
-                                            ),
-                                        },
-                                        None,
-                                    ),
-                                    range: Some(
-                                        (
-                                            3,
-                                            8,
                                         ),
-                                    ),
-                                },
-                                Parsed {
-                                    node: Field(
-                                        None,
-                                        Parsed {
-                                            node: Field(
-                                                "body",
-                                            ),
-                                            range: Some(
-                                                (
-                                                    9,
-                                                    13,
-                                                ),
-                                            ),
-                                        },
-                                        None,
-                                    ),
-                                    range: Some(
-                                        (
-                                            9,
-                                            13,
+                                    },
+                                    None,
+                                ),
+                                Field(
+                                    None,
+                                    Parsed {
+                                        node: Field(
+                                            "title",
                                         ),
-                                    ),
-                                },
+                                        range: Some(
+                                            (
+                                                3,
+                                                8,
+                                            ),
+                                        ),
+                                    },
+                                    None,
+                                ),
+                                Field(
+                                    None,
+                                    Parsed {
+                                        node: Field(
+                                            "body",
+                                        ),
+                                        range: Some(
+                                            (
+                                                9,
+                                                13,
+                                            ),
+                                        ),
+                                    },
+                                    None,
+                                ),
                             ],
                             star: None,
                         },

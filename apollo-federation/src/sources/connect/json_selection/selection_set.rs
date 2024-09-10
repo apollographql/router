@@ -68,38 +68,35 @@ impl SubSelection {
         // TODO: when we support abstract types, we'll want to first check if
         // the user defined a __typename mapping.
         if field_map.contains_key("__typename") {
-            new_selections.push(Parsed::new(
-                NamedSelection::Path(
-                    Parsed::new(Alias::new("__typename"), None),
-                    PathSelection {
-                        path: Parsed::new(
-                            PathList::Var(
-                                Parsed::new(KnownVariable::Dollar, None),
-                                Parsed::new(
-                                    PathList::Method(
-                                        Parsed::new("echo".to_string(), None),
-                                        Some(Parsed::new(
-                                            MethodArgs(vec![Parsed::new(
-                                                LitExpr::String(selection_set.ty.to_string()),
-                                                None,
-                                            )]),
+            new_selections.push(NamedSelection::Path(
+                Parsed::new(Alias::new("__typename"), None),
+                PathSelection {
+                    path: Parsed::new(
+                        PathList::Var(
+                            Parsed::new(KnownVariable::Dollar, None),
+                            Parsed::new(
+                                PathList::Method(
+                                    Parsed::new("echo".to_string(), None),
+                                    Some(Parsed::new(
+                                        MethodArgs(vec![Parsed::new(
+                                            LitExpr::String(selection_set.ty.to_string()),
                                             None,
-                                        )),
-                                        Parsed::new(PathList::Empty, None),
-                                    ),
-                                    None,
+                                        )]),
+                                        None,
+                                    )),
+                                    Parsed::new(PathList::Empty, None),
                                 ),
+                                None,
                             ),
-                            None,
                         ),
-                    },
-                ),
-                None,
+                        None,
+                    ),
+                },
             ));
         }
 
         for selection in &self.selections {
-            match selection.as_ref() {
+            match selection {
                 NamedSelection::Field(alias, name, sub) => {
                     let key = alias
                         .as_ref()
@@ -111,22 +108,19 @@ impl SubSelection {
                         }
                         for field in fields {
                             let field_response_key = field.response_key().as_str();
-                            new_selections.push(Parsed::new(
-                                NamedSelection::Field(
-                                    if field_response_key == name.as_str() {
-                                        None
-                                    } else {
-                                        Some(Parsed::new(Alias::new(field_response_key), None))
-                                    },
-                                    name.clone(),
-                                    sub.as_ref().map(|sub| {
-                                        Parsed::new(
-                                            sub.apply_selection_set(&field.selection_set),
-                                            sub.range(),
-                                        )
-                                    }),
-                                ),
-                                None,
+                            new_selections.push(NamedSelection::Field(
+                                if field_response_key == name.as_str() {
+                                    None
+                                } else {
+                                    Some(Parsed::new(Alias::new(field_response_key), None))
+                                },
+                                name.clone(),
+                                sub.as_ref().map(|sub| {
+                                    Parsed::new(
+                                        sub.apply_selection_set(&field.selection_set),
+                                        sub.range(),
+                                    )
+                                }),
                             ));
                         }
                     } else if self.star.is_some() {
@@ -142,12 +136,9 @@ impl SubSelection {
                             }
                         }
                         for field in fields {
-                            new_selections.push(Parsed::new(
-                                NamedSelection::Path(
-                                    Parsed::new(Alias::new(field.response_key().as_str()), None),
-                                    path_selection.apply_selection_set(&field.selection_set),
-                                ),
-                                None,
+                            new_selections.push(NamedSelection::Path(
+                                Parsed::new(Alias::new(field.response_key().as_str()), None),
+                                path_selection.apply_selection_set(&field.selection_set),
                             ));
                         }
                     } else if self.star.is_some() {
@@ -160,15 +151,12 @@ impl SubSelection {
                     let key = alias.name.as_str();
                     if let Some(fields) = field_map.get_vec(key) {
                         for field in fields {
-                            new_selections.push(Parsed::new(
-                                NamedSelection::Group(
-                                    Parsed::new(Alias::new(field.response_key().as_str()), None),
-                                    Parsed::new(
-                                        sub.apply_selection_set(&field.selection_set),
-                                        sub.range(),
-                                    ),
+                            new_selections.push(NamedSelection::Group(
+                                Parsed::new(Alias::new(field.response_key().as_str()), None),
+                                Parsed::new(
+                                    sub.apply_selection_set(&field.selection_set),
+                                    sub.range(),
                                 ),
-                                None,
                             ));
                         }
                     }
@@ -182,12 +170,9 @@ impl SubSelection {
             dropped_fields.retain(|key, _| !referenced_fields.contains(key));
             for (dropped, _) in dropped_fields {
                 let name = format!("__unused__{dropped}");
-                new_selections.push(Parsed::new(
-                    NamedSelection::Field(
-                        Some(Parsed::new(Alias::new(name.as_str()), None)),
-                        Parsed::new(Key::field(dropped), None),
-                        None,
-                    ),
+                new_selections.push(NamedSelection::Field(
+                    Some(Parsed::new(Alias::new(name.as_str()), None)),
+                    Parsed::new(Key::field(dropped), None),
                     None,
                 ));
             }

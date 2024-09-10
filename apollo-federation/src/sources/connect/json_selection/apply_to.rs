@@ -200,7 +200,7 @@ impl ApplyToInternal for JSONSelection {
     }
 }
 
-impl ApplyToInternal for Parsed<NamedSelection> {
+impl ApplyToInternal for NamedSelection {
     fn apply_to_path(
         &self,
         data: &JSON,
@@ -214,8 +214,8 @@ impl ApplyToInternal for Parsed<NamedSelection> {
 
         let mut output = JSONMap::new();
 
-        match self.as_ref() {
-            NamedSelection::Field(alias, key, selection) => {
+        match self {
+            Self::Field(alias, key, selection) => {
                 let input_path_with_key = input_path.append(key.to_json());
                 let name = key.as_str();
                 if let Some(child) = data.get(name) {
@@ -241,13 +241,13 @@ impl ApplyToInternal for Parsed<NamedSelection> {
                     ));
                 }
             }
-            NamedSelection::Path(alias, path_selection) => {
+            Self::Path(alias, path_selection) => {
                 let value = path_selection.apply_to_path(data, vars, input_path, errors);
                 if let Some(value) = value {
                     output.insert(alias.name(), value);
                 }
             }
-            NamedSelection::Group(alias, sub_selection) => {
+            Self::Group(alias, sub_selection) => {
                 let value = sub_selection.apply_to_path(data, vars, input_path, errors);
                 if let Some(value) = value {
                     output.insert(alias.name(), value);
@@ -458,7 +458,7 @@ impl ApplyToInternal for Parsed<SubSelection> {
             // *original* names of the fields that were explicitly selected,
             // because we will need to omit them from what the * matches.
             if self.star.is_some() {
-                match named_selection.as_ref() {
+                match named_selection {
                     NamedSelection::Field(_, name, _) => {
                         input_names.insert(name.as_str());
                     }

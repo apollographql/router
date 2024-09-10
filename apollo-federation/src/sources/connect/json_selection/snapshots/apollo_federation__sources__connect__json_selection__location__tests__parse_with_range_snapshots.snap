@@ -6,89 +6,78 @@ Named(
     Parsed {
         node: SubSelection {
             selections: [
-                Parsed {
-                    node: Path(
-                        Parsed {
-                            node: Alias {
-                                name: Parsed {
+                Path(
+                    Parsed {
+                        node: Alias {
+                            name: Parsed {
+                                node: Field(
+                                    "path",
+                                ),
+                                range: Some(
+                                    (
+                                        9,
+                                        13,
+                                    ),
+                                ),
+                            },
+                        },
+                        range: Some(
+                            (
+                                9,
+                                14,
+                            ),
+                        ),
+                    },
+                    PathSelection {
+                        path: Parsed {
+                            node: Key(
+                                Parsed {
                                     node: Field(
-                                        "path",
+                                        "some",
                                     ),
                                     range: Some(
                                         (
-                                            9,
-                                            13,
+                                            15,
+                                            19,
                                         ),
                                     ),
                                 },
-                            },
-                            range: Some(
-                                (
-                                    9,
-                                    14,
-                                ),
-                            ),
-                        },
-                        PathSelection {
-                            path: Parsed {
-                                node: Key(
-                                    Parsed {
-                                        node: Field(
-                                            "some",
-                                        ),
-                                        range: Some(
-                                            (
-                                                15,
-                                                19,
+                                Parsed {
+                                    node: Key(
+                                        Parsed {
+                                            node: Field(
+                                                "nested",
                                             ),
-                                        ),
-                                    },
-                                    Parsed {
-                                        node: Key(
-                                            Parsed {
-                                                node: Field(
-                                                    "nested",
+                                            range: Some(
+                                                (
+                                                    20,
+                                                    26,
                                                 ),
-                                                range: Some(
-                                                    (
-                                                        20,
-                                                        26,
+                                            ),
+                                        },
+                                        Parsed {
+                                            node: Key(
+                                                Parsed {
+                                                    node: Field(
+                                                        "path",
                                                     ),
-                                                ),
-                                            },
-                                            Parsed {
-                                                node: Key(
-                                                    Parsed {
-                                                        node: Field(
-                                                            "path",
+                                                    range: Some(
+                                                        (
+                                                            27,
+                                                            31,
                                                         ),
-                                                        range: Some(
-                                                            (
-                                                                27,
-                                                                31,
-                                                            ),
-                                                        ),
-                                                    },
-                                                    Parsed {
-                                                        node: Selection(
-                                                            Parsed {
-                                                                node: SubSelection {
-                                                                    selections: [
+                                                    ),
+                                                },
+                                                Parsed {
+                                                    node: Selection(
+                                                        Parsed {
+                                                            node: SubSelection {
+                                                                selections: [
+                                                                    Field(
+                                                                        None,
                                                                         Parsed {
                                                                             node: Field(
-                                                                                None,
-                                                                                Parsed {
-                                                                                    node: Field(
-                                                                                        "isbn",
-                                                                                    ),
-                                                                                    range: Some(
-                                                                                        (
-                                                                                            34,
-                                                                                            38,
-                                                                                        ),
-                                                                                    ),
-                                                                                },
-                                                                                None,
+                                                                                "isbn",
                                                                             ),
                                                                             range: Some(
                                                                                 (
@@ -97,339 +86,296 @@ Named(
                                                                                 ),
                                                                             ),
                                                                         },
+                                                                        None,
+                                                                    ),
+                                                                    Field(
+                                                                        None,
                                                                         Parsed {
                                                                             node: Field(
-                                                                                None,
-                                                                                Parsed {
-                                                                                    node: Field(
-                                                                                        "author",
-                                                                                    ),
-                                                                                    range: Some(
-                                                                                        (
-                                                                                            39,
-                                                                                            45,
-                                                                                        ),
-                                                                                    ),
-                                                                                },
-                                                                                Some(
-                                                                                    Parsed {
-                                                                                        node: SubSelection {
-                                                                                            selections: [
-                                                                                                Parsed {
-                                                                                                    node: Field(
-                                                                                                        None,
-                                                                                                        Parsed {
-                                                                                                            node: Field(
-                                                                                                                "name",
-                                                                                                            ),
-                                                                                                            range: Some(
-                                                                                                                (
-                                                                                                                    48,
-                                                                                                                    52,
-                                                                                                                ),
-                                                                                                            ),
-                                                                                                        },
-                                                                                                        None,
-                                                                                                    ),
-                                                                                                    range: Some(
-                                                                                                        (
-                                                                                                            48,
-                                                                                                            52,
-                                                                                                        ),
-                                                                                                    ),
-                                                                                                },
-                                                                                            ],
-                                                                                            star: None,
-                                                                                        },
-                                                                                        range: Some(
-                                                                                            (
-                                                                                                46,
-                                                                                                54,
-                                                                                            ),
-                                                                                        ),
-                                                                                    },
-                                                                                ),
+                                                                                "author",
                                                                             ),
                                                                             range: Some(
                                                                                 (
                                                                                     39,
-                                                                                    54,
+                                                                                    45,
                                                                                 ),
                                                                             ),
                                                                         },
-                                                                    ],
-                                                                    star: None,
-                                                                },
+                                                                        Some(
+                                                                            Parsed {
+                                                                                node: SubSelection {
+                                                                                    selections: [
+                                                                                        Field(
+                                                                                            None,
+                                                                                            Parsed {
+                                                                                                node: Field(
+                                                                                                    "name",
+                                                                                                ),
+                                                                                                range: Some(
+                                                                                                    (
+                                                                                                        48,
+                                                                                                        52,
+                                                                                                    ),
+                                                                                                ),
+                                                                                            },
+                                                                                            None,
+                                                                                        ),
+                                                                                    ],
+                                                                                    star: None,
+                                                                                },
+                                                                                range: Some(
+                                                                                    (
+                                                                                        46,
+                                                                                        54,
+                                                                                    ),
+                                                                                ),
+                                                                            },
+                                                                        ),
+                                                                    ),
+                                                                ],
+                                                                star: None,
+                                                            },
+                                                            range: Some(
+                                                                (
+                                                                    32,
+                                                                    55,
+                                                                ),
+                                                            ),
+                                                        },
+                                                    ),
+                                                    range: Some(
+                                                        (
+                                                            32,
+                                                            55,
+                                                        ),
+                                                    ),
+                                                },
+                                            ),
+                                            range: Some(
+                                                (
+                                                    26,
+                                                    55,
+                                                ),
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        (
+                                            19,
+                                            55,
+                                        ),
+                                    ),
+                                },
+                            ),
+                            range: Some(
+                                (
+                                    15,
+                                    55,
+                                ),
+                            ),
+                        },
+                    },
+                ),
+                Field(
+                    Some(
+                        Parsed {
+                            node: Alias {
+                                name: Parsed {
+                                    node: Field(
+                                        "alias",
+                                    ),
+                                    range: Some(
+                                        (
+                                            64,
+                                            69,
+                                        ),
+                                    ),
+                                },
+                            },
+                            range: Some(
+                                (
+                                    64,
+                                    70,
+                                ),
+                            ),
+                        },
+                    ),
+                    Parsed {
+                        node: Quoted(
+                            "not an identifier",
+                        ),
+                        range: Some(
+                            (
+                                71,
+                                90,
+                            ),
+                        ),
+                    },
+                    Some(
+                        Parsed {
+                            node: SubSelection {
+                                selections: [
+                                    Path(
+                                        Parsed {
+                                            node: Alias {
+                                                name: Parsed {
+                                                    node: Field(
+                                                        "__typename",
+                                                    ),
+                                                    range: Some(
+                                                        (
+                                                            151,
+                                                            161,
+                                                        ),
+                                                    ),
+                                                },
+                                            },
+                                            range: Some(
+                                                (
+                                                    151,
+                                                    162,
+                                                ),
+                                            ),
+                                        },
+                                        PathSelection {
+                                            path: Parsed {
+                                                node: Var(
+                                                    Parsed {
+                                                        node: @,
+                                                        range: Some(
+                                                            (
+                                                                163,
+                                                                164,
+                                                            ),
+                                                        ),
+                                                    },
+                                                    Parsed {
+                                                        node: Method(
+                                                            Parsed {
+                                                                node: "echo",
                                                                 range: Some(
                                                                     (
-                                                                        32,
-                                                                        55,
+                                                                        166,
+                                                                        170,
                                                                     ),
                                                                 ),
+                                                            },
+                                                            Some(
+                                                                Parsed {
+                                                                    node: MethodArgs(
+                                                                        [
+                                                                            Parsed {
+                                                                                node: String(
+                                                                                    "Frog",
+                                                                                ),
+                                                                                range: Some(
+                                                                                    (
+                                                                                        172,
+                                                                                        178,
+                                                                                    ),
+                                                                                ),
+                                                                            },
+                                                                        ],
+                                                                    ),
+                                                                    range: Some(
+                                                                        (
+                                                                            170,
+                                                                            182,
+                                                                        ),
+                                                                    ),
+                                                                },
+                                                            ),
+                                                            Parsed {
+                                                                node: Empty,
+                                                                range: None,
                                                             },
                                                         ),
                                                         range: Some(
                                                             (
-                                                                32,
-                                                                55,
+                                                                164,
+                                                                166,
                                                             ),
                                                         ),
                                                     },
                                                 ),
                                                 range: Some(
                                                     (
-                                                        26,
-                                                        55,
+                                                        163,
+                                                        166,
                                                     ),
                                                 ),
                                             },
-                                        ),
-                                        range: Some(
-                                            (
-                                                19,
-                                                55,
-                                            ),
-                                        ),
-                                    },
-                                ),
-                                range: Some(
-                                    (
-                                        15,
-                                        55,
-                                    ),
-                                ),
-                            },
-                        },
-                    ),
-                    range: Some(
-                        (
-                            9,
-                            55,
-                        ),
-                    ),
-                },
-                Parsed {
-                    node: Field(
-                        Some(
-                            Parsed {
-                                node: Alias {
-                                    name: Parsed {
-                                        node: Field(
-                                            "alias",
-                                        ),
-                                        range: Some(
-                                            (
-                                                64,
-                                                69,
-                                            ),
-                                        ),
-                                    },
-                                },
-                                range: Some(
-                                    (
-                                        64,
-                                        70,
-                                    ),
-                                ),
-                            },
-                        ),
-                        Parsed {
-                            node: Quoted(
-                                "not an identifier",
-                            ),
-                            range: Some(
-                                (
-                                    71,
-                                    90,
-                                ),
-                            ),
-                        },
-                        Some(
-                            Parsed {
-                                node: SubSelection {
-                                    selections: [
-                                        Parsed {
-                                            node: Path(
-                                                Parsed {
-                                                    node: Alias {
-                                                        name: Parsed {
-                                                            node: Field(
-                                                                "__typename",
-                                                            ),
-                                                            range: Some(
-                                                                (
-                                                                    151,
-                                                                    161,
-                                                                ),
-                                                            ),
-                                                        },
-                                                    },
-                                                    range: Some(
-                                                        (
-                                                            151,
-                                                            162,
-                                                        ),
-                                                    ),
-                                                },
-                                                PathSelection {
-                                                    path: Parsed {
-                                                        node: Var(
-                                                            Parsed {
-                                                                node: @,
-                                                                range: Some(
-                                                                    (
-                                                                        163,
-                                                                        164,
-                                                                    ),
-                                                                ),
-                                                            },
-                                                            Parsed {
-                                                                node: Method(
-                                                                    Parsed {
-                                                                        node: "echo",
-                                                                        range: Some(
-                                                                            (
-                                                                                166,
-                                                                                170,
-                                                                            ),
-                                                                        ),
-                                                                    },
-                                                                    Some(
-                                                                        Parsed {
-                                                                            node: MethodArgs(
-                                                                                [
-                                                                                    Parsed {
-                                                                                        node: String(
-                                                                                            "Frog",
-                                                                                        ),
-                                                                                        range: Some(
-                                                                                            (
-                                                                                                172,
-                                                                                                178,
-                                                                                            ),
-                                                                                        ),
-                                                                                    },
-                                                                                ],
-                                                                            ),
-                                                                            range: Some(
-                                                                                (
-                                                                                    170,
-                                                                                    182,
-                                                                                ),
-                                                                            ),
-                                                                        },
-                                                                    ),
-                                                                    Parsed {
-                                                                        node: Empty,
-                                                                        range: None,
-                                                                    },
-                                                                ),
-                                                                range: Some(
-                                                                    (
-                                                                        164,
-                                                                        166,
-                                                                    ),
-                                                                ),
-                                                            },
-                                                        ),
-                                                        range: Some(
-                                                            (
-                                                                163,
-                                                                166,
-                                                            ),
-                                                        ),
-                                                    },
-                                                },
-                                            ),
-                                            range: Some(
-                                                (
-                                                    151,
-                                                    166,
-                                                ),
-                                            ),
                                         },
+                                    ),
+                                    Path(
                                         Parsed {
-                                            node: Path(
-                                                Parsed {
-                                                    node: Alias {
-                                                        name: Parsed {
-                                                            node: Field(
-                                                                "wrapped",
-                                                            ),
-                                                            range: Some(
-                                                                (
-                                                                    195,
-                                                                    202,
-                                                                ),
-                                                            ),
-                                                        },
-                                                    },
+                                            node: Alias {
+                                                name: Parsed {
+                                                    node: Field(
+                                                        "wrapped",
+                                                    ),
                                                     range: Some(
                                                         (
                                                             195,
-                                                            203,
+                                                            202,
                                                         ),
                                                     ),
                                                 },
-                                                PathSelection {
-                                                    path: Parsed {
-                                                        node: Var(
+                                            },
+                                            range: Some(
+                                                (
+                                                    195,
+                                                    203,
+                                                ),
+                                            ),
+                                        },
+                                        PathSelection {
+                                            path: Parsed {
+                                                node: Var(
+                                                    Parsed {
+                                                        node: $,
+                                                        range: Some(
+                                                            (
+                                                                204,
+                                                                205,
+                                                            ),
+                                                        ),
+                                                    },
+                                                    Parsed {
+                                                        node: Method(
                                                             Parsed {
-                                                                node: $,
+                                                                node: "echo",
                                                                 range: Some(
                                                                     (
-                                                                        204,
-                                                                        205,
+                                                                        207,
+                                                                        211,
                                                                     ),
                                                                 ),
                                                             },
-                                                            Parsed {
-                                                                node: Method(
-                                                                    Parsed {
-                                                                        node: "echo",
-                                                                        range: Some(
-                                                                            (
-                                                                                207,
-                                                                                211,
-                                                                            ),
-                                                                        ),
-                                                                    },
-                                                                    Some(
-                                                                        Parsed {
-                                                                            node: MethodArgs(
-                                                                                [
-                                                                                    Parsed {
-                                                                                        node: Object(
-                                                                                            {
-                                                                                                Parsed {
-                                                                                                    node: Field(
-                                                                                                        "wrapped",
-                                                                                                    ),
-                                                                                                    range: Some(
-                                                                                                        (
-                                                                                                            214,
-                                                                                                            221,
-                                                                                                        ),
-                                                                                                    ),
-                                                                                                }: Parsed {
-                                                                                                    node: Path(
-                                                                                                        PathSelection {
-                                                                                                            path: Parsed {
-                                                                                                                node: Var(
-                                                                                                                    Parsed {
-                                                                                                                        node: @,
-                                                                                                                        range: Some(
-                                                                                                                            (
-                                                                                                                                224,
-                                                                                                                                225,
-                                                                                                                            ),
-                                                                                                                        ),
-                                                                                                                    },
-                                                                                                                    Parsed {
-                                                                                                                        node: Empty,
-                                                                                                                        range: None,
-                                                                                                                    },
-                                                                                                                ),
+                                                            Some(
+                                                                Parsed {
+                                                                    node: MethodArgs(
+                                                                        [
+                                                                            Parsed {
+                                                                                node: Object(
+                                                                                    {
+                                                                                        Parsed {
+                                                                                            node: Field(
+                                                                                                "wrapped",
+                                                                                            ),
+                                                                                            range: Some(
+                                                                                                (
+                                                                                                    214,
+                                                                                                    221,
+                                                                                                ),
+                                                                                            ),
+                                                                                        }: Parsed {
+                                                                                            node: Path(
+                                                                                                PathSelection {
+                                                                                                    path: Parsed {
+                                                                                                        node: Var(
+                                                                                                            Parsed {
+                                                                                                                node: @,
                                                                                                                 range: Some(
                                                                                                                     (
                                                                                                                         224,
@@ -437,268 +383,223 @@ Named(
                                                                                                                     ),
                                                                                                                 ),
                                                                                                             },
-                                                                                                        },
-                                                                                                    ),
-                                                                                                    range: Some(
-                                                                                                        (
-                                                                                                            224,
-                                                                                                            225,
+                                                                                                            Parsed {
+                                                                                                                node: Empty,
+                                                                                                                range: None,
+                                                                                                            },
                                                                                                         ),
-                                                                                                    ),
+                                                                                                        range: Some(
+                                                                                                            (
+                                                                                                                224,
+                                                                                                                225,
+                                                                                                            ),
+                                                                                                        ),
+                                                                                                    },
                                                                                                 },
-                                                                                            },
-                                                                                        ),
-                                                                                        range: Some(
-                                                                                            (
-                                                                                                212,
-                                                                                                229,
                                                                                             ),
-                                                                                        ),
+                                                                                            range: Some(
+                                                                                                (
+                                                                                                    224,
+                                                                                                    225,
+                                                                                                ),
+                                                                                            ),
+                                                                                        },
                                                                                     },
-                                                                                ],
-                                                                            ),
-                                                                            range: Some(
-                                                                                (
-                                                                                    211,
-                                                                                    230,
                                                                                 ),
-                                                                            ),
-                                                                        },
+                                                                                range: Some(
+                                                                                    (
+                                                                                        212,
+                                                                                        229,
+                                                                                    ),
+                                                                                ),
+                                                                            },
+                                                                        ],
                                                                     ),
-                                                                    Parsed {
-                                                                        node: Empty,
-                                                                        range: None,
-                                                                    },
-                                                                ),
-                                                                range: Some(
-                                                                    (
-                                                                        205,
-                                                                        207,
+                                                                    range: Some(
+                                                                        (
+                                                                            211,
+                                                                            230,
+                                                                        ),
                                                                     ),
-                                                                ),
+                                                                },
+                                                            ),
+                                                            Parsed {
+                                                                node: Empty,
+                                                                range: None,
                                                             },
                                                         ),
                                                         range: Some(
                                                             (
-                                                                204,
+                                                                205,
                                                                 207,
                                                             ),
                                                         ),
                                                     },
+                                                ),
+                                                range: Some(
+                                                    (
+                                                        204,
+                                                        207,
+                                                    ),
+                                                ),
+                                            },
+                                        },
+                                    ),
+                                    Group(
+                                        Parsed {
+                                            node: Alias {
+                                                name: Parsed {
+                                                    node: Field(
+                                                        "group",
+                                                    ),
+                                                    range: Some(
+                                                        (
+                                                            243,
+                                                            248,
+                                                        ),
+                                                    ),
                                                 },
-                                            ),
+                                            },
                                             range: Some(
                                                 (
-                                                    195,
-                                                    207,
+                                                    243,
+                                                    249,
                                                 ),
                                             ),
                                         },
                                         Parsed {
-                                            node: Group(
-                                                Parsed {
-                                                    node: Alias {
-                                                        name: Parsed {
+                                            node: SubSelection {
+                                                selections: [
+                                                    Field(
+                                                        None,
+                                                        Parsed {
                                                             node: Field(
-                                                                "group",
+                                                                "a",
                                                             ),
                                                             range: Some(
                                                                 (
-                                                                    243,
-                                                                    248,
+                                                                    252,
+                                                                    253,
                                                                 ),
                                                             ),
                                                         },
-                                                    },
-                                                    range: Some(
-                                                        (
-                                                            243,
-                                                            249,
-                                                        ),
+                                                        None,
                                                     ),
-                                                },
-                                                Parsed {
-                                                    node: SubSelection {
-                                                        selections: [
-                                                            Parsed {
-                                                                node: Field(
-                                                                    None,
-                                                                    Parsed {
-                                                                        node: Field(
-                                                                            "a",
-                                                                        ),
-                                                                        range: Some(
-                                                                            (
-                                                                                252,
-                                                                                253,
-                                                                            ),
-                                                                        ),
-                                                                    },
-                                                                    None,
+                                                    Field(
+                                                        None,
+                                                        Parsed {
+                                                            node: Field(
+                                                                "b",
+                                                            ),
+                                                            range: Some(
+                                                                (
+                                                                    254,
+                                                                    255,
                                                                 ),
-                                                                range: Some(
-                                                                    (
-                                                                        252,
-                                                                        253,
-                                                                    ),
-                                                                ),
-                                                            },
-                                                            Parsed {
-                                                                node: Field(
-                                                                    None,
-                                                                    Parsed {
-                                                                        node: Field(
-                                                                            "b",
-                                                                        ),
-                                                                        range: Some(
-                                                                            (
-                                                                                254,
-                                                                                255,
-                                                                            ),
-                                                                        ),
-                                                                    },
-                                                                    None,
-                                                                ),
-                                                                range: Some(
-                                                                    (
-                                                                        254,
-                                                                        255,
-                                                                    ),
-                                                                ),
-                                                            },
-                                                            Parsed {
-                                                                node: Field(
-                                                                    None,
-                                                                    Parsed {
-                                                                        node: Field(
-                                                                            "c",
-                                                                        ),
-                                                                        range: Some(
-                                                                            (
-                                                                                256,
-                                                                                257,
-                                                                            ),
-                                                                        ),
-                                                                    },
-                                                                    None,
-                                                                ),
-                                                                range: Some(
-                                                                    (
-                                                                        256,
-                                                                        257,
-                                                                    ),
-                                                                ),
-                                                            },
-                                                        ],
-                                                        star: None,
-                                                    },
-                                                    range: Some(
-                                                        (
-                                                            250,
-                                                            259,
-                                                        ),
+                                                            ),
+                                                        },
+                                                        None,
                                                     ),
-                                                },
-                                            ),
+                                                    Field(
+                                                        None,
+                                                        Parsed {
+                                                            node: Field(
+                                                                "c",
+                                                            ),
+                                                            range: Some(
+                                                                (
+                                                                    256,
+                                                                    257,
+                                                                ),
+                                                            ),
+                                                        },
+                                                        None,
+                                                    ),
+                                                ],
+                                                star: None,
+                                            },
                                             range: Some(
                                                 (
-                                                    243,
+                                                    250,
                                                     259,
                                                 ),
                                             ),
                                         },
+                                    ),
+                                    Path(
                                         Parsed {
-                                            node: Path(
-                                                Parsed {
-                                                    node: Alias {
-                                                        name: Parsed {
-                                                            node: Field(
-                                                                "arg",
-                                                            ),
-                                                            range: Some(
-                                                                (
-                                                                    272,
-                                                                    275,
-                                                                ),
-                                                            ),
-                                                        },
-                                                    },
+                                            node: Alias {
+                                                name: Parsed {
+                                                    node: Field(
+                                                        "arg",
+                                                    ),
                                                     range: Some(
                                                         (
                                                             272,
-                                                            276,
+                                                            275,
                                                         ),
                                                     ),
                                                 },
-                                                PathSelection {
-                                                    path: Parsed {
-                                                        node: Var(
+                                            },
+                                            range: Some(
+                                                (
+                                                    272,
+                                                    276,
+                                                ),
+                                            ),
+                                        },
+                                        PathSelection {
+                                            path: Parsed {
+                                                node: Var(
+                                                    Parsed {
+                                                        node: $args,
+                                                        range: Some(
+                                                            (
+                                                                277,
+                                                                282,
+                                                            ),
+                                                        ),
+                                                    },
+                                                    Parsed {
+                                                        node: Key(
                                                             Parsed {
-                                                                node: $args,
-                                                                range: Some(
-                                                                    (
-                                                                        277,
-                                                                        282,
-                                                                    ),
-                                                                ),
-                                                            },
-                                                            Parsed {
-                                                                node: Key(
-                                                                    Parsed {
-                                                                        node: Field(
-                                                                            "arg",
-                                                                        ),
-                                                                        range: Some(
-                                                                            (
-                                                                                285,
-                                                                                288,
-                                                                            ),
-                                                                        ),
-                                                                    },
-                                                                    Parsed {
-                                                                        node: Empty,
-                                                                        range: None,
-                                                                    },
+                                                                node: Field(
+                                                                    "arg",
                                                                 ),
                                                                 range: Some(
                                                                     (
-                                                                        283,
+                                                                        285,
                                                                         288,
                                                                     ),
                                                                 ),
                                                             },
+                                                            Parsed {
+                                                                node: Empty,
+                                                                range: None,
+                                                            },
                                                         ),
                                                         range: Some(
                                                             (
-                                                                277,
+                                                                283,
                                                                 288,
                                                             ),
                                                         ),
                                                     },
-                                                },
-                                            ),
-                                            range: Some(
-                                                (
-                                                    272,
-                                                    288,
                                                 ),
-                                            ),
+                                                range: Some(
+                                                    (
+                                                        277,
+                                                        288,
+                                                    ),
+                                                ),
+                                            },
                                         },
+                                    ),
+                                    Field(
+                                        None,
                                         Parsed {
                                             node: Field(
-                                                None,
-                                                Parsed {
-                                                    node: Field(
-                                                        "field",
-                                                    ),
-                                                    range: Some(
-                                                        (
-                                                            301,
-                                                            306,
-                                                        ),
-                                                    ),
-                                                },
-                                                None,
+                                                "field",
                                             ),
                                             range: Some(
                                                 (
@@ -707,52 +608,44 @@ Named(
                                                 ),
                                             ),
                                         },
-                                    ],
-                                    star: Some(
-                                        Parsed {
-                                            node: StarSelection(
-                                                Some(
-                                                    Parsed {
-                                                        node: Alias {
-                                                            name: Parsed {
-                                                                node: Field(
-                                                                    "rest",
-                                                                ),
-                                                                range: Some(
-                                                                    (
-                                                                        319,
-                                                                        323,
-                                                                    ),
-                                                                ),
-                                                            },
-                                                        },
-                                                        range: Some(
-                                                            (
-                                                                319,
-                                                                324,
+                                        None,
+                                    ),
+                                ],
+                                star: Some(
+                                    Parsed {
+                                        node: StarSelection(
+                                            Some(
+                                                Parsed {
+                                                    node: Alias {
+                                                        name: Parsed {
+                                                            node: Field(
+                                                                "rest",
                                                             ),
-                                                        ),
+                                                            range: Some(
+                                                                (
+                                                                    319,
+                                                                    323,
+                                                                ),
+                                                            ),
+                                                        },
                                                     },
-                                                ),
-                                                Some(
-                                                    Parsed {
-                                                        node: SubSelection {
-                                                            selections: [
+                                                    range: Some(
+                                                        (
+                                                            319,
+                                                            324,
+                                                        ),
+                                                    ),
+                                                },
+                                            ),
+                                            Some(
+                                                Parsed {
+                                                    node: SubSelection {
+                                                        selections: [
+                                                            Field(
+                                                                None,
                                                                 Parsed {
                                                                     node: Field(
-                                                                        None,
-                                                                        Parsed {
-                                                                            node: Field(
-                                                                                "data",
-                                                                            ),
-                                                                            range: Some(
-                                                                                (
-                                                                                    329,
-                                                                                    333,
-                                                                                ),
-                                                                            ),
-                                                                        },
-                                                                        None,
+                                                                        "data",
                                                                     ),
                                                                     range: Some(
                                                                         (
@@ -761,43 +654,38 @@ Named(
                                                                         ),
                                                                     ),
                                                                 },
-                                                            ],
-                                                            star: None,
-                                                        },
-                                                        range: Some(
-                                                            (
-                                                                327,
-                                                                335,
+                                                                None,
                                                             ),
-                                                        ),
+                                                        ],
+                                                        star: None,
                                                     },
-                                                ),
+                                                    range: Some(
+                                                        (
+                                                            327,
+                                                            335,
+                                                        ),
+                                                    ),
+                                                },
                                             ),
-                                            range: Some(
-                                                (
-                                                    319,
-                                                    335,
-                                                ),
+                                        ),
+                                        range: Some(
+                                            (
+                                                319,
+                                                335,
                                             ),
-                                        },
-                                    ),
-                                },
-                                range: Some(
-                                    (
-                                        91,
-                                        345,
-                                    ),
+                                        ),
+                                    },
                                 ),
                             },
-                        ),
+                            range: Some(
+                                (
+                                    91,
+                                    345,
+                                ),
+                            ),
+                        },
                     ),
-                    range: Some(
-                        (
-                            64,
-                            345,
-                        ),
-                    ),
-                },
+                ),
             ],
             star: None,
         },

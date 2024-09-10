@@ -5,11 +5,19 @@ use nom_locate::LocatedSpan;
 
 pub type Span<'a> = LocatedSpan<&'a str>;
 
+// Some parsed AST structures, like PathSelection and NamedSelection, can
+// produce a range directly from their children, so they do not need to be
+// wrapped as Parsed<PathSelection> or Parsed<NamedSelection>. Instead, these
+// types implement the Ranged<T> trait for compatibility with the other
+// Parsed<T> structures.
 pub trait Ranged<T> {
     fn node(&self) -> &T;
     fn range(&self) -> Option<(usize, usize)>;
 }
 
+// The most common implementation of the Ranged<T> trait is the Parsed<T>
+// struct, used for any AST node that needs its own location information
+// (because that information is not derivable from its children).
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct Parsed<T> {
     node: Box<T>,
@@ -152,24 +160,17 @@ pub(super) mod strip_ranges {
         }
     }
 
-    impl StripRanges for Parsed<NamedSelection> {
+    impl StripRanges for NamedSelection {
         fn strip_ranges(&self) -> Self {
-            Parsed::new(
-                match self.as_ref() {
-                    NamedSelection::Field(alias, key, sub) => NamedSelection::Field(
-                        alias.as_ref().map(|a| a.strip_ranges()),
-                        key.strip_ranges(),
-                        sub.as_ref().map(|s| s.strip_ranges()),
-                    ),
-                    NamedSelection::Path(alias, path) => {
-                        NamedSelection::Path(alias.strip_ranges(), path.strip_ranges())
-                    }
-                    NamedSelection::Group(alias, sub) => {
-                        NamedSelection::Group(alias.strip_ranges(), sub.strip_ranges())
-                    }
-                },
-                None,
-            )
+            match self {
+                Self::Field(alias, key, sub) => Self::Field(
+                    alias.as_ref().map(|a| a.strip_ranges()),
+                    key.strip_ranges(),
+                    sub.as_ref().map(|s| s.strip_ranges()),
+                ),
+                Self::Path(alias, path) => Self::Path(alias.strip_ranges(), path.strip_ranges()),
+                Self::Group(alias, sub) => Self::Group(alias.strip_ranges(), sub.strip_ranges()),
+            }
         }
     }
 
