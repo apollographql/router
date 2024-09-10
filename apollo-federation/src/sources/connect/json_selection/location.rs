@@ -19,7 +19,7 @@ pub trait Ranged<T> {
 // struct, used to wrap any AST node that (a) needs its own location information
 // (because that information is not derivable from its children) and (b) cannot
 // easily store that information by adding another struct field (most often
-// because T is an enum type, not a struct).
+// because T is an enum or primitive/String type, not a struct).
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct WithRange<T> {
     node: Box<T>,
@@ -232,12 +232,12 @@ pub(super) mod strip_ranges {
         }
     }
 
-    impl StripRanges for WithRange<MethodArgs> {
+    impl StripRanges for MethodArgs {
         fn strip_ranges(&self) -> Self {
-            WithRange::new(
-                MethodArgs(self.0.iter().map(|arg| arg.strip_ranges()).collect()),
-                None,
-            )
+            MethodArgs {
+                args: self.args.iter().map(|arg| arg.strip_ranges()).collect(),
+                range: None,
+            }
         }
     }
 

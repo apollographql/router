@@ -20,7 +20,7 @@ use crate::sources::connect::json_selection::VarsWithPathsMap;
 
 pub(super) fn typeof_method(
     method_name: &WithRange<String>,
-    method_args: Option<&WithRange<MethodArgs>>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
@@ -45,7 +45,7 @@ pub(super) fn typeof_method(
 
 pub(super) fn eq_method(
     method_name: &WithRange<String>,
-    method_args: Option<&WithRange<MethodArgs>>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
@@ -53,7 +53,7 @@ pub(super) fn eq_method(
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
     if let Some(parsed_args) = method_args {
-        let args = &parsed_args.0;
+        let args = &parsed_args.args;
         if args.len() == 1 {
             let matches = if let Some(value) = args[0].apply_to_path(data, vars, input_path, errors)
             {
@@ -82,7 +82,7 @@ pub(super) fn eq_method(
 // pair can be [true, <default>].
 pub(super) fn match_if_method(
     method_name: &WithRange<String>,
-    method_args: Option<&WithRange<MethodArgs>>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
@@ -90,7 +90,7 @@ pub(super) fn match_if_method(
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
     if let Some(parsed_args) = method_args {
-        for pair in &parsed_args.0 {
+        for pair in &parsed_args.args {
             if let LitExpr::Array(pair) = pair.node() {
                 if pair.len() == 2 {
                     if let Some(JSON::Bool(true)) =
@@ -122,7 +122,7 @@ pub(super) fn match_if_method(
 
 pub(super) fn arithmetic_method(
     method_name: &WithRange<String>,
-    method_args: Option<&WithRange<MethodArgs>>,
+    method_args: Option<&MethodArgs>,
     op: impl Fn(&Number, &Number) -> Option<Number>,
     data: &JSON,
     vars: &VarsWithPathsMap,
@@ -132,7 +132,7 @@ pub(super) fn arithmetic_method(
     if let Some(parsed_args) = method_args {
         if let JSON::Number(result) = data {
             let mut result = result.clone();
-            for arg in &parsed_args.0 {
+            for arg in &parsed_args.args {
                 let value_opt = arg.apply_to_path(data, vars, input_path, errors);
                 if let Some(JSON::Number(n)) = value_opt {
                     if let Some(new_result) = op(&result, &n) {
@@ -199,7 +199,7 @@ macro_rules! infix_math_method {
     ($name:ident, $op:ident) => {
         pub(super) fn $name(
             method_name: &WithRange<String>,
-            method_args: Option<&WithRange<MethodArgs>>,
+            method_args: Option<&MethodArgs>,
             data: &JSON,
             vars: &VarsWithPathsMap,
             input_path: &InputPath<JSON>,
@@ -230,7 +230,7 @@ infix_math_method!(mod_method, rem_op);
 
 pub(super) fn has_method(
     method_name: &WithRange<String>,
-    method_args: Option<&WithRange<MethodArgs>>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
@@ -238,7 +238,7 @@ pub(super) fn has_method(
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
     if let Some(parsed_args) = method_args {
-        match parsed_args.0.first() {
+        match parsed_args.args.first() {
             Some(arg) => match &arg.apply_to_path(data, vars, input_path, errors) {
                 Some(json_index @ JSON::Number(n)) => match (data, n.as_i64()) {
                     (JSON::Array(array), Some(index)) => {
@@ -315,7 +315,7 @@ pub(super) fn has_method(
 // the index is out of bounds, returns None and reports an error.
 pub(super) fn get_method(
     method_name: &WithRange<String>,
-    method_args: Option<&WithRange<MethodArgs>>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
@@ -323,7 +323,7 @@ pub(super) fn get_method(
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
     if let Some(parsed_args) = method_args {
-        if let Some(index_literal) = parsed_args.0.first() {
+        if let Some(index_literal) = parsed_args.args.first() {
             match &index_literal.apply_to_path(data, vars, input_path, errors) {
                 Some(JSON::Number(n)) => match (data, n.as_i64()) {
                     (JSON::Array(array), Some(i)) => {
@@ -474,7 +474,7 @@ pub(super) fn get_method(
 
 pub(super) fn keys_method(
     method_name: &WithRange<String>,
-    method_args: Option<&WithRange<MethodArgs>>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
@@ -515,7 +515,7 @@ pub(super) fn keys_method(
 
 pub(super) fn values_method(
     method_name: &WithRange<String>,
-    method_args: Option<&WithRange<MethodArgs>>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
@@ -556,7 +556,7 @@ pub(super) fn values_method(
 
 pub(super) fn not_method(
     method_name: &WithRange<String>,
-    method_args: Option<&WithRange<MethodArgs>>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
@@ -590,7 +590,7 @@ fn is_truthy(data: &JSON) -> bool {
 
 pub(super) fn or_method(
     method_name: &WithRange<String>,
-    method_args: Option<&WithRange<MethodArgs>>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
@@ -599,7 +599,7 @@ pub(super) fn or_method(
 ) -> Option<JSON> {
     if let Some(parsed_args) = method_args {
         let mut result = is_truthy(data);
-        for arg in &parsed_args.0 {
+        for arg in &parsed_args.args {
             if result {
                 break;
             }
@@ -621,7 +621,7 @@ pub(super) fn or_method(
 
 pub(super) fn and_method(
     method_name: &WithRange<String>,
-    method_args: Option<&WithRange<MethodArgs>>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
@@ -630,7 +630,7 @@ pub(super) fn and_method(
 ) -> Option<JSON> {
     if let Some(parsed_args) = method_args {
         let mut result = is_truthy(data);
-        for arg in &parsed_args.0 {
+        for arg in &parsed_args.args {
             if !result {
                 break;
             }

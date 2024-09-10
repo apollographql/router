@@ -28,7 +28,7 @@ type ArrowMethod = fn(
     // Method name
     method_name: &WithRange<String>,
     // Arguments passed to this method
-    method_args: Option<&WithRange<MethodArgs>>,
+    method_args: Option<&MethodArgs>,
     // The JSON input value (data)
     data: &JSON,
     // The variables

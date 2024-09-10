@@ -166,7 +166,7 @@ impl PrettyPrintable for WithRange<PathList> {
     }
 }
 
-impl PrettyPrintable for WithRange<MethodArgs> {
+impl PrettyPrintable for MethodArgs {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
         let mut result = String::new();
 
@@ -177,7 +177,7 @@ impl PrettyPrintable for WithRange<MethodArgs> {
         result.push('(');
 
         // TODO Break long argument lists across multiple lines, with indentation?
-        for (i, arg) in self.0.iter().enumerate() {
+        for (i, arg) in self.args.iter().enumerate() {
             if i > 0 {
                 result.push_str(", ");
             }

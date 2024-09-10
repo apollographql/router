@@ -74,13 +74,13 @@ impl SubSelection {
                             WithRange::new(
                                 PathList::Method(
                                     WithRange::new("echo".to_string(), None),
-                                    Some(WithRange::new(
-                                        MethodArgs(vec![WithRange::new(
+                                    Some(MethodArgs {
+                                        args: vec![WithRange::new(
                                             LitExpr::String(selection_set.ty.to_string()),
                                             None,
-                                        )]),
-                                        None,
-                                    )),
+                                        )],
+                                        ..Default::default()
+                                    }),
                                     WithRange::new(PathList::Empty, None),
                                 ),
                                 None,

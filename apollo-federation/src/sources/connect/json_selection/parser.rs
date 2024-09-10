@@ -313,7 +313,7 @@ impl ExternalVarPaths for PathSelection {
             }
             PathList::Method(_, opt_args, tail) => {
                 if let Some(args) = opt_args {
-                    for lit_arg in &args.0 {
+                    for lit_arg in &args.args {
                         paths.extend(lit_arg.external_var_paths());
                     }
                 }
@@ -353,11 +353,7 @@ pub(super) enum PathList {
     // A PathList::Method is a PathStep item that may appear only in the
     // middle/tail (not the beginning) of a PathSelection. Methods are
     // distinguished from .keys by their ->method invocation syntax.
-    Method(
-        WithRange<String>,
-        Option<WithRange<MethodArgs>>,
-        WithRange<PathList>,
-    ),
+    Method(WithRange<String>, Option<MethodArgs>, WithRange<PathList>),
 
     // Optionally, a PathList may end with a SubSelection, which applies a set
     // of named selections to the final value of the path. PathList::Selection
@@ -583,7 +579,7 @@ impl ExternalVarPaths for PathList {
             }
             PathList::Method(_, opt_args, rest) => {
                 if let Some(args) = opt_args {
-                    for lit_arg in &args.0 {
+                    for lit_arg in &args.args {
                         paths.extend(lit_arg.external_var_paths());
                     }
                 }
@@ -1006,15 +1002,28 @@ pub fn parse_string_literal(input: Span) -> IResult<Span, WithRange<String>> {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct MethodArgs(pub(super) Vec<WithRange<LitExpr>>);
+#[derive(Debug, PartialEq, Eq, Clone, Default)]
+pub struct MethodArgs {
+    pub(super) args: Vec<WithRange<LitExpr>>,
+    pub(super) range: Option<(usize, usize)>,
+}
+
+impl Ranged<MethodArgs> for MethodArgs {
+    fn node(&self) -> &MethodArgs {
+        self
+    }
+
+    fn range(&self) -> Option<(usize, usize)> {
+        self.range
+    }
+}
 
 // Comma-separated positional arguments for a method, surrounded by parentheses.
 // When an arrow method is used without arguments, the Option<MethodArgs> for
 // the PathSelection::Method will be None, so we can safely define MethodArgs
 // using a Vec<LitExpr> in all cases (possibly empty but never missing).
 impl MethodArgs {
-    fn parse(input: Span) -> IResult<Span, WithRange<Self>> {
+    fn parse(input: Span) -> IResult<Span, Self> {
         tuple((
             spaces_or_comments,
             parsed_span("("),
@@ -1037,12 +1046,14 @@ impl MethodArgs {
         ))(input)
         .map(|(input, (_, open_paren, _, args, _, close_paren, _))| {
             let range = merge_ranges(open_paren.range(), close_paren.range());
-            (input, WithRange::new(Self(args.unwrap_or_default()), range))
+            (
+                input,
+                Self {
+                    args: args.unwrap_or_default(),
+                    range,
+                },
+            )
         })
-    }
-
-    fn into_parsed(self) -> WithRange<Self> {
-        WithRange::new(self, None)
     }
 }
 
@@ -2151,14 +2162,14 @@ mod tests {
                         Key::field("x").into_parsed(),
                         PathList::Method(
                             WithRange::new("or".to_string(), None),
-                            Some(
-                                MethodArgs(vec![LitExpr::Path(PathSelection::from_slice(
+                            Some(MethodArgs {
+                                args: vec![LitExpr::Path(PathSelection::from_slice(
                                     &[Key::field("data"), Key::field("y")],
                                     None,
                                 ))
-                                .into_parsed()])
-                                .into_parsed(),
-                            ),
+                                .into_parsed()],
+                                ..Default::default()
+                            }),
                             PathList::Empty.into_parsed(),
                         )
                         .into_parsed(),
@@ -2175,17 +2186,17 @@ mod tests {
                     Key::field("data").into_parsed(),
                     PathList::Method(
                         WithRange::new("query".to_string(), None),
-                        Some(
-                            MethodArgs(vec![
+                        Some(MethodArgs {
+                            args: vec![
                                 LitExpr::Path(PathSelection::from_slice(&[Key::field("a")], None))
                                     .into_parsed(),
                                 LitExpr::Path(PathSelection::from_slice(&[Key::field("b")], None))
                                     .into_parsed(),
                                 LitExpr::Path(PathSelection::from_slice(&[Key::field("c")], None))
                                     .into_parsed(),
-                            ])
-                            .into_parsed(),
-                        ),
+                            ],
+                            ..Default::default()
+                        }),
                         PathList::Empty.into_parsed(),
                     )
                     .into_parsed(),
@@ -2207,8 +2218,8 @@ mod tests {
                         Key::field("x").into_parsed(),
                         PathList::Method(
                             WithRange::new("concat".to_string(), None),
-                            Some(
-                                MethodArgs(vec![LitExpr::Array(vec![
+                            Some(MethodArgs {
+                                args: vec![LitExpr::Array(vec![
                                     LitExpr::Path(PathSelection::from_slice(
                                         &[Key::field("data"), Key::field("y")],
                                         None,
@@ -2220,9 +2231,9 @@ mod tests {
                                     ))
                                     .into_parsed(),
                                 ])
-                                .into_parsed()])
-                                .into_parsed(),
-                            ),
+                                .into_parsed()],
+                                ..Default::default()
+                            }),
                             PathList::Empty.into_parsed(),
                         )
                         .into_parsed(),
@@ -2246,8 +2257,8 @@ mod tests {
                     Key::field("data").into_parsed(),
                     PathList::Method(
                         WithRange::new("method".to_string(), None),
-                        Some(
-                            MethodArgs(vec![LitExpr::Array(vec![
+                        Some(MethodArgs {
+                                args: vec![LitExpr::Array(vec![
                                 LitExpr::Path(PathSelection {
                                     path: PathList::Var(
                                         KnownVariable::Dollar.into_parsed(),
@@ -2263,16 +2274,14 @@ mod tests {
                                                                     "times".to_string(),
                                                                     None,
                                                                 ),
-                                                                Some(
-                                                                    MethodArgs(
-                                                                        vec![LitExpr::Number(
-                                                                            "2".parse().expect(
-                                                                                "serde_json::Number parse error",
-                                                                            ),
-                                                                        ).into_parsed()],
-                                                                    )
-                                                                    .into_parsed(),
-                                                                ),
+                                                                Some(MethodArgs {
+                                                                    args: vec![LitExpr::Number(
+                                                                        "2".parse().expect(
+                                                                            "serde_json::Number parse error",
+                                                                        ),
+                                                                    ).into_parsed()],
+                                                                    ..Default::default()
+                                                                }),
                                                                 PathList::Empty.into_parsed(),
                                                             )
                                                             .into_parsed(),
@@ -2304,14 +2313,14 @@ mod tests {
                                                                     None,
                                                                 ),
                                                                 Some(
-                                                                    MethodArgs(
-                                                                        vec![LitExpr::Number(
+                                                                    MethodArgs {
+                                                                        args: vec![LitExpr::Number(
                                                                             "2".parse().expect(
                                                                                 "serde_json::Number parse error",
                                                                             ),
                                                                         ).into_parsed()],
-                                                                    )
-                                                                    .into_parsed(),
+                                                                        ..Default::default()
+                                                                    },
                                                                 ),
                                                                 PathList::Empty.into_parsed(),
                                                             )
@@ -2329,9 +2338,9 @@ mod tests {
                                 })
                                 .into_parsed(),
                             ])
-                            .into_parsed()])
-                            .into_parsed(),
-                        ),
+                            .into_parsed()],
+                            ..Default::default()
+                        }),
                         PathList::Empty.into_parsed(),
                     )
                     .into_parsed(),

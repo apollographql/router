@@ -17,7 +17,7 @@ use crate::sources::connect::json_selection::VarsWithPathsMap;
 
 pub(super) fn echo_method(
     method_name: &WithRange<String>,
-    method_args: Option<&WithRange<MethodArgs>>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
@@ -25,7 +25,7 @@ pub(super) fn echo_method(
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
     if let Some(parsed_args) = method_args {
-        if let Some(arg) = parsed_args.0.first() {
+        if let Some(arg) = parsed_args.args.first() {
             return arg
                 .apply_to_path(data, vars, input_path, errors)
                 .and_then(|value| tail.apply_to_path(&value, vars, input_path, errors));
@@ -41,7 +41,7 @@ pub(super) fn echo_method(
 
 pub(super) fn map_method(
     method_name: &WithRange<String>,
-    method_args: Option<&WithRange<MethodArgs>>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
@@ -49,7 +49,7 @@ pub(super) fn map_method(
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
     if let Some(args) = method_args {
-        if let Some(first_arg) = args.0.first() {
+        if let Some(first_arg) = args.args.first() {
             if let JSON::Array(array) = data {
                 let mut output = Vec::with_capacity(array.len());
 
@@ -91,7 +91,7 @@ pub(super) fn map_method(
 
 pub(super) fn match_method(
     method_name: &WithRange<String>,
-    method_args: Option<&WithRange<MethodArgs>>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
@@ -103,7 +103,7 @@ pub(super) fn match_method(
     // Typically, the final pair will use @ as its key to ensure some default
     // value is returned.
     if let Some(parsed_args) = method_args {
-        for pair in &parsed_args.0 {
+        for pair in &parsed_args.args {
             if let LitExpr::Array(pair) = pair.node() {
                 if pair.len() == 2 {
                     if let Some(candidate) = pair[0].apply_to_path(data, vars, input_path, errors) {
@@ -135,7 +135,7 @@ pub(super) fn match_method(
 
 pub(super) fn first_method(
     method_name: &WithRange<String>,
-    method_args: Option<&WithRange<MethodArgs>>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
@@ -172,7 +172,7 @@ pub(super) fn first_method(
 
 pub(super) fn last_method(
     method_name: &WithRange<String>,
-    method_args: Option<&WithRange<MethodArgs>>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
@@ -209,7 +209,7 @@ pub(super) fn last_method(
 
 pub(super) fn slice_method(
     method_name: &WithRange<String>,
-    method_args: Option<&WithRange<MethodArgs>>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
@@ -234,7 +234,7 @@ pub(super) fn slice_method(
 
     if let Some(parsed_args) = method_args {
         let start = parsed_args
-            .0
+            .args
             .first()
             .and_then(|arg| arg.apply_to_path(data, vars, input_path, errors))
             .and_then(|n| n.as_i64())
@@ -242,7 +242,7 @@ pub(super) fn slice_method(
             .max(0)
             .min(length) as usize;
         let end = parsed_args
-            .0
+            .args
             .get(1)
             .and_then(|arg| arg.apply_to_path(data, vars, input_path, errors))
             .and_then(|n| n.as_i64())
@@ -283,7 +283,7 @@ pub(super) fn slice_method(
 
 pub(super) fn size_method(
     method_name: &WithRange<String>,
-    method_args: Option<&WithRange<MethodArgs>>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
@@ -338,7 +338,7 @@ pub(super) fn size_method(
 // well as it handles objects with named properties like { key, value }.
 pub(super) fn entries_method(
     method_name: &WithRange<String>,
-    method_args: Option<&WithRange<MethodArgs>>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,

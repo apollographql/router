@@ -249,22 +249,20 @@ Named(
                                                         ),
                                                     },
                                                     Some(
-                                                        WithRange {
-                                                            node: MethodArgs(
-                                                                [
-                                                                    WithRange {
-                                                                        node: String(
-                                                                            "Frog",
+                                                        MethodArgs {
+                                                            args: [
+                                                                WithRange {
+                                                                    node: String(
+                                                                        "Frog",
+                                                                    ),
+                                                                    range: Some(
+                                                                        (
+                                                                            172,
+                                                                            178,
                                                                         ),
-                                                                        range: Some(
-                                                                            (
-                                                                                172,
-                                                                                178,
-                                                                            ),
-                                                                        ),
-                                                                    },
-                                                                ],
-                                                            ),
+                                                                    ),
+                                                                },
+                                                            ],
                                                             range: Some(
                                                                 (
                                                                     170,
@@ -339,68 +337,66 @@ Named(
                                                         ),
                                                     },
                                                     Some(
-                                                        WithRange {
-                                                            node: MethodArgs(
-                                                                [
-                                                                    WithRange {
-                                                                        node: Object(
-                                                                            {
-                                                                                WithRange {
-                                                                                    node: Field(
-                                                                                        "wrapped",
+                                                        MethodArgs {
+                                                            args: [
+                                                                WithRange {
+                                                                    node: Object(
+                                                                        {
+                                                                            WithRange {
+                                                                                node: Field(
+                                                                                    "wrapped",
+                                                                                ),
+                                                                                range: Some(
+                                                                                    (
+                                                                                        214,
+                                                                                        221,
                                                                                     ),
-                                                                                    range: Some(
-                                                                                        (
-                                                                                            214,
-                                                                                            221,
-                                                                                        ),
-                                                                                    ),
-                                                                                }: WithRange {
-                                                                                    node: Path(
-                                                                                        PathSelection {
-                                                                                            path: WithRange {
-                                                                                                node: Var(
-                                                                                                    WithRange {
-                                                                                                        node: @,
-                                                                                                        range: Some(
-                                                                                                            (
-                                                                                                                224,
-                                                                                                                225,
-                                                                                                            ),
+                                                                                ),
+                                                                            }: WithRange {
+                                                                                node: Path(
+                                                                                    PathSelection {
+                                                                                        path: WithRange {
+                                                                                            node: Var(
+                                                                                                WithRange {
+                                                                                                    node: @,
+                                                                                                    range: Some(
+                                                                                                        (
+                                                                                                            224,
+                                                                                                            225,
                                                                                                         ),
-                                                                                                    },
-                                                                                                    WithRange {
-                                                                                                        node: Empty,
-                                                                                                        range: None,
-                                                                                                    },
-                                                                                                ),
-                                                                                                range: Some(
-                                                                                                    (
-                                                                                                        224,
-                                                                                                        225,
                                                                                                     ),
+                                                                                                },
+                                                                                                WithRange {
+                                                                                                    node: Empty,
+                                                                                                    range: None,
+                                                                                                },
+                                                                                            ),
+                                                                                            range: Some(
+                                                                                                (
+                                                                                                    224,
+                                                                                                    225,
                                                                                                 ),
-                                                                                            },
+                                                                                            ),
                                                                                         },
+                                                                                    },
+                                                                                ),
+                                                                                range: Some(
+                                                                                    (
+                                                                                        224,
+                                                                                        225,
                                                                                     ),
-                                                                                    range: Some(
-                                                                                        (
-                                                                                            224,
-                                                                                            225,
-                                                                                        ),
-                                                                                    ),
-                                                                                },
+                                                                                ),
                                                                             },
+                                                                        },
+                                                                    ),
+                                                                    range: Some(
+                                                                        (
+                                                                            212,
+                                                                            229,
                                                                         ),
-                                                                        range: Some(
-                                                                            (
-                                                                                212,
-                                                                                229,
-                                                                            ),
-                                                                        ),
-                                                                    },
-                                                                ],
-                                                            ),
+                                                                    ),
+                                                                },
+                                                            ],
                                                             range: Some(
                                                                 (
                                                                     211,
