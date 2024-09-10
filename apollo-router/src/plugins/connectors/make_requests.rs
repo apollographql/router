@@ -15,6 +15,7 @@ use serde_json_bytes::Value;
 use super::http_json_transport::make_request;
 use super::http_json_transport::HttpJsonTransportError;
 use super::plugin::ConnectorContext;
+use super::plugin::ConnectorDebugHttpRequest;
 use crate::services::connect;
 use crate::services::router::body::RouterBody;
 
@@ -96,11 +97,17 @@ pub(crate) enum ResponseTypeName {
     Omitted,
 }
 
+type MakeRequestParts = (
+    http::Request<RouterBody>,
+    ResponseKey,
+    Option<ConnectorDebugHttpRequest>,
+);
+
 pub(crate) fn make_requests(
     request: connect::Request,
     connector: &Connector,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
-) -> Result<Vec<(http::Request<RouterBody>, ResponseKey)>, MakeRequestError> {
+) -> Result<Vec<MakeRequestParts>, MakeRequestError> {
     let request_params = match connector.entity_resolver {
         Some(EntityResolver::Explicit) => entities_from_request(connector, &request),
         Some(EntityResolver::Implicit) => entities_with_fields_from_request(connector, &request),
@@ -115,7 +122,7 @@ fn request_params_to_requests(
     request_params: Vec<ResponseKey>,
     original_request: &connect::Request,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
-) -> Result<Vec<(http::Request<RouterBody>, ResponseKey)>, MakeRequestError> {
+) -> Result<Vec<MakeRequestParts>, MakeRequestError> {
     let mut results = vec![];
     let context: Map<ByteString, Value> = original_request
         .context
@@ -123,7 +130,7 @@ fn request_params_to_requests(
         .map(|r| (r.key().as_str().into(), r.value().clone()))
         .collect();
     for response_key in request_params {
-        let request = make_request(
+        let (request, debug_request) = make_request(
             &connector.transport,
             response_key
                 .inputs()
@@ -132,7 +139,7 @@ fn request_params_to_requests(
             debug,
         )?;
 
-        results.push((request, response_key));
+        results.push((request, response_key, debug_request));
     }
 
     Ok(results)
@@ -1724,6 +1731,7 @@ mod tests {
                         this: {},
                     },
                 },
+                None,
             ),
         ]
         "###);

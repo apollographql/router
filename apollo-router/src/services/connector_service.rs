@@ -52,7 +52,7 @@ pub(crate) const APOLLO_CONNECTOR_SOURCE_DETAIL: Key =
 #[derive(Clone)]
 pub(crate) struct ConnectorService {
     pub(crate) http_service_factory: Arc<IndexMap<String, HttpClientServiceFactory>>,
-    pub(crate) schema: Arc<Schema>,
+    pub(crate) _schema: Arc<Schema>,
     pub(crate) _subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     pub(crate) _subscription_config: Option<SubscriptionConfig>,
     pub(crate) connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
@@ -77,8 +77,6 @@ impl tower::Service<ConnectRequest> for ConnectorService {
             .http_service_factory
             .get(&request.service_name.to_string())
             .cloned();
-
-        let schema = self.schema.supergraph_schema().clone();
 
         Box::pin(async move {
             let Some(connector) = connector else {
@@ -119,7 +117,7 @@ impl tower::Service<ConnectRequest> for ConnectorService {
                 }
             }
 
-            execute(&http_client_factory, request, &connector, &schema)
+            execute(&http_client_factory, request, &connector)
                 .instrument(span)
                 .await
         })
@@ -130,7 +128,6 @@ async fn execute(
     http_client_factory: &HttpClientServiceFactory,
     request: ConnectRequest,
     connector: &Connector,
-    schema: &Valid<apollo_compiler::Schema>,
 ) -> Result<ConnectResponse, BoxError> {
     let context = request.context.clone();
     let original_subgraph_name = connector.id.subgraph_name.to_string();
@@ -146,7 +143,7 @@ async fn execute(
 
     let requests = make_requests(request, connector, &debug).map_err(BoxError::from)?;
 
-    let tasks = requests.into_iter().map(move |(req, key)| {
+    let tasks = requests.into_iter().map(move |(req, key, debug_request)| {
         // Returning an error from this closure causes all tasks to be cancelled and the operation
         // to fail. This is the reason for the Result-wrapped-in-a-Result here. An `Err` on the
         // inner result fails just that one task, but an `Err` on the outer result cancels all the
@@ -160,6 +157,7 @@ async fn execute(
                     return Ok(ConnectorResponse {
                         result: ConnectorResult::Err(ConnectorError::RequestLimitExceeded),
                         key,
+                        debug_request,
                     });
                 }
             }
@@ -190,6 +188,7 @@ async fn execute(
             Ok::<_, BoxError>(ConnectorResponse {
                 result: ConnectorResult::HttpResponse(res.http_response),
                 key,
+                debug_request,
             })
         }
     });
@@ -198,7 +197,7 @@ async fn execute(
         .await
         .map_err(BoxError::from)?;
 
-    handle_responses(responses, connector, &debug, schema)
+    handle_responses(responses, connector, &debug)
         .await
         .map_err(BoxError::from)
 }
@@ -247,7 +246,7 @@ impl ServiceFactory<ConnectRequest> for ConnectorServiceFactory {
     fn create(&self) -> Self::Service {
         ConnectorService {
             http_service_factory: self.http_service_factory.clone(),
-            schema: self.schema.clone(),
+            _schema: self.schema.clone(),
             _subgraph_schemas: self.subgraph_schemas.clone(),
             _subscription_config: self.subscription_config.clone(),
             connectors_by_service_name: self.connectors_by_service_name.clone(),

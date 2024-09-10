@@ -1,7 +1,5 @@
 use std::sync::Arc;
 
-use apollo_compiler::validation::Valid;
-use apollo_compiler::Schema;
 use apollo_federation::sources::connect::Connector;
 use http_body::Body as HttpBody;
 use parking_lot::Mutex;
@@ -39,7 +37,6 @@ pub(crate) async fn handle_responses<T: HttpBody>(
     responses: Vec<ConnectorResponse<T>>,
     connector: &Connector,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
-    _schema: &Valid<Schema>, // TODO for future apply_with_selection
 ) -> Result<Response, HandleResponseError> {
     use HandleResponseError::*;
 
@@ -49,6 +46,8 @@ pub(crate) async fn handle_responses<T: HttpBody>(
     for response in responses {
         let mut error = None;
         let response_key = response.key;
+        let debug_request = response.debug_request;
+
         match response.result {
             ConnectorResult::Err(e) => {
                 error = Some(e.to_graphql_error(connector, None));
@@ -60,12 +59,20 @@ pub(crate) async fn handle_responses<T: HttpBody>(
                 })?;
 
                 if parts.status.is_success() {
-                    let json_data = serde_json::from_slice::<Value>(body).map_err(|e| {
-                        if let Some(debug) = debug {
-                            debug.lock().push_invalid_response(&parts, body);
+                    let json_data = match serde_json::from_slice::<Value>(body) {
+                        Ok(body) => body,
+                        Err(e) => {
+                            if let Some(debug) = debug {
+                                debug
+                                    .lock()
+                                    .push_invalid_response(debug_request, &parts, body);
+                            }
+                            // TODO this stops processing all responses
+                            return Err(InvalidResponseBody(format!(
+                                "couldn't deserialize response body: {e}"
+                            )));
                         }
-                        InvalidResponseBody(format!("couldn't deserialize response body: {e}"))
-                    })?;
+                    };
 
                     let mut res_data = {
                         let (res, apply_to_errors) = response_key.selection().apply_with_vars(
@@ -75,6 +82,7 @@ pub(crate) async fn handle_responses<T: HttpBody>(
 
                         if let Some(ref debug) = debug {
                             debug.lock().push_response(
+                                debug_request,
                                 &parts,
                                 &json_data,
                                 Some(SelectionData {
@@ -170,10 +178,14 @@ pub(crate) async fn handle_responses<T: HttpBody>(
                     if let Some(ref debug) = debug {
                         match serde_json::from_slice(body) {
                             Ok(json_data) => {
-                                debug.lock().push_response(&parts, &json_data, None);
+                                debug
+                                    .lock()
+                                    .push_response(debug_request, &parts, &json_data, None);
                             }
                             Err(_) => {
-                                debug.lock().push_invalid_response(&parts, body);
+                                debug
+                                    .lock()
+                                    .push_invalid_response(debug_request, &parts, body);
                             }
                         }
                     }
@@ -239,7 +251,6 @@ mod tests {
     use std::sync::Arc;
 
     use apollo_compiler::name;
-    use apollo_compiler::Schema;
     use apollo_federation::sources::connect::ConnectId;
     use apollo_federation::sources::connect::Connector;
     use apollo_federation::sources::connect::EntityResolver;
@@ -298,22 +309,21 @@ mod tests {
             selection: Arc::new(JSONSelection::parse(".data").unwrap().1),
         };
 
-        let schema = Schema::parse_and_validate("type Query { hello: String }", "./").unwrap();
-
         let res = super::handle_responses(
             vec![
                 ConnectorResponse {
                     result: response1.into(),
                     key: response_key1,
+                    debug_request: None,
                 },
                 ConnectorResponse {
                     result: response2.into(),
                     key: response_key2,
+                    debug_request: None,
                 },
             ],
             &connector,
             &None,
-            &schema,
         )
         .await
         .unwrap();
@@ -393,27 +403,21 @@ mod tests {
             selection: Arc::new(JSONSelection::parse(".data").unwrap().1),
         };
 
-        let schema = Schema::parse_and_validate(
-            "type Query { user(id: ID!): User }
-            type User { id: ID! }",
-            "./",
-        )
-        .unwrap();
-
         let res = super::handle_responses(
             vec![
                 ConnectorResponse {
                     result: response1.into(),
                     key: response_key1,
+                    debug_request: None,
                 },
                 ConnectorResponse {
                     result: response2.into(),
                     key: response_key2,
+                    debug_request: None,
                 },
             ],
             &connector,
             &None,
-            &schema,
         )
         .await
         .unwrap();
@@ -507,27 +511,21 @@ mod tests {
             selection: Arc::new(JSONSelection::parse(".data").unwrap().1),
         };
 
-        let schema = Schema::parse_and_validate(
-            "type Query { _: Int } # just to make it valid
-            type User { id: ID! field: String! }",
-            "./",
-        )
-        .unwrap();
-
         let res = super::handle_responses(
             vec![
                 ConnectorResponse {
                     result: response1.into(),
                     key: response_key1,
+                    debug_request: None,
                 },
                 ConnectorResponse {
                     result: response2.into(),
                     key: response_key2,
+                    debug_request: None,
                 },
             ],
             &connector,
             &None,
-            &schema,
         )
         .await
         .unwrap();
@@ -631,31 +629,26 @@ mod tests {
             selection: Arc::new(JSONSelection::parse(".data").unwrap().1),
         };
 
-        let schema = Schema::parse_and_validate(
-            "type Query { user(id: ID): User }
-            type User { id: ID! }",
-            "./",
-        )
-        .unwrap();
-
         let res = super::handle_responses(
             vec![
                 ConnectorResponse {
                     result: response1.into(),
                     key: response_key1,
+                    debug_request: None,
                 },
                 ConnectorResponse {
                     result: response2.into(),
                     key: response_key2,
+                    debug_request: None,
                 },
                 ConnectorResponse {
                     result: response3.into(),
                     key: response_key3,
+                    debug_request: None,
                 },
             ],
             &connector,
             &None,
-            &schema,
         )
         .await
         .unwrap();
