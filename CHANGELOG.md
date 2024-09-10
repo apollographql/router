@@ -27,7 +27,7 @@ telemetry:
            json:
              display_span_list: false
              span_attributes:
-             - span_attr_1
+               - span_attr_1
 ```
 
 Example output with a list of spans:
