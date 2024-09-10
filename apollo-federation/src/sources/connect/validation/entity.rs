@@ -103,13 +103,13 @@ pub(super) fn validate_entity_arg(
                     let key_fields = object_type
                         .directives
                         .iter()
-                        .find(|directive| directive.name == "key")
-                        .and_then(|directive| {
+                        .filter(|directive| directive.name == "key")
+                        .filter_map(|directive| {
                             directive.arguments.iter().find(|arg| arg.name == "fields")
                         })
                         .map(|fields| &*fields.value)
-                        .and_then(|key_fields| key_fields.as_str())
-                        .and_then(|fields| {
+                        .filter_map(|key_fields| key_fields.as_str())
+                        .filter_map(|fields| {
                             Parser::new()
                                 .parse_field_set(
                                     Valid::assume_valid_ref(schema),
@@ -118,7 +118,8 @@ pub(super) fn validate_entity_arg(
                                     "",
                                 )
                                 .ok()
-                        });
+                        })
+                        .collect();
 
                     if let Some(message) = (ArgumentVisitor {
                         schema,
@@ -155,7 +156,7 @@ enum Group<'schema> {
     Child {
         input_type: &'schema Node<InputObjectType>,
         entity_type: &'schema ExtendedType,
-        key_selection: Option<Selection>,
+        key_selection: Vec<Selection>,
         root_entity_type: &'schema Name,
     },
 }
@@ -165,7 +166,7 @@ struct Field<'schema> {
     node: &'schema Node<InputValueDefinition>,
     input_type: &'schema ExtendedType,
     entity_type: &'schema ExtendedType,
-    key_selection: Option<Selection>,
+    key_selection: Vec<Selection>,
     root_entity_type: &'schema Name,
 }
 
@@ -185,7 +186,7 @@ struct ArgumentVisitor<'schema> {
     object: &'schema Node<ObjectType>,
     source_map: &'schema SourceMap,
     field: &'schema Name,
-    key_fields: Option<FieldSet>,
+    key_fields: Vec<FieldSet>,
 }
 
 impl<'schema> GroupVisitor<Group<'schema>, Field<'schema>> for ArgumentVisitor<'schema> {
@@ -279,14 +280,18 @@ impl<'schema> ArgumentVisitor<'schema> {
         field.arguments.iter().filter_map(|arg| {
             if let Some(input_type) = self.schema.types.get(arg.ty.inner_named_type()) {
 
-                // If the entity type has a `@key` directive, check that the argument corresponds to a field in the key
-                let key_selection = if let Some(key_fields) = &self.key_fields {
-                    match self.find_key(&key_fields.selection_set.selections, &arg.name, arg, None, &entity_type.name) {
-                        Ok(selection) => Some(selection),
+                // If the entity type has one or more `@key` directives, check that the argument
+                // corresponds to a field in the keys
+                let key_fields: Vec<&Vec<Selection>> = self.key_fields.iter()
+                    .map(|fields| &fields.selection_set.selections)
+                    .collect();
+                let key_selection = if key_fields.is_empty() {
+                    vec![]
+                } else {
+                    match self.find_key(key_fields, &arg.name, arg, None, &entity_type.name) {
+                        Ok(selection) => selection,
                         Err(message) => return Some(Err(message)),
                     }
-                } else {
-                    None
                 };
 
                 // Check that the argument has a corresponding field on the entity type
@@ -332,7 +337,7 @@ impl<'schema> ArgumentVisitor<'schema> {
         &mut self,
         child_input_type: &'schema Node<InputObjectType>,
         entity_type: &'schema ExtendedType,
-        key_selection: &Option<Selection>,
+        key_selections: &Vec<Selection>,
         root_entity_type: &'schema Name,
     ) -> Result<
         Vec<Field<'schema>>,
@@ -346,13 +351,18 @@ impl<'schema> ArgumentVisitor<'schema> {
                     if let Some(input_type) = self.schema.types.get(input_field.ty.inner_named_type()) {
 
                         // Check that the field on the input type corresponds to a key field
-                        let key_selection = if let Some(field) = key_selection.as_ref().and_then(|key_selection| key_selection.as_field()) {
-                            match self.find_key(&field.selection_set.selections, name, input_field, Some(&child_input_type.name), root_entity_type) {
-                                Ok(selection) => Some(selection),
+                        let selections: Vec<&Vec<Selection>> = key_selections
+                            .iter()
+                            .filter_map(|key_selection| key_selection.as_field())
+                            .map(|field| &field.selection_set.selections)
+                            .collect();
+                        let key_selection = if selections.is_empty() {
+                            vec![]
+                        } else {
+                            match self.find_key(selections, name, input_field, Some(&child_input_type.name), root_entity_type) {
+                                Ok(selections) => selections,
                                 Err(message) => return Some(Err(message)),
                             }
-                        } else {
-                            None
                         };
 
                         self.schema.types.get(entity_field_type).map(|entity_type| Ok(Field {
@@ -395,36 +405,53 @@ impl<'schema> ArgumentVisitor<'schema> {
         }
     }
 
-    fn find_key<'a, T: IntoIterator<Item = &'a Selection>>(
+    fn find_key(
         &self,
-        selections: T,
+        selections: Vec<&Vec<Selection>>,
         name: &str,
         node: &Node<InputValueDefinition>,
         input_type: Option<&Name>,
         entity_type: &Name,
-    ) -> Result<Selection, <ArgumentVisitor<'schema> as FieldVisitor<Field<'schema>>>::Error> {
-        selections.into_iter().find(|selection| {
-            selection.as_field().map(|field| field.name == *name).unwrap_or(false)
-        }).ok_or(Message {
-            code: Code::EntityResolverArgumentMismatch,
-            message: format!(
-                "{coordinate} has invalid entity resolver arguments. {name} does not exist as a key field on entity type `{entity_type}`.",
-                name = match input_type {
-                    Some(input_type) => format!("Field `{name}` on input type `{input_type}`"),
-                    None => format!("Argument `{name}`"),
-                },
-                coordinate = connect_directive_entity_argument_coordinate(
-                    self.connect_directive_name,
-                    self.entity_arg_value.as_ref(),
-                    self.object,
-                    self.field,
+    ) -> Result<Vec<Selection>, <ArgumentVisitor<'schema> as FieldVisitor<Field<'schema>>>::Error>
+    {
+        let matches: Vec<Selection> = selections
+            .into_iter()
+            .filter_map(|selections| {
+                selections
+                    .iter()
+                    .find(|selection| {
+                        selection
+                            .as_field()
+                            .map(|field| field.name == *name)
+                            .unwrap_or(false)
+                    })
+                    .cloned()
+            })
+            .collect();
+        if matches.is_empty() {
+            Err(Message {
+                code: Code::EntityResolverArgumentMismatch,
+                message: format!(
+                    "{coordinate} has invalid entity resolver arguments. {name} does not exist as a key field on entity type `{entity_type}`.",
+                    name = match input_type {
+                        Some(input_type) => format!("Field `{name}` on input type `{input_type}`"),
+                        None => format!("Argument `{name}`"),
+                    },
+                    coordinate = connect_directive_entity_argument_coordinate(
+                        self.connect_directive_name,
+                        self.entity_arg_value.as_ref(),
+                        self.object,
+                        self.field,
+                    ),
                 ),
-            ),
-            locations: node
-                .line_column_range(self.source_map)
-                .into_iter()
-                .chain(self.entity_arg.line_column_range(self.source_map))
-                .collect(),
-        }).cloned()
+                locations: node
+                    .line_column_range(self.source_map)
+                    .into_iter()
+                    .chain(self.entity_arg.line_column_range(self.source_map))
+                    .collect(),
+            })
+        } else {
+            Ok(matches)
+        }
     }
 }
