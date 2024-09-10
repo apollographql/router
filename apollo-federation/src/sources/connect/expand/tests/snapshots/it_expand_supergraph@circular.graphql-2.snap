@@ -68,7 +68,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ci
                 selections: [
                     Field(
                         None,
-                        Parsed {
+                        WithRange {
                             node: Field(
                                 "id",
                             ),
@@ -166,7 +166,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ci
                 selections: [
                     Field(
                         None,
-                        Parsed {
+                        WithRange {
                             node: Field(
                                 "id",
                             ),

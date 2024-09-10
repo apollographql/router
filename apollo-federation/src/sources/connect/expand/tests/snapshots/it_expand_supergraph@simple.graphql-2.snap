@@ -49,7 +49,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
                 selections: [
                     Field(
                         None,
-                        Parsed {
+                        WithRange {
                             node: Field(
                                 "id",
                             ),
@@ -64,7 +64,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
                     ),
                     Field(
                         None,
-                        Parsed {
+                        WithRange {
                             node: Field(
                                 "a",
                             ),
@@ -148,7 +148,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
                 selections: [
                     Field(
                         None,
-                        Parsed {
+                        WithRange {
                             node: Field(
                                 "id",
                             ),
@@ -163,7 +163,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
                     ),
                     Field(
                         None,
-                        Parsed {
+                        WithRange {
                             node: Field(
                                 "a",
                             ),
@@ -178,7 +178,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
                     ),
                     Field(
                         None,
-                        Parsed {
+                        WithRange {
                             node: Field(
                                 "b",
                             ),
@@ -270,7 +270,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
                         selections: [
                             Path(
                                 Alias {
-                                    name: Parsed {
+                                    name: WithRange {
                                         node: Field(
                                             "with_b",
                                         ),
@@ -289,9 +289,9 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
                                     ),
                                 },
                                 PathSelection {
-                                    path: Parsed {
+                                    path: WithRange {
                                         node: Var(
-                                            Parsed {
+                                            WithRange {
                                                 node: $this,
                                                 range: Some(
                                                     (
@@ -300,9 +300,9 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
                                                     ),
                                                 ),
                                             },
-                                            Parsed {
+                                            WithRange {
                                                 node: Key(
-                                                    Parsed {
+                                                    WithRange {
                                                         node: Field(
                                                             "b",
                                                         ),
@@ -313,7 +313,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
                                                             ),
                                                         ),
                                                     },
-                                                    Parsed {
+                                                    WithRange {
                                                         node: Empty,
                                                         range: None,
                                                     },
@@ -349,9 +349,9 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
         },
         selection: Path(
             PathSelection {
-                path: Parsed {
+                path: WithRange {
                     node: Var(
-                        Parsed {
+                        WithRange {
                             node: $,
                             range: Some(
                                 (
@@ -360,7 +360,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
                                 ),
                             ),
                         },
-                        Parsed {
+                        WithRange {
                             node: Empty,
                             range: None,
                         },

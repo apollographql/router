@@ -8,8 +8,8 @@
 use itertools::Itertools;
 
 use super::lit_expr::LitExpr;
-use super::location::Parsed;
 use super::location::Ranged;
+use super::location::WithRange;
 use crate::sources::connect::json_selection::JSONSelection;
 use crate::sources::connect::json_selection::MethodArgs;
 use crate::sources::connect::json_selection::NamedSelection;
@@ -114,14 +114,14 @@ impl PrettyPrintable for PathSelection {
     }
 }
 
-impl PrettyPrintable for Parsed<PathSelection> {
+impl PrettyPrintable for WithRange<PathSelection> {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
         self.node()
             .pretty_print_with_indentation(inline, indentation)
     }
 }
 
-impl PrettyPrintable for Parsed<PathList> {
+impl PrettyPrintable for WithRange<PathList> {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
         let mut result = String::new();
 
@@ -166,7 +166,7 @@ impl PrettyPrintable for Parsed<PathList> {
     }
 }
 
-impl PrettyPrintable for Parsed<MethodArgs> {
+impl PrettyPrintable for WithRange<MethodArgs> {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
         let mut result = String::new();
 
@@ -193,7 +193,7 @@ impl PrettyPrintable for Parsed<MethodArgs> {
     }
 }
 
-impl PrettyPrintable for Parsed<LitExpr> {
+impl PrettyPrintable for WithRange<LitExpr> {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
         let mut result = String::new();
         if !inline {

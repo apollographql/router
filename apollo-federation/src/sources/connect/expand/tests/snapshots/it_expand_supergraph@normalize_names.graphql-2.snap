@@ -49,7 +49,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/no
                 selections: [
                     Field(
                         None,
-                        Parsed {
+                        WithRange {
                             node: Field(
                                 "id",
                             ),
@@ -64,7 +64,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/no
                     ),
                     Field(
                         None,
-                        Parsed {
+                        WithRange {
                             node: Field(
                                 "a",
                             ),
@@ -148,7 +148,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/no
                 selections: [
                     Field(
                         None,
-                        Parsed {
+                        WithRange {
                             node: Field(
                                 "id",
                             ),
@@ -163,7 +163,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/no
                     ),
                     Field(
                         None,
-                        Parsed {
+                        WithRange {
                             node: Field(
                                 "a",
                             ),
@@ -178,7 +178,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/no
                     ),
                     Field(
                         None,
-                        Parsed {
+                        WithRange {
                             node: Field(
                                 "b",
                             ),

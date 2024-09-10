@@ -1,4 +1,4 @@
-use super::location::Parsed;
+use super::location::WithRange;
 
 #[derive(PartialEq, Eq, Clone, Hash)]
 pub(crate) enum KnownVariable {
@@ -31,8 +31,8 @@ impl KnownVariable {
         }
     }
 
-    pub(super) fn into_parsed(self) -> Parsed<Self> {
-        Parsed::new(self, None)
+    pub(super) fn into_parsed(self) -> WithRange<Self> {
+        WithRange::new(self, None)
     }
 }
 

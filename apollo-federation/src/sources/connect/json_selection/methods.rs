@@ -4,7 +4,7 @@ use lazy_static::lazy_static;
 use serde_json_bytes::Value as JSON;
 
 use super::immutable::InputPath;
-use super::location::Parsed;
+use super::location::WithRange;
 use super::ApplyToError;
 use super::MethodArgs;
 use super::PathList;
@@ -26,9 +26,9 @@ mod tests;
 
 type ArrowMethod = fn(
     // Method name
-    method_name: &Parsed<String>,
+    method_name: &WithRange<String>,
     // Arguments passed to this method
-    method_args: Option<&Parsed<MethodArgs>>,
+    method_args: Option<&WithRange<MethodArgs>>,
     // The JSON input value (data)
     data: &JSON,
     // The variables
@@ -36,7 +36,7 @@ type ArrowMethod = fn(
     // The input_path (may contain integers)
     input_path: &InputPath<JSON>,
     // The rest of the PathList
-    tail: &Parsed<PathList>,
+    tail: &WithRange<PathList>,
     // Errors
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON>;

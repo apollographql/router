@@ -80,9 +80,9 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ne
         },
         selection: Path(
             PathSelection {
-                path: Parsed {
+                path: WithRange {
                     node: Var(
-                        Parsed {
+                        WithRange {
                             node: $,
                             range: Some(
                                 (
@@ -91,7 +91,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ne
                                 ),
                             ),
                         },
-                        Parsed {
+                        WithRange {
                             node: Empty,
                             range: None,
                         },

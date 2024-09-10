@@ -7,21 +7,86 @@ pub type Span<'a> = LocatedSpan<&'a str>;
 
 // Some parsed AST structures, like PathSelection and NamedSelection, can
 // produce a range directly from their children, so they do not need to be
-// wrapped as Parsed<PathSelection> or Parsed<NamedSelection>. Instead, these
-// types implement the Ranged<T> trait for compatibility with the other
-// Parsed<T> structures.
+// wrapped as WithRange<PathSelection> or WithRange<NamedSelection>.
+// Additionally, AST nodes that are structs can store their own range as a
+// field, so they can implement Ranged<T> without the WithRange<T> wrapper.
 pub trait Ranged<T> {
     fn node(&self) -> &T;
     fn range(&self) -> Option<(usize, usize)>;
 }
 
-// The most common implementation of the Ranged<T> trait is the Parsed<T>
-// struct, used for any AST node that needs its own location information
-// (because that information is not derivable from its children).
+// The most common implementation of the Ranged<T> trait is the WithRange<T>
+// struct, used to wrap any AST node that (a) needs its own location information
+// (because that information is not derivable from its children) and (b) cannot
+// easily store that information by adding another struct field (most often
+// because T is an enum type, not a struct).
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
-pub struct Parsed<T> {
+pub struct WithRange<T> {
     node: Box<T>,
     range: Option<(usize, usize)>,
+}
+
+// We can recover some of the ergonomics of working with the inner type T by
+// implementing Deref and DerefMut for WithRange<T>.
+impl<T> std::ops::Deref for WithRange<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.node.as_ref()
+    }
+}
+impl<T> std::ops::DerefMut for WithRange<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.node.as_mut()
+    }
+}
+
+impl<T> AsRef<T> for WithRange<T> {
+    fn as_ref(&self) -> &T {
+        self.node.as_ref()
+    }
+}
+
+impl<T> AsMut<T> for WithRange<T> {
+    fn as_mut(&mut self) -> &mut T {
+        self.node.as_mut()
+    }
+}
+
+impl<T> PartialEq<T> for WithRange<T>
+where
+    T: PartialEq,
+{
+    fn eq(&self, other: &T) -> bool {
+        self.node.as_ref() == other
+    }
+}
+
+impl<T> Ranged<T> for WithRange<T> {
+    fn node(&self) -> &T {
+        self.node.as_ref()
+    }
+
+    fn range(&self) -> Option<(usize, usize)> {
+        self.range
+    }
+}
+
+impl<T> WithRange<T> {
+    pub(crate) fn new(node: T, range: Option<(usize, usize)>) -> Self {
+        Self {
+            node: Box::new(node),
+            range,
+        }
+    }
+
+    pub(crate) fn take(self) -> T {
+        *self.node
+    }
+
+    pub(crate) fn take_as<U>(self, f: impl FnOnce(T) -> U) -> WithRange<U> {
+        WithRange::new(f(*self.node), self.range)
+    }
 }
 
 pub(super) fn merge_ranges(
@@ -38,77 +103,18 @@ pub(super) fn merge_ranges(
     }
 }
 
-impl<T> std::ops::Deref for Parsed<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        self.node.as_ref()
-    }
-}
-impl<T> std::ops::DerefMut for Parsed<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.node.as_mut()
-    }
-}
-
-impl<T> AsRef<T> for Parsed<T> {
-    fn as_ref(&self) -> &T {
-        self.node.as_ref()
-    }
-}
-
-impl<T> AsMut<T> for Parsed<T> {
-    fn as_mut(&mut self) -> &mut T {
-        self.node.as_mut()
-    }
-}
-
-impl<T> PartialEq<T> for Parsed<T>
-where
-    T: PartialEq,
-{
-    fn eq(&self, other: &T) -> bool {
-        self.node.as_ref() == other
-    }
-}
-
-impl<T> Ranged<T> for Parsed<T> {
-    fn node(&self) -> &T {
-        self.node.as_ref()
-    }
-
-    fn range(&self) -> Option<(usize, usize)> {
-        self.range
-    }
-}
-
-impl<T> Parsed<T> {
-    pub(crate) fn new(node: T, range: Option<(usize, usize)>) -> Self {
-        Self {
-            node: Box::new(node),
-            range,
-        }
-    }
-
-    pub(crate) fn take(self) -> T {
-        *self.node
-    }
-
-    pub(crate) fn take_as<U>(self, f: impl FnOnce(T) -> U) -> Parsed<U> {
-        Parsed::new(f(*self.node), self.range)
-    }
-}
-
+// Parser combinator that matches a &str and returns a WithRange<&str> with the
+// matched string and the range of the match.
 pub(super) fn parsed_span<'a, 'b>(
     s: &'a str,
-) -> impl FnMut(Span<'b>) -> IResult<Span<'b>, Parsed<&'b str>> + 'a
+) -> impl FnMut(Span<'b>) -> IResult<Span<'b>, WithRange<&'b str>> + 'a
 where
     'b: 'a,
 {
     map(tag(s), |t: Span<'b>| {
         let start = t.location_offset();
         let range = Some((start, start + s.len()));
-        Parsed::new(*t.fragment(), range)
+        WithRange::new(*t.fragment(), range)
     })
 }
 
@@ -119,8 +125,8 @@ pub(super) mod strip_ranges {
     use super::super::known_var::KnownVariable;
     use super::super::lit_expr::LitExpr;
     use super::super::parser::*;
-    use super::Parsed;
     use super::Ranged;
+    use super::WithRange;
 
     /// Including location information in the AST introduces unnecessary
     /// varation in many tests. StripLoc is a test-only trait allowing
@@ -131,9 +137,9 @@ pub(super) mod strip_ranges {
         fn strip_ranges(&self) -> Self;
     }
 
-    impl StripRanges for Parsed<String> {
+    impl StripRanges for WithRange<String> {
         fn strip_ranges(&self) -> Self {
-            Parsed::new(self.node().clone(), None)
+            WithRange::new(self.node().clone(), None)
         }
     }
 
@@ -168,9 +174,9 @@ pub(super) mod strip_ranges {
         }
     }
 
-    impl StripRanges for Parsed<PathList> {
+    impl StripRanges for WithRange<PathList> {
         fn strip_ranges(&self) -> Self {
-            Parsed::new(
+            WithRange::new(
                 match self.as_ref() {
                     PathList::Var(var, rest) => {
                         PathList::Var(var.strip_ranges(), rest.strip_ranges())
@@ -220,24 +226,24 @@ pub(super) mod strip_ranges {
         }
     }
 
-    impl StripRanges for Parsed<Key> {
+    impl StripRanges for WithRange<Key> {
         fn strip_ranges(&self) -> Self {
-            Parsed::new(self.node().clone(), None)
+            WithRange::new(self.node().clone(), None)
         }
     }
 
-    impl StripRanges for Parsed<MethodArgs> {
+    impl StripRanges for WithRange<MethodArgs> {
         fn strip_ranges(&self) -> Self {
-            Parsed::new(
+            WithRange::new(
                 MethodArgs(self.0.iter().map(|arg| arg.strip_ranges()).collect()),
                 None,
             )
         }
     }
 
-    impl StripRanges for Parsed<LitExpr> {
+    impl StripRanges for WithRange<LitExpr> {
         fn strip_ranges(&self) -> Self {
-            Parsed::new(
+            WithRange::new(
                 match self.as_ref() {
                     LitExpr::String(s) => LitExpr::String(s.clone()),
                     LitExpr::Number(n) => LitExpr::Number(n.clone()),
@@ -264,9 +270,9 @@ pub(super) mod strip_ranges {
         }
     }
 
-    impl StripRanges for Parsed<KnownVariable> {
+    impl StripRanges for WithRange<KnownVariable> {
         fn strip_ranges(&self) -> Self {
-            Parsed::new(self.node().clone(), None)
+            WithRange::new(self.node().clone(), None)
         }
     }
 }

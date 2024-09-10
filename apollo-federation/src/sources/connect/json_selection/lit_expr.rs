@@ -21,9 +21,9 @@ use nom::IResult;
 use super::helpers::spaces_or_comments;
 use super::location::merge_ranges;
 use super::location::parsed_span;
-use super::location::Parsed;
 use super::location::Ranged;
 use super::location::Span;
+use super::location::WithRange;
 use super::parser::parse_string_literal;
 use super::parser::Key;
 use super::parser::PathSelection;
@@ -35,32 +35,34 @@ pub enum LitExpr {
     Number(serde_json::Number),
     Bool(bool),
     Null,
-    Object(IndexMap<Parsed<Key>, Parsed<LitExpr>>),
-    Array(Vec<Parsed<LitExpr>>),
+    Object(IndexMap<WithRange<Key>, WithRange<LitExpr>>),
+    Array(Vec<WithRange<LitExpr>>),
     Path(PathSelection),
 }
 
 impl LitExpr {
     // LitExpr      ::= LitPrimitive | LitObject | LitArray | PathSelection
     // LitPrimitive ::= LitString | LitNumber | "true" | "false" | "null"
-    pub fn parse(input: Span) -> IResult<Span, Parsed<Self>> {
+    pub fn parse(input: Span) -> IResult<Span, WithRange<Self>> {
         tuple((
             spaces_or_comments,
             alt((
                 map(parse_string_literal, |s| s.take_as(Self::String)),
                 Self::parse_number,
                 map(parsed_span("true"), |t| {
-                    Parsed::new(Self::Bool(true), t.range())
+                    WithRange::new(Self::Bool(true), t.range())
                 }),
                 map(parsed_span("false"), |f| {
-                    Parsed::new(Self::Bool(false), f.range())
+                    WithRange::new(Self::Bool(false), f.range())
                 }),
-                map(parsed_span("null"), |n| Parsed::new(Self::Null, n.range())),
+                map(parsed_span("null"), |n| {
+                    WithRange::new(Self::Null, n.range())
+                }),
                 Self::parse_object,
                 Self::parse_array,
                 map(PathSelection::parse, |p| {
                     let range = p.path.range();
-                    Parsed::new(Self::Path(p), range)
+                    WithRange::new(Self::Path(p), range)
                 }),
             )),
             spaces_or_comments,
@@ -69,7 +71,7 @@ impl LitExpr {
     }
 
     // LitNumber ::= "-"? ([0-9]+ ("." [0-9]*)? | "." [0-9]+)
-    fn parse_number(input: Span) -> IResult<Span, Parsed<Self>> {
+    fn parse_number(input: Span) -> IResult<Span, WithRange<Self>> {
         let (suffix, (_, neg, _, num, _)) = tuple((
             spaces_or_comments,
             opt(parsed_span("-")),
@@ -117,7 +119,7 @@ impl LitExpr {
                             int_range
                         };
 
-                        Parsed::new(s, full_range)
+                        WithRange::new(s, full_range)
                     },
                 ),
                 map(
@@ -133,7 +135,7 @@ impl LitExpr {
                             frac.location_offset() + frac.fragment().len(),
                         ));
                         let full_range = merge_ranges(dot.range(), frac_range);
-                        Parsed::new(format!("0.{}", frac.fragment()), full_range)
+                        WithRange::new(format!("0.{}", frac.fragment()), full_range)
                     },
                 ),
             )),
@@ -148,7 +150,7 @@ impl LitExpr {
 
         if let Ok(lit_number) = number.parse().map(Self::Number) {
             let range = merge_ranges(neg.and_then(|n| n.range()), num.range());
-            Ok((suffix, Parsed::new(lit_number, range)))
+            Ok((suffix, WithRange::new(lit_number, range)))
         } else {
             Err(nom::Err::Failure(nom::error::Error::new(
                 input,
@@ -158,7 +160,7 @@ impl LitExpr {
     }
 
     // LitObject ::= "{" (LitProperty ("," LitProperty)* ","?)? "}"
-    fn parse_object(input: Span) -> IResult<Span, Parsed<Self>> {
+    fn parse_object(input: Span) -> IResult<Span, WithRange<Self>> {
         tuple((
             spaces_or_comments,
             parsed_span("{"),
@@ -186,18 +188,18 @@ impl LitExpr {
         ))(input)
         .map(|(input, (_, open_brace, _, output, _, close_brace, _))| {
             let range = merge_ranges(open_brace.range(), close_brace.range());
-            (input, Parsed::new(output, range))
+            (input, WithRange::new(output, range))
         })
     }
 
     // LitProperty ::= Key ":" LitExpr
-    fn parse_property(input: Span) -> IResult<Span, (Parsed<Key>, Parsed<Self>)> {
+    fn parse_property(input: Span) -> IResult<Span, (WithRange<Key>, WithRange<Self>)> {
         tuple((Key::parse, char(':'), Self::parse))(input)
             .map(|(input, (key, _, value))| (input, (key, value)))
     }
 
     // LitArray ::= "[" (LitExpr ("," LitExpr)* ","?)? "]"
-    fn parse_array(input: Span) -> IResult<Span, Parsed<Self>> {
+    fn parse_array(input: Span) -> IResult<Span, WithRange<Self>> {
         tuple((
             spaces_or_comments,
             parsed_span("["),
@@ -224,13 +226,13 @@ impl LitExpr {
         .map(
             |(input, (_, open_bracket, _, output, _, close_bracket, _))| {
                 let range = merge_ranges(open_bracket.range(), close_bracket.range());
-                (input, Parsed::new(output, range))
+                (input, WithRange::new(output, range))
             },
         )
     }
 
-    pub(super) fn into_parsed(self) -> Parsed<Self> {
-        Parsed::new(self, None)
+    pub(super) fn into_parsed(self) -> WithRange<Self> {
+        WithRange::new(self, None)
     }
 
     pub(super) fn as_i64(&self) -> Option<i64> {
@@ -275,7 +277,7 @@ mod tests {
         match LitExpr::parse(Span::new(input)) {
             Ok((remainder, parsed)) => {
                 assert_eq!(*remainder.fragment(), "");
-                assert_eq!(parsed.strip_ranges(), Parsed::new(expected, None));
+                assert_eq!(parsed.strip_ranges(), WithRange::new(expected, None));
             }
             Err(e) => panic!("Failed to parse '{}': {:?}", input, e),
         };
@@ -391,17 +393,17 @@ mod tests {
         check_parse(
             "[1, 2]",
             LitExpr::Array(vec![
-                Parsed::new(LitExpr::Number(serde_json::Number::from(1)), None),
-                Parsed::new(LitExpr::Number(serde_json::Number::from(2)), None),
+                WithRange::new(LitExpr::Number(serde_json::Number::from(1)), None),
+                WithRange::new(LitExpr::Number(serde_json::Number::from(2)), None),
             ]),
         );
 
         check_parse(
             "[1, true, 'three']",
             LitExpr::Array(vec![
-                Parsed::new(LitExpr::Number(serde_json::Number::from(1)), None),
-                Parsed::new(LitExpr::Bool(true), None),
-                Parsed::new(LitExpr::String("three".to_string()), None),
+                WithRange::new(LitExpr::Number(serde_json::Number::from(1)), None),
+                WithRange::new(LitExpr::Bool(true), None),
+                WithRange::new(LitExpr::String("three".to_string()), None),
             ]),
         );
     }

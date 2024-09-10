@@ -330,7 +330,7 @@ mod tests {
                         selections: [
                             Field(
                                 None,
-                                Parsed {
+                                WithRange {
                                     node: Field(
                                         "id",
                                     ),
@@ -345,7 +345,7 @@ mod tests {
                             ),
                             Field(
                                 None,
-                                Parsed {
+                                WithRange {
                                     node: Field(
                                         "name",
                                     ),
@@ -449,7 +449,7 @@ mod tests {
                         selections: [
                             Field(
                                 None,
-                                Parsed {
+                                WithRange {
                                     node: Field(
                                         "id",
                                     ),
@@ -464,7 +464,7 @@ mod tests {
                             ),
                             Field(
                                 None,
-                                Parsed {
+                                WithRange {
                                     node: Field(
                                         "title",
                                     ),
@@ -479,7 +479,7 @@ mod tests {
                             ),
                             Field(
                                 None,
-                                Parsed {
+                                WithRange {
                                     node: Field(
                                         "body",
                                     ),

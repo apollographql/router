@@ -3,8 +3,8 @@ use nom::IResult;
 use nom::Slice;
 use serde_json_bytes::Value as JSON;
 
-use super::location::Parsed;
 use super::location::Span;
+use super::location::WithRange;
 
 // This macro is handy for tests, but it absolutely should never be used with
 // dynamic input at runtime, since it panics if the selection string fails to
@@ -26,7 +26,7 @@ macro_rules! selection {
 
 // Consumes any amount of whitespace and/or comments starting with # until the
 // end of the line.
-pub fn spaces_or_comments(input: Span) -> IResult<Span, Parsed<&str>> {
+pub fn spaces_or_comments(input: Span) -> IResult<Span, WithRange<&str>> {
     let mut suffix = input;
     loop {
         let mut made_progress = false;
@@ -50,7 +50,7 @@ pub fn spaces_or_comments(input: Span) -> IResult<Span, Parsed<&str>> {
             let end = suffix.location_offset();
             return Ok((
                 suffix,
-                Parsed::new(
+                WithRange::new(
                     input.slice(0..end_of_slice).fragment(),
                     // The location of the parsed spaces and comments
                     Some((start, end)),

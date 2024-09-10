@@ -13,8 +13,8 @@ use super::helpers::json_type_name;
 use super::immutable::InputPath;
 use super::known_var::KnownVariable;
 use super::lit_expr::LitExpr;
-use super::location::Parsed;
 use super::location::Ranged;
+use super::location::WithRange;
 use super::methods::lookup_arrow_method;
 use super::parser::*;
 
@@ -284,7 +284,7 @@ impl ApplyToInternal for PathSelection {
     }
 }
 
-impl ApplyToInternal for Parsed<PathList> {
+impl ApplyToInternal for WithRange<PathList> {
     fn apply_to_path(
         &self,
         data: &JSON,
@@ -382,7 +382,7 @@ impl ApplyToInternal for Parsed<PathList> {
     }
 }
 
-impl ApplyToInternal for Parsed<LitExpr> {
+impl ApplyToInternal for WithRange<LitExpr> {
     fn apply_to_path(
         &self,
         data: &JSON,

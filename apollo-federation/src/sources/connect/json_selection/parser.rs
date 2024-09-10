@@ -21,9 +21,9 @@ use super::known_var::KnownVariable;
 use super::lit_expr::LitExpr;
 use super::location::merge_ranges;
 use super::location::parsed_span;
-use super::location::Parsed;
 use super::location::Ranged;
 use super::location::Span;
+use super::location::WithRange;
 
 pub(crate) trait ExternalVarPaths {
     fn external_var_paths(&self) -> Vec<&PathSelection>;
@@ -113,7 +113,7 @@ impl ExternalVarPaths for JSONSelection {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum NamedSelection {
-    Field(Option<Alias>, Parsed<Key>, Option<SubSelection>),
+    Field(Option<Alias>, WithRange<Key>, Option<SubSelection>),
     Path(Alias, PathSelection),
     Group(Alias, SubSelection),
 }
@@ -121,7 +121,7 @@ pub enum NamedSelection {
 // Like PathSelection, NamedSelection is an AST structure that takes its range
 // entirely from its children, so NamedSelection itself does not need to provide
 // separate storage for its own range, and therefore does not need to be wrapped
-// as Parsed<NamedSelection>, but merely needs to implement the Ranged trait.
+// as WithRange<NamedSelection>, but merely needs to implement the Ranged trait.
 impl Ranged<NamedSelection> for NamedSelection {
     fn node(&self) -> &NamedSelection {
         self
@@ -247,12 +247,12 @@ impl ExternalVarPaths for NamedSelection {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct PathSelection {
-    pub(super) path: Parsed<PathList>,
+    pub(super) path: WithRange<PathList>,
 }
 
 // Like NamedSelection, PathSelection is an AST structure that takes its range
-// entirely from self.path (a Parsed<PathList>), so PathSelection itself does
-// not need to be wrapped as Parsed<PathSelection>, but merely needs to
+// entirely from self.path (a WithRange<PathList>), so PathSelection itself does
+// not need to be wrapped as WithRange<PathSelection>, but merely needs to
 // implement the Ranged trait.
 impl Ranged<PathSelection> for PathSelection {
     fn node(&self) -> &PathSelection {
@@ -282,7 +282,7 @@ impl PathSelection {
 
     pub(super) fn from_slice(keys: &[Key], selection: Option<SubSelection>) -> Self {
         Self {
-            path: Parsed::new(PathList::from_slice(keys, selection), None),
+            path: WithRange::new(PathList::from_slice(keys, selection), None),
         }
     }
 
@@ -329,7 +329,7 @@ impl ExternalVarPaths for PathSelection {
 impl From<PathList> for PathSelection {
     fn from(path: PathList) -> Self {
         Self {
-            path: Parsed::new(path, None),
+            path: WithRange::new(path, None),
         }
     }
 }
@@ -337,22 +337,27 @@ impl From<PathList> for PathSelection {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(super) enum PathList {
     // A VarPath must start with a variable (either $identifier, $, or @),
-    // followed by any number of PathStep items (the Parsed<PathList>). Because we
-    // represent the @ quasi-variable using PathList::Var, this variant handles
-    // both VarPath and AtPath from the grammar. The String variable name must
-    // always contain the $ character. The PathList::Var variant may only appear
-    // at the beginning of a PathSelection's PathList, not in the middle.
-    Var(Parsed<KnownVariable>, Parsed<PathList>),
+    // followed by any number of PathStep items (the WithRange<PathList>).
+    // Because we represent the @ quasi-variable using PathList::Var, this
+    // variant handles both VarPath and AtPath from the grammar. The String
+    // variable name must always contain the $ character. The PathList::Var
+    // variant may only appear at the beginning of a PathSelection's PathList,
+    // not in the middle.
+    Var(WithRange<KnownVariable>, WithRange<PathList>),
 
     // A PathSelection that starts with a PathList::Key is a KeyPath, but a
     // PathList::Key also counts as PathStep item, so it may also appear in the
     // middle/tail of a PathList.
-    Key(Parsed<Key>, Parsed<PathList>),
+    Key(WithRange<Key>, WithRange<PathList>),
 
     // A PathList::Method is a PathStep item that may appear only in the
     // middle/tail (not the beginning) of a PathSelection. Methods are
     // distinguished from .keys by their ->method invocation syntax.
-    Method(Parsed<String>, Option<Parsed<MethodArgs>>, Parsed<PathList>),
+    Method(
+        WithRange<String>,
+        Option<WithRange<MethodArgs>>,
+        WithRange<PathList>,
+    ),
 
     // Optionally, a PathList may end with a SubSelection, which applies a set
     // of named selections to the final value of the path. PathList::Selection
@@ -365,7 +370,7 @@ pub(super) enum PathList {
 }
 
 impl PathList {
-    pub fn parse(input: Span) -> IResult<Span, Parsed<Self>> {
+    pub fn parse(input: Span) -> IResult<Span, WithRange<Self>> {
         match Self::parse_with_depth(input, 0) {
             Ok((remainder, parsed)) if matches!(*parsed, Self::Empty) => Err(nom::Err::Error(
                 nom::error::Error::new(remainder, nom::error::ErrorKind::IsNot),
@@ -374,11 +379,11 @@ impl PathList {
         }
     }
 
-    pub(super) fn into_parsed(self) -> Parsed<Self> {
-        Parsed::new(self, None)
+    pub(super) fn into_parsed(self) -> WithRange<Self> {
+        WithRange::new(self, None)
     }
 
-    fn parse_with_depth(input: Span, depth: usize) -> IResult<Span, Parsed<Self>> {
+    fn parse_with_depth(input: Span, depth: usize) -> IResult<Span, WithRange<Self>> {
         let (input, _spaces) = spaces_or_comments(input)?;
 
         // Variable references (including @ references) and key references
@@ -399,10 +404,10 @@ impl PathList {
                     let full_name = format!("{}{}", dollar.node(), var.as_str());
                     if let Some(known_var) = KnownVariable::from_str(full_name.as_str()) {
                         let var_range = merge_ranges(dollar_range, var.range());
-                        let parsed_known_var = Parsed::new(known_var, var_range);
+                        let parsed_known_var = WithRange::new(known_var, var_range);
                         Ok((
                             remainder,
-                            Parsed::new(Self::Var(parsed_known_var, rest), full_range),
+                            WithRange::new(Self::Var(parsed_known_var, rest), full_range),
                         ))
                     } else {
                         // Reject unknown variables at parse time.
@@ -413,10 +418,10 @@ impl PathList {
                         )))
                     }
                 } else {
-                    let parsed_dollar_var = Parsed::new(KnownVariable::Dollar, dollar_range);
+                    let parsed_dollar_var = WithRange::new(KnownVariable::Dollar, dollar_range);
                     Ok((
                         remainder,
-                        Parsed::new(Self::Var(parsed_dollar_var, rest), full_range),
+                        WithRange::new(Self::Var(parsed_dollar_var, rest), full_range),
                     ))
                 };
             }
@@ -433,8 +438,8 @@ impl PathList {
                 // name of a variable could technically be any string we like.
                 return Ok((
                     input,
-                    Parsed::new(
-                        Self::Var(Parsed::new(KnownVariable::AtSign, at.range()), rest),
+                    WithRange::new(
+                        Self::Var(WithRange::new(KnownVariable::AtSign, at.range()), rest),
                         full_range,
                     ),
                 ));
@@ -448,7 +453,7 @@ impl PathList {
                     )),
                     _ => {
                         let full_range = merge_ranges(key.range(), rest.range());
-                        Ok((input, Parsed::new(Self::Key(key, rest), full_range)))
+                        Ok((input, WithRange::new(Self::Key(key, rest), full_range)))
                     }
                 };
             }
@@ -467,7 +472,7 @@ impl PathList {
             let (input, rest) = Self::parse_with_depth(suffix, depth + 1)?;
             let dot_key_range = merge_ranges(dot.range(), key.range());
             let full_range = merge_ranges(dot_key_range, rest.range());
-            return Ok((input, Parsed::new(Self::Key(key, rest), full_range)));
+            return Ok((input, WithRange::new(Self::Key(key, rest), full_range)));
         }
 
         if depth == 0 {
@@ -493,7 +498,7 @@ impl PathList {
             let full_range = merge_ranges(arrow.range(), rest.range());
             return Ok((
                 input,
-                Parsed::new(Self::Method(method, args, rest), full_range),
+                WithRange::new(Self::Method(method, args, rest), full_range),
             ));
         }
 
@@ -503,13 +508,13 @@ impl PathList {
             let selection_range = selection.range();
             return Ok((
                 suffix,
-                Parsed::new(Self::Selection(selection), selection_range),
+                WithRange::new(Self::Selection(selection), selection_range),
             ));
         }
 
         // The Self::Empty enum case is used to indicate the end of a
         // PathSelection that has no SubSelection.
-        Ok((input, Parsed::new(Self::Empty, None)))
+        Ok((input, WithRange::new(Self::Empty, None)))
     }
 
     pub(super) fn is_single_key(&self) -> bool {
@@ -534,8 +539,8 @@ impl PathList {
         match properties {
             [] => selection.map_or(Self::Empty, Self::Selection),
             [head, tail @ ..] => Self::Key(
-                Parsed::new(head.clone(), None),
-                Parsed::new(Self::from_slice(tail, selection), None),
+                WithRange::new(head.clone(), None),
+                WithRange::new(Self::from_slice(tail, selection), None),
             ),
         }
     }
@@ -607,7 +612,7 @@ impl Ranged<SubSelection> for SubSelection {
 
     // Since SubSelection is a struct, we can store its range directly as a
     // field of the struct, allowing SubSelection to implement the Ranged trait
-    // without a Parsed<SubSelection> wrapper.
+    // without a WithRange<SubSelection> wrapper.
     fn range(&self) -> Option<(usize, usize)> {
         self.range
     }
@@ -795,7 +800,7 @@ impl StarSelection {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Alias {
-    pub(super) name: Parsed<Key>,
+    pub(super) name: WithRange<Key>,
     pub(super) range: Option<(usize, usize)>,
 }
 
@@ -812,14 +817,14 @@ impl Ranged<Alias> for Alias {
 impl Alias {
     pub fn new(name: &str) -> Self {
         Self {
-            name: Parsed::new(Key::field(name), None),
+            name: WithRange::new(Key::field(name), None),
             range: None,
         }
     }
 
     pub fn quoted(name: &str) -> Self {
         Self {
-            name: Parsed::new(Key::quoted(name), None),
+            name: WithRange::new(Key::quoted(name), None),
             range: None,
         }
     }
@@ -847,7 +852,7 @@ pub enum Key {
 }
 
 impl Key {
-    pub fn parse(input: Span) -> IResult<Span, Parsed<Self>> {
+    pub fn parse(input: Span) -> IResult<Span, WithRange<Self>> {
         alt((
             map(parse_identifier, |id| id.take_as(Key::Field)),
             map(parse_string_literal, |s| s.take_as(Key::Quoted)),
@@ -862,8 +867,8 @@ impl Key {
         Self::Quoted(name.to_string())
     }
 
-    pub fn into_parsed(self) -> Parsed<Self> {
-        Parsed::new(self, None)
+    pub fn into_parsed(self) -> WithRange<Self> {
+        WithRange::new(self, None)
     }
 
     pub fn is_quoted(&self) -> bool {
@@ -922,7 +927,7 @@ impl Display for Key {
 
 // Identifier ::= [a-zA-Z_] NO_SPACE [0-9a-zA-Z_]*
 
-fn parse_identifier(input: Span) -> IResult<Span, Parsed<String>> {
+fn parse_identifier(input: Span) -> IResult<Span, WithRange<String>> {
     delimited(
         spaces_or_comments,
         parse_identifier_no_space,
@@ -930,7 +935,7 @@ fn parse_identifier(input: Span) -> IResult<Span, Parsed<String>> {
     )(input)
 }
 
-fn parse_identifier_no_space(input: Span) -> IResult<Span, Parsed<String>> {
+fn parse_identifier_no_space(input: Span) -> IResult<Span, WithRange<String>> {
     recognize(pair(
         one_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_"),
         many0(one_of(
@@ -939,7 +944,7 @@ fn parse_identifier_no_space(input: Span) -> IResult<Span, Parsed<String>> {
     ))(input)
     .map(|(remainder, name)| {
         let range = Some((name.location_offset(), remainder.location_offset()));
-        (remainder, Parsed::new(name.to_string(), range))
+        (remainder, WithRange::new(name.to_string(), range))
     })
 }
 
@@ -947,7 +952,7 @@ fn parse_identifier_no_space(input: Span) -> IResult<Span, Parsed<String>> {
 //   | "'" ("\\'" | [^'])* "'"
 //   | '"' ('\\"' | [^"])* '"'
 
-pub fn parse_string_literal(input: Span) -> IResult<Span, Parsed<String>> {
+pub fn parse_string_literal(input: Span) -> IResult<Span, WithRange<String>> {
     let input = spaces_or_comments(input)?.0;
     let start = input.location_offset();
     let mut input_char_indices = input.char_indices();
@@ -981,7 +986,7 @@ pub fn parse_string_literal(input: Span) -> IResult<Span, Parsed<String>> {
             if let Some(remainder) = remainder {
                 Ok((
                     spaces_or_comments(remainder)?.0,
-                    Parsed::new(
+                    WithRange::new(
                         chars.iter().collect::<String>(),
                         Some((start, remainder.location_offset())),
                     ),
@@ -1002,14 +1007,14 @@ pub fn parse_string_literal(input: Span) -> IResult<Span, Parsed<String>> {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct MethodArgs(pub(super) Vec<Parsed<LitExpr>>);
+pub struct MethodArgs(pub(super) Vec<WithRange<LitExpr>>);
 
 // Comma-separated positional arguments for a method, surrounded by parentheses.
 // When an arrow method is used without arguments, the Option<MethodArgs> for
 // the PathSelection::Method will be None, so we can safely define MethodArgs
 // using a Vec<LitExpr> in all cases (possibly empty but never missing).
 impl MethodArgs {
-    fn parse(input: Span) -> IResult<Span, Parsed<Self>> {
+    fn parse(input: Span) -> IResult<Span, WithRange<Self>> {
         tuple((
             spaces_or_comments,
             parsed_span("("),
@@ -1032,12 +1037,12 @@ impl MethodArgs {
         ))(input)
         .map(|(input, (_, open_paren, _, args, _, close_paren, _))| {
             let range = merge_ranges(open_paren.range(), close_paren.range());
-            (input, Parsed::new(Self(args.unwrap_or_default()), range))
+            (input, WithRange::new(Self(args.unwrap_or_default()), range))
         })
     }
 
-    fn into_parsed(self) -> Parsed<Self> {
-        Parsed::new(self, None)
+    fn into_parsed(self) -> WithRange<Self> {
+        WithRange::new(self, None)
     }
 }
 
@@ -2122,7 +2127,7 @@ mod tests {
                     PathList::Key(
                         Key::field("items").into_parsed(),
                         PathList::Method(
-                            Parsed::new("first".to_string(), None),
+                            WithRange::new("first".to_string(), None),
                             None,
                             PathList::Empty.into_parsed(),
                         )
@@ -2145,7 +2150,7 @@ mod tests {
                     PathList::Key(
                         Key::field("x").into_parsed(),
                         PathList::Method(
-                            Parsed::new("or".to_string(), None),
+                            WithRange::new("or".to_string(), None),
                             Some(
                                 MethodArgs(vec![LitExpr::Path(PathSelection::from_slice(
                                     &[Key::field("data"), Key::field("y")],
@@ -2169,7 +2174,7 @@ mod tests {
                 path: PathList::Key(
                     Key::field("data").into_parsed(),
                     PathList::Method(
-                        Parsed::new("query".to_string(), None),
+                        WithRange::new("query".to_string(), None),
                         Some(
                             MethodArgs(vec![
                                 LitExpr::Path(PathSelection::from_slice(&[Key::field("a")], None))
@@ -2201,7 +2206,7 @@ mod tests {
                     PathList::Key(
                         Key::field("x").into_parsed(),
                         PathList::Method(
-                            Parsed::new("concat".to_string(), None),
+                            WithRange::new("concat".to_string(), None),
                             Some(
                                 MethodArgs(vec![LitExpr::Array(vec![
                                     LitExpr::Path(PathSelection::from_slice(
@@ -2240,7 +2245,7 @@ mod tests {
                 path: PathList::Key(
                     Key::field("data").into_parsed(),
                     PathList::Method(
-                        Parsed::new("method".to_string(), None),
+                        WithRange::new("method".to_string(), None),
                         Some(
                             MethodArgs(vec![LitExpr::Array(vec![
                                 LitExpr::Path(PathSelection {
@@ -2254,7 +2259,7 @@ mod tests {
                                                         path: PathList::Key(
                                                             Key::field("x").into_parsed(),
                                                             PathList::Method(
-                                                                Parsed::new(
+                                                                WithRange::new(
                                                                     "times".to_string(),
                                                                     None,
                                                                 ),
@@ -2294,7 +2299,7 @@ mod tests {
                                                         path: PathList::Key(
                                                             Key::field("y").into_parsed(),
                                                             PathList::Method(
-                                                                Parsed::new(
+                                                                WithRange::new(
                                                                     "times".to_string(),
                                                                     None,
                                                                 ),
@@ -2664,7 +2669,7 @@ mod tests {
             JSONSelection::Named(SubSelection {
                 selections: vec![NamedSelection::Field(
                     None,
-                    Parsed::new(Key::field("hello"), Some((0, 5))),
+                    WithRange::new(Key::field("hello"), Some((0, 5))),
                     None,
                 )],
                 range: Some((0, 5)),
@@ -2677,7 +2682,7 @@ mod tests {
             JSONSelection::Named(SubSelection {
                 selections: vec![NamedSelection::Field(
                     None,
-                    Parsed::new(Key::field("hello"), Some((2, 7))),
+                    WithRange::new(Key::field("hello"), Some((2, 7))),
                     None,
                 )],
                 range: Some((2, 7)),
@@ -2690,17 +2695,17 @@ mod tests {
             JSONSelection::Named(SubSelection {
                 selections: vec![NamedSelection::Field(
                     None,
-                    Parsed::new(Key::field("hello"), Some((2, 7))),
+                    WithRange::new(Key::field("hello"), Some((2, 7))),
                     Some(SubSelection {
                         selections: vec![
                             NamedSelection::Field(
                                 None,
-                                Parsed::new(Key::field("hi"), Some((11, 13))),
+                                WithRange::new(Key::field("hi"), Some((11, 13))),
                                 None,
                             ),
                             NamedSelection::Field(
                                 None,
-                                Parsed::new(Key::field("name"), Some((14, 18))),
+                                WithRange::new(Key::field("name"), Some((14, 18))),
                                 None,
                             ),
                         ],
@@ -2716,16 +2721,16 @@ mod tests {
         check(
             "$args.product.id",
             JSONSelection::Path(PathSelection {
-                path: Parsed::new(
+                path: WithRange::new(
                     PathList::Var(
-                        Parsed::new(KnownVariable::Args, Some((0, 5))),
-                        Parsed::new(
+                        WithRange::new(KnownVariable::Args, Some((0, 5))),
+                        WithRange::new(
                             PathList::Key(
-                                Parsed::new(Key::field("product"), Some((6, 13))),
-                                Parsed::new(
+                                WithRange::new(Key::field("product"), Some((6, 13))),
+                                WithRange::new(
                                     PathList::Key(
-                                        Parsed::new(Key::field("id"), Some((14, 16))),
-                                        Parsed::new(PathList::Empty, None),
+                                        WithRange::new(Key::field("id"), Some((14, 16))),
+                                        WithRange::new(PathList::Empty, None),
                                     ),
                                     Some((13, 16)),
                                 ),
@@ -2741,16 +2746,16 @@ mod tests {
         check(
             " $args . product . id ",
             JSONSelection::Path(PathSelection {
-                path: Parsed::new(
+                path: WithRange::new(
                     PathList::Var(
-                        Parsed::new(KnownVariable::Args, Some((1, 6))),
-                        Parsed::new(
+                        WithRange::new(KnownVariable::Args, Some((1, 6))),
+                        WithRange::new(
                             PathList::Key(
-                                Parsed::new(Key::field("product"), Some((9, 16))),
-                                Parsed::new(
+                                WithRange::new(Key::field("product"), Some((9, 16))),
+                                WithRange::new(
                                     PathList::Key(
-                                        Parsed::new(Key::field("id"), Some((19, 21))),
-                                        Parsed::new(PathList::Empty, None),
+                                        WithRange::new(Key::field("id"), Some((19, 21))),
+                                        WithRange::new(PathList::Empty, None),
                                     ),
                                     Some((17, 21)),
                                 ),
@@ -2769,27 +2774,27 @@ mod tests {
                 selections: vec![
                     NamedSelection::Field(
                         None,
-                        Parsed::new(Key::field("before"), Some((0, 6))),
+                        WithRange::new(Key::field("before"), Some((0, 6))),
                         None,
                     ),
                     NamedSelection::Path(
                         Alias {
-                            name: Parsed::new(Key::field("product"), Some((7, 14))),
+                            name: WithRange::new(Key::field("product"), Some((7, 14))),
                             range: Some((7, 15)),
                         },
                         PathSelection {
-                            path: Parsed::new(
+                            path: WithRange::new(
                                 PathList::Var(
-                                    Parsed::new(KnownVariable::Args, Some((15, 20))),
-                                    Parsed::new(
+                                    WithRange::new(KnownVariable::Args, Some((15, 20))),
+                                    WithRange::new(
                                         PathList::Key(
-                                            Parsed::new(Key::field("product"), Some((21, 28))),
-                                            Parsed::new(
+                                            WithRange::new(Key::field("product"), Some((21, 28))),
+                                            WithRange::new(
                                                 PathList::Selection(SubSelection {
                                                     selections: vec![
                                                         NamedSelection::Field(
                                                             None,
-                                                            Parsed::new(
+                                                            WithRange::new(
                                                                 Key::field("id"),
                                                                 Some((29, 31)),
                                                             ),
@@ -2797,7 +2802,7 @@ mod tests {
                                                         ),
                                                         NamedSelection::Field(
                                                             None,
-                                                            Parsed::new(
+                                                            WithRange::new(
                                                                 Key::field("name"),
                                                                 Some((32, 36)),
                                                             ),
@@ -2819,7 +2824,7 @@ mod tests {
                     ),
                     NamedSelection::Field(
                         None,
-                        Parsed::new(Key::field("after"), Some((37, 42))),
+                        WithRange::new(Key::field("after"), Some((37, 42))),
                         None,
                     ),
                 ],

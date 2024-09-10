@@ -7,7 +7,7 @@ Named(
         selections: [
             Path(
                 Alias {
-                    name: Parsed {
+                    name: WithRange {
                         node: Field(
                             "path",
                         ),
@@ -26,9 +26,9 @@ Named(
                     ),
                 },
                 PathSelection {
-                    path: Parsed {
+                    path: WithRange {
                         node: Key(
-                            Parsed {
+                            WithRange {
                                 node: Field(
                                     "some",
                                 ),
@@ -39,9 +39,9 @@ Named(
                                     ),
                                 ),
                             },
-                            Parsed {
+                            WithRange {
                                 node: Key(
-                                    Parsed {
+                                    WithRange {
                                         node: Field(
                                             "nested",
                                         ),
@@ -52,9 +52,9 @@ Named(
                                             ),
                                         ),
                                     },
-                                    Parsed {
+                                    WithRange {
                                         node: Key(
-                                            Parsed {
+                                            WithRange {
                                                 node: Field(
                                                     "path",
                                                 ),
@@ -65,13 +65,13 @@ Named(
                                                     ),
                                                 ),
                                             },
-                                            Parsed {
+                                            WithRange {
                                                 node: Selection(
                                                     SubSelection {
                                                         selections: [
                                                             Field(
                                                                 None,
-                                                                Parsed {
+                                                                WithRange {
                                                                     node: Field(
                                                                         "isbn",
                                                                     ),
@@ -86,7 +86,7 @@ Named(
                                                             ),
                                                             Field(
                                                                 None,
-                                                                Parsed {
+                                                                WithRange {
                                                                     node: Field(
                                                                         "author",
                                                                     ),
@@ -102,7 +102,7 @@ Named(
                                                                         selections: [
                                                                             Field(
                                                                                 None,
-                                                                                Parsed {
+                                                                                WithRange {
                                                                                     node: Field(
                                                                                         "name",
                                                                                     ),
@@ -172,7 +172,7 @@ Named(
             Field(
                 Some(
                     Alias {
-                        name: Parsed {
+                        name: WithRange {
                             node: Field(
                                 "alias",
                             ),
@@ -191,7 +191,7 @@ Named(
                         ),
                     },
                 ),
-                Parsed {
+                WithRange {
                     node: Quoted(
                         "not an identifier",
                     ),
@@ -207,7 +207,7 @@ Named(
                         selections: [
                             Path(
                                 Alias {
-                                    name: Parsed {
+                                    name: WithRange {
                                         node: Field(
                                             "__typename",
                                         ),
@@ -226,9 +226,9 @@ Named(
                                     ),
                                 },
                                 PathSelection {
-                                    path: Parsed {
+                                    path: WithRange {
                                         node: Var(
-                                            Parsed {
+                                            WithRange {
                                                 node: @,
                                                 range: Some(
                                                     (
@@ -237,9 +237,9 @@ Named(
                                                     ),
                                                 ),
                                             },
-                                            Parsed {
+                                            WithRange {
                                                 node: Method(
-                                                    Parsed {
+                                                    WithRange {
                                                         node: "echo",
                                                         range: Some(
                                                             (
@@ -249,10 +249,10 @@ Named(
                                                         ),
                                                     },
                                                     Some(
-                                                        Parsed {
+                                                        WithRange {
                                                             node: MethodArgs(
                                                                 [
-                                                                    Parsed {
+                                                                    WithRange {
                                                                         node: String(
                                                                             "Frog",
                                                                         ),
@@ -273,7 +273,7 @@ Named(
                                                             ),
                                                         },
                                                     ),
-                                                    Parsed {
+                                                    WithRange {
                                                         node: Empty,
                                                         range: None,
                                                     },
@@ -297,7 +297,7 @@ Named(
                             ),
                             Path(
                                 Alias {
-                                    name: Parsed {
+                                    name: WithRange {
                                         node: Field(
                                             "wrapped",
                                         ),
@@ -316,9 +316,9 @@ Named(
                                     ),
                                 },
                                 PathSelection {
-                                    path: Parsed {
+                                    path: WithRange {
                                         node: Var(
-                                            Parsed {
+                                            WithRange {
                                                 node: $,
                                                 range: Some(
                                                     (
@@ -327,9 +327,9 @@ Named(
                                                     ),
                                                 ),
                                             },
-                                            Parsed {
+                                            WithRange {
                                                 node: Method(
-                                                    Parsed {
+                                                    WithRange {
                                                         node: "echo",
                                                         range: Some(
                                                             (
@@ -339,13 +339,13 @@ Named(
                                                         ),
                                                     },
                                                     Some(
-                                                        Parsed {
+                                                        WithRange {
                                                             node: MethodArgs(
                                                                 [
-                                                                    Parsed {
+                                                                    WithRange {
                                                                         node: Object(
                                                                             {
-                                                                                Parsed {
+                                                                                WithRange {
                                                                                     node: Field(
                                                                                         "wrapped",
                                                                                     ),
@@ -355,12 +355,12 @@ Named(
                                                                                             221,
                                                                                         ),
                                                                                     ),
-                                                                                }: Parsed {
+                                                                                }: WithRange {
                                                                                     node: Path(
                                                                                         PathSelection {
-                                                                                            path: Parsed {
+                                                                                            path: WithRange {
                                                                                                 node: Var(
-                                                                                                    Parsed {
+                                                                                                    WithRange {
                                                                                                         node: @,
                                                                                                         range: Some(
                                                                                                             (
@@ -369,7 +369,7 @@ Named(
                                                                                                             ),
                                                                                                         ),
                                                                                                     },
-                                                                                                    Parsed {
+                                                                                                    WithRange {
                                                                                                         node: Empty,
                                                                                                         range: None,
                                                                                                     },
@@ -409,7 +409,7 @@ Named(
                                                             ),
                                                         },
                                                     ),
-                                                    Parsed {
+                                                    WithRange {
                                                         node: Empty,
                                                         range: None,
                                                     },
@@ -433,7 +433,7 @@ Named(
                             ),
                             Group(
                                 Alias {
-                                    name: Parsed {
+                                    name: WithRange {
                                         node: Field(
                                             "group",
                                         ),
@@ -455,7 +455,7 @@ Named(
                                     selections: [
                                         Field(
                                             None,
-                                            Parsed {
+                                            WithRange {
                                                 node: Field(
                                                     "a",
                                                 ),
@@ -470,7 +470,7 @@ Named(
                                         ),
                                         Field(
                                             None,
-                                            Parsed {
+                                            WithRange {
                                                 node: Field(
                                                     "b",
                                                 ),
@@ -485,7 +485,7 @@ Named(
                                         ),
                                         Field(
                                             None,
-                                            Parsed {
+                                            WithRange {
                                                 node: Field(
                                                     "c",
                                                 ),
@@ -510,7 +510,7 @@ Named(
                             ),
                             Path(
                                 Alias {
-                                    name: Parsed {
+                                    name: WithRange {
                                         node: Field(
                                             "arg",
                                         ),
@@ -529,9 +529,9 @@ Named(
                                     ),
                                 },
                                 PathSelection {
-                                    path: Parsed {
+                                    path: WithRange {
                                         node: Var(
-                                            Parsed {
+                                            WithRange {
                                                 node: $args,
                                                 range: Some(
                                                     (
@@ -540,9 +540,9 @@ Named(
                                                     ),
                                                 ),
                                             },
-                                            Parsed {
+                                            WithRange {
                                                 node: Key(
-                                                    Parsed {
+                                                    WithRange {
                                                         node: Field(
                                                             "arg",
                                                         ),
@@ -553,7 +553,7 @@ Named(
                                                             ),
                                                         ),
                                                     },
-                                                    Parsed {
+                                                    WithRange {
                                                         node: Empty,
                                                         range: None,
                                                     },
@@ -577,7 +577,7 @@ Named(
                             ),
                             Field(
                                 None,
-                                Parsed {
+                                WithRange {
                                     node: Field(
                                         "field",
                                     ),
@@ -595,7 +595,7 @@ Named(
                             StarSelection {
                                 alias: Some(
                                     Alias {
-                                        name: Parsed {
+                                        name: WithRange {
                                             node: Field(
                                                 "rest",
                                             ),
@@ -619,7 +619,7 @@ Named(
                                         selections: [
                                             Field(
                                                 None,
-                                                Parsed {
+                                                WithRange {
                                                     node: Field(
                                                         "data",
                                                     ),

@@ -7,8 +7,8 @@ use crate::sources::connect::json_selection::helpers::json_type_name;
 use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::lit_expr::LitExpr;
 use crate::sources::connect::json_selection::location::merge_ranges;
-use crate::sources::connect::json_selection::location::Parsed;
 use crate::sources::connect::json_selection::location::Ranged;
+use crate::sources::connect::json_selection::location::WithRange;
 use crate::sources::connect::json_selection::ApplyToError;
 use crate::sources::connect::json_selection::ApplyToInternal;
 use crate::sources::connect::json_selection::MethodArgs;
@@ -16,12 +16,12 @@ use crate::sources::connect::json_selection::PathList;
 use crate::sources::connect::json_selection::VarsWithPathsMap;
 
 pub(super) fn echo_method(
-    method_name: &Parsed<String>,
-    method_args: Option<&Parsed<MethodArgs>>,
+    method_name: &WithRange<String>,
+    method_args: Option<&WithRange<MethodArgs>>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &Parsed<PathList>,
+    tail: &WithRange<PathList>,
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
     if let Some(parsed_args) = method_args {
@@ -40,12 +40,12 @@ pub(super) fn echo_method(
 }
 
 pub(super) fn map_method(
-    method_name: &Parsed<String>,
-    method_args: Option<&Parsed<MethodArgs>>,
+    method_name: &WithRange<String>,
+    method_args: Option<&WithRange<MethodArgs>>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &Parsed<PathList>,
+    tail: &WithRange<PathList>,
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
     if let Some(args) = method_args {
@@ -90,12 +90,12 @@ pub(super) fn map_method(
 }
 
 pub(super) fn match_method(
-    method_name: &Parsed<String>,
-    method_args: Option<&Parsed<MethodArgs>>,
+    method_name: &WithRange<String>,
+    method_args: Option<&WithRange<MethodArgs>>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &Parsed<PathList>,
+    tail: &WithRange<PathList>,
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
     // Takes any number of pairs [key, value], and returns value for the first
@@ -134,12 +134,12 @@ pub(super) fn match_method(
 }
 
 pub(super) fn first_method(
-    method_name: &Parsed<String>,
-    method_args: Option<&Parsed<MethodArgs>>,
+    method_name: &WithRange<String>,
+    method_args: Option<&WithRange<MethodArgs>>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &Parsed<PathList>,
+    tail: &WithRange<PathList>,
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
     if method_args.is_some() {
@@ -171,12 +171,12 @@ pub(super) fn first_method(
 }
 
 pub(super) fn last_method(
-    method_name: &Parsed<String>,
-    method_args: Option<&Parsed<MethodArgs>>,
+    method_name: &WithRange<String>,
+    method_args: Option<&WithRange<MethodArgs>>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &Parsed<PathList>,
+    tail: &WithRange<PathList>,
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
     if method_args.is_some() {
@@ -208,12 +208,12 @@ pub(super) fn last_method(
 }
 
 pub(super) fn slice_method(
-    method_name: &Parsed<String>,
-    method_args: Option<&Parsed<MethodArgs>>,
+    method_name: &WithRange<String>,
+    method_args: Option<&WithRange<MethodArgs>>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &Parsed<PathList>,
+    tail: &WithRange<PathList>,
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
     let length = if let JSON::Array(array) = data {
@@ -282,12 +282,12 @@ pub(super) fn slice_method(
 }
 
 pub(super) fn size_method(
-    method_name: &Parsed<String>,
-    method_args: Option<&Parsed<MethodArgs>>,
+    method_name: &WithRange<String>,
+    method_args: Option<&WithRange<MethodArgs>>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &Parsed<PathList>,
+    tail: &WithRange<PathList>,
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
     if method_args.is_some() {
@@ -337,12 +337,12 @@ pub(super) fn size_method(
 // like an option, but GraphQL doesn't handle heterogeneous lists (or tuples) as
 // well as it handles objects with named properties like { key, value }.
 pub(super) fn entries_method(
-    method_name: &Parsed<String>,
-    method_args: Option<&Parsed<MethodArgs>>,
+    method_name: &WithRange<String>,
+    method_args: Option<&WithRange<MethodArgs>>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &Parsed<PathList>,
+    tail: &WithRange<PathList>,
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
     if method_args.is_some() {

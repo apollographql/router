@@ -60,9 +60,9 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
             body: Some(
                 Path(
                     PathSelection {
-                        path: Parsed {
+                        path: WithRange {
                             node: Var(
-                                Parsed {
+                                WithRange {
                                     node: $args,
                                     range: Some(
                                         (
@@ -71,9 +71,9 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                         ),
                                     ),
                                 },
-                                Parsed {
+                                WithRange {
                                     node: Key(
-                                        Parsed {
+                                        WithRange {
                                             node: Field(
                                                 "input",
                                             ),
@@ -84,13 +84,13 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                 ),
                                             ),
                                         },
-                                        Parsed {
+                                        WithRange {
                                             node: Selection(
                                                 SubSelection {
                                                     selections: [
                                                         Field(
                                                             None,
-                                                            Parsed {
+                                                            WithRange {
                                                                 node: Field(
                                                                     "name",
                                                                 ),
@@ -105,7 +105,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                         ),
                                                         Field(
                                                             None,
-                                                            Parsed {
+                                                            WithRange {
                                                                 node: Field(
                                                                     "username",
                                                                 ),
@@ -120,7 +120,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                         ),
                                                         Field(
                                                             None,
-                                                            Parsed {
+                                                            WithRange {
                                                                 node: Field(
                                                                     "email",
                                                                 ),
@@ -135,7 +135,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                         ),
                                                         Field(
                                                             None,
-                                                            Parsed {
+                                                            WithRange {
                                                                 node: Field(
                                                                     "status",
                                                                 ),
@@ -150,7 +150,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                         ),
                                                         Field(
                                                             None,
-                                                            Parsed {
+                                                            WithRange {
                                                                 node: Field(
                                                                     "address",
                                                                 ),
@@ -166,7 +166,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                     selections: [
                                                                         Field(
                                                                             None,
-                                                                            Parsed {
+                                                                            WithRange {
                                                                                 node: Field(
                                                                                     "street",
                                                                                 ),
@@ -181,7 +181,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                         ),
                                                                         Field(
                                                                             None,
-                                                                            Parsed {
+                                                                            WithRange {
                                                                                 node: Field(
                                                                                     "suite",
                                                                                 ),
@@ -196,7 +196,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                         ),
                                                                         Field(
                                                                             None,
-                                                                            Parsed {
+                                                                            WithRange {
                                                                                 node: Field(
                                                                                     "city",
                                                                                 ),
@@ -211,7 +211,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                         ),
                                                                         Field(
                                                                             None,
-                                                                            Parsed {
+                                                                            WithRange {
                                                                                 node: Field(
                                                                                     "zipcode",
                                                                                 ),
@@ -226,7 +226,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                         ),
                                                                         Field(
                                                                             None,
-                                                                            Parsed {
+                                                                            WithRange {
                                                                                 node: Field(
                                                                                     "geo",
                                                                                 ),
@@ -242,7 +242,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                                     selections: [
                                                                                         Field(
                                                                                             None,
-                                                                                            Parsed {
+                                                                                            WithRange {
                                                                                                 node: Field(
                                                                                                     "lat",
                                                                                                 ),
@@ -257,7 +257,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                                         ),
                                                                                         Field(
                                                                                             None,
-                                                                                            Parsed {
+                                                                                            WithRange {
                                                                                                 node: Field(
                                                                                                     "lng",
                                                                                                 ),
@@ -334,7 +334,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                 selections: [
                     Field(
                         None,
-                        Parsed {
+                        WithRange {
                             node: Field(
                                 "id",
                             ),
@@ -420,7 +420,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                         selections: [
                             Path(
                                 Alias {
-                                    name: Parsed {
+                                    name: WithRange {
                                         node: Field(
                                             "emailDomain",
                                         ),
@@ -439,9 +439,9 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                     ),
                                 },
                                 PathSelection {
-                                    path: Parsed {
+                                    path: WithRange {
                                         node: Var(
-                                            Parsed {
+                                            WithRange {
                                                 node: $args,
                                                 range: Some(
                                                     (
@@ -450,9 +450,9 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                     ),
                                                 ),
                                             },
-                                            Parsed {
+                                            WithRange {
                                                 node: Key(
-                                                    Parsed {
+                                                    WithRange {
                                                         node: Field(
                                                             "email",
                                                         ),
@@ -463,7 +463,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                             ),
                                                         ),
                                                     },
-                                                    Parsed {
+                                                    WithRange {
                                                         node: Empty,
                                                         range: None,
                                                     },
@@ -502,7 +502,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                 selections: [
                     Field(
                         None,
-                        Parsed {
+                        WithRange {
                             node: Field(
                                 "id",
                             ),
@@ -517,7 +517,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                     ),
                     Field(
                         None,
-                        Parsed {
+                        WithRange {
                             node: Field(
                                 "name",
                             ),
@@ -608,7 +608,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                 selections: [
                     Field(
                         None,
-                        Parsed {
+                        WithRange {
                             node: Field(
                                 "id",
                             ),
@@ -623,7 +623,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                     ),
                     Field(
                         None,
-                        Parsed {
+                        WithRange {
                             node: Field(
                                 "name",
                             ),
@@ -638,7 +638,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                     ),
                     Field(
                         None,
-                        Parsed {
+                        WithRange {
                             node: Field(
                                 "company",
                             ),
@@ -654,7 +654,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                 selections: [
                                     Field(
                                         None,
-                                        Parsed {
+                                        WithRange {
                                             node: Field(
                                                 "name",
                                             ),
@@ -669,7 +669,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                     ),
                                     Field(
                                         None,
-                                        Parsed {
+                                        WithRange {
                                             node: Field(
                                                 "catchPhrase",
                                             ),
@@ -684,7 +684,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                     ),
                                     Field(
                                         None,
-                                        Parsed {
+                                        WithRange {
                                             node: Field(
                                                 "bs",
                                             ),
@@ -779,7 +779,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                 selections: [
                     Field(
                         None,
-                        Parsed {
+                        WithRange {
                             node: Field(
                                 "id",
                             ),
@@ -794,7 +794,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                     ),
                     Field(
                         None,
-                        Parsed {
+                        WithRange {
                             node: Field(
                                 "name",
                             ),
@@ -809,7 +809,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                     ),
                     Field(
                         None,
-                        Parsed {
+                        WithRange {
                             node: Field(
                                 "username",
                             ),
@@ -824,7 +824,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                     ),
                     Field(
                         None,
-                        Parsed {
+                        WithRange {
                             node: Field(
                                 "email",
                             ),
@@ -839,7 +839,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                     ),
                     Field(
                         None,
-                        Parsed {
+                        WithRange {
                             node: Field(
                                 "address",
                             ),
@@ -855,7 +855,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                 selections: [
                                     Field(
                                         None,
-                                        Parsed {
+                                        WithRange {
                                             node: Field(
                                                 "street",
                                             ),
@@ -870,7 +870,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                     ),
                                     Field(
                                         None,
-                                        Parsed {
+                                        WithRange {
                                             node: Field(
                                                 "suite",
                                             ),
@@ -885,7 +885,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                     ),
                                     Field(
                                         None,
-                                        Parsed {
+                                        WithRange {
                                             node: Field(
                                                 "city",
                                             ),
@@ -900,7 +900,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                     ),
                                     Field(
                                         None,
-                                        Parsed {
+                                        WithRange {
                                             node: Field(
                                                 "zipcode",
                                             ),
@@ -915,7 +915,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                     ),
                                     Field(
                                         None,
-                                        Parsed {
+                                        WithRange {
                                             node: Field(
                                                 "geo",
                                             ),
@@ -931,7 +931,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                 selections: [
                                                     Field(
                                                         None,
-                                                        Parsed {
+                                                        WithRange {
                                                             node: Field(
                                                                 "lat",
                                                             ),
@@ -946,7 +946,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                     ),
                                                     Field(
                                                         None,
-                                                        Parsed {
+                                                        WithRange {
                                                             node: Field(
                                                                 "lng",
                                                             ),
@@ -983,7 +983,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                     ),
                     Field(
                         None,
-                        Parsed {
+                        WithRange {
                             node: Field(
                                 "phone",
                             ),
@@ -998,7 +998,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                     ),
                     Field(
                         None,
-                        Parsed {
+                        WithRange {
                             node: Field(
                                 "website",
                             ),
@@ -1013,7 +1013,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                     ),
                     Field(
                         None,
-                        Parsed {
+                        WithRange {
                             node: Field(
                                 "company",
                             ),
@@ -1029,7 +1029,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                 selections: [
                                     Field(
                                         None,
-                                        Parsed {
+                                        WithRange {
                                             node: Field(
                                                 "name",
                                             ),
@@ -1044,7 +1044,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                     ),
                                     Field(
                                         None,
-                                        Parsed {
+                                        WithRange {
                                             node: Field(
                                                 "catchPhrase",
                                             ),
@@ -1059,7 +1059,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                     ),
                                     Field(
                                         None,
-                                        Parsed {
+                                        WithRange {
                                             node: Field(
                                                 "bs",
                                             ),
@@ -1074,7 +1074,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                     ),
                                     Field(
                                         None,
-                                        Parsed {
+                                        WithRange {
                                             node: Field(
                                                 "email",
                                             ),

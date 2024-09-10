@@ -27,8 +27,8 @@ use multimap::MultiMap;
 
 use super::known_var::KnownVariable;
 use super::lit_expr::LitExpr;
-use super::location::Parsed;
 use super::location::Ranged;
+use super::location::WithRange;
 use super::parser::MethodArgs;
 use super::parser::PathList;
 use crate::sources::connect::json_selection::Alias;
@@ -68,20 +68,20 @@ impl SubSelection {
             new_selections.push(NamedSelection::Path(
                 Alias::new("__typename"),
                 PathSelection {
-                    path: Parsed::new(
+                    path: WithRange::new(
                         PathList::Var(
-                            Parsed::new(KnownVariable::Dollar, None),
-                            Parsed::new(
+                            WithRange::new(KnownVariable::Dollar, None),
+                            WithRange::new(
                                 PathList::Method(
-                                    Parsed::new("echo".to_string(), None),
-                                    Some(Parsed::new(
-                                        MethodArgs(vec![Parsed::new(
+                                    WithRange::new("echo".to_string(), None),
+                                    Some(WithRange::new(
+                                        MethodArgs(vec![WithRange::new(
                                             LitExpr::String(selection_set.ty.to_string()),
                                             None,
                                         )]),
                                         None,
                                     )),
-                                    Parsed::new(PathList::Empty, None),
+                                    WithRange::new(PathList::Empty, None),
                                 ),
                                 None,
                             ),
@@ -162,7 +162,7 @@ impl SubSelection {
                 let name = format!("__unused__{dropped}");
                 new_selections.push(NamedSelection::Field(
                     Some(Alias::new(name.as_str())),
-                    Parsed::new(Key::field(dropped), None),
+                    WithRange::new(Key::field(dropped), None),
                     None,
                 ));
             }
@@ -183,7 +183,7 @@ impl PathSelection {
     /// Apply a selection set to create a new [`PathSelection`]
     pub fn apply_selection_set(&self, selection_set: &SelectionSet) -> Self {
         Self {
-            path: Parsed::new(
+            path: WithRange::new(
                 self.path.apply_selection_set(selection_set),
                 self.path.range(),
             ),
@@ -196,16 +196,16 @@ impl PathList {
         match self {
             Self::Var(name, path) => Self::Var(
                 name.clone(),
-                Parsed::new(path.apply_selection_set(selection_set), path.range()),
+                WithRange::new(path.apply_selection_set(selection_set), path.range()),
             ),
             Self::Key(key, path) => Self::Key(
                 key.clone(),
-                Parsed::new(path.apply_selection_set(selection_set), path.range()),
+                WithRange::new(path.apply_selection_set(selection_set), path.range()),
             ),
             Self::Method(method_name, args, path) => Self::Method(
                 method_name.clone(),
                 args.clone(),
-                Parsed::new(path.apply_selection_set(selection_set), path.range()),
+                WithRange::new(path.apply_selection_set(selection_set), path.range()),
             ),
             Self::Selection(sub) => Self::Selection(sub.apply_selection_set(selection_set)),
             Self::Empty => Self::Empty,
