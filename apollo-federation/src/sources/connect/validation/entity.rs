@@ -338,7 +338,7 @@ impl<'schema> ArgumentVisitor<'schema> {
         &mut self,
         child_input_type: &'schema Node<InputObjectType>,
         entity_type: &'schema ExtendedType,
-        key_selections: &Vec<Selection>,
+        key_selections: &[Selection],
         root_entity_type: &'schema Name,
     ) -> Result<
         Vec<Field<'schema>>,
