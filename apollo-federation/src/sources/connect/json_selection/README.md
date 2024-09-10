@@ -89,10 +89,11 @@ NamedPathSelection   ::= Alias PathSelection
 NamedFieldSelection  ::= Alias? Key SubSelection?
 NamedGroupSelection  ::= Alias SubSelection
 Alias                ::= Key ":"
-PathSelection        ::= (VarPath | KeyPath | AtPath) SubSelection?
+PathSelection        ::= (VarPath | KeyPath | AtPath | ExprPath) SubSelection?
 VarPath              ::= "$" (NO_SPACE Identifier)? PathStep*
 KeyPath              ::= Key PathStep+
 AtPath               ::= "@" PathStep*
+ExprPath             ::= "(" LitExpr ")" PathStep*
 PathStep             ::= "." Key | "->" Identifier MethodArgs?
 Key                  ::= Identifier | LitString
 Identifier           ::= [a-zA-Z_] NO_SPACE [0-9a-zA-Z_]*
@@ -608,6 +609,45 @@ This special behavior of `@` within `->map` is available to any method
 implementation, since method arguments are not evaluated before calling the
 method, but are passed in as expressions that the method may choose to evaluate
 (or even repeatedly reevaluate) however it chooses.
+
+### `ExprPath ::=`
+
+![ExprPath](./grammar/ExprPath.svg)
+
+Another syntax for beginning a `PathSelection` is the `ExprPath` rule, which is
+a `LitExpr` enclosed in parentheses, followed by zero or more `PathStep` items.
+
+This syntax is especially useful for embedding literal values, allowing
+
+```graphql
+__typename: ("Product")
+
+# Does not work because "Product" parses as a quoted field name:
+# __typename: "Product"
+
+# Best alternative option without ExprPath:
+# __typename: $->echo("Product")
+```
+
+The `->echo` method is still useful when you want to do something with the input
+value (which is bound to `@` within the echoed expression), rather than ignoring
+the input value (using `@` nowhere in the expression).
+
+The parenthetical `ExprPath` syntax is also useful when you want to apply nested
+`PathStep` keys/methods to a literal value within a `LitExpr`, as in
+
+```graphql
+suffix: results.slice((-1)->mul($args.suffixLength))
+
+# Instead of something like this:
+# suffix: results.slice($->echo(-1)->mul($args.suffixLength))
+```
+
+In fairness, due to the commutavity of multiplication, this particular case
+could have been written as `suffix: results.slice($args.suffixLength->mul(-1))`,
+but not all methods allow reversing the input and arguments so easily, and this
+syntax works in part because it still parenthesizes the `-1` literal value,
+forcing `LitExpr` parsing, much like the new `ExprPath` syntax.
 
 ### `PathStep ::=`
 

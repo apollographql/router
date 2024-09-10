@@ -202,6 +202,10 @@ impl PathList {
                 key.clone(),
                 WithRange::new(path.apply_selection_set(selection_set), path.range()),
             ),
+            Self::Expr(expr, path) => Self::Expr(
+                expr.clone(),
+                WithRange::new(path.apply_selection_set(selection_set), path.range()),
+            ),
             Self::Method(method_name, args, path) => Self::Method(
                 method_name.clone(),
                 args.clone(),
