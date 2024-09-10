@@ -6,7 +6,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_e
 [
     Message {
         code: EntityResolverArgumentMismatch,
-        message: "`@connect(entity: true)` on `Query.product` has invalid entity resolver arguments. Argument `id` does not exist as a field on entity type `Product`.",
+        message: "`Query.product` with `@connect(entity: true)` has invalid arguments. Argument `id` does not have a matching field `id` on type `Product`.",
         locations: [
             LineColumn {
                 line: 13,

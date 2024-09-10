@@ -140,3 +140,12 @@ pub(super) fn connect_directive_entity_argument_coordinate(
 ) -> String {
     format!("`@{connect_directive_entity_argument}({CONNECT_ENTITY_ARGUMENT_NAME}: {value})` on `{object_name}.{field}`", object_name = object.name)
 }
+
+pub(super) fn field_with_connect_directive_entity_true_coordinate(
+    connect_directive_entity_argument: &Name,
+    value: &Value,
+    object: &Node<ObjectType>,
+    field: &Name,
+) -> String {
+    format!("`{object_name}.{field}` with `@{connect_directive_entity_argument}({CONNECT_ENTITY_ARGUMENT_NAME}: {value})`", object_name = object.name)
+}

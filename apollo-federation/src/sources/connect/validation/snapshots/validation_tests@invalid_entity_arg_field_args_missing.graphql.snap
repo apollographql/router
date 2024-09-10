@@ -6,7 +6,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_e
 [
     Message {
         code: EntityResolverArgumentMismatch,
-        message: "`@connect(entity: true)` on `Query.product` is missing entity resolver arguments.",
+        message: "`Query.product` with `@connect(entity: true)` must have arguments. See https://preview-docs.apollographql.com/graphos/connectors/directives/#rules-for-entity-true",
         locations: [
             LineColumn {
                 line: 16,

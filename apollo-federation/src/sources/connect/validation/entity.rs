@@ -17,6 +17,7 @@ use apollo_compiler::Node;
 use apollo_compiler::Schema;
 
 use super::coordinates::connect_directive_entity_argument_coordinate;
+use super::coordinates::field_with_connect_directive_entity_true_coordinate;
 use super::extended_type::ObjectCategory;
 use super::Code;
 use super::Message;
@@ -64,7 +65,7 @@ pub(super) fn validate_entity_arg(
                 messages.push(Message {
                     code: Code::EntityTypeInvalid,
                     message: format!(
-                        "{coordinate} is invalid. Entities can only be non-list, nullable, object types.",
+                        "{coordinate} is invalid. Entity connectors must return non-list, nullable, object types.",
                         coordinate = connect_directive_entity_argument_coordinate(
                             connect_directive_name,
                             entity_arg_value.as_ref(),
@@ -86,8 +87,8 @@ pub(super) fn validate_entity_arg(
                     messages.push(Message {
                         code: Code::EntityResolverArgumentMismatch,
                         message: format!(
-                            "{coordinate} is missing entity resolver arguments.",
-                            coordinate = connect_directive_entity_argument_coordinate(
+                            "{coordinate} must have arguments. See https://preview-docs.apollographql.com/graphos/connectors/directives/#rules-for-entity-true",
+                            coordinate = field_with_connect_directive_entity_true_coordinate(
                                 connect_directive_name,
                                 entity_arg_value.as_ref(),
                                 object,
@@ -246,8 +247,8 @@ impl<'schema> FieldVisitor<Field<'schema>> for ArgumentVisitor<'schema> {
             Err(Message {
                 code: Code::EntityResolverArgumentMismatch,
                 message: format!(
-                    "{coordinate} has invalid entity resolver arguments. Mismatched type on field `{field_name}` - expected `{entity_type}` but found `{input_type}`.",
-                    coordinate = connect_directive_entity_argument_coordinate(
+                    "{coordinate} has invalid arguments. Mismatched type on field `{field_name}` - expected `{entity_type}` but found `{input_type}`.",
+                    coordinate = field_with_connect_directive_entity_true_coordinate(
                         self.connect_directive_name,
                         self.entity_arg_value.as_ref(),
                         self.object,
@@ -309,8 +310,8 @@ impl<'schema> ArgumentVisitor<'schema> {
                     Some(Err(Message {
                         code: Code::EntityResolverArgumentMismatch,
                         message: format!(
-                            "{coordinate} has invalid entity resolver arguments. Argument `{arg_name}` does not exist as a field on entity type `{entity_type}`.",
-                            coordinate = connect_directive_entity_argument_coordinate(
+                            "{coordinate} has invalid arguments. Argument `{arg_name}` does not have a matching field `{arg_name}` on type `{entity_type}`.",
+                            coordinate = field_with_connect_directive_entity_true_coordinate(
                                 self.connect_directive_name,
                                 self.entity_arg_value.as_ref(),
                                 self.object,
@@ -381,8 +382,8 @@ impl<'schema> ArgumentVisitor<'schema> {
                     Some(Err(Message {
                         code: Code::EntityResolverArgumentMismatch,
                         message: format!(
-                            "{coordinate} has invalid entity resolver arguments. Field `{name}` on `{input_type}` does not exist on `{entity_type}`.",
-                            coordinate = connect_directive_entity_argument_coordinate(
+                            "{coordinate} has invalid arguments. Field `{name}` on `{input_type}` does not exist on `{entity_type}`.",
+                            coordinate = field_with_connect_directive_entity_true_coordinate(
                                 self.connect_directive_name,
                                 self.entity_arg_value.as_ref(),
                                 self.object,
@@ -432,12 +433,12 @@ impl<'schema> ArgumentVisitor<'schema> {
             Err(Message {
                 code: Code::EntityResolverArgumentMismatch,
                 message: format!(
-                    "{coordinate} has invalid entity resolver arguments. {name} does not exist as a key field on entity type `{entity_type}`.",
+                    "{coordinate} has invalid arguments. {name} does not match a field in a `@key` on type `{entity_type}`.",
                     name = match input_type {
                         Some(input_type) => format!("Field `{name}` on input type `{input_type}`"),
                         None => format!("Argument `{name}`"),
                     },
-                    coordinate = connect_directive_entity_argument_coordinate(
+                    coordinate = field_with_connect_directive_entity_true_coordinate(
                         self.connect_directive_name,
                         self.entity_arg_value.as_ref(),
                         self.object,
