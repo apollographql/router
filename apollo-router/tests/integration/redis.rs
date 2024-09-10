@@ -369,7 +369,8 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
                         "enabled": false,
                         "redis": {
                             "urls": ["redis://127.0.0.1:6379"],
-                            "ttl": "2s"
+                            "ttl": "2s",
+                            "pool_size": 3
                         },
                     },
                     "subgraphs": {
