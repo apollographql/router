@@ -45,129 +45,121 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
             body: None,
         },
         selection: Named(
-            Parsed {
-                node: SubSelection {
-                    selections: [
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "a",
-                                ),
-                                range: Some(
-                                    (
-                                        0,
-                                        1,
-                                    ),
-                                ),
-                            },
-                            Some(
-                                Parsed {
-                                    node: SubSelection {
-                                        selections: [
-                                            Field(
-                                                None,
-                                                Parsed {
-                                                    node: Field(
-                                                        "id",
-                                                    ),
-                                                    range: Some(
-                                                        (
-                                                            4,
-                                                            6,
-                                                        ),
-                                                    ),
-                                                },
-                                                None,
-                                            ),
-                                        ],
-                                        star: None,
-                                    },
-                                    range: Some(
-                                        (
-                                            2,
-                                            8,
-                                        ),
-                                    ),
-                                },
+            SubSelection {
+                selections: [
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "a",
                             ),
-                        ),
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "b",
+                            range: Some(
+                                (
+                                    0,
+                                    1,
                                 ),
-                                range: Some(
-                                    (
-                                        9,
-                                        10,
-                                    ),
-                                ),
-                            },
-                            Some(
-                                Parsed {
-                                    node: SubSelection {
-                                        selections: [
-                                            Field(
-                                                None,
-                                                Parsed {
-                                                    node: Field(
-                                                        "a",
-                                                    ),
-                                                    range: Some(
-                                                        (
-                                                            13,
-                                                            14,
-                                                        ),
-                                                    ),
-                                                },
-                                                Some(
-                                                    Parsed {
-                                                        node: SubSelection {
-                                                            selections: [
-                                                                Field(
-                                                                    None,
-                                                                    Parsed {
-                                                                        node: Field(
-                                                                            "id",
-                                                                        ),
-                                                                        range: Some(
-                                                                            (
-                                                                                17,
-                                                                                19,
-                                                                            ),
-                                                                        ),
-                                                                    },
-                                                                    None,
-                                                                ),
-                                                            ],
-                                                            star: None,
-                                                        },
-                                                        range: Some(
-                                                            (
-                                                                15,
-                                                                21,
-                                                            ),
-                                                        ),
-                                                    },
+                            ),
+                        },
+                        Some(
+                            SubSelection {
+                                selections: [
+                                    Field(
+                                        None,
+                                        Parsed {
+                                            node: Field(
+                                                "id",
+                                            ),
+                                            range: Some(
+                                                (
+                                                    4,
+                                                    6,
                                                 ),
                                             ),
-                                        ],
-                                        star: None,
-                                    },
-                                    range: Some(
-                                        (
-                                            11,
-                                            23,
+                                        },
+                                        None,
+                                    ),
+                                ],
+                                star: None,
+                                range: Some(
+                                    (
+                                        2,
+                                        8,
+                                    ),
+                                ),
+                            },
+                        ),
+                    ),
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "b",
+                            ),
+                            range: Some(
+                                (
+                                    9,
+                                    10,
+                                ),
+                            ),
+                        },
+                        Some(
+                            SubSelection {
+                                selections: [
+                                    Field(
+                                        None,
+                                        Parsed {
+                                            node: Field(
+                                                "a",
+                                            ),
+                                            range: Some(
+                                                (
+                                                    13,
+                                                    14,
+                                                ),
+                                            ),
+                                        },
+                                        Some(
+                                            SubSelection {
+                                                selections: [
+                                                    Field(
+                                                        None,
+                                                        Parsed {
+                                                            node: Field(
+                                                                "id",
+                                                            ),
+                                                            range: Some(
+                                                                (
+                                                                    17,
+                                                                    19,
+                                                                ),
+                                                            ),
+                                                        },
+                                                        None,
+                                                    ),
+                                                ],
+                                                star: None,
+                                                range: Some(
+                                                    (
+                                                        15,
+                                                        21,
+                                                    ),
+                                                ),
+                                            },
                                         ),
                                     ),
-                                },
-                            ),
+                                ],
+                                star: None,
+                                range: Some(
+                                    (
+                                        11,
+                                        23,
+                                    ),
+                                ),
+                            },
                         ),
-                    ],
-                    star: None,
-                },
+                    ),
+                ],
+                star: None,
                 range: Some(
                     (
                         0,

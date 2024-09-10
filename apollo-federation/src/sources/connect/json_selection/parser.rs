@@ -37,19 +37,16 @@ pub enum JSONSelection {
     // Although we reuse the SubSelection type for the JSONSelection::Named
     // case, we parse it as a sequence of NamedSelection items without the
     // {...} curly braces that SubSelection::parse expects.
-    Named(Parsed<SubSelection>),
+    Named(SubSelection),
     Path(PathSelection),
 }
 
 impl JSONSelection {
     pub fn empty() -> Self {
-        JSONSelection::Named(Parsed::new(
-            SubSelection {
-                selections: vec![],
-                star: None,
-            },
-            None,
-        ))
+        JSONSelection::Named(SubSelection {
+            selections: vec![],
+            ..Default::default()
+        })
     }
 
     pub fn is_empty(&self) -> bool {
@@ -116,13 +113,9 @@ impl ExternalVarPaths for JSONSelection {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum NamedSelection {
-    Field(
-        Option<Parsed<Alias>>,
-        Parsed<Key>,
-        Option<Parsed<SubSelection>>,
-    ),
+    Field(Option<Parsed<Alias>>, Parsed<Key>, Option<SubSelection>),
     Path(Parsed<Alias>, PathSelection),
-    Group(Parsed<Alias>, Parsed<SubSelection>),
+    Group(Parsed<Alias>, SubSelection),
 }
 
 // Like PathSelection, NamedSelection is an AST structure that takes its range
@@ -364,7 +357,7 @@ pub(super) enum PathList {
     // Optionally, a PathList may end with a SubSelection, which applies a set
     // of named selections to the final value of the path. PathList::Selection
     // by itself is not a valid PathList.
-    Selection(Parsed<SubSelection>),
+    Selection(SubSelection),
 
     // Every PathList must be terminated by either PathList::Selection or
     // PathList::Empty. PathList::Empty by itself is not a valid PathList.
@@ -539,7 +532,7 @@ impl PathList {
 
     pub(super) fn from_slice(properties: &[Key], selection: Option<SubSelection>) -> Self {
         match properties {
-            [] => selection.map_or(Self::Empty, |sub| Self::Selection(Parsed::new(sub, None))),
+            [] => selection.map_or(Self::Empty, Self::Selection),
             [head, tail @ ..] => Self::Key(
                 Parsed::new(head.clone(), None),
                 Parsed::new(Self::from_slice(tail, selection), None),
@@ -604,10 +597,24 @@ impl ExternalVarPaths for PathList {
 pub struct SubSelection {
     pub(super) selections: Vec<NamedSelection>,
     pub(super) star: Option<Parsed<StarSelection>>,
+    pub(super) range: Option<(usize, usize)>,
+}
+
+impl Ranged<SubSelection> for SubSelection {
+    fn node(&self) -> &SubSelection {
+        self
+    }
+
+    // Since SubSelection is a struct, we can store its range directly as a
+    // field of the struct, allowing SubSelection to implement the Ranged trait
+    // without a Parsed<SubSelection> wrapper.
+    fn range(&self) -> Option<(usize, usize)> {
+        self.range
+    }
 }
 
 impl SubSelection {
-    pub(crate) fn parse(input: Span) -> IResult<Span, Parsed<Self>> {
+    pub(crate) fn parse(input: Span) -> IResult<Span, Self> {
         tuple((
             spaces_or_comments,
             parsed_span("{"),
@@ -617,11 +624,18 @@ impl SubSelection {
         ))(input)
         .map(|(remainder, (_, open_brace, sub, close_brace, _))| {
             let range = merge_ranges(open_brace.range(), close_brace.range());
-            (remainder, Parsed::new(sub.node().clone(), range))
+            (
+                remainder,
+                Self {
+                    selections: sub.selections,
+                    star: sub.star,
+                    range,
+                },
+            )
         })
     }
 
-    fn parse_naked(input: Span) -> IResult<Span, Parsed<Self>> {
+    fn parse_naked(input: Span) -> IResult<Span, Self> {
         tuple((
             spaces_or_comments,
             many0(NamedSelection::parse),
@@ -642,12 +656,15 @@ impl SubSelection {
             } else {
                 range
             };
-            (input, Parsed::new(Self { selections, star }, range))
+            (
+                input,
+                Self {
+                    selections,
+                    star,
+                    range,
+                },
+            )
         })
-    }
-
-    fn into_parsed(self) -> Parsed<Self> {
-        Parsed::new(self, None)
     }
 
     pub fn selections_iter(&self) -> impl Iterator<Item = &NamedSelection> {
@@ -716,15 +733,12 @@ impl ExternalVarPaths for SubSelection {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct StarSelection(
     pub(super) Option<Parsed<Alias>>,
-    pub(super) Option<Parsed<SubSelection>>,
+    pub(super) Option<SubSelection>,
 );
 
 impl StarSelection {
     pub(crate) fn new(alias: Option<Alias>, sub: Option<SubSelection>) -> Self {
-        Self(
-            alias.map(|a| Parsed::new(a, None)),
-            sub.map(|s| Parsed::new(s, None)),
-        )
+        Self(alias.map(|a| Parsed::new(a, None)), sub)
     }
 
     pub(crate) fn parse(input: Span) -> IResult<Span, Parsed<Self>> {
@@ -1112,13 +1126,10 @@ mod tests {
             assert_eq!(selection.node().name(), name);
             assert_eq!(
                 selection!(input).strip_ranges(),
-                JSONSelection::Named(Parsed::new(
-                    SubSelection {
-                        selections: vec![expected],
-                        star: None,
-                    },
-                    None
-                )),
+                JSONSelection::Named(SubSelection {
+                    selections: vec![expected],
+                    ..Default::default()
+                },),
             );
         }
 
@@ -1133,17 +1144,14 @@ mod tests {
             NamedSelection::Field(
                 None,
                 Key::field("hello").into_parsed(),
-                Some(
-                    SubSelection {
-                        selections: vec![NamedSelection::Field(
-                            None,
-                            Key::field("world").into_parsed(),
-                            None,
-                        )],
-                        star: None,
-                    }
-                    .into_parsed(),
-                ),
+                Some(SubSelection {
+                    selections: vec![NamedSelection::Field(
+                        None,
+                        Key::field("world").into_parsed(),
+                        None,
+                    )],
+                    ..Default::default()
+                }),
             ),
             "hello",
         );
@@ -1173,17 +1181,14 @@ mod tests {
             NamedSelection::Field(
                 Some(Alias::new("hi").into_parsed()),
                 Key::field("hello").into_parsed(),
-                Some(
-                    SubSelection {
-                        selections: vec![NamedSelection::Field(
-                            None,
-                            Key::field("world").into_parsed(),
-                            None,
-                        )],
-                        star: None,
-                    }
-                    .into_parsed(),
-                ),
+                Some(SubSelection {
+                    selections: vec![NamedSelection::Field(
+                        None,
+                        Key::field("world").into_parsed(),
+                        None,
+                    )],
+                    ..Default::default()
+                }),
             ),
             "hi",
         );
@@ -1193,16 +1198,13 @@ mod tests {
             NamedSelection::Field(
                 Some(Alias::new("hey").into_parsed()),
                 Key::field("hello").into_parsed(),
-                Some(
-                    SubSelection {
-                        selections: vec![
-                            NamedSelection::Field(None, Key::field("world").into_parsed(), None),
-                            NamedSelection::Field(None, Key::field("again").into_parsed(), None),
-                        ],
-                        star: None,
-                    }
-                    .into_parsed(),
-                ),
+                Some(SubSelection {
+                    selections: vec![
+                        NamedSelection::Field(None, Key::field("world").into_parsed(), None),
+                        NamedSelection::Field(None, Key::field("again").into_parsed(), None),
+                    ],
+                    ..Default::default()
+                }),
             ),
             "hey",
         );
@@ -1212,17 +1214,14 @@ mod tests {
             NamedSelection::Field(
                 Some(Alias::new("hey").into_parsed()),
                 Key::quoted("hello world").into_parsed(),
-                Some(
-                    SubSelection {
-                        selections: vec![NamedSelection::Field(
-                            None,
-                            Key::field("again").into_parsed(),
-                            None,
-                        )],
-                        star: None,
-                    }
-                    .into_parsed(),
-                ),
+                Some(SubSelection {
+                    selections: vec![NamedSelection::Field(
+                        None,
+                        Key::field("again").into_parsed(),
+                        None,
+                    )],
+                    ..Default::default()
+                }),
             ),
             "hey",
         );
@@ -1252,39 +1251,30 @@ mod tests {
     fn test_selection() {
         assert_eq!(
             selection!("").strip_ranges(),
-            JSONSelection::Named(
-                SubSelection {
-                    selections: vec![],
-                    star: None,
-                }
-                .into_parsed()
-            ),
+            JSONSelection::Named(SubSelection {
+                selections: vec![],
+                ..Default::default()
+            }),
         );
 
         assert_eq!(
             selection!("   ").strip_ranges(),
-            JSONSelection::Named(
-                SubSelection {
-                    selections: vec![],
-                    star: None,
-                }
-                .into_parsed()
-            ),
+            JSONSelection::Named(SubSelection {
+                selections: vec![],
+                ..Default::default()
+            }),
         );
 
         assert_eq!(
             selection!("hello").strip_ranges(),
-            JSONSelection::Named(
-                SubSelection {
-                    selections: vec![NamedSelection::Field(
-                        None,
-                        Key::field("hello").into_parsed(),
-                        None
-                    )],
-                    star: None,
-                }
-                .into_parsed()
-            ),
+            JSONSelection::Named(SubSelection {
+                selections: vec![NamedSelection::Field(
+                    None,
+                    Key::field("hello").into_parsed(),
+                    None
+                )],
+                ..Default::default()
+            }),
         );
 
         assert_eq!(
@@ -1296,22 +1286,19 @@ mod tests {
         );
 
         {
-            let expected = JSONSelection::Named(
-                SubSelection {
-                    selections: vec![NamedSelection::Path(
-                        Alias::new("hi").into_parsed(),
-                        PathSelection::from_slice(
-                            &[
-                                Key::Field("hello".to_string()),
-                                Key::Field("world".to_string()),
-                            ],
-                            None,
-                        ),
-                    )],
-                    star: None,
-                }
-                .into_parsed(),
-            );
+            let expected = JSONSelection::Named(SubSelection {
+                selections: vec![NamedSelection::Path(
+                    Alias::new("hi").into_parsed(),
+                    PathSelection::from_slice(
+                        &[
+                            Key::Field("hello".to_string()),
+                            Key::Field("world".to_string()),
+                        ],
+                        None,
+                    ),
+                )],
+                ..Default::default()
+            });
 
             assert_eq!(selection!("hi: .hello.world").strip_ranges(), expected);
             assert_eq!(selection!("hi: .hello .world").strip_ranges(), expected);
@@ -1324,26 +1311,23 @@ mod tests {
         }
 
         {
-            let expected = JSONSelection::Named(
-                SubSelection {
-                    selections: vec![
-                        NamedSelection::Field(None, Key::field("before").into_parsed(), None),
-                        NamedSelection::Path(
-                            Alias::new("hi").into_parsed(),
-                            PathSelection::from_slice(
-                                &[
-                                    Key::Field("hello".to_string()),
-                                    Key::Field("world".to_string()),
-                                ],
-                                None,
-                            ),
+            let expected = JSONSelection::Named(SubSelection {
+                selections: vec![
+                    NamedSelection::Field(None, Key::field("before").into_parsed(), None),
+                    NamedSelection::Path(
+                        Alias::new("hi").into_parsed(),
+                        PathSelection::from_slice(
+                            &[
+                                Key::Field("hello".to_string()),
+                                Key::Field("world".to_string()),
+                            ],
+                            None,
                         ),
-                        NamedSelection::Field(None, Key::field("after").into_parsed(), None),
-                    ],
-                    star: None,
-                }
-                .into_parsed(),
-            );
+                    ),
+                    NamedSelection::Field(None, Key::field("after").into_parsed(), None),
+                ],
+                ..Default::default()
+            });
 
             assert_eq!(
                 selection!("before hi: .hello.world after").strip_ranges(),
@@ -1396,40 +1380,37 @@ mod tests {
         }
 
         {
-            let expected = JSONSelection::Named(
-                SubSelection {
-                    selections: vec![
-                        NamedSelection::Field(None, Key::field("before").into_parsed(), None),
-                        NamedSelection::Path(
-                            Alias::new("hi").into_parsed(),
-                            PathSelection::from_slice(
-                                &[
-                                    Key::Field("hello".to_string()),
-                                    Key::Field("world".to_string()),
+            let expected = JSONSelection::Named(SubSelection {
+                selections: vec![
+                    NamedSelection::Field(None, Key::field("before").into_parsed(), None),
+                    NamedSelection::Path(
+                        Alias::new("hi").into_parsed(),
+                        PathSelection::from_slice(
+                            &[
+                                Key::Field("hello".to_string()),
+                                Key::Field("world".to_string()),
+                            ],
+                            Some(SubSelection {
+                                selections: vec![
+                                    NamedSelection::Field(
+                                        None,
+                                        Key::field("nested").into_parsed(),
+                                        None,
+                                    ),
+                                    NamedSelection::Field(
+                                        None,
+                                        Key::field("names").into_parsed(),
+                                        None,
+                                    ),
                                 ],
-                                Some(SubSelection {
-                                    selections: vec![
-                                        NamedSelection::Field(
-                                            None,
-                                            Key::field("nested").into_parsed(),
-                                            None,
-                                        ),
-                                        NamedSelection::Field(
-                                            None,
-                                            Key::field("names").into_parsed(),
-                                            None,
-                                        ),
-                                    ],
-                                    star: None,
-                                }),
-                            ),
+                                ..Default::default()
+                            }),
                         ),
-                        NamedSelection::Field(None, Key::field("after").into_parsed(), None),
-                    ],
-                    star: None,
-                }
-                .into_parsed(),
-            );
+                    ),
+                    NamedSelection::Field(None, Key::field("after").into_parsed(), None),
+                ],
+                ..Default::default()
+            });
 
             assert_eq!(
                 selection!("before hi: .hello.world { nested names } after").strip_ranges(),
@@ -1472,89 +1453,81 @@ mod tests {
             }"
             )
             .strip_ranges(),
-            JSONSelection::Named(
-                SubSelection {
-                    selections: vec![NamedSelection::Field(
-                        Some(Alias::new("topLevelAlias").into_parsed()),
-                        Key::field("topLevelField").into_parsed(),
-                        Some(
-                            SubSelection {
-                                selections: vec![
-                                    NamedSelection::Field(
-                                        Some(Alias::new("identifier").into_parsed()),
-                                        Key::quoted("property name with spaces").into_parsed(),
-                                        None,
-                                    ),
-                                    NamedSelection::Field(
-                                        None,
-                                        Key::quoted("unaliased non-identifier property")
-                                            .into_parsed(),
-                                        None,
-                                    ),
-                                    NamedSelection::Field(
-                                        Some(Alias::quoted("non-identifier alias").into_parsed()),
-                                        Key::field("identifier").into_parsed(),
-                                        None,
-                                    ),
-                                    NamedSelection::Path(
-                                        Alias::new("pathSelection").into_parsed(),
-                                        PathSelection::from_slice(
-                                            &[
-                                                Key::Field("some".to_string()),
-                                                Key::Field("nested".to_string()),
-                                                Key::Field("path".to_string()),
-                                            ],
-                                            Some(SubSelection {
-                                                selections: vec![
-                                                    NamedSelection::Field(
-                                                        Some(Alias::new("still").into_parsed()),
-                                                        Key::field("yet").into_parsed(),
-                                                        None,
-                                                    ),
-                                                    NamedSelection::Field(
-                                                        None,
-                                                        Key::field("more").into_parsed(),
-                                                        None,
-                                                    ),
-                                                    NamedSelection::Field(
-                                                        None,
-                                                        Key::field("properties").into_parsed(),
-                                                        None,
-                                                    ),
-                                                ],
-                                                star: None,
-                                            })
+            JSONSelection::Named(SubSelection {
+                selections: vec![NamedSelection::Field(
+                    Some(Alias::new("topLevelAlias").into_parsed()),
+                    Key::field("topLevelField").into_parsed(),
+                    Some(SubSelection {
+                        selections: vec![
+                            NamedSelection::Field(
+                                Some(Alias::new("identifier").into_parsed()),
+                                Key::quoted("property name with spaces").into_parsed(),
+                                None,
+                            ),
+                            NamedSelection::Field(
+                                None,
+                                Key::quoted("unaliased non-identifier property").into_parsed(),
+                                None,
+                            ),
+                            NamedSelection::Field(
+                                Some(Alias::quoted("non-identifier alias").into_parsed()),
+                                Key::field("identifier").into_parsed(),
+                                None,
+                            ),
+                            NamedSelection::Path(
+                                Alias::new("pathSelection").into_parsed(),
+                                PathSelection::from_slice(
+                                    &[
+                                        Key::Field("some".to_string()),
+                                        Key::Field("nested".to_string()),
+                                        Key::Field("path".to_string()),
+                                    ],
+                                    Some(SubSelection {
+                                        selections: vec![
+                                            NamedSelection::Field(
+                                                Some(Alias::new("still").into_parsed()),
+                                                Key::field("yet").into_parsed(),
+                                                None,
+                                            ),
+                                            NamedSelection::Field(
+                                                None,
+                                                Key::field("more").into_parsed(),
+                                                None,
+                                            ),
+                                            NamedSelection::Field(
+                                                None,
+                                                Key::field("properties").into_parsed(),
+                                                None,
+                                            ),
+                                        ],
+                                        ..Default::default()
+                                    })
+                                ),
+                            ),
+                            NamedSelection::Group(
+                                Alias::new("siblingGroup").into_parsed(),
+                                SubSelection {
+                                    selections: vec![
+                                        NamedSelection::Field(
+                                            None,
+                                            Key::field("brother").into_parsed(),
+                                            None
                                         ),
-                                    ),
-                                    NamedSelection::Group(
-                                        Alias::new("siblingGroup").into_parsed(),
-                                        SubSelection {
-                                            selections: vec![
-                                                NamedSelection::Field(
-                                                    None,
-                                                    Key::field("brother").into_parsed(),
-                                                    None
-                                                ),
-                                                NamedSelection::Field(
-                                                    None,
-                                                    Key::field("sister").into_parsed(),
-                                                    None
-                                                ),
-                                            ],
-                                            star: None,
-                                        }
-                                        .into_parsed(),
-                                    ),
-                                ],
-                                star: None,
-                            }
-                            .into_parsed()
-                        ),
-                    )],
-                    star: None,
-                }
-                .into_parsed()
-            ),
+                                        NamedSelection::Field(
+                                            None,
+                                            Key::field("sister").into_parsed(),
+                                            None
+                                        ),
+                                    ],
+                                    ..Default::default()
+                                },
+                            ),
+                        ],
+                        ..Default::default()
+                    }),
+                )],
+                ..Default::default()
+            }),
         );
     }
 
@@ -1605,7 +1578,7 @@ mod tests {
                         Key::field("hello").into_parsed(),
                         None,
                     )],
-                    star: None,
+                    ..Default::default()
                 }),
             );
             check_path_selection(".hello.world { hello }", expected.clone());
@@ -1670,7 +1643,7 @@ mod tests {
                         Key::quoted("my ego").into_parsed(),
                         None,
                     )],
-                    star: None,
+                    ..Default::default()
                 }),
             );
 
@@ -1699,34 +1672,28 @@ mod tests {
             let expected = PathSelection {
                 path: PathList::Key(
                     Key::field("results").into_parsed(),
-                    PathList::Selection(
-                        SubSelection {
-                            selections: vec![NamedSelection::Field(
-                                None,
-                                Key::quoted("quoted without alias").into_parsed(),
-                                Some(
-                                    SubSelection {
-                                        selections: vec![
-                                            NamedSelection::Field(
-                                                None,
-                                                Key::field("id").into_parsed(),
-                                                None,
-                                            ),
-                                            NamedSelection::Field(
-                                                None,
-                                                Key::quoted("n a m e").into_parsed(),
-                                                None,
-                                            ),
-                                        ],
-                                        star: None,
-                                    }
-                                    .into_parsed(),
-                                ),
-                            )],
-                            star: None,
-                        }
-                        .into_parsed(),
-                    )
+                    PathList::Selection(SubSelection {
+                        selections: vec![NamedSelection::Field(
+                            None,
+                            Key::quoted("quoted without alias").into_parsed(),
+                            Some(SubSelection {
+                                selections: vec![
+                                    NamedSelection::Field(
+                                        None,
+                                        Key::field("id").into_parsed(),
+                                        None,
+                                    ),
+                                    NamedSelection::Field(
+                                        None,
+                                        Key::quoted("n a m e").into_parsed(),
+                                        None,
+                                    ),
+                                ],
+                                ..Default::default()
+                            }),
+                        )],
+                        ..Default::default()
+                    })
                     .into_parsed(),
                 )
                 .into_parsed(),
@@ -1745,34 +1712,28 @@ mod tests {
             let expected = PathSelection {
                 path: PathList::Key(
                     Key::field("results").into_parsed(),
-                    PathList::Selection(
-                        SubSelection {
-                            selections: vec![NamedSelection::Field(
-                                Some(Alias::quoted("non-identifier alias").into_parsed()),
-                                Key::quoted("quoted with alias").into_parsed(),
-                                Some(
-                                    SubSelection {
-                                        selections: vec![
-                                            NamedSelection::Field(
-                                                None,
-                                                Key::field("id").into_parsed(),
-                                                None,
-                                            ),
-                                            NamedSelection::Field(
-                                                Some(Alias::quoted("n a m e").into_parsed()),
-                                                Key::field("name").into_parsed(),
-                                                None,
-                                            ),
-                                        ],
-                                        star: None,
-                                    }
-                                    .into_parsed(),
-                                ),
-                            )],
-                            star: None,
-                        }
-                        .into_parsed(),
-                    )
+                    PathList::Selection(SubSelection {
+                        selections: vec![NamedSelection::Field(
+                            Some(Alias::quoted("non-identifier alias").into_parsed()),
+                            Key::quoted("quoted with alias").into_parsed(),
+                            Some(SubSelection {
+                                selections: vec![
+                                    NamedSelection::Field(
+                                        None,
+                                        Key::field("id").into_parsed(),
+                                        None,
+                                    ),
+                                    NamedSelection::Field(
+                                        Some(Alias::quoted("n a m e").into_parsed()),
+                                        Key::field("name").into_parsed(),
+                                        None,
+                                    ),
+                                ],
+                                ..Default::default()
+                            }),
+                        )],
+                        ..Default::default()
+                    })
                     .into_parsed(),
                 )
                 .into_parsed(),
@@ -1817,17 +1778,14 @@ mod tests {
             PathSelection {
                 path: PathList::Var(
                     KnownVariable::This.into_parsed(),
-                    PathList::Selection(
-                        SubSelection {
-                            selections: vec![NamedSelection::Field(
-                                None,
-                                Key::field("hello").into_parsed(),
-                                None,
-                            )],
-                            star: None,
-                        }
-                        .into_parsed(),
-                    )
+                    PathList::Selection(SubSelection {
+                        selections: vec![NamedSelection::Field(
+                            None,
+                            Key::field("hello").into_parsed(),
+                            None,
+                        )],
+                        ..Default::default()
+                    })
                     .into_parsed(),
                 )
                 .into_parsed(),
@@ -1839,17 +1797,14 @@ mod tests {
             PathSelection {
                 path: PathList::Var(
                     KnownVariable::Dollar.into_parsed(),
-                    PathList::Selection(
-                        SubSelection {
-                            selections: vec![NamedSelection::Field(
-                                None,
-                                Key::field("hello").into_parsed(),
-                                None,
-                            )],
-                            star: None,
-                        }
-                        .into_parsed(),
-                    )
+                    PathList::Selection(SubSelection {
+                        selections: vec![NamedSelection::Field(
+                            None,
+                            Key::field("hello").into_parsed(),
+                            None,
+                        )],
+                        ..Default::default()
+                    })
                     .into_parsed(),
                 )
                 .into_parsed(),
@@ -1860,30 +1815,27 @@ mod tests {
             "$this { before alias: $args.arg after }",
             PathList::Var(
                 KnownVariable::This.into_parsed(),
-                PathList::Selection(
-                    SubSelection {
-                        selections: vec![
-                            NamedSelection::Field(None, Key::field("before").into_parsed(), None),
-                            NamedSelection::Path(
-                                Alias::new("alias").into_parsed(),
-                                PathSelection {
-                                    path: PathList::Var(
-                                        KnownVariable::Args.into_parsed(),
-                                        PathList::Key(
-                                            Key::field("arg").into_parsed(),
-                                            PathList::Empty.into_parsed(),
-                                        )
-                                        .into_parsed(),
+                PathList::Selection(SubSelection {
+                    selections: vec![
+                        NamedSelection::Field(None, Key::field("before").into_parsed(), None),
+                        NamedSelection::Path(
+                            Alias::new("alias").into_parsed(),
+                            PathSelection {
+                                path: PathList::Var(
+                                    KnownVariable::Args.into_parsed(),
+                                    PathList::Key(
+                                        Key::field("arg").into_parsed(),
+                                        PathList::Empty.into_parsed(),
                                     )
                                     .into_parsed(),
-                                },
-                            ),
-                            NamedSelection::Field(None, Key::field("after").into_parsed(), None),
-                        ],
-                        star: None,
-                    }
-                    .into_parsed(),
-                )
+                                )
+                                .into_parsed(),
+                            },
+                        ),
+                        NamedSelection::Field(None, Key::field("after").into_parsed(), None),
+                    ],
+                    ..Default::default()
+                })
                 .into_parsed(),
             )
             .into(),
@@ -1896,33 +1848,26 @@ mod tests {
                     KnownVariable::Dollar.into_parsed(),
                     PathList::Key(
                         Key::field("nested").into_parsed(),
-                        PathList::Selection(
-                            SubSelection {
-                                selections: vec![
-                                    NamedSelection::Field(
-                                        None,
-                                        Key::field("key").into_parsed(),
-                                        None,
-                                    ),
-                                    NamedSelection::Path(
-                                        Alias::new("injected").into_parsed(),
-                                        PathSelection {
-                                            path: PathList::Var(
-                                                KnownVariable::Args.into_parsed(),
-                                                PathList::Key(
-                                                    Key::field("arg").into_parsed(),
-                                                    PathList::Empty.into_parsed(),
-                                                )
-                                                .into_parsed(),
+                        PathList::Selection(SubSelection {
+                            selections: vec![
+                                NamedSelection::Field(None, Key::field("key").into_parsed(), None),
+                                NamedSelection::Path(
+                                    Alias::new("injected").into_parsed(),
+                                    PathSelection {
+                                        path: PathList::Var(
+                                            KnownVariable::Args.into_parsed(),
+                                            PathList::Key(
+                                                Key::field("arg").into_parsed(),
+                                                PathList::Empty.into_parsed(),
                                             )
                                             .into_parsed(),
-                                        },
-                                    ),
-                                ],
-                                star: None,
-                            }
-                            .into_parsed(),
-                        )
+                                        )
+                                        .into_parsed(),
+                                    },
+                                ),
+                            ],
+                            ..Default::default()
+                        })
                         .into_parsed(),
                     )
                     .into_parsed(),
@@ -2071,83 +2016,63 @@ mod tests {
 
         assert_eq!(
             selection!("value: $ a { b c }").strip_ranges(),
-            JSONSelection::Named(
-                SubSelection {
-                    selections: vec![
-                        NamedSelection::Path(
-                            Alias::new("value").into_parsed(),
-                            PathSelection {
-                                path: PathList::Var(
-                                    KnownVariable::Dollar.into_parsed(),
-                                    PathList::Empty.into_parsed()
-                                )
-                                .into_parsed(),
-                            },
-                        ),
-                        NamedSelection::Field(
-                            None,
-                            Key::field("a").into_parsed(),
-                            Some(
-                                SubSelection {
-                                    selections: vec![
-                                        NamedSelection::Field(
-                                            None,
-                                            Key::field("b").into_parsed(),
-                                            None
-                                        ),
-                                        NamedSelection::Field(
-                                            None,
-                                            Key::field("c").into_parsed(),
-                                            None
-                                        ),
-                                    ],
-                                    star: None,
-                                }
-                                .into_parsed()
-                            ),
-                        ),
-                    ],
-                    star: None,
-                }
-                .into_parsed()
-            ),
-        );
-        assert_eq!(
-            selection!("value: $this { b c }").strip_ranges(),
-            JSONSelection::Named(
-                SubSelection {
-                    selections: vec![NamedSelection::Path(
+            JSONSelection::Named(SubSelection {
+                selections: vec![
+                    NamedSelection::Path(
                         Alias::new("value").into_parsed(),
                         PathSelection {
                             path: PathList::Var(
-                                KnownVariable::This.into_parsed(),
-                                PathList::Selection(
-                                    SubSelection {
-                                        selections: vec![
-                                            NamedSelection::Field(
-                                                None,
-                                                Key::field("b").into_parsed(),
-                                                None
-                                            ),
-                                            NamedSelection::Field(
-                                                None,
-                                                Key::field("c").into_parsed(),
-                                                None
-                                            ),
-                                        ],
-                                        star: None,
-                                    }
-                                    .into_parsed()
-                                )
-                                .into_parsed(),
+                                KnownVariable::Dollar.into_parsed(),
+                                PathList::Empty.into_parsed()
                             )
                             .into_parsed(),
                         },
-                    )],
-                    star: None,
-                }
-                .into_parsed()
-            ),
+                    ),
+                    NamedSelection::Field(
+                        None,
+                        Key::field("a").into_parsed(),
+                        Some(SubSelection {
+                            selections: vec![
+                                NamedSelection::Field(None, Key::field("b").into_parsed(), None),
+                                NamedSelection::Field(None, Key::field("c").into_parsed(), None),
+                            ],
+                            ..Default::default()
+                        }),
+                    ),
+                ],
+                ..Default::default()
+            }),
+        );
+        assert_eq!(
+            selection!("value: $this { b c }").strip_ranges(),
+            JSONSelection::Named(SubSelection {
+                selections: vec![NamedSelection::Path(
+                    Alias::new("value").into_parsed(),
+                    PathSelection {
+                        path: PathList::Var(
+                            KnownVariable::This.into_parsed(),
+                            PathList::Selection(SubSelection {
+                                selections: vec![
+                                    NamedSelection::Field(
+                                        None,
+                                        Key::field("b").into_parsed(),
+                                        None
+                                    ),
+                                    NamedSelection::Field(
+                                        None,
+                                        Key::field("c").into_parsed(),
+                                        None
+                                    ),
+                                ],
+                                ..Default::default()
+                            })
+                            .into_parsed(),
+                        )
+                        .into_parsed(),
+                    },
+                )],
+                ..Default::default()
+            }),
         );
     }
 
@@ -2344,9 +2269,8 @@ mod tests {
                                                         .into_parsed(),
                                                     },
                                                 )],
-                                                star: None,
-                                            }
-                                            .into_parsed(),
+                                                ..Default::default()
+                                            },
                                         )
                                         .into_parsed(),
                                     )
@@ -2385,9 +2309,8 @@ mod tests {
                                                         .into_parsed(),
                                                     },
                                                 )],
-                                                star: None,
-                                            }
-                                            .into_parsed(),
+                                                ..Default::default()
+                                            },
                                         )
                                         .into_parsed(),
                                     )
@@ -2409,7 +2332,7 @@ mod tests {
 
     #[test]
     fn test_subselection() {
-        fn check_parsed(input: &str, expected: Parsed<SubSelection>) {
+        fn check_parsed(input: &str, expected: SubSelection) {
             let (remainder, parsed) = SubSelection::parse(Span::new(input)).unwrap();
             assert_eq!(*remainder.fragment(), "");
             assert_eq!(parsed.strip_ranges(), expected);
@@ -2419,9 +2342,8 @@ mod tests {
             " { \n } ",
             SubSelection {
                 selections: vec![],
-                star: None,
-            }
-            .into_parsed(),
+                ..Default::default()
+            },
         );
 
         check_parsed(
@@ -2432,9 +2354,8 @@ mod tests {
                     Key::field("hello").into_parsed(),
                     None,
                 )],
-                star: None,
-            }
-            .into_parsed(),
+                ..Default::default()
+            },
         );
 
         check_parsed(
@@ -2445,9 +2366,8 @@ mod tests {
                     Key::field("hello").into_parsed(),
                     None,
                 )],
-                star: None,
-            }
-            .into_parsed(),
+                ..Default::default()
+            },
         );
 
         check_parsed(
@@ -2458,9 +2378,8 @@ mod tests {
                     Key::field("padded").into_parsed(),
                     None,
                 )],
-                star: None,
-            }
-            .into_parsed(),
+                ..Default::default()
+            },
         );
 
         check_parsed(
@@ -2470,9 +2389,8 @@ mod tests {
                     NamedSelection::Field(None, Key::field("hello").into_parsed(), None),
                     NamedSelection::Field(None, Key::field("world").into_parsed(), None),
                 ],
-                star: None,
-            }
-            .into_parsed(),
+                ..Default::default()
+            },
         );
 
         check_parsed(
@@ -2481,21 +2399,17 @@ mod tests {
                 selections: vec![NamedSelection::Field(
                     None,
                     Key::field("hello").into_parsed(),
-                    Some(
-                        SubSelection {
-                            selections: vec![NamedSelection::Field(
-                                None,
-                                Key::field("world").into_parsed(),
-                                None,
-                            )],
-                            star: None,
-                        }
-                        .into_parsed(),
-                    ),
+                    Some(SubSelection {
+                        selections: vec![NamedSelection::Field(
+                            None,
+                            Key::field("world").into_parsed(),
+                            None,
+                        )],
+                        ..Default::default()
+                    }),
                 )],
-                star: None,
-            }
-            .into_parsed(),
+                ..Default::default()
+            },
         );
     }
 
@@ -2520,17 +2434,14 @@ mod tests {
             " * { hello } ",
             StarSelection(
                 None,
-                Some(
-                    SubSelection {
-                        selections: vec![NamedSelection::Field(
-                            None,
-                            Key::field("hello").into_parsed(),
-                            None,
-                        )],
-                        star: None,
-                    }
-                    .into_parsed(),
-                ),
+                Some(SubSelection {
+                    selections: vec![NamedSelection::Field(
+                        None,
+                        Key::field("hello").into_parsed(),
+                        None,
+                    )],
+                    ..Default::default()
+                }),
             )
             .into_parsed(),
         );
@@ -2539,17 +2450,14 @@ mod tests {
             "hi: * { hello }",
             StarSelection(
                 Some(Alias::new("hi").into_parsed()),
-                Some(
-                    SubSelection {
-                        selections: vec![NamedSelection::Field(
-                            None,
-                            Key::field("hello").into_parsed(),
-                            None,
-                        )],
-                        star: None,
-                    }
-                    .into_parsed(),
-                ),
+                Some(SubSelection {
+                    selections: vec![NamedSelection::Field(
+                        None,
+                        Key::field("hello").into_parsed(),
+                        None,
+                    )],
+                    ..Default::default()
+                }),
             )
             .into_parsed(),
         );
@@ -2558,127 +2466,111 @@ mod tests {
             "alias: * { x y z rest: * }",
             StarSelection(
                 Some(Alias::new("alias").into_parsed()),
-                Some(
-                    SubSelection {
-                        selections: vec![
-                            NamedSelection::Field(None, Key::field("x").into_parsed(), None),
-                            NamedSelection::Field(None, Key::field("y").into_parsed(), None),
-                            NamedSelection::Field(None, Key::field("z").into_parsed(), None),
-                        ],
-                        star: Some(
-                            StarSelection(Some(Alias::new("rest").into_parsed()), None)
-                                .into_parsed(),
-                        ),
-                    }
-                    .into_parsed(),
-                ),
+                Some(SubSelection {
+                    selections: vec![
+                        NamedSelection::Field(None, Key::field("x").into_parsed(), None),
+                        NamedSelection::Field(None, Key::field("y").into_parsed(), None),
+                        NamedSelection::Field(None, Key::field("z").into_parsed(), None),
+                    ],
+                    star: Some(
+                        StarSelection(Some(Alias::new("rest").into_parsed()), None).into_parsed(),
+                    ),
+                    ..Default::default()
+                }),
             )
             .into_parsed(),
         );
 
         assert_eq!(
             selection!(" before alias: * { * { a b c } } ").strip_ranges(),
-            JSONSelection::Named(
-                SubSelection {
-                    selections: vec![NamedSelection::Field(
-                        None,
-                        Key::field("before").into_parsed(),
-                        None
-                    )],
-                    star: Some(
-                        StarSelection(
-                            Some(Alias::new("alias").into_parsed()),
-                            Some(
-                                SubSelection {
-                                    selections: vec![],
-                                    star: Some(
-                                        StarSelection(
-                                            None,
-                                            Some(
-                                                SubSelection {
-                                                    selections: vec![
-                                                        NamedSelection::Field(
-                                                            None,
-                                                            Key::field("a").into_parsed(),
-                                                            None
-                                                        ),
-                                                        NamedSelection::Field(
-                                                            None,
-                                                            Key::field("b").into_parsed(),
-                                                            None
-                                                        ),
-                                                        NamedSelection::Field(
-                                                            None,
-                                                            Key::field("c").into_parsed(),
-                                                            None
-                                                        ),
-                                                    ],
-                                                    star: None,
-                                                }
-                                                .into_parsed()
+            JSONSelection::Named(SubSelection {
+                selections: vec![NamedSelection::Field(
+                    None,
+                    Key::field("before").into_parsed(),
+                    None
+                )],
+                star: Some(
+                    StarSelection(
+                        Some(Alias::new("alias").into_parsed()),
+                        Some(SubSelection {
+                            selections: vec![],
+                            star: Some(
+                                StarSelection(
+                                    None,
+                                    Some(SubSelection {
+                                        selections: vec![
+                                            NamedSelection::Field(
+                                                None,
+                                                Key::field("a").into_parsed(),
+                                                None
                                             ),
-                                        )
-                                        .into_parsed()
-                                    ),
-                                }
+                                            NamedSelection::Field(
+                                                None,
+                                                Key::field("b").into_parsed(),
+                                                None
+                                            ),
+                                            NamedSelection::Field(
+                                                None,
+                                                Key::field("c").into_parsed(),
+                                                None
+                                            ),
+                                        ],
+                                        ..Default::default()
+                                    }),
+                                )
                                 .into_parsed()
                             ),
-                        )
-                        .into_parsed()
-                    ),
-                }
-                .into_parsed()
-            ),
+                            ..Default::default()
+                        }),
+                    )
+                    .into_parsed()
+                ),
+                ..Default::default()
+            }),
         );
 
         assert_eq!(
             selection!(" before group: { * { a b c } } after ").strip_ranges(),
-            JSONSelection::Named(
-                SubSelection {
-                    selections: vec![
-                        NamedSelection::Field(None, Key::field("before").into_parsed(), None),
-                        NamedSelection::Group(
-                            Alias::new("group").into_parsed(),
-                            SubSelection {
-                                selections: vec![],
-                                star: Some(
-                                    StarSelection(
-                                        None,
-                                        Some(
-                                            SubSelection {
-                                                selections: vec![
-                                                    NamedSelection::Field(
-                                                        None,
-                                                        Key::field("a").into_parsed(),
-                                                        None
-                                                    ),
-                                                    NamedSelection::Field(
-                                                        None,
-                                                        Key::field("b").into_parsed(),
-                                                        None
-                                                    ),
-                                                    NamedSelection::Field(
-                                                        None,
-                                                        Key::field("c").into_parsed(),
-                                                        None
-                                                    ),
-                                                ],
-                                                star: None,
-                                            }
-                                            .into_parsed()
-                                        ),
-                                    )
-                                    .into_parsed()
-                                ),
-                            }
-                            .into_parsed(),
-                        ),
-                        NamedSelection::Field(None, Key::field("after").into_parsed(), None),
-                    ],
-                    star: None,
-                }
-                .into_parsed()
-            ),
+            JSONSelection::Named(SubSelection {
+                selections: vec![
+                    NamedSelection::Field(None, Key::field("before").into_parsed(), None),
+                    NamedSelection::Group(
+                        Alias::new("group").into_parsed(),
+                        SubSelection {
+                            selections: vec![],
+                            star: Some(
+                                StarSelection(
+                                    None,
+                                    Some(SubSelection {
+                                        selections: vec![
+                                            NamedSelection::Field(
+                                                None,
+                                                Key::field("a").into_parsed(),
+                                                None
+                                            ),
+                                            NamedSelection::Field(
+                                                None,
+                                                Key::field("b").into_parsed(),
+                                                None
+                                            ),
+                                            NamedSelection::Field(
+                                                None,
+                                                Key::field("c").into_parsed(),
+                                                None
+                                            ),
+                                        ],
+                                        ..Default::default()
+                                    }),
+                                )
+                                .into_parsed()
+                            ),
+                            ..Default::default()
+                        },
+                    ),
+                    NamedSelection::Field(None, Key::field("after").into_parsed(), None),
+                ],
+                ..Default::default()
+            }),
         );
     }
 
@@ -2759,64 +2651,56 @@ mod tests {
 
         check(
             "hello",
-            JSONSelection::Named(Parsed::new(
-                SubSelection {
-                    selections: vec![NamedSelection::Field(
-                        None,
-                        Parsed::new(Key::field("hello"), Some((0, 5))),
-                        None,
-                    )],
-                    star: None,
-                },
-                Some((0, 5)),
-            )),
+            JSONSelection::Named(SubSelection {
+                selections: vec![NamedSelection::Field(
+                    None,
+                    Parsed::new(Key::field("hello"), Some((0, 5))),
+                    None,
+                )],
+                range: Some((0, 5)),
+                ..Default::default()
+            }),
         );
 
         check(
             "  hello ",
-            JSONSelection::Named(Parsed::new(
-                SubSelection {
-                    selections: vec![NamedSelection::Field(
-                        None,
-                        Parsed::new(Key::field("hello"), Some((2, 7))),
-                        None,
-                    )],
-                    star: None,
-                },
-                Some((2, 7)),
-            )),
+            JSONSelection::Named(SubSelection {
+                selections: vec![NamedSelection::Field(
+                    None,
+                    Parsed::new(Key::field("hello"), Some((2, 7))),
+                    None,
+                )],
+                range: Some((2, 7)),
+                ..Default::default()
+            }),
         );
 
         check(
             "  hello  { hi name }",
-            JSONSelection::Named(Parsed::new(
-                SubSelection {
-                    selections: vec![NamedSelection::Field(
-                        None,
-                        Parsed::new(Key::field("hello"), Some((2, 7))),
-                        Some(Parsed::new(
-                            SubSelection {
-                                selections: vec![
-                                    NamedSelection::Field(
-                                        None,
-                                        Parsed::new(Key::field("hi"), Some((11, 13))),
-                                        None,
-                                    ),
-                                    NamedSelection::Field(
-                                        None,
-                                        Parsed::new(Key::field("name"), Some((14, 18))),
-                                        None,
-                                    ),
-                                ],
-                                star: None,
-                            },
-                            Some((9, 20)),
-                        )),
-                    )],
-                    star: None,
-                },
-                Some((2, 20)),
-            )),
+            JSONSelection::Named(SubSelection {
+                selections: vec![NamedSelection::Field(
+                    None,
+                    Parsed::new(Key::field("hello"), Some((2, 7))),
+                    Some(SubSelection {
+                        selections: vec![
+                            NamedSelection::Field(
+                                None,
+                                Parsed::new(Key::field("hi"), Some((11, 13))),
+                                None,
+                            ),
+                            NamedSelection::Field(
+                                None,
+                                Parsed::new(Key::field("name"), Some((14, 18))),
+                                None,
+                            ),
+                        ],
+                        range: Some((9, 20)),
+                        ..Default::default()
+                    }),
+                )],
+                range: Some((2, 20)),
+                ..Default::default()
+            }),
         );
 
         check(
@@ -2871,68 +2755,64 @@ mod tests {
 
         check(
             "before product:$args.product{id name}after",
-            JSONSelection::Named(Parsed::new(
-                SubSelection {
-                    selections: vec![
-                        NamedSelection::Field(
-                            None,
-                            Parsed::new(Key::field("before"), Some((0, 6))),
-                            None,
-                        ),
-                        NamedSelection::Path(
-                            Parsed::new(Alias::new_with_range("product", (7, 14)), Some((7, 15))),
-                            PathSelection {
-                                path: Parsed::new(
-                                    PathList::Var(
-                                        Parsed::new(KnownVariable::Args, Some((15, 20))),
-                                        Parsed::new(
-                                            PathList::Key(
-                                                Parsed::new(Key::field("product"), Some((21, 28))),
-                                                Parsed::new(
-                                                    PathList::Selection(Parsed::new(
-                                                        SubSelection {
-                                                            selections: vec![
-                                                                NamedSelection::Field(
-                                                                    None,
-                                                                    Parsed::new(
-                                                                        Key::field("id"),
-                                                                        Some((29, 31)),
-                                                                    ),
-                                                                    None,
-                                                                ),
-                                                                NamedSelection::Field(
-                                                                    None,
-                                                                    Parsed::new(
-                                                                        Key::field("name"),
-                                                                        Some((32, 36)),
-                                                                    ),
-                                                                    None,
-                                                                ),
-                                                            ],
-                                                            star: None,
-                                                        },
-                                                        Some((28, 37)),
-                                                    )),
-                                                    Some((28, 37)),
-                                                ),
+            JSONSelection::Named(SubSelection {
+                selections: vec![
+                    NamedSelection::Field(
+                        None,
+                        Parsed::new(Key::field("before"), Some((0, 6))),
+                        None,
+                    ),
+                    NamedSelection::Path(
+                        Parsed::new(Alias::new_with_range("product", (7, 14)), Some((7, 15))),
+                        PathSelection {
+                            path: Parsed::new(
+                                PathList::Var(
+                                    Parsed::new(KnownVariable::Args, Some((15, 20))),
+                                    Parsed::new(
+                                        PathList::Key(
+                                            Parsed::new(Key::field("product"), Some((21, 28))),
+                                            Parsed::new(
+                                                PathList::Selection(SubSelection {
+                                                    selections: vec![
+                                                        NamedSelection::Field(
+                                                            None,
+                                                            Parsed::new(
+                                                                Key::field("id"),
+                                                                Some((29, 31)),
+                                                            ),
+                                                            None,
+                                                        ),
+                                                        NamedSelection::Field(
+                                                            None,
+                                                            Parsed::new(
+                                                                Key::field("name"),
+                                                                Some((32, 36)),
+                                                            ),
+                                                            None,
+                                                        ),
+                                                    ],
+                                                    range: Some((28, 37)),
+                                                    ..Default::default()
+                                                }),
+                                                Some((28, 37)),
                                             ),
-                                            Some((20, 37)),
                                         ),
+                                        Some((20, 37)),
                                     ),
-                                    Some((15, 37)),
                                 ),
-                            },
-                        ),
-                        NamedSelection::Field(
-                            None,
-                            Parsed::new(Key::field("after"), Some((37, 42))),
-                            None,
-                        ),
-                    ],
-                    star: None,
-                },
-                Some((0, 42)),
-            )),
+                                Some((15, 37)),
+                            ),
+                        },
+                    ),
+                    NamedSelection::Field(
+                        None,
+                        Parsed::new(Key::field("after"), Some((37, 42))),
+                        None,
+                    ),
+                ],
+                range: Some((0, 42)),
+                ..Default::default()
+            }),
         );
     }
 }

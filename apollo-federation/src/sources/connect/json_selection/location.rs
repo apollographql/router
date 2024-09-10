@@ -205,15 +205,13 @@ pub(super) mod strip_ranges {
         }
     }
 
-    impl StripRanges for Parsed<SubSelection> {
+    impl StripRanges for SubSelection {
         fn strip_ranges(&self) -> Self {
-            Parsed::new(
-                SubSelection {
-                    selections: self.selections.iter().map(|s| s.strip_ranges()).collect(),
-                    star: self.star.as_ref().map(|s| s.strip_ranges()),
-                },
-                None,
-            )
+            SubSelection {
+                selections: self.selections.iter().map(|s| s.strip_ranges()).collect(),
+                star: self.star.as_ref().map(|s| s.strip_ranges()),
+                ..Default::default()
+            }
         }
     }
 

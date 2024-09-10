@@ -64,27 +64,25 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ci
             body: None,
         },
         selection: Named(
-            Parsed {
-                node: SubSelection {
-                    selections: [
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "id",
+            SubSelection {
+                selections: [
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                (
+                                    0,
+                                    2,
                                 ),
-                                range: Some(
-                                    (
-                                        0,
-                                        2,
-                                    ),
-                                ),
-                            },
-                            None,
-                        ),
-                    ],
-                    star: None,
-                },
+                            ),
+                        },
+                        None,
+                    ),
+                ],
+                star: None,
                 range: Some(
                     (
                         0,
@@ -164,27 +162,25 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ci
             body: None,
         },
         selection: Named(
-            Parsed {
-                node: SubSelection {
-                    selections: [
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "id",
+            SubSelection {
+                selections: [
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                (
+                                    0,
+                                    2,
                                 ),
-                                range: Some(
-                                    (
-                                        0,
-                                        2,
-                                    ),
-                                ),
-                            },
-                            None,
-                        ),
-                    ],
-                    star: None,
-                },
+                            ),
+                        },
+                        None,
+                    ),
+                ],
+                star: None,
                 range: Some(
                     (
                         0,

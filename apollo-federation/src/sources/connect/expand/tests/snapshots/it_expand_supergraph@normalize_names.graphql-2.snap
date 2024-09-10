@@ -45,42 +45,40 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/no
             body: None,
         },
         selection: Named(
-            Parsed {
-                node: SubSelection {
-                    selections: [
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "id",
+            SubSelection {
+                selections: [
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                (
+                                    0,
+                                    2,
                                 ),
-                                range: Some(
-                                    (
-                                        0,
-                                        2,
-                                    ),
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "a",
+                            ),
+                            range: Some(
+                                (
+                                    3,
+                                    4,
                                 ),
-                            },
-                            None,
-                        ),
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "a",
-                                ),
-                                range: Some(
-                                    (
-                                        3,
-                                        4,
-                                    ),
-                                ),
-                            },
-                            None,
-                        ),
-                    ],
-                    star: None,
-                },
+                            ),
+                        },
+                        None,
+                    ),
+                ],
+                star: None,
                 range: Some(
                     (
                         0,
@@ -146,57 +144,55 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/no
             body: None,
         },
         selection: Named(
-            Parsed {
-                node: SubSelection {
-                    selections: [
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "id",
+            SubSelection {
+                selections: [
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                (
+                                    0,
+                                    2,
                                 ),
-                                range: Some(
-                                    (
-                                        0,
-                                        2,
-                                    ),
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "a",
+                            ),
+                            range: Some(
+                                (
+                                    3,
+                                    4,
                                 ),
-                            },
-                            None,
-                        ),
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "a",
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "b",
+                            ),
+                            range: Some(
+                                (
+                                    5,
+                                    6,
                                 ),
-                                range: Some(
-                                    (
-                                        3,
-                                        4,
-                                    ),
-                                ),
-                            },
-                            None,
-                        ),
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "b",
-                                ),
-                                range: Some(
-                                    (
-                                        5,
-                                        6,
-                                    ),
-                                ),
-                            },
-                            None,
-                        ),
-                    ],
-                    star: None,
-                },
+                            ),
+                        },
+                        None,
+                    ),
+                ],
+                star: None,
                 range: Some(
                     (
                         0,

@@ -42,10 +42,7 @@ impl JSONSelection {
     /// Apply a selection set to create a new [`JSONSelection`]
     pub fn apply_selection_set(&self, selection_set: &SelectionSet) -> Self {
         match self {
-            Self::Named(sub) => Self::Named(Parsed::new(
-                sub.apply_selection_set(selection_set),
-                sub.range(),
-            )),
+            Self::Named(sub) => Self::Named(sub.apply_selection_set(selection_set)),
             Self::Path(path) => Self::Path(path.apply_selection_set(selection_set)),
         }
     }
@@ -115,12 +112,8 @@ impl SubSelection {
                                     Some(Parsed::new(Alias::new(field_response_key), None))
                                 },
                                 name.clone(),
-                                sub.as_ref().map(|sub| {
-                                    Parsed::new(
-                                        sub.apply_selection_set(&field.selection_set),
-                                        sub.range(),
-                                    )
-                                }),
+                                sub.as_ref()
+                                    .map(|sub| sub.apply_selection_set(&field.selection_set)),
                             ));
                         }
                     } else if self.star.is_some() {
@@ -153,10 +146,7 @@ impl SubSelection {
                         for field in fields {
                             new_selections.push(NamedSelection::Group(
                                 Parsed::new(Alias::new(field.response_key().as_str()), None),
-                                Parsed::new(
-                                    sub.apply_selection_set(&field.selection_set),
-                                    sub.range(),
-                                ),
+                                sub.apply_selection_set(&field.selection_set),
                             ));
                         }
                     }
@@ -181,6 +171,10 @@ impl SubSelection {
         Self {
             selections: new_selections,
             star: new_star,
+            // Keep the old range even though it may be inaccurate after the
+            // removal of selections, since it still indicates where the
+            // original SubSelection came from.
+            range: self.range,
         }
     }
 }
@@ -213,10 +207,7 @@ impl PathList {
                 args.clone(),
                 Parsed::new(path.apply_selection_set(selection_set), path.range()),
             ),
-            Self::Selection(sub) => Self::Selection(Parsed::new(
-                sub.apply_selection_set(selection_set),
-                sub.range(),
-            )),
+            Self::Selection(sub) => Self::Selection(sub.apply_selection_set(selection_set)),
             Self::Empty => Self::Empty,
         }
     }

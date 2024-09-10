@@ -53,132 +53,130 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
             body: None,
         },
         selection: Named(
-            Parsed {
-                node: SubSelection {
-                    selections: [
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "id",
+            SubSelection {
+                selections: [
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                (
+                                    0,
+                                    2,
                                 ),
-                                range: Some(
-                                    (
-                                        0,
-                                        2,
-                                    ),
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "tagged",
+                            ),
+                            range: Some(
+                                (
+                                    3,
+                                    9,
                                 ),
-                            },
-                            None,
-                        ),
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "tagged",
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "hidden",
+                            ),
+                            range: Some(
+                                (
+                                    10,
+                                    16,
                                 ),
-                                range: Some(
-                                    (
-                                        3,
-                                        9,
-                                    ),
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "custom",
+                            ),
+                            range: Some(
+                                (
+                                    17,
+                                    23,
                                 ),
-                            },
-                            None,
-                        ),
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "hidden",
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "authenticated",
+                            ),
+                            range: Some(
+                                (
+                                    24,
+                                    37,
                                 ),
-                                range: Some(
-                                    (
-                                        10,
-                                        16,
-                                    ),
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "requiresScopes",
+                            ),
+                            range: Some(
+                                (
+                                    38,
+                                    52,
                                 ),
-                            },
-                            None,
-                        ),
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "custom",
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "policy",
+                            ),
+                            range: Some(
+                                (
+                                    53,
+                                    59,
                                 ),
-                                range: Some(
-                                    (
-                                        17,
-                                        23,
-                                    ),
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "overridden",
+                            ),
+                            range: Some(
+                                (
+                                    60,
+                                    70,
                                 ),
-                            },
-                            None,
-                        ),
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "authenticated",
-                                ),
-                                range: Some(
-                                    (
-                                        24,
-                                        37,
-                                    ),
-                                ),
-                            },
-                            None,
-                        ),
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "requiresScopes",
-                                ),
-                                range: Some(
-                                    (
-                                        38,
-                                        52,
-                                    ),
-                                ),
-                            },
-                            None,
-                        ),
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "policy",
-                                ),
-                                range: Some(
-                                    (
-                                        53,
-                                        59,
-                                    ),
-                                ),
-                            },
-                            None,
-                        ),
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "overridden",
-                                ),
-                                range: Some(
-                                    (
-                                        60,
-                                        70,
-                                    ),
-                                ),
-                            },
-                            None,
-                        ),
-                    ],
-                    star: None,
-                },
+                            ),
+                        },
+                        None,
+                    ),
+                ],
+                star: None,
                 range: Some(
                     (
                         0,
@@ -251,132 +249,130 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
             body: None,
         },
         selection: Named(
-            Parsed {
-                node: SubSelection {
-                    selections: [
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "id",
+            SubSelection {
+                selections: [
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                (
+                                    0,
+                                    2,
                                 ),
-                                range: Some(
-                                    (
-                                        0,
-                                        2,
-                                    ),
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "tagged",
+                            ),
+                            range: Some(
+                                (
+                                    3,
+                                    9,
                                 ),
-                            },
-                            None,
-                        ),
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "tagged",
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "hidden",
+                            ),
+                            range: Some(
+                                (
+                                    10,
+                                    16,
                                 ),
-                                range: Some(
-                                    (
-                                        3,
-                                        9,
-                                    ),
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "custom",
+                            ),
+                            range: Some(
+                                (
+                                    17,
+                                    23,
                                 ),
-                            },
-                            None,
-                        ),
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "hidden",
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "authenticated",
+                            ),
+                            range: Some(
+                                (
+                                    24,
+                                    37,
                                 ),
-                                range: Some(
-                                    (
-                                        10,
-                                        16,
-                                    ),
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "requiresScopes",
+                            ),
+                            range: Some(
+                                (
+                                    38,
+                                    52,
                                 ),
-                            },
-                            None,
-                        ),
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "custom",
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "policy",
+                            ),
+                            range: Some(
+                                (
+                                    53,
+                                    59,
                                 ),
-                                range: Some(
-                                    (
-                                        17,
-                                        23,
-                                    ),
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "overridden",
+                            ),
+                            range: Some(
+                                (
+                                    60,
+                                    70,
                                 ),
-                            },
-                            None,
-                        ),
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "authenticated",
-                                ),
-                                range: Some(
-                                    (
-                                        24,
-                                        37,
-                                    ),
-                                ),
-                            },
-                            None,
-                        ),
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "requiresScopes",
-                                ),
-                                range: Some(
-                                    (
-                                        38,
-                                        52,
-                                    ),
-                                ),
-                            },
-                            None,
-                        ),
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "policy",
-                                ),
-                                range: Some(
-                                    (
-                                        53,
-                                        59,
-                                    ),
-                                ),
-                            },
-                            None,
-                        ),
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "overridden",
-                                ),
-                                range: Some(
-                                    (
-                                        60,
-                                        70,
-                                    ),
-                                ),
-                            },
-                            None,
-                        ),
-                    ],
-                    star: None,
-                },
+                            ),
+                        },
+                        None,
+                    ),
+                ],
+                star: None,
                 range: Some(
                     (
                         0,
@@ -458,27 +454,25 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
             body: None,
         },
         selection: Named(
-            Parsed {
-                node: SubSelection {
-                    selections: [
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "id",
+            SubSelection {
+                selections: [
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                (
+                                    0,
+                                    2,
                                 ),
-                                range: Some(
-                                    (
-                                        0,
-                                        2,
-                                    ),
-                                ),
-                            },
-                            None,
-                        ),
-                    ],
-                    star: None,
-                },
+                            ),
+                        },
+                        None,
+                    ),
+                ],
+                star: None,
                 range: Some(
                     (
                         0,

@@ -62,7 +62,7 @@ impl PrettyPrintable for Parsed<JSONSelection> {
     }
 }
 
-impl PrettyPrintable for Parsed<SubSelection> {
+impl PrettyPrintable for SubSelection {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
         let mut result = String::new();
         let indent = indent_chars(indentation);

@@ -86,220 +86,214 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                         },
                                         Parsed {
                                             node: Selection(
-                                                Parsed {
-                                                    node: SubSelection {
-                                                        selections: [
-                                                            Field(
-                                                                None,
-                                                                Parsed {
-                                                                    node: Field(
-                                                                        "name",
+                                                SubSelection {
+                                                    selections: [
+                                                        Field(
+                                                            None,
+                                                            Parsed {
+                                                                node: Field(
+                                                                    "name",
+                                                                ),
+                                                                range: Some(
+                                                                    (
+                                                                        14,
+                                                                        18,
                                                                     ),
-                                                                    range: Some(
-                                                                        (
-                                                                            14,
-                                                                            18,
-                                                                        ),
+                                                                ),
+                                                            },
+                                                            None,
+                                                        ),
+                                                        Field(
+                                                            None,
+                                                            Parsed {
+                                                                node: Field(
+                                                                    "username",
+                                                                ),
+                                                                range: Some(
+                                                                    (
+                                                                        19,
+                                                                        27,
                                                                     ),
-                                                                },
-                                                                None,
-                                                            ),
-                                                            Field(
-                                                                None,
-                                                                Parsed {
-                                                                    node: Field(
-                                                                        "username",
+                                                                ),
+                                                            },
+                                                            None,
+                                                        ),
+                                                        Field(
+                                                            None,
+                                                            Parsed {
+                                                                node: Field(
+                                                                    "email",
+                                                                ),
+                                                                range: Some(
+                                                                    (
+                                                                        28,
+                                                                        33,
                                                                     ),
-                                                                    range: Some(
-                                                                        (
-                                                                            19,
-                                                                            27,
-                                                                        ),
+                                                                ),
+                                                            },
+                                                            None,
+                                                        ),
+                                                        Field(
+                                                            None,
+                                                            Parsed {
+                                                                node: Field(
+                                                                    "status",
+                                                                ),
+                                                                range: Some(
+                                                                    (
+                                                                        34,
+                                                                        40,
                                                                     ),
-                                                                },
-                                                                None,
-                                                            ),
-                                                            Field(
-                                                                None,
-                                                                Parsed {
-                                                                    node: Field(
-                                                                        "email",
+                                                                ),
+                                                            },
+                                                            None,
+                                                        ),
+                                                        Field(
+                                                            None,
+                                                            Parsed {
+                                                                node: Field(
+                                                                    "address",
+                                                                ),
+                                                                range: Some(
+                                                                    (
+                                                                        41,
+                                                                        48,
                                                                     ),
-                                                                    range: Some(
-                                                                        (
-                                                                            28,
-                                                                            33,
-                                                                        ),
-                                                                    ),
-                                                                },
-                                                                None,
-                                                            ),
-                                                            Field(
-                                                                None,
-                                                                Parsed {
-                                                                    node: Field(
-                                                                        "status",
-                                                                    ),
-                                                                    range: Some(
-                                                                        (
-                                                                            34,
-                                                                            40,
-                                                                        ),
-                                                                    ),
-                                                                },
-                                                                None,
-                                                            ),
-                                                            Field(
-                                                                None,
-                                                                Parsed {
-                                                                    node: Field(
-                                                                        "address",
-                                                                    ),
-                                                                    range: Some(
-                                                                        (
-                                                                            41,
-                                                                            48,
-                                                                        ),
-                                                                    ),
-                                                                },
-                                                                Some(
-                                                                    Parsed {
-                                                                        node: SubSelection {
-                                                                            selections: [
-                                                                                Field(
-                                                                                    None,
-                                                                                    Parsed {
-                                                                                        node: Field(
-                                                                                            "street",
-                                                                                        ),
-                                                                                        range: Some(
-                                                                                            (
-                                                                                                51,
-                                                                                                57,
-                                                                                            ),
-                                                                                        ),
-                                                                                    },
-                                                                                    None,
+                                                                ),
+                                                            },
+                                                            Some(
+                                                                SubSelection {
+                                                                    selections: [
+                                                                        Field(
+                                                                            None,
+                                                                            Parsed {
+                                                                                node: Field(
+                                                                                    "street",
                                                                                 ),
-                                                                                Field(
-                                                                                    None,
-                                                                                    Parsed {
-                                                                                        node: Field(
-                                                                                            "suite",
-                                                                                        ),
-                                                                                        range: Some(
-                                                                                            (
-                                                                                                58,
-                                                                                                63,
-                                                                                            ),
-                                                                                        ),
-                                                                                    },
-                                                                                    None,
-                                                                                ),
-                                                                                Field(
-                                                                                    None,
-                                                                                    Parsed {
-                                                                                        node: Field(
-                                                                                            "city",
-                                                                                        ),
-                                                                                        range: Some(
-                                                                                            (
-                                                                                                64,
-                                                                                                68,
-                                                                                            ),
-                                                                                        ),
-                                                                                    },
-                                                                                    None,
-                                                                                ),
-                                                                                Field(
-                                                                                    None,
-                                                                                    Parsed {
-                                                                                        node: Field(
-                                                                                            "zipcode",
-                                                                                        ),
-                                                                                        range: Some(
-                                                                                            (
-                                                                                                69,
-                                                                                                76,
-                                                                                            ),
-                                                                                        ),
-                                                                                    },
-                                                                                    None,
-                                                                                ),
-                                                                                Field(
-                                                                                    None,
-                                                                                    Parsed {
-                                                                                        node: Field(
-                                                                                            "geo",
-                                                                                        ),
-                                                                                        range: Some(
-                                                                                            (
-                                                                                                77,
-                                                                                                80,
-                                                                                            ),
-                                                                                        ),
-                                                                                    },
-                                                                                    Some(
-                                                                                        Parsed {
-                                                                                            node: SubSelection {
-                                                                                                selections: [
-                                                                                                    Field(
-                                                                                                        None,
-                                                                                                        Parsed {
-                                                                                                            node: Field(
-                                                                                                                "lat",
-                                                                                                            ),
-                                                                                                            range: Some(
-                                                                                                                (
-                                                                                                                    83,
-                                                                                                                    86,
-                                                                                                                ),
-                                                                                                            ),
-                                                                                                        },
-                                                                                                        None,
-                                                                                                    ),
-                                                                                                    Field(
-                                                                                                        None,
-                                                                                                        Parsed {
-                                                                                                            node: Field(
-                                                                                                                "lng",
-                                                                                                            ),
-                                                                                                            range: Some(
-                                                                                                                (
-                                                                                                                    87,
-                                                                                                                    90,
-                                                                                                                ),
-                                                                                                            ),
-                                                                                                        },
-                                                                                                        None,
-                                                                                                    ),
-                                                                                                ],
-                                                                                                star: None,
-                                                                                            },
-                                                                                            range: Some(
-                                                                                                (
-                                                                                                    81,
-                                                                                                    92,
-                                                                                                ),
-                                                                                            ),
-                                                                                        },
+                                                                                range: Some(
+                                                                                    (
+                                                                                        51,
+                                                                                        57,
                                                                                     ),
                                                                                 ),
-                                                                            ],
-                                                                            star: None,
-                                                                        },
-                                                                        range: Some(
-                                                                            (
-                                                                                49,
-                                                                                94,
+                                                                            },
+                                                                            None,
+                                                                        ),
+                                                                        Field(
+                                                                            None,
+                                                                            Parsed {
+                                                                                node: Field(
+                                                                                    "suite",
+                                                                                ),
+                                                                                range: Some(
+                                                                                    (
+                                                                                        58,
+                                                                                        63,
+                                                                                    ),
+                                                                                ),
+                                                                            },
+                                                                            None,
+                                                                        ),
+                                                                        Field(
+                                                                            None,
+                                                                            Parsed {
+                                                                                node: Field(
+                                                                                    "city",
+                                                                                ),
+                                                                                range: Some(
+                                                                                    (
+                                                                                        64,
+                                                                                        68,
+                                                                                    ),
+                                                                                ),
+                                                                            },
+                                                                            None,
+                                                                        ),
+                                                                        Field(
+                                                                            None,
+                                                                            Parsed {
+                                                                                node: Field(
+                                                                                    "zipcode",
+                                                                                ),
+                                                                                range: Some(
+                                                                                    (
+                                                                                        69,
+                                                                                        76,
+                                                                                    ),
+                                                                                ),
+                                                                            },
+                                                                            None,
+                                                                        ),
+                                                                        Field(
+                                                                            None,
+                                                                            Parsed {
+                                                                                node: Field(
+                                                                                    "geo",
+                                                                                ),
+                                                                                range: Some(
+                                                                                    (
+                                                                                        77,
+                                                                                        80,
+                                                                                    ),
+                                                                                ),
+                                                                            },
+                                                                            Some(
+                                                                                SubSelection {
+                                                                                    selections: [
+                                                                                        Field(
+                                                                                            None,
+                                                                                            Parsed {
+                                                                                                node: Field(
+                                                                                                    "lat",
+                                                                                                ),
+                                                                                                range: Some(
+                                                                                                    (
+                                                                                                        83,
+                                                                                                        86,
+                                                                                                    ),
+                                                                                                ),
+                                                                                            },
+                                                                                            None,
+                                                                                        ),
+                                                                                        Field(
+                                                                                            None,
+                                                                                            Parsed {
+                                                                                                node: Field(
+                                                                                                    "lng",
+                                                                                                ),
+                                                                                                range: Some(
+                                                                                                    (
+                                                                                                        87,
+                                                                                                        90,
+                                                                                                    ),
+                                                                                                ),
+                                                                                            },
+                                                                                            None,
+                                                                                        ),
+                                                                                    ],
+                                                                                    star: None,
+                                                                                    range: Some(
+                                                                                        (
+                                                                                            81,
+                                                                                            92,
+                                                                                        ),
+                                                                                    ),
+                                                                                },
                                                                             ),
                                                                         ),
-                                                                    },
-                                                                ),
+                                                                    ],
+                                                                    star: None,
+                                                                    range: Some(
+                                                                        (
+                                                                            49,
+                                                                            94,
+                                                                        ),
+                                                                    ),
+                                                                },
                                                             ),
-                                                        ],
-                                                        star: None,
-                                                    },
+                                                        ),
+                                                    ],
+                                                    star: None,
                                                     range: Some(
                                                         (
                                                             12,
@@ -336,27 +330,25 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
             ),
         },
         selection: Named(
-            Parsed {
-                node: SubSelection {
-                    selections: [
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "id",
+            SubSelection {
+                selections: [
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                (
+                                    0,
+                                    2,
                                 ),
-                                range: Some(
-                                    (
-                                        0,
-                                        2,
-                                    ),
-                                ),
-                            },
-                            None,
-                        ),
-                    ],
-                    star: None,
-                },
+                            ),
+                        },
+                        None,
+                    ),
+                ],
+                star: None,
                 range: Some(
                     (
                         0,
@@ -424,81 +416,79 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
             headers: {},
             body: Some(
                 Named(
-                    Parsed {
-                        node: SubSelection {
-                            selections: [
-                                Path(
-                                    Parsed {
-                                        node: Alias {
-                                            name: Parsed {
-                                                node: Field(
-                                                    "emailDomain",
-                                                ),
-                                                range: Some(
-                                                    (
-                                                        0,
-                                                        11,
-                                                    ),
-                                                ),
-                                            },
-                                        },
-                                        range: Some(
-                                            (
-                                                0,
-                                                12,
-                                            ),
-                                        ),
-                                    },
-                                    PathSelection {
-                                        path: Parsed {
-                                            node: Var(
-                                                Parsed {
-                                                    node: $args,
-                                                    range: Some(
-                                                        (
-                                                            13,
-                                                            18,
-                                                        ),
-                                                    ),
-                                                },
-                                                Parsed {
-                                                    node: Key(
-                                                        Parsed {
-                                                            node: Field(
-                                                                "email",
-                                                            ),
-                                                            range: Some(
-                                                                (
-                                                                    19,
-                                                                    24,
-                                                                ),
-                                                            ),
-                                                        },
-                                                        Parsed {
-                                                            node: Empty,
-                                                            range: None,
-                                                        },
-                                                    ),
-                                                    range: Some(
-                                                        (
-                                                            18,
-                                                            24,
-                                                        ),
-                                                    ),
-                                                },
+                    SubSelection {
+                        selections: [
+                            Path(
+                                Parsed {
+                                    node: Alias {
+                                        name: Parsed {
+                                            node: Field(
+                                                "emailDomain",
                                             ),
                                             range: Some(
                                                 (
-                                                    13,
-                                                    24,
+                                                    0,
+                                                    11,
                                                 ),
                                             ),
                                         },
                                     },
-                                ),
-                            ],
-                            star: None,
-                        },
+                                    range: Some(
+                                        (
+                                            0,
+                                            12,
+                                        ),
+                                    ),
+                                },
+                                PathSelection {
+                                    path: Parsed {
+                                        node: Var(
+                                            Parsed {
+                                                node: $args,
+                                                range: Some(
+                                                    (
+                                                        13,
+                                                        18,
+                                                    ),
+                                                ),
+                                            },
+                                            Parsed {
+                                                node: Key(
+                                                    Parsed {
+                                                        node: Field(
+                                                            "email",
+                                                        ),
+                                                        range: Some(
+                                                            (
+                                                                19,
+                                                                24,
+                                                            ),
+                                                        ),
+                                                    },
+                                                    Parsed {
+                                                        node: Empty,
+                                                        range: None,
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    (
+                                                        18,
+                                                        24,
+                                                    ),
+                                                ),
+                                            },
+                                        ),
+                                        range: Some(
+                                            (
+                                                13,
+                                                24,
+                                            ),
+                                        ),
+                                    },
+                                },
+                            ),
+                        ],
+                        star: None,
                         range: Some(
                             (
                                 0,
@@ -510,42 +500,40 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
             ),
         },
         selection: Named(
-            Parsed {
-                node: SubSelection {
-                    selections: [
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "id",
+            SubSelection {
+                selections: [
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                (
+                                    0,
+                                    2,
                                 ),
-                                range: Some(
-                                    (
-                                        0,
-                                        2,
-                                    ),
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "name",
+                            ),
+                            range: Some(
+                                (
+                                    3,
+                                    7,
                                 ),
-                            },
-                            None,
-                        ),
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "name",
-                                ),
-                                range: Some(
-                                    (
-                                        3,
-                                        7,
-                                    ),
-                                ),
-                            },
-                            None,
-                        ),
-                    ],
-                    star: None,
-                },
+                            ),
+                        },
+                        None,
+                    ),
+                ],
+                star: None,
                 range: Some(
                     (
                         0,
@@ -618,116 +606,112 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
             body: None,
         },
         selection: Named(
-            Parsed {
-                node: SubSelection {
-                    selections: [
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "id",
-                                ),
-                                range: Some(
-                                    (
-                                        0,
-                                        2,
-                                    ),
-                                ),
-                            },
-                            None,
-                        ),
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "name",
-                                ),
-                                range: Some(
-                                    (
-                                        3,
-                                        7,
-                                    ),
-                                ),
-                            },
-                            None,
-                        ),
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "company",
-                                ),
-                                range: Some(
-                                    (
-                                        8,
-                                        15,
-                                    ),
-                                ),
-                            },
-                            Some(
-                                Parsed {
-                                    node: SubSelection {
-                                        selections: [
-                                            Field(
-                                                None,
-                                                Parsed {
-                                                    node: Field(
-                                                        "name",
-                                                    ),
-                                                    range: Some(
-                                                        (
-                                                            20,
-                                                            24,
-                                                        ),
-                                                    ),
-                                                },
-                                                None,
-                                            ),
-                                            Field(
-                                                None,
-                                                Parsed {
-                                                    node: Field(
-                                                        "catchPhrase",
-                                                    ),
-                                                    range: Some(
-                                                        (
-                                                            27,
-                                                            38,
-                                                        ),
-                                                    ),
-                                                },
-                                                None,
-                                            ),
-                                            Field(
-                                                None,
-                                                Parsed {
-                                                    node: Field(
-                                                        "bs",
-                                                    ),
-                                                    range: Some(
-                                                        (
-                                                            41,
-                                                            43,
-                                                        ),
-                                                    ),
-                                                },
-                                                None,
-                                            ),
-                                        ],
-                                        star: None,
-                                    },
-                                    range: Some(
-                                        (
-                                            16,
-                                            45,
-                                        ),
-                                    ),
-                                },
+            SubSelection {
+                selections: [
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "id",
                             ),
+                            range: Some(
+                                (
+                                    0,
+                                    2,
+                                ),
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "name",
+                            ),
+                            range: Some(
+                                (
+                                    3,
+                                    7,
+                                ),
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "company",
+                            ),
+                            range: Some(
+                                (
+                                    8,
+                                    15,
+                                ),
+                            ),
+                        },
+                        Some(
+                            SubSelection {
+                                selections: [
+                                    Field(
+                                        None,
+                                        Parsed {
+                                            node: Field(
+                                                "name",
+                                            ),
+                                            range: Some(
+                                                (
+                                                    20,
+                                                    24,
+                                                ),
+                                            ),
+                                        },
+                                        None,
+                                    ),
+                                    Field(
+                                        None,
+                                        Parsed {
+                                            node: Field(
+                                                "catchPhrase",
+                                            ),
+                                            range: Some(
+                                                (
+                                                    27,
+                                                    38,
+                                                ),
+                                            ),
+                                        },
+                                        None,
+                                    ),
+                                    Field(
+                                        None,
+                                        Parsed {
+                                            node: Field(
+                                                "bs",
+                                            ),
+                                            range: Some(
+                                                (
+                                                    41,
+                                                    43,
+                                                ),
+                                            ),
+                                        },
+                                        None,
+                                    ),
+                                ],
+                                star: None,
+                                range: Some(
+                                    (
+                                        16,
+                                        45,
+                                    ),
+                                ),
+                            },
                         ),
-                    ],
-                    star: None,
-                },
+                    ),
+                ],
+                star: None,
                 range: Some(
                     (
                         0,
@@ -793,339 +777,331 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
             body: None,
         },
         selection: Named(
-            Parsed {
-                node: SubSelection {
-                    selections: [
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "id",
+            SubSelection {
+                selections: [
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                (
+                                    0,
+                                    2,
                                 ),
-                                range: Some(
-                                    (
-                                        0,
-                                        2,
-                                    ),
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "name",
+                            ),
+                            range: Some(
+                                (
+                                    3,
+                                    7,
                                 ),
-                            },
-                            None,
-                        ),
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "name",
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "username",
+                            ),
+                            range: Some(
+                                (
+                                    8,
+                                    16,
                                 ),
-                                range: Some(
-                                    (
-                                        3,
-                                        7,
-                                    ),
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "email",
+                            ),
+                            range: Some(
+                                (
+                                    17,
+                                    22,
                                 ),
-                            },
-                            None,
-                        ),
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "username",
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "address",
+                            ),
+                            range: Some(
+                                (
+                                    23,
+                                    30,
                                 ),
-                                range: Some(
-                                    (
-                                        8,
-                                        16,
-                                    ),
-                                ),
-                            },
-                            None,
-                        ),
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "email",
-                                ),
-                                range: Some(
-                                    (
-                                        17,
-                                        22,
-                                    ),
-                                ),
-                            },
-                            None,
-                        ),
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "address",
-                                ),
-                                range: Some(
-                                    (
-                                        23,
-                                        30,
-                                    ),
-                                ),
-                            },
-                            Some(
-                                Parsed {
-                                    node: SubSelection {
-                                        selections: [
-                                            Field(
-                                                None,
-                                                Parsed {
-                                                    node: Field(
-                                                        "street",
-                                                    ),
-                                                    range: Some(
-                                                        (
-                                                            35,
-                                                            41,
-                                                        ),
-                                                    ),
-                                                },
-                                                None,
+                            ),
+                        },
+                        Some(
+                            SubSelection {
+                                selections: [
+                                    Field(
+                                        None,
+                                        Parsed {
+                                            node: Field(
+                                                "street",
                                             ),
-                                            Field(
-                                                None,
-                                                Parsed {
-                                                    node: Field(
-                                                        "suite",
-                                                    ),
-                                                    range: Some(
-                                                        (
-                                                            44,
-                                                            49,
-                                                        ),
-                                                    ),
-                                                },
-                                                None,
-                                            ),
-                                            Field(
-                                                None,
-                                                Parsed {
-                                                    node: Field(
-                                                        "city",
-                                                    ),
-                                                    range: Some(
-                                                        (
-                                                            52,
-                                                            56,
-                                                        ),
-                                                    ),
-                                                },
-                                                None,
-                                            ),
-                                            Field(
-                                                None,
-                                                Parsed {
-                                                    node: Field(
-                                                        "zipcode",
-                                                    ),
-                                                    range: Some(
-                                                        (
-                                                            59,
-                                                            66,
-                                                        ),
-                                                    ),
-                                                },
-                                                None,
-                                            ),
-                                            Field(
-                                                None,
-                                                Parsed {
-                                                    node: Field(
-                                                        "geo",
-                                                    ),
-                                                    range: Some(
-                                                        (
-                                                            69,
-                                                            72,
-                                                        ),
-                                                    ),
-                                                },
-                                                Some(
-                                                    Parsed {
-                                                        node: SubSelection {
-                                                            selections: [
-                                                                Field(
-                                                                    None,
-                                                                    Parsed {
-                                                                        node: Field(
-                                                                            "lat",
-                                                                        ),
-                                                                        range: Some(
-                                                                            (
-                                                                                79,
-                                                                                82,
-                                                                            ),
-                                                                        ),
-                                                                    },
-                                                                    None,
-                                                                ),
-                                                                Field(
-                                                                    None,
-                                                                    Parsed {
-                                                                        node: Field(
-                                                                            "lng",
-                                                                        ),
-                                                                        range: Some(
-                                                                            (
-                                                                                87,
-                                                                                90,
-                                                                            ),
-                                                                        ),
-                                                                    },
-                                                                    None,
-                                                                ),
-                                                            ],
-                                                            star: None,
-                                                        },
-                                                        range: Some(
-                                                            (
-                                                                73,
-                                                                94,
-                                                            ),
-                                                        ),
-                                                    },
+                                            range: Some(
+                                                (
+                                                    35,
+                                                    41,
                                                 ),
                                             ),
-                                        ],
-                                        star: None,
-                                    },
-                                    range: Some(
-                                        (
-                                            31,
-                                            96,
+                                        },
+                                        None,
+                                    ),
+                                    Field(
+                                        None,
+                                        Parsed {
+                                            node: Field(
+                                                "suite",
+                                            ),
+                                            range: Some(
+                                                (
+                                                    44,
+                                                    49,
+                                                ),
+                                            ),
+                                        },
+                                        None,
+                                    ),
+                                    Field(
+                                        None,
+                                        Parsed {
+                                            node: Field(
+                                                "city",
+                                            ),
+                                            range: Some(
+                                                (
+                                                    52,
+                                                    56,
+                                                ),
+                                            ),
+                                        },
+                                        None,
+                                    ),
+                                    Field(
+                                        None,
+                                        Parsed {
+                                            node: Field(
+                                                "zipcode",
+                                            ),
+                                            range: Some(
+                                                (
+                                                    59,
+                                                    66,
+                                                ),
+                                            ),
+                                        },
+                                        None,
+                                    ),
+                                    Field(
+                                        None,
+                                        Parsed {
+                                            node: Field(
+                                                "geo",
+                                            ),
+                                            range: Some(
+                                                (
+                                                    69,
+                                                    72,
+                                                ),
+                                            ),
+                                        },
+                                        Some(
+                                            SubSelection {
+                                                selections: [
+                                                    Field(
+                                                        None,
+                                                        Parsed {
+                                                            node: Field(
+                                                                "lat",
+                                                            ),
+                                                            range: Some(
+                                                                (
+                                                                    79,
+                                                                    82,
+                                                                ),
+                                                            ),
+                                                        },
+                                                        None,
+                                                    ),
+                                                    Field(
+                                                        None,
+                                                        Parsed {
+                                                            node: Field(
+                                                                "lng",
+                                                            ),
+                                                            range: Some(
+                                                                (
+                                                                    87,
+                                                                    90,
+                                                                ),
+                                                            ),
+                                                        },
+                                                        None,
+                                                    ),
+                                                ],
+                                                star: None,
+                                                range: Some(
+                                                    (
+                                                        73,
+                                                        94,
+                                                    ),
+                                                ),
+                                            },
                                         ),
                                     ),
-                                },
+                                ],
+                                star: None,
+                                range: Some(
+                                    (
+                                        31,
+                                        96,
+                                    ),
+                                ),
+                            },
+                        ),
+                    ),
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "phone",
                             ),
-                        ),
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "phone",
+                            range: Some(
+                                (
+                                    97,
+                                    102,
                                 ),
-                                range: Some(
-                                    (
-                                        97,
-                                        102,
-                                    ),
-                                ),
-                            },
-                            None,
-                        ),
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "website",
-                                ),
-                                range: Some(
-                                    (
-                                        103,
-                                        110,
-                                    ),
-                                ),
-                            },
-                            None,
-                        ),
-                        Field(
-                            None,
-                            Parsed {
-                                node: Field(
-                                    "company",
-                                ),
-                                range: Some(
-                                    (
-                                        111,
-                                        118,
-                                    ),
-                                ),
-                            },
-                            Some(
-                                Parsed {
-                                    node: SubSelection {
-                                        selections: [
-                                            Field(
-                                                None,
-                                                Parsed {
-                                                    node: Field(
-                                                        "name",
-                                                    ),
-                                                    range: Some(
-                                                        (
-                                                            123,
-                                                            127,
-                                                        ),
-                                                    ),
-                                                },
-                                                None,
-                                            ),
-                                            Field(
-                                                None,
-                                                Parsed {
-                                                    node: Field(
-                                                        "catchPhrase",
-                                                    ),
-                                                    range: Some(
-                                                        (
-                                                            130,
-                                                            141,
-                                                        ),
-                                                    ),
-                                                },
-                                                None,
-                                            ),
-                                            Field(
-                                                None,
-                                                Parsed {
-                                                    node: Field(
-                                                        "bs",
-                                                    ),
-                                                    range: Some(
-                                                        (
-                                                            144,
-                                                            146,
-                                                        ),
-                                                    ),
-                                                },
-                                                None,
-                                            ),
-                                            Field(
-                                                None,
-                                                Parsed {
-                                                    node: Field(
-                                                        "email",
-                                                    ),
-                                                    range: Some(
-                                                        (
-                                                            149,
-                                                            154,
-                                                        ),
-                                                    ),
-                                                },
-                                                None,
-                                            ),
-                                        ],
-                                        star: None,
-                                    },
-                                    range: Some(
-                                        (
-                                            119,
-                                            156,
-                                        ),
-                                    ),
-                                },
                             ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "website",
+                            ),
+                            range: Some(
+                                (
+                                    103,
+                                    110,
+                                ),
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        Parsed {
+                            node: Field(
+                                "company",
+                            ),
+                            range: Some(
+                                (
+                                    111,
+                                    118,
+                                ),
+                            ),
+                        },
+                        Some(
+                            SubSelection {
+                                selections: [
+                                    Field(
+                                        None,
+                                        Parsed {
+                                            node: Field(
+                                                "name",
+                                            ),
+                                            range: Some(
+                                                (
+                                                    123,
+                                                    127,
+                                                ),
+                                            ),
+                                        },
+                                        None,
+                                    ),
+                                    Field(
+                                        None,
+                                        Parsed {
+                                            node: Field(
+                                                "catchPhrase",
+                                            ),
+                                            range: Some(
+                                                (
+                                                    130,
+                                                    141,
+                                                ),
+                                            ),
+                                        },
+                                        None,
+                                    ),
+                                    Field(
+                                        None,
+                                        Parsed {
+                                            node: Field(
+                                                "bs",
+                                            ),
+                                            range: Some(
+                                                (
+                                                    144,
+                                                    146,
+                                                ),
+                                            ),
+                                        },
+                                        None,
+                                    ),
+                                    Field(
+                                        None,
+                                        Parsed {
+                                            node: Field(
+                                                "email",
+                                            ),
+                                            range: Some(
+                                                (
+                                                    149,
+                                                    154,
+                                                ),
+                                            ),
+                                        },
+                                        None,
+                                    ),
+                                ],
+                                star: None,
+                                range: Some(
+                                    (
+                                        119,
+                                        156,
+                                    ),
+                                ),
+                            },
                         ),
-                    ],
-                    star: None,
-                },
+                    ),
+                ],
+                star: None,
                 range: Some(
                     (
                         0,

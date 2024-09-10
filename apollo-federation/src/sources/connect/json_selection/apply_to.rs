@@ -420,7 +420,7 @@ impl ApplyToInternal for Parsed<LitExpr> {
     }
 }
 
-impl ApplyToInternal for Parsed<SubSelection> {
+impl ApplyToInternal for SubSelection {
     fn apply_to_path(
         &self,
         data: &JSON,
