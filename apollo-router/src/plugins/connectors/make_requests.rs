@@ -548,30 +548,25 @@ mod tests {
                         "A",
                     ),
                     selection: Named(
-                        Parsed {
-                            node: SubSelection {
-                                selections: [
-                                    Parsed {
+                        SubSelection {
+                            selections: [
+                                Field(
+                                    None,
+                                    WithRange {
                                         node: Field(
-                                            None,
-                                            Parsed {
-                                                node: Field(
-                                                    "f",
-                                                ),
-                                                range: Some(
-                                                    (
-                                                        0,
-                                                        1,
-                                                    ),
-                                                ),
-                                            },
-                                            None,
+                                            "f",
                                         ),
-                                        range: None,
+                                        range: Some(
+                                            (
+                                                0,
+                                                1,
+                                            ),
+                                        ),
                                     },
-                                ],
-                                star: None,
-                            },
+                                    None,
+                                ),
+                            ],
+                            star: None,
                             range: Some(
                                 (
                                     0,
@@ -591,42 +586,35 @@ mod tests {
                         "A",
                     ),
                     selection: Named(
-                        Parsed {
-                            node: SubSelection {
-                                selections: [
-                                    Parsed {
-                                        node: Field(
-                                            Some(
-                                                Parsed {
-                                                    node: Alias {
-                                                        name: Parsed {
-                                                            node: Field(
-                                                                "f2",
-                                                            ),
-                                                            range: None,
-                                                        },
-                                                    },
-                                                    range: None,
-                                                },
-                                            ),
-                                            Parsed {
+                        SubSelection {
+                            selections: [
+                                Field(
+                                    Some(
+                                        Alias {
+                                            name: WithRange {
                                                 node: Field(
-                                                    "f",
+                                                    "f2",
                                                 ),
-                                                range: Some(
-                                                    (
-                                                        0,
-                                                        1,
-                                                    ),
-                                                ),
+                                                range: None,
                                             },
-                                            None,
+                                            range: None,
+                                        },
+                                    ),
+                                    WithRange {
+                                        node: Field(
+                                            "f",
                                         ),
-                                        range: None,
+                                        range: Some(
+                                            (
+                                                0,
+                                                1,
+                                            ),
+                                        ),
                                     },
-                                ],
-                                star: None,
-                            },
+                                    None,
+                                ),
+                            ],
+                            star: None,
                             range: Some(
                                 (
                                     0,
@@ -709,9 +697,9 @@ mod tests {
                     ),
                     selection: Path(
                         PathSelection {
-                            path: Parsed {
+                            path: WithRange {
                                 node: Var(
-                                    Parsed {
+                                    WithRange {
                                         node: $,
                                         range: Some(
                                             (
@@ -720,7 +708,7 @@ mod tests {
                                             ),
                                         ),
                                     },
-                                    Parsed {
+                                    WithRange {
                                         node: Empty,
                                         range: None,
                                     },
@@ -750,9 +738,9 @@ mod tests {
                     ),
                     selection: Path(
                         PathSelection {
-                            path: Parsed {
+                            path: WithRange {
                                 node: Var(
-                                    Parsed {
+                                    WithRange {
                                         node: $,
                                         range: Some(
                                             (
@@ -761,7 +749,7 @@ mod tests {
                                             ),
                                         ),
                                     },
-                                    Parsed {
+                                    WithRange {
                                         node: Empty,
                                         range: None,
                                     },
@@ -879,9 +867,9 @@ mod tests {
                     ),
                     selection: Path(
                         PathSelection {
-                            path: Parsed {
+                            path: WithRange {
                                 node: Key(
-                                    Parsed {
+                                    WithRange {
                                         node: Field(
                                             "data",
                                         ),
@@ -892,7 +880,7 @@ mod tests {
                                             ),
                                         ),
                                     },
-                                    Parsed {
+                                    WithRange {
                                         node: Empty,
                                         range: None,
                                     },
@@ -936,9 +924,9 @@ mod tests {
                     ),
                     selection: Path(
                         PathSelection {
-                            path: Parsed {
+                            path: WithRange {
                                 node: Key(
-                                    Parsed {
+                                    WithRange {
                                         node: Field(
                                             "data",
                                         ),
@@ -949,7 +937,7 @@ mod tests {
                                             ),
                                         ),
                                     },
-                                    Parsed {
+                                    WithRange {
                                         node: Empty,
                                         range: None,
                                     },
@@ -1091,115 +1079,98 @@ mod tests {
                     "Entity",
                 ),
                 selection: Named(
-                    Parsed {
-                        node: SubSelection {
-                            selections: [
-                                Parsed {
-                                    node: Path(
-                                        Parsed {
-                                            node: Alias {
-                                                name: Parsed {
-                                                    node: Field(
-                                                        "__typename",
-                                                    ),
-                                                    range: None,
-                                                },
+                    SubSelection {
+                        selections: [
+                            Path(
+                                Alias {
+                                    name: WithRange {
+                                        node: Field(
+                                            "__typename",
+                                        ),
+                                        range: None,
+                                    },
+                                    range: None,
+                                },
+                                PathSelection {
+                                    path: WithRange {
+                                        node: Var(
+                                            WithRange {
+                                                node: $,
+                                                range: None,
                                             },
-                                            range: None,
-                                        },
-                                        PathSelection {
-                                            path: Parsed {
-                                                node: Var(
-                                                    Parsed {
-                                                        node: $,
+                                            WithRange {
+                                                node: Method(
+                                                    WithRange {
+                                                        node: "echo",
                                                         range: None,
                                                     },
-                                                    Parsed {
-                                                        node: Method(
-                                                            Parsed {
-                                                                node: "echo",
-                                                                range: None,
-                                                            },
-                                                            Some(
-                                                                Parsed {
-                                                                    node: MethodArgs(
-                                                                        [
-                                                                            Parsed {
-                                                                                node: String(
-                                                                                    "_Entity",
-                                                                                ),
-                                                                                range: None,
-                                                                            },
-                                                                        ],
+                                                    Some(
+                                                        MethodArgs {
+                                                            args: [
+                                                                WithRange {
+                                                                    node: String(
+                                                                        "_Entity",
                                                                     ),
                                                                     range: None,
                                                                 },
-                                                            ),
-                                                            Parsed {
-                                                                node: Empty,
-                                                                range: None,
-                                                            },
-                                                        ),
+                                                            ],
+                                                            range: None,
+                                                        },
+                                                    ),
+                                                    WithRange {
+                                                        node: Empty,
                                                         range: None,
                                                     },
                                                 ),
-                                                range: None,
-                                            },
-                                        },
-                                    ),
-                                    range: None,
-                                },
-                                Parsed {
-                                    node: Field(
-                                        None,
-                                        Parsed {
-                                            node: Field(
-                                                "field",
-                                            ),
-                                            range: Some(
-                                                (
-                                                    0,
-                                                    5,
-                                                ),
-                                            ),
-                                        },
-                                        None,
-                                    ),
-                                    range: None,
-                                },
-                                Parsed {
-                                    node: Field(
-                                        Some(
-                                            Parsed {
-                                                node: Alias {
-                                                    name: Parsed {
-                                                        node: Field(
-                                                            "alias",
-                                                        ),
-                                                        range: None,
-                                                    },
-                                                },
                                                 range: None,
                                             },
                                         ),
-                                        Parsed {
-                                            node: Field(
-                                                "field",
-                                            ),
-                                            range: Some(
-                                                (
-                                                    0,
-                                                    5,
-                                                ),
-                                            ),
-                                        },
-                                        None,
-                                    ),
-                                    range: None,
+                                        range: None,
+                                    },
                                 },
-                            ],
-                            star: None,
-                        },
+                            ),
+                            Field(
+                                None,
+                                WithRange {
+                                    node: Field(
+                                        "field",
+                                    ),
+                                    range: Some(
+                                        (
+                                            0,
+                                            5,
+                                        ),
+                                    ),
+                                },
+                                None,
+                            ),
+                            Field(
+                                Some(
+                                    Alias {
+                                        name: WithRange {
+                                            node: Field(
+                                                "alias",
+                                            ),
+                                            range: None,
+                                        },
+                                        range: None,
+                                    },
+                                ),
+                                WithRange {
+                                    node: Field(
+                                        "field",
+                                    ),
+                                    range: Some(
+                                        (
+                                            0,
+                                            5,
+                                        ),
+                                    ),
+                                },
+                                None,
+                            ),
+                        ],
+                        star: None,
                         range: Some(
                             (
                                 0,
@@ -1226,115 +1197,98 @@ mod tests {
                     "Entity",
                 ),
                 selection: Named(
-                    Parsed {
-                        node: SubSelection {
-                            selections: [
-                                Parsed {
-                                    node: Path(
-                                        Parsed {
-                                            node: Alias {
-                                                name: Parsed {
-                                                    node: Field(
-                                                        "__typename",
-                                                    ),
-                                                    range: None,
-                                                },
+                    SubSelection {
+                        selections: [
+                            Path(
+                                Alias {
+                                    name: WithRange {
+                                        node: Field(
+                                            "__typename",
+                                        ),
+                                        range: None,
+                                    },
+                                    range: None,
+                                },
+                                PathSelection {
+                                    path: WithRange {
+                                        node: Var(
+                                            WithRange {
+                                                node: $,
+                                                range: None,
                                             },
-                                            range: None,
-                                        },
-                                        PathSelection {
-                                            path: Parsed {
-                                                node: Var(
-                                                    Parsed {
-                                                        node: $,
+                                            WithRange {
+                                                node: Method(
+                                                    WithRange {
+                                                        node: "echo",
                                                         range: None,
                                                     },
-                                                    Parsed {
-                                                        node: Method(
-                                                            Parsed {
-                                                                node: "echo",
-                                                                range: None,
-                                                            },
-                                                            Some(
-                                                                Parsed {
-                                                                    node: MethodArgs(
-                                                                        [
-                                                                            Parsed {
-                                                                                node: String(
-                                                                                    "_Entity",
-                                                                                ),
-                                                                                range: None,
-                                                                            },
-                                                                        ],
+                                                    Some(
+                                                        MethodArgs {
+                                                            args: [
+                                                                WithRange {
+                                                                    node: String(
+                                                                        "_Entity",
                                                                     ),
                                                                     range: None,
                                                                 },
-                                                            ),
-                                                            Parsed {
-                                                                node: Empty,
-                                                                range: None,
-                                                            },
-                                                        ),
+                                                            ],
+                                                            range: None,
+                                                        },
+                                                    ),
+                                                    WithRange {
+                                                        node: Empty,
                                                         range: None,
                                                     },
                                                 ),
-                                                range: None,
-                                            },
-                                        },
-                                    ),
-                                    range: None,
-                                },
-                                Parsed {
-                                    node: Field(
-                                        None,
-                                        Parsed {
-                                            node: Field(
-                                                "field",
-                                            ),
-                                            range: Some(
-                                                (
-                                                    0,
-                                                    5,
-                                                ),
-                                            ),
-                                        },
-                                        None,
-                                    ),
-                                    range: None,
-                                },
-                                Parsed {
-                                    node: Field(
-                                        Some(
-                                            Parsed {
-                                                node: Alias {
-                                                    name: Parsed {
-                                                        node: Field(
-                                                            "alias",
-                                                        ),
-                                                        range: None,
-                                                    },
-                                                },
                                                 range: None,
                                             },
                                         ),
-                                        Parsed {
-                                            node: Field(
-                                                "field",
-                                            ),
-                                            range: Some(
-                                                (
-                                                    0,
-                                                    5,
-                                                ),
-                                            ),
-                                        },
-                                        None,
-                                    ),
-                                    range: None,
+                                        range: None,
+                                    },
                                 },
-                            ],
-                            star: None,
-                        },
+                            ),
+                            Field(
+                                None,
+                                WithRange {
+                                    node: Field(
+                                        "field",
+                                    ),
+                                    range: Some(
+                                        (
+                                            0,
+                                            5,
+                                        ),
+                                    ),
+                                },
+                                None,
+                            ),
+                            Field(
+                                Some(
+                                    Alias {
+                                        name: WithRange {
+                                            node: Field(
+                                                "alias",
+                                            ),
+                                            range: None,
+                                        },
+                                        range: None,
+                                    },
+                                ),
+                                WithRange {
+                                    node: Field(
+                                        "field",
+                                    ),
+                                    range: Some(
+                                        (
+                                            0,
+                                            5,
+                                        ),
+                                    ),
+                                },
+                                None,
+                            ),
+                        ],
+                        star: None,
                         range: Some(
                             (
                                 0,
@@ -1441,62 +1395,52 @@ mod tests {
                     "Entity",
                 ),
                 selection: Named(
-                    Parsed {
-                        node: SubSelection {
-                            selections: [
-                                Parsed {
+                    SubSelection {
+                        selections: [
+                            Field(
+                                None,
+                                WithRange {
                                     node: Field(
-                                        None,
-                                        Parsed {
-                                            node: Field(
-                                                "field",
-                                            ),
-                                            range: Some(
-                                                (
-                                                    0,
-                                                    5,
-                                                ),
-                                            ),
-                                        },
-                                        Some(
-                                            Parsed {
-                                                node: SubSelection {
-                                                    selections: [
-                                                        Parsed {
-                                                            node: Field(
-                                                                None,
-                                                                Parsed {
-                                                                    node: Field(
-                                                                        "field",
-                                                                    ),
-                                                                    range: Some(
-                                                                        (
-                                                                            8,
-                                                                            13,
-                                                                        ),
-                                                                    ),
-                                                                },
-                                                                None,
-                                                            ),
-                                                            range: None,
-                                                        },
-                                                    ],
-                                                    star: None,
-                                                },
-                                                range: Some(
-                                                    (
-                                                        6,
-                                                        15,
-                                                    ),
-                                                ),
-                                            },
+                                        "field",
+                                    ),
+                                    range: Some(
+                                        (
+                                            0,
+                                            5,
                                         ),
                                     ),
-                                    range: None,
                                 },
-                            ],
-                            star: None,
-                        },
+                                Some(
+                                    SubSelection {
+                                        selections: [
+                                            Field(
+                                                None,
+                                                WithRange {
+                                                    node: Field(
+                                                        "field",
+                                                    ),
+                                                    range: Some(
+                                                        (
+                                                            8,
+                                                            13,
+                                                        ),
+                                                    ),
+                                                },
+                                                None,
+                                            ),
+                                        ],
+                                        star: None,
+                                        range: Some(
+                                            (
+                                                6,
+                                                15,
+                                            ),
+                                        ),
+                                    },
+                                ),
+                            ),
+                        ],
+                        star: None,
                         range: Some(
                             (
                                 0,
@@ -1520,74 +1464,62 @@ mod tests {
                     "Entity",
                 ),
                 selection: Named(
-                    Parsed {
-                        node: SubSelection {
-                            selections: [
-                                Parsed {
+                    SubSelection {
+                        selections: [
+                            Field(
+                                None,
+                                WithRange {
                                     node: Field(
-                                        None,
-                                        Parsed {
-                                            node: Field(
-                                                "field",
-                                            ),
-                                            range: Some(
-                                                (
-                                                    0,
-                                                    5,
-                                                ),
-                                            ),
-                                        },
-                                        Some(
-                                            Parsed {
-                                                node: SubSelection {
-                                                    selections: [
-                                                        Parsed {
+                                        "field",
+                                    ),
+                                    range: Some(
+                                        (
+                                            0,
+                                            5,
+                                        ),
+                                    ),
+                                },
+                                Some(
+                                    SubSelection {
+                                        selections: [
+                                            Field(
+                                                Some(
+                                                    Alias {
+                                                        name: WithRange {
                                                             node: Field(
-                                                                Some(
-                                                                    Parsed {
-                                                                        node: Alias {
-                                                                            name: Parsed {
-                                                                                node: Field(
-                                                                                    "alias",
-                                                                                ),
-                                                                                range: None,
-                                                                            },
-                                                                        },
-                                                                        range: None,
-                                                                    },
-                                                                ),
-                                                                Parsed {
-                                                                    node: Field(
-                                                                        "field",
-                                                                    ),
-                                                                    range: Some(
-                                                                        (
-                                                                            8,
-                                                                            13,
-                                                                        ),
-                                                                    ),
-                                                                },
-                                                                None,
+                                                                "alias",
                                                             ),
                                                             range: None,
                                                         },
-                                                    ],
-                                                    star: None,
-                                                },
-                                                range: Some(
-                                                    (
-                                                        6,
-                                                        15,
-                                                    ),
+                                                        range: None,
+                                                    },
                                                 ),
-                                            },
+                                                WithRange {
+                                                    node: Field(
+                                                        "field",
+                                                    ),
+                                                    range: Some(
+                                                        (
+                                                            8,
+                                                            13,
+                                                        ),
+                                                    ),
+                                                },
+                                                None,
+                                            ),
+                                        ],
+                                        star: None,
+                                        range: Some(
+                                            (
+                                                6,
+                                                15,
+                                            ),
                                         ),
-                                    ),
-                                    range: None,
-                                },
-                            ],
-                            star: None,
-                        },
+                                    },
+                                ),
+                            ),
+                        ],
+                        star: None,
                         range: Some(
                             (
                                 0,
@@ -1714,30 +1646,25 @@ mod tests {
                     "Entity",
                 ),
                 selection: Named(
-                    Parsed {
-                        node: SubSelection {
-                            selections: [
-                                Parsed {
+                    SubSelection {
+                        selections: [
+                            Field(
+                                None,
+                                WithRange {
                                     node: Field(
-                                        None,
-                                        Parsed {
-                                            node: Field(
-                                                "selected",
-                                            ),
-                                            range: Some(
-                                                (
-                                                    0,
-                                                    8,
-                                                ),
-                                            ),
-                                        },
-                                        None,
+                                        "selected",
                                     ),
-                                    range: None,
+                                    range: Some(
+                                        (
+                                            0,
+                                            8,
+                                        ),
+                                    ),
                                 },
-                            ],
-                            star: None,
-                        },
+                                None,
+                            ),
+                        ],
+                        star: None,
                         range: Some(
                             (
                                 0,
@@ -1769,30 +1696,25 @@ mod tests {
                     "Entity",
                 ),
                 selection: Named(
-                    Parsed {
-                        node: SubSelection {
-                            selections: [
-                                Parsed {
+                    SubSelection {
+                        selections: [
+                            Field(
+                                None,
+                                WithRange {
                                     node: Field(
-                                        None,
-                                        Parsed {
-                                            node: Field(
-                                                "selected",
-                                            ),
-                                            range: Some(
-                                                (
-                                                    0,
-                                                    8,
-                                                ),
-                                            ),
-                                        },
-                                        None,
+                                        "selected",
                                     ),
-                                    range: None,
+                                    range: Some(
+                                        (
+                                            0,
+                                            8,
+                                        ),
+                                    ),
                                 },
-                            ],
-                            star: None,
-                        },
+                                None,
+                            ),
+                        ],
+                        star: None,
                         range: Some(
                             (
                                 0,
@@ -1824,30 +1746,25 @@ mod tests {
                     "Entity",
                 ),
                 selection: Named(
-                    Parsed {
-                        node: SubSelection {
-                            selections: [
-                                Parsed {
+                    SubSelection {
+                        selections: [
+                            Field(
+                                None,
+                                WithRange {
                                     node: Field(
-                                        None,
-                                        Parsed {
-                                            node: Field(
-                                                "selected",
-                                            ),
-                                            range: Some(
-                                                (
-                                                    0,
-                                                    8,
-                                                ),
-                                            ),
-                                        },
-                                        None,
+                                        "selected",
                                     ),
-                                    range: None,
+                                    range: Some(
+                                        (
+                                            0,
+                                            8,
+                                        ),
+                                    ),
                                 },
-                            ],
-                            star: None,
-                        },
+                                None,
+                            ),
+                        ],
+                        star: None,
                         range: Some(
                             (
                                 0,
@@ -1879,30 +1796,25 @@ mod tests {
                     "Entity",
                 ),
                 selection: Named(
-                    Parsed {
-                        node: SubSelection {
-                            selections: [
-                                Parsed {
+                    SubSelection {
+                        selections: [
+                            Field(
+                                None,
+                                WithRange {
                                     node: Field(
-                                        None,
-                                        Parsed {
-                                            node: Field(
-                                                "selected",
-                                            ),
-                                            range: Some(
-                                                (
-                                                    0,
-                                                    8,
-                                                ),
-                                            ),
-                                        },
-                                        None,
+                                        "selected",
                                     ),
-                                    range: None,
+                                    range: Some(
+                                        (
+                                            0,
+                                            8,
+                                        ),
+                                    ),
                                 },
-                            ],
-                            star: None,
-                        },
+                                None,
+                            ),
+                        ],
+                        star: None,
                         range: Some(
                             (
                                 0,
@@ -2032,30 +1944,25 @@ mod tests {
                 field_name: "field",
                 typename: Omitted,
                 selection: Named(
-                    Parsed {
-                        node: SubSelection {
-                            selections: [
-                                Parsed {
+                    SubSelection {
+                        selections: [
+                            Field(
+                                None,
+                                WithRange {
                                     node: Field(
-                                        None,
-                                        Parsed {
-                                            node: Field(
-                                                "selected",
-                                            ),
-                                            range: Some(
-                                                (
-                                                    0,
-                                                    8,
-                                                ),
-                                            ),
-                                        },
-                                        None,
+                                        "selected",
                                     ),
-                                    range: None,
+                                    range: Some(
+                                        (
+                                            0,
+                                            8,
+                                        ),
+                                    ),
                                 },
-                            ],
-                            star: None,
-                        },
+                                None,
+                            ),
+                        ],
+                        star: None,
                         range: Some(
                             (
                                 0,
@@ -2085,30 +1992,25 @@ mod tests {
                 field_name: "field",
                 typename: Omitted,
                 selection: Named(
-                    Parsed {
-                        node: SubSelection {
-                            selections: [
-                                Parsed {
+                    SubSelection {
+                        selections: [
+                            Field(
+                                None,
+                                WithRange {
                                     node: Field(
-                                        None,
-                                        Parsed {
-                                            node: Field(
-                                                "selected",
-                                            ),
-                                            range: Some(
-                                                (
-                                                    0,
-                                                    8,
-                                                ),
-                                            ),
-                                        },
-                                        None,
+                                        "selected",
                                     ),
-                                    range: None,
+                                    range: Some(
+                                        (
+                                            0,
+                                            8,
+                                        ),
+                                    ),
                                 },
-                            ],
-                            star: None,
-                        },
+                                None,
+                            ),
+                        ],
+                        star: None,
                         range: Some(
                             (
                                 0,
@@ -2207,9 +2109,9 @@ mod tests {
                     ),
                     selection: Path(
                         PathSelection {
-                            path: Parsed {
+                            path: WithRange {
                                 node: Key(
-                                    Parsed {
+                                    WithRange {
                                         node: Field(
                                             "data",
                                         ),
@@ -2220,7 +2122,7 @@ mod tests {
                                             ),
                                         ),
                                     },
-                                    Parsed {
+                                    WithRange {
                                         node: Empty,
                                         range: None,
                                     },
