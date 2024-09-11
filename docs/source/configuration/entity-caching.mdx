@@ -133,7 +133,7 @@ This entry contains an object with the `all` field to affect all subgraph reques
 ### Entity cache invalidation
 
 When existing cache entries need to be replaced, the router supports a couple of ways for you to invalidate entity cache entries:
-- **Invalidation endpoint** - the router exposes an invalidation endpoint that can receive invalidation requests from any authorized service. This is primarily intended as an alternative to the extensions mechanism described below. For example a subgraph could use it to trigger invalidation events "out of band" from any requests received by the router or a platform operator could use it to invalidate cache entries in response to events which aren't directly related to a router.
+- [**Invalidation endpoint**](#invalidation-http-endpoint) - the router exposes an invalidation endpoint that can receive invalidation requests from any authorized service. This is primarily intended as an alternative to the extensions mechanism described below. For example a subgraph could use it to trigger invalidation events "out of band" from any requests received by the router or a platform operator could use it to invalidate cache entries in response to events which aren't directly related to a router.
 - **Subgraph response extensions** - you can send invalidation requests via subgraph response extensions, allowing a subgraph to invalidate cached data right after a mutation.
 
 One invalidation request can invalidate multiple cached entries at once. It can invalidate:
