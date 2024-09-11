@@ -424,7 +424,12 @@ impl Variable {
     }
 
     fn interpolate(&self, vars: &Map<ByteString, JSON>) -> Option<String> {
-        vars.get(self.path.as_str()).map(|child_value| {
+        let full_path = format!(
+            "{var_type}.{path}",
+            var_type = self.var_type,
+            path = self.path
+        );
+        vars.get(full_path.as_str()).map(|child_value| {
             // Need to remove quotes from string values, since the quotes don't
             // belong in the URL.
             if let JSON::String(string) = child_value {
