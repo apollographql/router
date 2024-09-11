@@ -1009,8 +1009,8 @@ impl SupergraphCreator {
         self.query_planner_service.previous_cache()
     }
 
-    pub(crate) fn planners(&self) -> Vec<Arc<Planner<QueryPlanResult>>> {
-        self.query_planner_service.planners()
+    pub(crate) fn js_planners(&self) -> Vec<Arc<Planner<QueryPlanResult>>> {
+        self.query_planner_service.js_planners()
     }
 
     pub(crate) async fn warm_up_query_planner(
