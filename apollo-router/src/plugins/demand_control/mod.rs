@@ -306,9 +306,10 @@ impl Plugin for DemandControl {
             let strategy = self.strategy_factory.create();
             ServiceBuilder::new()
                 .checkpoint(move |req: execution::Request| {
-                    req.context
-                        .extensions()
-                        .with_lock(|mut lock| lock.insert(strategy.clone()));
+                    req.context.extensions().with_lock(|mut lock| {
+                        lock.insert(strategy.clone());
+                        lock.insert(req.supergraph_request.body().variables.clone());
+                    });
                     // On the request path we need to check for estimates, checkpoint is used to do this, short-circuiting the request if it's too expensive.
                     Ok(match strategy.on_execution_request(&req) {
                         Ok(_) => ControlFlow::Continue(req),

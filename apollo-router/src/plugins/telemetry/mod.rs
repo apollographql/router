@@ -1411,7 +1411,13 @@ impl Telemetry {
                                     config.apollo.experimental_local_field_metrics,
                                     ctx.unsupported_executable_document(),
                                 ) {
-                                    local_stat_recorder.visit(&query, &response);
+                                    local_stat_recorder.visit(
+                                        &query,
+                                        &response,
+                                        &ctx.extensions()
+                                            .with_lock(|lock| lock.get().cloned())
+                                            .unwrap_or_default(),
+                                    );
                                 }
 
                                 if operation_kind == OperationKind::Subscription {

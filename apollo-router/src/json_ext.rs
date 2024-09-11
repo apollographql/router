@@ -5,6 +5,7 @@
 use std::cmp::min;
 use std::fmt;
 
+use num_traits::ToPrimitive;
 use once_cell::sync::Lazy;
 use regex::Captures;
 use regex::Regex;
@@ -144,6 +145,11 @@ pub(crate) trait ValueExt {
     /// function to handle `PathElement::Fragment`).
     #[track_caller]
     fn is_object_of_type(&self, schema: &Schema, maybe_type: &str) -> bool;
+
+    /// Convert this value to an instance of `apollo_compiler::ast::Value`
+    fn to_ast(&self) -> apollo_compiler::ast::Value;
+
+    fn as_i32(&self) -> Option<i32>;
 }
 
 impl ValueExt for Value {
@@ -467,6 +473,42 @@ impl ValueExt for Value {
                 .map_or(true, |typename| {
                     typename == maybe_type || schema.is_subtype(maybe_type, typename)
                 })
+    }
+
+    fn to_ast(&self) -> apollo_compiler::ast::Value {
+        match self {
+            Value::Null => apollo_compiler::ast::Value::Null,
+            Value::Bool(b) => apollo_compiler::ast::Value::Boolean(*b),
+            Value::Number(n) => {
+                if n.is_f64() {
+                    apollo_compiler::ast::Value::Float(n.as_f64().expect("is float").into())
+                } else {
+                    apollo_compiler::ast::Value::Int((n.as_i64().expect("is int") as i32).into())
+                }
+            }
+            Value::String(s) => apollo_compiler::ast::Value::String(s.as_str().to_string()),
+            Value::Array(inner_vars) => apollo_compiler::ast::Value::List(
+                inner_vars
+                    .iter()
+                    .map(|v| apollo_compiler::Node::new(v.to_ast()))
+                    .collect(),
+            ),
+            Value::Object(inner_vars) => apollo_compiler::ast::Value::Object(
+                inner_vars
+                    .iter()
+                    .map(|(k, v)| {
+                        (
+                            apollo_compiler::Name::new(k.as_str()).expect("is valid name"),
+                            apollo_compiler::Node::new(v.to_ast()),
+                        )
+                    })
+                    .collect(),
+            ),
+        }
+    }
+
+    fn as_i32(&self) -> Option<i32> {
+        self.as_i64().and_then(|i| i.to_i32())
     }
 }
 

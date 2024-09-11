@@ -21,6 +21,8 @@ use super::schema::DemandControlledSchema;
 use super::DemandControlError;
 use crate::graphql::Response;
 use crate::graphql::ResponseVisitor;
+use crate::json_ext::Object;
+use crate::json_ext::ValueExt;
 use crate::plugins::demand_control::cost_calculator::directives::CostDirective;
 use crate::plugins::demand_control::cost_calculator::directives::ListSizeDirective;
 use crate::query_planner::fetch::SubgraphOperation;
@@ -39,6 +41,7 @@ fn score_argument(
     argument: &apollo_compiler::ast::Value,
     argument_definition: &Node<InputValueDefinition>,
     schema: &DemandControlledSchema,
+    variables: &Object,
 ) -> Result<f64, DemandControlError> {
     let cost_directive =
         CostDirective::from_argument(schema.directive_name_map(), argument_definition);
@@ -74,16 +77,25 @@ fn score_argument(
                         argument_definition.ty.inner_named_type()
                     ))
                 })?;
-                cost += score_argument(arg_val, arg_def, schema)?;
+                cost += score_argument(arg_val, arg_def, schema, variables,)?;
             }
             Ok(cost)
         }
         (ast::Value::List(inner_args), _) => {
             let mut cost = cost_directive.map_or(0.0, |cost| cost.weight());
             for arg_val in inner_args {
-                cost += score_argument(arg_val, argument_definition, schema)?;
+                cost += score_argument(arg_val, argument_definition, schema, variables)?;
             }
             Ok(cost)
+        }
+        (ast::Value::Variable(name), _) => {
+            // We make a best effort attempt to score the variable, but some of these may not exist in the variables
+            // sent on the supergraph request, such as `$representations`.
+            if let Some(variable) = variables.get(name.as_str()) {
+                score_argument(&variable.to_ast(), argument_definition, schema, variables)
+            } else {
+                Ok(0.0)
+            }
         }
         (ast::Value::Null, _) => Ok(0.0),
         _ => Ok(cost_directive.map_or(0.0, |cost| cost.weight()))
@@ -127,6 +139,7 @@ impl StaticCostCalculator {
         parent_type: &NamedType,
         schema: &DemandControlledSchema,
         executable: &ExecutableDocument,
+        variables: &Object,
         should_estimate_requires: bool,
         list_size_from_upstream: Option<i32>,
     ) -> Result<f64, DemandControlError> {
@@ -146,7 +159,7 @@ impl StaticCostCalculator {
 
         let list_size_directive =
             match schema.type_field_list_size_directive(parent_type, &field.name) {
-                Some(dir) => dir.with_field(field).map(Some),
+                Some(dir) => dir.with_field_and_variables(field, variables).map(Some),
                 None => Ok(None),
             }?;
         let instance_count = if !field.ty().is_list() {
@@ -179,6 +192,7 @@ impl StaticCostCalculator {
             field.ty().inner_named_type(),
             schema,
             executable,
+            variables,
             should_estimate_requires,
             list_size_directive.as_ref(),
         )?;
@@ -192,7 +206,8 @@ impl StaticCostCalculator {
                         argument.name, field.name
                     ))
                 })?;
-            arguments_cost += score_argument(&argument.value, argument_definition, schema)?;
+            arguments_cost +=
+                score_argument(&argument.value, argument_definition, schema, variables)?;
         }
 
         let mut requirements_cost = 0.0;
@@ -209,6 +224,7 @@ impl StaticCostCalculator {
                     parent_type,
                     schema,
                     executable,
+                    variables,
                     should_estimate_requires,
                     list_size_directive.as_ref(),
                 )?;
@@ -235,6 +251,7 @@ impl StaticCostCalculator {
         parent_type: &NamedType,
         schema: &DemandControlledSchema,
         executable: &ExecutableDocument,
+        variables: &Object,
         should_estimate_requires: bool,
         list_size_directive: Option<&ListSizeDirective>,
     ) -> Result<f64, DemandControlError> {
@@ -249,6 +266,7 @@ impl StaticCostCalculator {
             parent_type,
             schema,
             executable,
+            variables,
             should_estimate_requires,
             list_size_directive,
         )
@@ -260,6 +278,7 @@ impl StaticCostCalculator {
         parent_type: &NamedType,
         schema: &DemandControlledSchema,
         executable: &ExecutableDocument,
+        variables: &Object,
         should_estimate_requires: bool,
         list_size_directive: Option<&ListSizeDirective>,
     ) -> Result<f64, DemandControlError> {
@@ -268,6 +287,7 @@ impl StaticCostCalculator {
             parent_type,
             schema,
             executable,
+            variables,
             should_estimate_requires,
             list_size_directive,
         )
@@ -278,6 +298,7 @@ impl StaticCostCalculator {
         operation: &Operation,
         schema: &DemandControlledSchema,
         executable: &ExecutableDocument,
+        variables: &Object,
         should_estimate_requires: bool,
     ) -> Result<f64, DemandControlError> {
         let mut cost = if operation.is_mutation() { 10.0 } else { 0.0 };
@@ -294,6 +315,7 @@ impl StaticCostCalculator {
             root_type_name,
             schema,
             executable,
+            variables,
             should_estimate_requires,
             None,
         )?;
@@ -307,6 +329,7 @@ impl StaticCostCalculator {
         parent_type: &NamedType,
         schema: &DemandControlledSchema,
         executable: &ExecutableDocument,
+        variables: &Object,
         should_estimate_requires: bool,
         list_size_directive: Option<&ListSizeDirective>,
     ) -> Result<f64, DemandControlError> {
@@ -316,6 +339,7 @@ impl StaticCostCalculator {
                 parent_type,
                 schema,
                 executable,
+                variables,
                 should_estimate_requires,
                 list_size_directive.and_then(|dir| dir.size_of(f)),
             ),
@@ -324,6 +348,7 @@ impl StaticCostCalculator {
                 parent_type,
                 schema,
                 executable,
+                variables,
                 should_estimate_requires,
                 list_size_directive,
             ),
@@ -332,6 +357,7 @@ impl StaticCostCalculator {
                 i.type_condition.as_ref().unwrap_or(parent_type),
                 schema,
                 executable,
+                variables,
                 should_estimate_requires,
                 list_size_directive,
             ),
@@ -344,6 +370,7 @@ impl StaticCostCalculator {
         parent_type_name: &NamedType,
         schema: &DemandControlledSchema,
         executable: &ExecutableDocument,
+        variables: &Object,
         should_estimate_requires: bool,
         list_size_directive: Option<&ListSizeDirective>,
     ) -> Result<f64, DemandControlError> {
@@ -354,6 +381,7 @@ impl StaticCostCalculator {
                 parent_type_name,
                 schema,
                 executable,
+                variables,
                 should_estimate_requires,
                 list_size_directive,
             )?;
@@ -375,25 +403,33 @@ impl StaticCostCalculator {
         false
     }
 
-    fn score_plan_node(&self, plan_node: &PlanNode) -> Result<f64, DemandControlError> {
+    fn score_plan_node(
+        &self,
+        plan_node: &PlanNode,
+        variables: &Object,
+    ) -> Result<f64, DemandControlError> {
         match plan_node {
-            PlanNode::Sequence { nodes } => self.summed_score_of_nodes(nodes),
-            PlanNode::Parallel { nodes } => self.summed_score_of_nodes(nodes),
-            PlanNode::Flatten(flatten_node) => self.score_plan_node(&flatten_node.node),
+            PlanNode::Sequence { nodes } => self.summed_score_of_nodes(nodes, variables),
+            PlanNode::Parallel { nodes } => self.summed_score_of_nodes(nodes, variables),
+            PlanNode::Flatten(flatten_node) => self.score_plan_node(&flatten_node.node, variables),
             PlanNode::Condition {
                 condition: _,
                 if_clause,
                 else_clause,
-            } => self.max_score_of_nodes(if_clause, else_clause),
+            } => self.max_score_of_nodes(if_clause, else_clause, variables),
             PlanNode::Defer { primary, deferred } => {
-                self.summed_score_of_deferred_nodes(primary, deferred)
+                self.summed_score_of_deferred_nodes(primary, deferred, variables)
             }
-            PlanNode::Fetch(fetch_node) => {
-                self.estimated_cost_of_operation(&fetch_node.service_name, &fetch_node.operation)
-            }
-            PlanNode::Subscription { primary, rest: _ } => {
-                self.estimated_cost_of_operation(&primary.service_name, &primary.operation)
-            }
+            PlanNode::Fetch(fetch_node) => self.estimated_cost_of_operation(
+                &fetch_node.service_name,
+                &fetch_node.operation,
+                variables,
+            ),
+            PlanNode::Subscription { primary, rest: _ } => self.estimated_cost_of_operation(
+                &primary.service_name,
+                &primary.operation,
+                variables,
+            ),
         }
     }
 
@@ -401,6 +437,7 @@ impl StaticCostCalculator {
         &self,
         subgraph: &str,
         operation: &SubgraphOperation,
+        variables: &Object,
     ) -> Result<f64, DemandControlError> {
         tracing::debug!("On subgraph {}, scoring operation: {}", subgraph, operation);
 
@@ -414,21 +451,22 @@ impl StaticCostCalculator {
         let operation = operation
             .as_parsed()
             .map_err(DemandControlError::SubgraphOperationNotInitialized)?;
-        self.estimated(operation, schema, false)
+        self.estimated(operation, schema, variables, false)
     }
 
     fn max_score_of_nodes(
         &self,
         left: &Option<Box<PlanNode>>,
         right: &Option<Box<PlanNode>>,
+        variables: &Object,
     ) -> Result<f64, DemandControlError> {
         match (left, right) {
             (None, None) => Ok(0.0),
-            (None, Some(right)) => self.score_plan_node(right),
-            (Some(left), None) => self.score_plan_node(left),
+            (None, Some(right)) => self.score_plan_node(right, variables),
+            (Some(left), None) => self.score_plan_node(left, variables),
             (Some(left), Some(right)) => {
-                let left_score = self.score_plan_node(left)?;
-                let right_score = self.score_plan_node(right)?;
+                let left_score = self.score_plan_node(left, variables)?;
+                let right_score = self.score_plan_node(right, variables)?;
                 Ok(left_score.max(right_score))
             }
         }
@@ -438,23 +476,28 @@ impl StaticCostCalculator {
         &self,
         primary: &Primary,
         deferred: &Vec<DeferredNode>,
+        variables: &Object,
     ) -> Result<f64, DemandControlError> {
         let mut score = 0.0;
         if let Some(node) = &primary.node {
-            score += self.score_plan_node(node)?;
+            score += self.score_plan_node(node, variables)?;
         }
         for d in deferred {
             if let Some(node) = &d.node {
-                score += self.score_plan_node(node)?;
+                score += self.score_plan_node(node, variables)?;
             }
         }
         Ok(score)
     }
 
-    fn summed_score_of_nodes(&self, nodes: &Vec<PlanNode>) -> Result<f64, DemandControlError> {
+    fn summed_score_of_nodes(
+        &self,
+        nodes: &Vec<PlanNode>,
+        variables: &Object,
+    ) -> Result<f64, DemandControlError> {
         let mut sum = 0.0;
         for node in nodes {
-            sum += self.score_plan_node(node)?;
+            sum += self.score_plan_node(node, variables)?;
         }
         Ok(sum)
     }
@@ -463,29 +506,35 @@ impl StaticCostCalculator {
         &self,
         query: &ExecutableDocument,
         schema: &DemandControlledSchema,
+        variables: &Object,
         should_estimate_requires: bool,
     ) -> Result<f64, DemandControlError> {
         let mut cost = 0.0;
         if let Some(op) = &query.operations.anonymous {
-            cost += self.score_operation(op, schema, query, should_estimate_requires)?;
+            cost += self.score_operation(op, schema, query, variables, should_estimate_requires)?;
         }
         for (_name, op) in query.operations.named.iter() {
-            cost += self.score_operation(op, schema, query, should_estimate_requires)?;
+            cost += self.score_operation(op, schema, query, variables, should_estimate_requires)?;
         }
         Ok(cost)
     }
 
-    pub(crate) fn planned(&self, query_plan: &QueryPlan) -> Result<f64, DemandControlError> {
-        self.score_plan_node(&query_plan.root)
+    pub(crate) fn planned(
+        &self,
+        query_plan: &QueryPlan,
+        variables: &Object,
+    ) -> Result<f64, DemandControlError> {
+        self.score_plan_node(&query_plan.root, variables)
     }
 
     pub(crate) fn actual(
         &self,
         request: &ExecutableDocument,
         response: &Response,
+        variables: &Object,
     ) -> Result<f64, DemandControlError> {
         let mut visitor = ResponseCostCalculator::new(&self.supergraph_schema);
-        visitor.visit(request, response);
+        visitor.visit(request, response, variables);
         Ok(visitor.cost)
     }
 }
@@ -505,11 +554,12 @@ impl<'schema> ResponseVisitor for ResponseCostCalculator<'schema> {
     fn visit_field(
         &mut self,
         request: &ExecutableDocument,
+        variables: &Object,
         parent_ty: &NamedType,
         field: &Field,
         value: &Value,
     ) {
-        self.visit_list_item(request, parent_ty, field, value);
+        self.visit_list_item(request, variables, parent_ty, field, value);
 
         let definition = self.schema.type_field(parent_ty, &field.name);
         for argument in &field.arguments {
@@ -517,7 +567,8 @@ impl<'schema> ResponseVisitor for ResponseCostCalculator<'schema> {
                 .as_ref()
                 .map(|def| def.argument_by_name(&argument.name))
             {
-                if let Ok(score) = score_argument(&argument.value, argument_definition, self.schema)
+                if let Ok(score) =
+                    score_argument(&argument.value, argument_definition, self.schema, variables)
                 {
                     self.cost += score;
                 }
@@ -534,6 +585,7 @@ impl<'schema> ResponseVisitor for ResponseCostCalculator<'schema> {
     fn visit_list_item(
         &mut self,
         request: &apollo_compiler::ExecutableDocument,
+        variables: &Object,
         parent_ty: &apollo_compiler::executable::NamedType,
         field: &apollo_compiler::executable::Field,
         value: &Value,
@@ -548,12 +600,12 @@ impl<'schema> ResponseVisitor for ResponseCostCalculator<'schema> {
             }
             Value::Array(items) => {
                 for item in items {
-                    self.visit_list_item(request, parent_ty, field, item);
+                    self.visit_list_item(request, variables, parent_ty, field, item);
                 }
             }
             Value::Object(children) => {
                 self.cost += cost_directive.map_or(1.0, |cost| cost.weight());
-                self.visit_selections(request, &field.selection_set, children);
+                self.visit_selections(request, variables, &field.selection_set, children);
             }
         }
     }
@@ -583,9 +635,10 @@ mod tests {
         fn rust_planned(
             &self,
             query_plan: &apollo_federation::query_plan::QueryPlan,
+            variables: &Object,
         ) -> Result<f64, DemandControlError> {
             let js_planner_node: PlanNode = query_plan.node.as_ref().unwrap().into();
-            self.score_plan_node(&js_planner_node)
+            self.score_plan_node(&js_planner_node, variables)
         }
     }
 
@@ -600,20 +653,30 @@ mod tests {
     }
 
     /// Estimate cost of an operation executed on a supergraph.
-    fn estimated_cost(schema_str: &str, query_str: &str) -> f64 {
+    fn estimated_cost(schema_str: &str, query_str: &str, variables_str: &str) -> f64 {
         let (schema, query) =
             parse_schema_and_operation(schema_str, query_str, &Default::default());
+        let variables = serde_json::from_str::<Value>(variables_str)
+            .unwrap()
+            .as_object()
+            .cloned()
+            .unwrap_or_default();
         let schema =
             DemandControlledSchema::new(Arc::new(schema.supergraph_schema().clone())).unwrap();
         let calculator = StaticCostCalculator::new(Arc::new(schema), Default::default(), 100);
 
         calculator
-            .estimated(&query.executable, &calculator.supergraph_schema, true)
+            .estimated(
+                &query.executable,
+                &calculator.supergraph_schema,
+                &variables,
+                true,
+            )
             .unwrap()
     }
 
     /// Estimate cost of an operation on a plain, non-federated schema.
-    fn basic_estimated_cost(schema_str: &str, query_str: &str) -> f64 {
+    fn basic_estimated_cost(schema_str: &str, query_str: &str, variables_str: &str) -> f64 {
         let schema =
             apollo_compiler::Schema::parse_and_validate(schema_str, "schema.graphqls").unwrap();
         let query = apollo_compiler::ExecutableDocument::parse_and_validate(
@@ -622,17 +685,27 @@ mod tests {
             "query.graphql",
         )
         .unwrap();
+        let variables = serde_json::from_str::<Value>(variables_str)
+            .unwrap()
+            .as_object()
+            .cloned()
+            .unwrap_or_default();
         let schema = DemandControlledSchema::new(Arc::new(schema)).unwrap();
         let calculator = StaticCostCalculator::new(Arc::new(schema), Default::default(), 100);
 
         calculator
-            .estimated(&query, &calculator.supergraph_schema, true)
+            .estimated(&query, &calculator.supergraph_schema, &variables, true)
             .unwrap()
     }
 
-    async fn planned_cost_js(schema_str: &str, query_str: &str) -> f64 {
+    async fn planned_cost_js(schema_str: &str, query_str: &str, variables_str: &str) -> f64 {
         let config: Arc<Configuration> = Arc::new(Default::default());
         let (schema, query) = parse_schema_and_operation(schema_str, query_str, &config);
+        let variables = serde_json::from_str::<Value>(variables_str)
+            .unwrap()
+            .as_object()
+            .cloned()
+            .unwrap_or_default();
         let supergraph_schema = schema.supergraph_schema().clone();
 
         let mut planner = BridgeQueryPlanner::new(schema.into(), config.clone(), None, None)
@@ -667,12 +740,17 @@ mod tests {
             100,
         );
 
-        calculator.planned(&query_plan).unwrap()
+        calculator.planned(&query_plan, &variables).unwrap()
     }
 
-    fn planned_cost_rust(schema_str: &str, query_str: &str) -> f64 {
+    fn planned_cost_rust(schema_str: &str, query_str: &str, variables_str: &str) -> f64 {
         let config: Arc<Configuration> = Arc::new(Default::default());
         let (schema, query) = parse_schema_and_operation(schema_str, query_str, &config);
+        let variables = serde_json::from_str::<Value>(variables_str)
+            .unwrap()
+            .as_object()
+            .cloned()
+            .unwrap_or_default();
 
         let planner =
             QueryPlanner::new(schema.federation_supergraph(), Default::default()).unwrap();
@@ -695,22 +773,37 @@ mod tests {
             100,
         );
 
-        calculator.rust_planned(&query_plan).unwrap()
+        calculator.rust_planned(&query_plan, &variables).unwrap()
     }
 
-    fn actual_cost(schema_str: &str, query_str: &str, response_bytes: &'static [u8]) -> f64 {
+    fn actual_cost(
+        schema_str: &str,
+        query_str: &str,
+        variables_str: &str,
+        response_bytes: &'static [u8],
+    ) -> f64 {
         let (schema, query) =
             parse_schema_and_operation(schema_str, query_str, &Default::default());
+        let variables = serde_json::from_str::<Value>(variables_str)
+            .unwrap()
+            .as_object()
+            .cloned()
+            .unwrap_or_default();
         let response = Response::from_bytes("test", Bytes::from(response_bytes)).unwrap();
         let schema =
             DemandControlledSchema::new(Arc::new(schema.supergraph_schema().clone())).unwrap();
         StaticCostCalculator::new(Arc::new(schema), Default::default(), 100)
-            .actual(&query.executable, &response)
+            .actual(&query.executable, &response, &variables)
             .unwrap()
     }
 
     /// Actual cost of an operation on a plain, non-federated schema.
-    fn basic_actual_cost(schema_str: &str, query_str: &str, response_bytes: &'static [u8]) -> f64 {
+    fn basic_actual_cost(
+        schema_str: &str,
+        query_str: &str,
+        variables_str: &str,
+        response_bytes: &'static [u8],
+    ) -> f64 {
         let schema =
             apollo_compiler::Schema::parse_and_validate(schema_str, "schema.graphqls").unwrap();
         let query = apollo_compiler::ExecutableDocument::parse_and_validate(
@@ -719,11 +812,16 @@ mod tests {
             "query.graphql",
         )
         .unwrap();
+        let variables = serde_json::from_str::<Value>(variables_str)
+            .unwrap()
+            .as_object()
+            .cloned()
+            .unwrap_or_default();
         let response = Response::from_bytes("test", Bytes::from(response_bytes)).unwrap();
 
         let schema = DemandControlledSchema::new(Arc::new(schema)).unwrap();
         StaticCostCalculator::new(Arc::new(schema), Default::default(), 100)
-            .actual(&query, &response)
+            .actual(&query, &response, &variables)
             .unwrap()
     }
 
@@ -731,157 +829,174 @@ mod tests {
     fn query_cost() {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_query.graphql");
+        let variables = "{}";
 
-        assert_eq!(basic_estimated_cost(schema, query), 0.0)
+        assert_eq!(basic_estimated_cost(schema, query, variables), 0.0)
     }
 
     #[test]
     fn mutation_cost() {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_mutation.graphql");
+        let variables = "{}";
 
-        assert_eq!(basic_estimated_cost(schema, query), 10.0)
+        assert_eq!(basic_estimated_cost(schema, query, variables), 10.0)
     }
 
     #[test]
     fn object_cost() {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_object_query.graphql");
+        let variables = "{}";
 
-        assert_eq!(basic_estimated_cost(schema, query), 1.0)
+        assert_eq!(basic_estimated_cost(schema, query, variables), 1.0)
     }
 
     #[test]
     fn interface_cost() {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_interface_query.graphql");
+        let variables = "{}";
 
-        assert_eq!(basic_estimated_cost(schema, query), 1.0)
+        assert_eq!(basic_estimated_cost(schema, query, variables), 1.0)
     }
 
     #[test]
     fn union_cost() {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_union_query.graphql");
+        let variables = "{}";
 
-        assert_eq!(basic_estimated_cost(schema, query), 1.0)
+        assert_eq!(basic_estimated_cost(schema, query, variables), 1.0)
     }
 
     #[test]
     fn list_cost() {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_object_list_query.graphql");
+        let variables = "{}";
 
-        assert_eq!(basic_estimated_cost(schema, query), 100.0)
+        assert_eq!(basic_estimated_cost(schema, query, variables), 100.0)
     }
 
     #[test]
     fn scalar_list_cost() {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_scalar_list_query.graphql");
+        let variables = "{}";
 
-        assert_eq!(basic_estimated_cost(schema, query), 0.0)
+        assert_eq!(basic_estimated_cost(schema, query, variables), 0.0)
     }
 
     #[test]
     fn nested_object_lists() {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_nested_list_query.graphql");
+        let variables = "{}";
 
-        assert_eq!(basic_estimated_cost(schema, query), 10100.0)
+        assert_eq!(basic_estimated_cost(schema, query, variables), 10100.0)
     }
 
     #[test]
     fn input_object_cost() {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_input_object_query.graphql");
+        let variables = "{}";
 
-        assert_eq!(basic_estimated_cost(schema, query), 4.0)
+        assert_eq!(basic_estimated_cost(schema, query, variables), 4.0)
     }
 
     #[test]
     fn input_object_cost_with_returned_objects() {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_input_object_query_2.graphql");
+        let variables = "{}";
         let response = include_bytes!("./fixtures/basic_input_object_response.json");
 
-        assert_eq!(basic_estimated_cost(schema, query), 104.0);
+        assert_eq!(basic_estimated_cost(schema, query, variables), 104.0);
         // The cost of the arguments from the query should be included when scoring the response
-        assert_eq!(basic_actual_cost(schema, query, response), 7.0);
+        assert_eq!(basic_actual_cost(schema, query, variables, response), 7.0);
     }
 
     #[test]
     fn skip_directive_excludes_cost() {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_skipped_query.graphql");
+        let variables = "{}";
 
-        assert_eq!(basic_estimated_cost(schema, query), 0.0)
+        assert_eq!(basic_estimated_cost(schema, query, variables), 0.0)
     }
 
     #[test]
     fn include_directive_excludes_cost() {
         let schema = include_str!("./fixtures/basic_schema.graphql");
         let query = include_str!("./fixtures/basic_excluded_query.graphql");
+        let variables = "{}";
 
-        assert_eq!(basic_estimated_cost(schema, query), 0.0)
+        assert_eq!(basic_estimated_cost(schema, query, variables), 0.0)
     }
 
     #[test(tokio::test)]
     async fn federated_query_with_name() {
         let schema = include_str!("./fixtures/federated_ships_schema.graphql");
         let query = include_str!("./fixtures/federated_ships_named_query.graphql");
+        let variables = "{}";
         let response = include_bytes!("./fixtures/federated_ships_named_response.json");
 
-        assert_eq!(estimated_cost(schema, query), 100.0);
-        assert_eq!(actual_cost(schema, query, response), 2.0);
+        assert_eq!(estimated_cost(schema, query, variables), 100.0);
+        assert_eq!(actual_cost(schema, query, variables, response), 2.0);
     }
 
     #[test(tokio::test)]
     async fn federated_query_with_requires() {
         let schema = include_str!("./fixtures/federated_ships_schema.graphql");
         let query = include_str!("./fixtures/federated_ships_required_query.graphql");
+        let variables = "{}";
         let response = include_bytes!("./fixtures/federated_ships_required_response.json");
 
-        assert_eq!(estimated_cost(schema, query), 10200.0);
-        assert_eq!(planned_cost_js(schema, query).await, 10400.0);
-        assert_eq!(planned_cost_rust(schema, query), 10400.0);
-        assert_eq!(actual_cost(schema, query, response), 2.0);
+        assert_eq!(estimated_cost(schema, query, variables), 10200.0);
+        assert_eq!(planned_cost_js(schema, query, variables).await, 10400.0);
+        assert_eq!(planned_cost_rust(schema, query, variables), 10400.0);
+        assert_eq!(actual_cost(schema, query, variables, response), 2.0);
     }
 
     #[test(tokio::test)]
     async fn federated_query_with_fragments() {
         let schema = include_str!("./fixtures/federated_ships_schema.graphql");
         let query = include_str!("./fixtures/federated_ships_fragment_query.graphql");
+        let variables = "{}";
         let response = include_bytes!("./fixtures/federated_ships_fragment_response.json");
 
-        assert_eq!(estimated_cost(schema, query), 300.0);
-        assert_eq!(planned_cost_js(schema, query).await, 400.0);
-        assert_eq!(planned_cost_rust(schema, query), 400.0);
-        assert_eq!(actual_cost(schema, query, response), 6.0);
+        assert_eq!(estimated_cost(schema, query, variables), 300.0);
+        assert_eq!(planned_cost_js(schema, query, variables).await, 400.0);
+        assert_eq!(planned_cost_rust(schema, query, variables), 400.0);
+        assert_eq!(actual_cost(schema, query, variables, response), 6.0);
     }
 
     #[test(tokio::test)]
     async fn federated_query_with_inline_fragments() {
         let schema = include_str!("./fixtures/federated_ships_schema.graphql");
         let query = include_str!("./fixtures/federated_ships_inline_fragment_query.graphql");
+        let variables = "{}";
         let response = include_bytes!("./fixtures/federated_ships_fragment_response.json");
 
-        assert_eq!(estimated_cost(schema, query), 300.0);
-        assert_eq!(planned_cost_js(schema, query).await, 400.0);
-        assert_eq!(planned_cost_rust(schema, query), 400.0);
-        assert_eq!(actual_cost(schema, query, response), 6.0);
+        assert_eq!(estimated_cost(schema, query, variables), 300.0);
+        assert_eq!(planned_cost_js(schema, query, variables).await, 400.0);
+        assert_eq!(planned_cost_rust(schema, query, variables), 400.0);
+        assert_eq!(actual_cost(schema, query, variables, response), 6.0);
     }
 
     #[test(tokio::test)]
     async fn federated_query_with_defer() {
         let schema = include_str!("./fixtures/federated_ships_schema.graphql");
         let query = include_str!("./fixtures/federated_ships_deferred_query.graphql");
+        let variables = "{}";
         let response = include_bytes!("./fixtures/federated_ships_deferred_response.json");
 
-        assert_eq!(estimated_cost(schema, query), 10200.0);
-        assert_eq!(planned_cost_js(schema, query).await, 10400.0);
-        assert_eq!(planned_cost_rust(schema, query), 10400.0);
-        assert_eq!(actual_cost(schema, query, response), 2.0);
+        assert_eq!(estimated_cost(schema, query, variables), 10200.0);
+        assert_eq!(planned_cost_js(schema, query, variables).await, 10400.0);
+        assert_eq!(planned_cost_rust(schema, query, variables), 10400.0);
+        assert_eq!(actual_cost(schema, query, variables, response), 2.0);
     }
 
     #[test(tokio::test)]
@@ -895,12 +1010,22 @@ mod tests {
 
         let calculator = StaticCostCalculator::new(schema.clone(), Default::default(), 100);
         let conservative_estimate = calculator
-            .estimated(&query.executable, &calculator.supergraph_schema, true)
+            .estimated(
+                &query.executable,
+                &calculator.supergraph_schema,
+                &Default::default(),
+                true,
+            )
             .unwrap();
 
         let calculator = StaticCostCalculator::new(schema.clone(), Default::default(), 5);
         let narrow_estimate = calculator
-            .estimated(&query.executable, &calculator.supergraph_schema, true)
+            .estimated(
+                &query.executable,
+                &calculator.supergraph_schema,
+                &Default::default(),
+                true,
+            )
             .unwrap();
 
         assert_eq!(conservative_estimate, 10200.0);
@@ -911,24 +1036,26 @@ mod tests {
     async fn custom_cost_query() {
         let schema = include_str!("./fixtures/custom_cost_schema.graphql");
         let query = include_str!("./fixtures/custom_cost_query.graphql");
+        let variables = "{}";
         let response = include_bytes!("./fixtures/custom_cost_response.json");
 
-        assert_eq!(estimated_cost(schema, query), 127.0);
-        assert_eq!(planned_cost_js(schema, query).await, 127.0);
-        assert_eq!(planned_cost_rust(schema, query), 127.0);
-        assert_eq!(actual_cost(schema, query, response), 125.0);
+        assert_eq!(estimated_cost(schema, query, variables), 127.0);
+        assert_eq!(planned_cost_js(schema, query, variables).await, 127.0);
+        assert_eq!(planned_cost_rust(schema, query, variables), 127.0);
+        assert_eq!(actual_cost(schema, query, variables, response), 125.0);
     }
 
     #[test(tokio::test)]
     async fn custom_cost_query_with_renamed_directives() {
         let schema = include_str!("./fixtures/custom_cost_schema_with_renamed_directives.graphql");
         let query = include_str!("./fixtures/custom_cost_query.graphql");
+        let variables = "{}";
         let response = include_bytes!("./fixtures/custom_cost_response.json");
 
-        assert_eq!(estimated_cost(schema, query), 127.0);
-        assert_eq!(planned_cost_js(schema, query).await, 127.0);
-        assert_eq!(planned_cost_rust(schema, query), 127.0);
-        assert_eq!(actual_cost(schema, query, response), 125.0);
+        assert_eq!(estimated_cost(schema, query, variables), 127.0);
+        assert_eq!(planned_cost_js(schema, query, variables).await, 127.0);
+        assert_eq!(planned_cost_rust(schema, query, variables), 127.0);
+        assert_eq!(actual_cost(schema, query, variables, response), 125.0);
     }
 
     #[test(tokio::test)]
@@ -936,11 +1063,26 @@ mod tests {
         let schema = include_str!("./fixtures/custom_cost_schema.graphql");
         let query =
             include_str!("./fixtures/custom_cost_query_with_default_slicing_argument.graphql");
+        let variables = "{}";
         let response = include_bytes!("./fixtures/custom_cost_response.json");
 
-        assert_eq!(estimated_cost(schema, query), 132.0);
-        assert_eq!(planned_cost_js(schema, query).await, 132.0);
-        assert_eq!(planned_cost_rust(schema, query), 132.0);
-        assert_eq!(actual_cost(schema, query, response), 125.0);
+        assert_eq!(estimated_cost(schema, query, variables), 132.0);
+        assert_eq!(planned_cost_js(schema, query, variables).await, 132.0);
+        assert_eq!(planned_cost_rust(schema, query, variables), 132.0);
+        assert_eq!(actual_cost(schema, query, variables, response), 125.0);
+    }
+
+    #[test(tokio::test)]
+    async fn custom_cost_query_with_variable_slicing_argument() {
+        let schema = include_str!("./fixtures/custom_cost_schema.graphql");
+        let query =
+            include_str!("./fixtures/custom_cost_query_with_variable_slicing_argument.graphql");
+        let variables = r#"{"costlyInput": {"somethingWithCost": 10}, "fieldCountVar": 5}"#;
+        let response = include_bytes!("./fixtures/custom_cost_response.json");
+
+        assert_eq!(estimated_cost(schema, query, variables), 127.0);
+        assert_eq!(planned_cost_js(schema, query, variables).await, 127.0);
+        assert_eq!(planned_cost_rust(schema, query, variables), 127.0);
+        assert_eq!(actual_cost(schema, query, variables, response), 125.0);
     }
 }
