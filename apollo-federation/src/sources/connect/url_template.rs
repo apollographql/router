@@ -53,11 +53,16 @@ impl URLTemplate {
     }
 
     pub fn interpolate_path(&self, vars: &Map<ByteString, JSON>) -> Result<Vec<String>, String> {
-        self.path.iter().enumerate().map(|(path_position, param_value)| {
-            param_value.interpolate(vars).ok_or_else(|| format!(
-                "Incomplete path parameter {param_value} at position {path_position} with variables {vars:?}",
-            ))
-        }).collect()
+        self.path
+            .iter()
+            .map(|param_value| {
+                param_value.interpolate(vars).ok_or_else(|| {
+                    format!(
+                        "Path parameter {param_value} was missing one or more values in {vars:?}",
+                    )
+                })
+            })
+            .collect()
     }
 
     pub fn interpolate_query(&self, vars: &Map<ByteString, JSON>) -> Vec<(String, String)> {
