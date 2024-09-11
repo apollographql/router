@@ -159,9 +159,9 @@ checksum = "b3d1d046238990b9cf5bcde22a3fb3584ee5cf65fb2765f454ed428c7a0063da"
 
 [[package]]
 name = "apollo-compiler"
-version = "1.0.0-beta.21"
+version = "1.0.0-beta.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9496debc2b28a7da94aa6329b653fae37e0f0ec44da93d82a8d5d2a6a82abe0e"
+checksum = "6feccaf8fab00732a73dd3a40e4aaa7a1106ceef3c0bfbc591c4e0ba27e07774"
 dependencies = [
  "ahash",
  "apollo-parser",
@@ -178,7 +178,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-federation"
-version = "1.53.0"
+version = "1.54.0"
 dependencies = [
  "apollo-compiler",
  "derive_more",
@@ -218,9 +218,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-parser"
-version = "0.8.0"
+version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f17a43dc64e71ca7140e646b99bf86ae721ebb801d2aec44e29a654c4d035ab8"
+checksum = "9692c1bfa7e0628e5c46bd0538571dd469138a0f062290fd4bf90e20e46f05da"
 dependencies = [
  "memchr",
  "rowan",
@@ -229,7 +229,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "1.53.0"
+version = "1.54.0"
 dependencies = [
  "access-json",
  "ahash",
@@ -401,7 +401,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "1.53.0"
+version = "1.54.0"
 dependencies = [
  "apollo-parser",
  "apollo-router",
@@ -417,7 +417,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "1.53.0"
+version = "1.54.0"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
@@ -449,9 +449,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-smith"
-version = "0.11.0"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de03c56d7feec663e7f9e981cf4570db68a0901de8c4667f5b5d20321b88af6e"
+checksum = "10e88b295221ae9d2af63d5eac86cb1f47ec8449e7440253d7772fc305a6c200"
 dependencies = [
  "apollo-compiler",
  "apollo-parser",
