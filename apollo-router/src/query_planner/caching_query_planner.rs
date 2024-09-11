@@ -28,6 +28,7 @@ use crate::cache::estimate_size;
 use crate::cache::storage::InMemoryCache;
 use crate::cache::storage::ValueType;
 use crate::cache::DeduplicatingCache;
+use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
 use crate::plugins::authorization::AuthorizationPlugin;
@@ -167,7 +168,7 @@ where
         previous_cache: Option<InMemoryCachePlanner>,
         count: Option<usize>,
         experimental_reuse_query_plans: bool,
-        experimental_pql_prewarm: bool,
+        experimental_pql_prewarm: &PersistedQueriesPrewarmQueryPlanCache,
     ) {
         let _timer = Timer::new(|duration| {
             ::tracing::info!(
@@ -223,8 +224,9 @@ where
 
         cache_keys.shuffle(&mut thread_rng());
 
-        let should_warm_with_pqs =
-            (experimental_pql_prewarm && previous_cache.is_none()) || previous_cache.is_some();
+        let should_warm_with_pqs = (experimental_pql_prewarm.on_startup
+            && previous_cache.is_none())
+            || (experimental_pql_prewarm.on_reload && previous_cache.is_some());
         let persisted_queries_operations = persisted_query_layer.all_operations();
 
         let capacity = if should_warm_with_pqs {
