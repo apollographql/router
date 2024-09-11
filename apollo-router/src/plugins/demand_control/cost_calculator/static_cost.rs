@@ -37,6 +37,13 @@ pub(crate) struct StaticCostCalculator {
     subgraph_schemas: Arc<HashMap<String, DemandControlledSchema>>,
 }
 
+struct ScoringContext<'a> {
+    schema: &'a DemandControlledSchema,
+    query: &'a ExecutableDocument,
+    variables: &'a Object,
+    should_estimate_requires: bool,
+}
+
 fn score_argument(
     argument: &apollo_compiler::ast::Value,
     argument_definition: &Node<InputValueDefinition>,
@@ -135,12 +142,9 @@ impl StaticCostCalculator {
     /// bound for cost anyway.
     fn score_field(
         &self,
+        ctx: &ScoringContext,
         field: &Field,
         parent_type: &NamedType,
-        schema: &DemandControlledSchema,
-        executable: &ExecutableDocument,
-        variables: &Object,
-        should_estimate_requires: bool,
         list_size_from_upstream: Option<i32>,
     ) -> Result<f64, DemandControlError> {
         if StaticCostCalculator::skipped_by_directives(field) {
@@ -149,19 +153,21 @@ impl StaticCostCalculator {
 
         // We need to look up the `FieldDefinition` from the supergraph schema instead of using `field.definition`
         // because `field.definition` was generated from the API schema, which strips off the directives we need.
-        let definition = schema.type_field(parent_type, &field.name)?;
-        let ty = field.inner_type_def(schema).ok_or_else(|| {
+        let definition = ctx.schema.type_field(parent_type, &field.name)?;
+        let ty = field.inner_type_def(ctx.schema).ok_or_else(|| {
             DemandControlError::QueryParseFailure(format!(
                 "Field {} was found in query, but its type is missing from the schema.",
                 field.name
             ))
         })?;
 
-        let list_size_directive =
-            match schema.type_field_list_size_directive(parent_type, &field.name) {
-                Some(dir) => dir.with_field_and_variables(field, variables).map(Some),
-                None => Ok(None),
-            }?;
+        let list_size_directive = match ctx
+            .schema
+            .type_field_list_size_directive(parent_type, &field.name)
+        {
+            Some(dir) => dir.with_field_and_variables(field, ctx.variables).map(Some),
+            None => Ok(None),
+        }?;
         let instance_count = if !field.ty().is_list() {
             1
         } else if let Some(value) = list_size_from_upstream {
@@ -178,8 +184,9 @@ impl StaticCostCalculator {
 
         // Determine the cost for this particular field. Scalars are free, non-scalars are not.
         // For fields with selections, add in the cost of the selections as well.
-        let mut type_cost = if let Some(cost_directive) =
-            schema.type_field_cost_directive(parent_type, &field.name)
+        let mut type_cost = if let Some(cost_directive) = ctx
+            .schema
+            .type_field_cost_directive(parent_type, &field.name)
         {
             cost_directive.weight()
         } else if ty.is_interface() || ty.is_object() || ty.is_union() {
@@ -188,12 +195,9 @@ impl StaticCostCalculator {
             0.0
         };
         type_cost += self.score_selection_set(
+            ctx,
             &field.selection_set,
             field.ty().inner_named_type(),
-            schema,
-            executable,
-            variables,
-            should_estimate_requires,
             list_size_directive.as_ref(),
         )?;
 
@@ -206,26 +210,28 @@ impl StaticCostCalculator {
                         argument.name, field.name
                     ))
                 })?;
-            arguments_cost +=
-                score_argument(&argument.value, argument_definition, schema, variables)?;
+            arguments_cost += score_argument(
+                &argument.value,
+                argument_definition,
+                ctx.schema,
+                ctx.variables,
+            )?;
         }
 
         let mut requirements_cost = 0.0;
-        if should_estimate_requires {
+        if ctx.should_estimate_requires {
             // If the field is marked with `@requires`, the required selection may not be included
             // in the query's selection. Adding that requirement's cost to the field ensures it's
             // accounted for.
-            let requirements = schema
+            let requirements = ctx
+                .schema
                 .type_field_requires_directive(parent_type, &field.name)
                 .map(|d| &d.fields);
             if let Some(selection_set) = requirements {
                 requirements_cost = self.score_selection_set(
+                    ctx,
                     selection_set,
                     parent_type,
-                    schema,
-                    executable,
-                    variables,
-                    should_estimate_requires,
                     list_size_directive.as_ref(),
                 )?;
             }
@@ -247,48 +253,36 @@ impl StaticCostCalculator {
 
     fn score_fragment_spread(
         &self,
+        ctx: &ScoringContext,
         fragment_spread: &FragmentSpread,
         parent_type: &NamedType,
-        schema: &DemandControlledSchema,
-        executable: &ExecutableDocument,
-        variables: &Object,
-        should_estimate_requires: bool,
         list_size_directive: Option<&ListSizeDirective>,
     ) -> Result<f64, DemandControlError> {
-        let fragment = fragment_spread.fragment_def(executable).ok_or_else(|| {
+        let fragment = fragment_spread.fragment_def(ctx.query).ok_or_else(|| {
             DemandControlError::QueryParseFailure(format!(
                 "Parsed operation did not have a definition for fragment {}",
                 fragment_spread.fragment_name
             ))
         })?;
         self.score_selection_set(
+            ctx,
             &fragment.selection_set,
             parent_type,
-            schema,
-            executable,
-            variables,
-            should_estimate_requires,
             list_size_directive,
         )
     }
 
     fn score_inline_fragment(
         &self,
+        ctx: &ScoringContext,
         inline_fragment: &InlineFragment,
         parent_type: &NamedType,
-        schema: &DemandControlledSchema,
-        executable: &ExecutableDocument,
-        variables: &Object,
-        should_estimate_requires: bool,
         list_size_directive: Option<&ListSizeDirective>,
     ) -> Result<f64, DemandControlError> {
         self.score_selection_set(
+            ctx,
             &inline_fragment.selection_set,
             parent_type,
-            schema,
-            executable,
-            variables,
-            should_estimate_requires,
             list_size_directive,
         )
     }
@@ -296,69 +290,43 @@ impl StaticCostCalculator {
     fn score_operation(
         &self,
         operation: &Operation,
-        schema: &DemandControlledSchema,
-        executable: &ExecutableDocument,
-        variables: &Object,
-        should_estimate_requires: bool,
+        ctx: &ScoringContext,
     ) -> Result<f64, DemandControlError> {
         let mut cost = if operation.is_mutation() { 10.0 } else { 0.0 };
 
-        let Some(root_type_name) = schema.root_operation(operation.operation_type) else {
+        let Some(root_type_name) = ctx.schema.root_operation(operation.operation_type) else {
             return Err(DemandControlError::QueryParseFailure(format!(
                 "Cannot cost {} operation because the schema does not support this root type",
                 operation.operation_type
             )));
         };
 
-        cost += self.score_selection_set(
-            &operation.selection_set,
-            root_type_name,
-            schema,
-            executable,
-            variables,
-            should_estimate_requires,
-            None,
-        )?;
+        cost += self.score_selection_set(ctx, &operation.selection_set, root_type_name, None)?;
 
         Ok(cost)
     }
 
     fn score_selection(
         &self,
+        ctx: &ScoringContext,
         selection: &Selection,
         parent_type: &NamedType,
-        schema: &DemandControlledSchema,
-        executable: &ExecutableDocument,
-        variables: &Object,
-        should_estimate_requires: bool,
         list_size_directive: Option<&ListSizeDirective>,
     ) -> Result<f64, DemandControlError> {
         match selection {
             Selection::Field(f) => self.score_field(
+                ctx,
                 f,
                 parent_type,
-                schema,
-                executable,
-                variables,
-                should_estimate_requires,
                 list_size_directive.and_then(|dir| dir.size_of(f)),
             ),
-            Selection::FragmentSpread(s) => self.score_fragment_spread(
-                s,
-                parent_type,
-                schema,
-                executable,
-                variables,
-                should_estimate_requires,
-                list_size_directive,
-            ),
+            Selection::FragmentSpread(s) => {
+                self.score_fragment_spread(ctx, s, parent_type, list_size_directive)
+            }
             Selection::InlineFragment(i) => self.score_inline_fragment(
+                ctx,
                 i,
                 i.type_condition.as_ref().unwrap_or(parent_type),
-                schema,
-                executable,
-                variables,
-                should_estimate_requires,
                 list_size_directive,
             ),
         }
@@ -366,25 +334,14 @@ impl StaticCostCalculator {
 
     fn score_selection_set(
         &self,
+        ctx: &ScoringContext,
         selection_set: &SelectionSet,
         parent_type_name: &NamedType,
-        schema: &DemandControlledSchema,
-        executable: &ExecutableDocument,
-        variables: &Object,
-        should_estimate_requires: bool,
         list_size_directive: Option<&ListSizeDirective>,
     ) -> Result<f64, DemandControlError> {
         let mut cost = 0.0;
         for selection in selection_set.selections.iter() {
-            cost += self.score_selection(
-                selection,
-                parent_type_name,
-                schema,
-                executable,
-                variables,
-                should_estimate_requires,
-                list_size_directive,
-            )?;
+            cost += self.score_selection(ctx, selection, parent_type_name, list_size_directive)?;
         }
         Ok(cost)
     }
@@ -510,11 +467,17 @@ impl StaticCostCalculator {
         should_estimate_requires: bool,
     ) -> Result<f64, DemandControlError> {
         let mut cost = 0.0;
+        let ctx = ScoringContext {
+            schema,
+            query,
+            variables,
+            should_estimate_requires,
+        };
         if let Some(op) = &query.operations.anonymous {
-            cost += self.score_operation(op, schema, query, variables, should_estimate_requires)?;
+            cost += self.score_operation(op, &ctx)?;
         }
         for (_name, op) in query.operations.named.iter() {
-            cost += self.score_operation(op, schema, query, variables, should_estimate_requires)?;
+            cost += self.score_operation(op, &ctx)?;
         }
         Ok(cost)
     }
