@@ -1,6 +1,7 @@
 ---
 source: apollo-federation/src/sources/connect/expand/tests/mod.rs
 expression: raw_sdl
+input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/steelthread.graphql
 ---
 schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY) @join__directive(graphs: [], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1"}) {
   query: Query
@@ -40,16 +41,22 @@ scalar join__FieldSet
 scalar join__DirectiveArguments
 
 enum join__Graph {
-  ONE_QUERY_T_0 @join__graph(name: "one_Query_t_0", url: "none")
-  ONE_T_TS_0 @join__graph(name: "one_T_ts_0", url: "none")
+  CONNECTORS_QUERY_USER_0 @join__graph(name: "connectors_Query_user_0", url: "none")
+  CONNECTORS_QUERY_USERS_0 @join__graph(name: "connectors_Query_users_0", url: "none")
+  CONNECTORS_USER_D_1 @join__graph(name: "connectors_User_d_1", url: "none")
+  GRAPHQL @join__graph(name: "graphql", url: "https://localhost:4001")
 }
 
-type T @join__type(graph: ONE_QUERY_T_0) @join__type(graph: ONE_T_TS_0, key: "id") {
-  id: ID! @join__field(graph: ONE_QUERY_T_0) @join__field(graph: ONE_T_TS_0)
-  ts: [T] @join__field(graph: ONE_T_TS_0)
+type User @join__type(graph: CONNECTORS_QUERY_USER_0, key: "id") @join__type(graph: CONNECTORS_QUERY_USERS_0) @join__type(graph: CONNECTORS_USER_D_1, key: "c") @join__type(graph: GRAPHQL, key: "id") {
+  id: ID! @join__field(graph: CONNECTORS_QUERY_USER_0) @join__field(graph: CONNECTORS_QUERY_USERS_0) @join__field(graph: GRAPHQL)
+  name: String @join__field(graph: CONNECTORS_QUERY_USER_0) @join__field(graph: CONNECTORS_QUERY_USERS_0)
+  username: String @join__field(graph: CONNECTORS_QUERY_USER_0)
+  d: String @join__field(graph: CONNECTORS_USER_D_1)
+  c: String @join__field(graph: CONNECTORS_USER_D_1) @join__field(graph: GRAPHQL)
 }
 
-type Query @join__type(graph: ONE_QUERY_T_0) @join__type(graph: ONE_T_TS_0) {
-  t(id: ID): T @join__field(graph: ONE_QUERY_T_0)
-  _: ID @inaccessible @join__field(graph: ONE_T_TS_0)
+type Query @join__type(graph: CONNECTORS_QUERY_USER_0) @join__type(graph: CONNECTORS_QUERY_USERS_0) @join__type(graph: CONNECTORS_USER_D_1) @join__type(graph: GRAPHQL) {
+  user(id: ID!): User @join__field(graph: CONNECTORS_QUERY_USER_0)
+  users: [User] @join__field(graph: CONNECTORS_QUERY_USERS_0)
+  _: ID @inaccessible @join__field(graph: CONNECTORS_USER_D_1)
 }

@@ -1,6 +1,7 @@
 ---
 source: apollo-federation/src/sources/connect/expand/tests/mod.rs
 expression: connectors.by_service_name
+input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/simple.graphql
 ---
 {
     "connectors_Query_users_0": Connector {

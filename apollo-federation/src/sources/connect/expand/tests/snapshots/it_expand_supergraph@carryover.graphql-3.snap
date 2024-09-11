@@ -1,6 +1,7 @@
 ---
 source: apollo-federation/src/sources/connect/expand/tests/mod.rs
 expression: raw_sdl
+input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/carryover.graphql
 ---
 schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY) @join__directive(graphs: [], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1"}) @link(url: "https://specs.apollo.dev/tag/v0.3", import: ["@tag"]) @link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY, import: ["@authenticated"]) @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", for: SECURITY, import: ["@requiresScopes"]) @link(url: "https://specs.apollo.dev/policy/v0.1", for: SECURITY, import: ["@policy"]) @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom"]) {
   query: Query

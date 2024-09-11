@@ -448,7 +448,7 @@ mod tests {
 
     #[test]
     fn test_carryover() {
-        let sdl = include_str!("./tests/schemas/directives.graphql");
+        let sdl = include_str!("./tests/schemas/ignore/directives.graphql");
         let schema = Schema::parse(sdl, "directives.graphql").expect("parse failed");
         let supergraph_schema = FederationSchema::new(schema).expect("federation schema failed");
         let subgraphs = extract_subgraphs_from_supergraph(&supergraph_schema, None)

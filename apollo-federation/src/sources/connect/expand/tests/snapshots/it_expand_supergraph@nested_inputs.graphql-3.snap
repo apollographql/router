@@ -1,6 +1,7 @@
 ---
 source: apollo-federation/src/sources/connect/expand/tests/mod.rs
 expression: raw_sdl
+input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/nested_inputs.graphql
 ---
 schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) @join__directive(graphs: [], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1"}) {
   query: Query
@@ -38,22 +39,18 @@ scalar join__FieldSet
 scalar join__DirectiveArguments
 
 enum join__Graph {
-  CONNECTORS_QUERY_TS_0 @join__graph(name: "connectors_Query_ts_0", url: "none")
+  CONNECTORS_QUERY_FOO_0 @join__graph(name: "connectors_Query_foo_0", url: "none")
 }
 
-type A @join__type(graph: CONNECTORS_QUERY_TS_0) {
-  id: ID @join__field(graph: CONNECTORS_QUERY_TS_0)
+input QuuxInput @join__type(graph: CONNECTORS_QUERY_FOO_0) {
+  quaz: String
 }
 
-type B @join__type(graph: CONNECTORS_QUERY_TS_0) {
-  a: A @join__field(graph: CONNECTORS_QUERY_TS_0)
+input BazInput @join__type(graph: CONNECTORS_QUERY_FOO_0) {
+  buzz: String
+  quux: QuuxInput
 }
 
-type T @join__type(graph: CONNECTORS_QUERY_TS_0) {
-  a: A @join__field(graph: CONNECTORS_QUERY_TS_0)
-  b: B @join__field(graph: CONNECTORS_QUERY_TS_0)
-}
-
-type Query @join__type(graph: CONNECTORS_QUERY_TS_0) {
-  ts: [T] @join__field(graph: CONNECTORS_QUERY_TS_0)
+type Query @join__type(graph: CONNECTORS_QUERY_FOO_0) {
+  foo(bar: String, baz: BazInput, doubleBaz: BazInput): String @join__field(graph: CONNECTORS_QUERY_FOO_0)
 }

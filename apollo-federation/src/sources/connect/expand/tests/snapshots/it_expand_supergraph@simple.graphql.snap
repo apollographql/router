@@ -1,14 +1,19 @@
 ---
 source: apollo-federation/src/sources/connect/expand/tests/mod.rs
 expression: api_schema
+input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/simple.graphql
 ---
 directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
 
 type Query {
-  t(id: ID): T
+  users: [User]
+  user(id: ID!): User
 }
 
-type T {
+type User {
   id: ID!
-  ts: [T]
+  a: String
+  b: String
+  c: String
+  d: String
 }

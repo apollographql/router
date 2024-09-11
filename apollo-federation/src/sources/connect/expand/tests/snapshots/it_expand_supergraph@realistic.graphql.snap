@@ -1,6 +1,7 @@
 ---
 source: apollo-federation/src/sources/connect/expand/tests/mod.rs
 expression: api_schema
+input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/realistic.graphql
 ---
 directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
 
