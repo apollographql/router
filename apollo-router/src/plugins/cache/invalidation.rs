@@ -3,13 +3,14 @@ use std::time::Instant;
 
 use fred::error::RedisError;
 use fred::types::Scanner;
+use futures::stream;
 use futures::StreamExt;
 use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::Value;
 use thiserror::Error;
-use tokio::sync::broadcast;
+use tokio::sync::Semaphore;
 use tower::BoxError;
 use tracing::Instrument;
 
@@ -19,16 +20,11 @@ use crate::cache::redis::RedisKey;
 use crate::plugins::cache::entity::hash_entity_key;
 use crate::plugins::cache::entity::ENTITY_CACHE_VERSION;
 
-const CHANNEL_SIZE: usize = 1024;
-
 #[derive(Clone)]
 pub(crate) struct Invalidation {
-    #[allow(clippy::type_complexity)]
-    pub(super) handle: tokio::sync::mpsc::Sender<(
-        Vec<InvalidationRequest>,
-        InvalidationOrigin,
-        broadcast::Sender<Result<u64, InvalidationError>>,
-    )>,
+    pub(crate) storage: Arc<EntityStorage>,
+    pub(crate) scan_count: u32,
+    pub(crate) semaphore: Arc<Semaphore>,
 }
 
 #[derive(Error, Debug, Clone)]
@@ -37,9 +33,6 @@ pub(crate) enum InvalidationError {
     RedisError(#[from] RedisError),
     #[error("several errors")]
     Errors(#[from] InvalidationErrors),
-    #[cfg(test)]
-    #[error("custom error: {0}")]
-    Custom(String),
 }
 
 #[derive(Debug, Clone)]
@@ -70,53 +63,20 @@ impl Invalidation {
     pub(crate) async fn new(
         storage: Arc<EntityStorage>,
         scan_count: u32,
+        concurrent_requests: u32,
     ) -> Result<Self, BoxError> {
-        let (tx, rx) = tokio::sync::mpsc::channel(CHANNEL_SIZE);
-
-        tokio::task::spawn(async move {
-            start(storage, scan_count, rx).await;
-        });
-        Ok(Self { handle: tx })
+        Ok(Self {
+            storage,
+            scan_count,
+            semaphore: Arc::new(Semaphore::new(concurrent_requests as usize)),
+        })
     }
 
     pub(crate) async fn invalidate(
-        &mut self,
+        &self,
         origin: InvalidationOrigin,
         requests: Vec<InvalidationRequest>,
     ) -> Result<u64, BoxError> {
-        let (response_tx, mut response_rx) = broadcast::channel(2);
-        self.handle
-            .send((requests, origin, response_tx.clone()))
-            .await
-            .map_err(|e| format!("cannot send invalidation request: {e}"))?;
-
-        let result = response_rx
-            .recv()
-            .await
-            .map_err(|err| {
-                format!(
-                    "cannot receive response for invalidation request: {:?}",
-                    err
-                )
-            })?
-            .map_err(|err| format!("received an invalidation error: {:?}", err))?;
-
-        Ok(result)
-    }
-}
-
-// TODO refactor
-#[allow(clippy::type_complexity)]
-async fn start(
-    storage: Arc<EntityStorage>,
-    scan_count: u32,
-    mut handle: tokio::sync::mpsc::Receiver<(
-        Vec<InvalidationRequest>,
-        InvalidationOrigin,
-        broadcast::Sender<Result<u64, InvalidationError>>,
-    )>,
-) {
-    while let Some((requests, origin, response_tx)) = handle.recv().await {
         let origin = match origin {
             InvalidationOrigin::Endpoint => "endpoint",
             InvalidationOrigin::Extensions => "extensions",
@@ -128,117 +88,130 @@ async fn start(
             "origin" = origin
         );
 
-        if let Err(err) = response_tx.send(
-            handle_request_batch(&storage, scan_count, origin, requests)
-                .instrument(tracing::info_span!(
-                    "cache.invalidation.batch",
-                    "origin" = origin
-                ))
-                .await,
-        ) {
-            ::tracing::error!("cannot send answer to invalidation request in the channel: {err}");
-        }
-    }
-}
-
-async fn handle_request(
-    storage: &RedisCacheStorage,
-    scan_count: u32,
-    origin: &'static str,
-    request: &InvalidationRequest,
-) -> Result<u64, InvalidationError> {
-    let key_prefix = request.key_prefix();
-    let subgraph = request.subgraph_name();
-    tracing::debug!(
-        "got invalidation request: {request:?}, will scan for: {}",
-        key_prefix
-    );
-
-    let mut stream = storage.scan(key_prefix.clone(), Some(scan_count));
-    let mut count = 0u64;
-    let mut error = None;
-
-    while let Some(res) = stream.next().await {
-        match res {
-            Err(e) => {
-                tracing::error!(
-                    pattern = key_prefix,
-                    error = %e,
-                    message = "error scanning for key",
-                );
-                error = Some(e);
-                break;
-            }
-            Ok(scan_res) => {
-                if let Some(keys) = scan_res.results() {
-                    let keys = keys
-                        .iter()
-                        .filter_map(|k| k.as_str())
-                        .map(|k| RedisKey(k.to_string()))
-                        .collect::<Vec<_>>();
-                    if !keys.is_empty() {
-                        count += storage.delete(keys).await.unwrap_or(0) as u64;
-
-                        u64_counter!(
-                            "apollo.router.operations.entity.invalidation.entry",
-                            "Entity cache counter for invalidated entries",
-                            count,
-                            "origin" = origin,
-                            "subgraph.name" = subgraph.clone()
-                        );
-                    }
-                }
-                scan_res.next()?;
-            }
-        }
+        Ok(self
+            .handle_request_batch(origin, requests)
+            .instrument(tracing::info_span!(
+                "cache.invalidation.batch",
+                "origin" = origin
+            ))
+            .await?)
     }
 
-    u64_histogram!(
-        "apollo.router.cache.invalidation.keys",
-        "Number of invalidated keys.",
-        count
-    );
-
-    match error {
-        Some(err) => Err(err.into()),
-        None => Ok(count),
-    }
-}
-
-async fn handle_request_batch(
-    storage: &EntityStorage,
-    scan_count: u32,
-    origin: &'static str,
-    requests: Vec<InvalidationRequest>,
-) -> Result<u64, InvalidationError> {
-    let mut count = 0;
-    let mut errors = Vec::new();
-    for request in requests {
-        let start = Instant::now();
-        let redis_storage = match storage.get(request.subgraph_name()) {
-            Some(s) => s,
-            None => continue,
-        };
-        match handle_request(redis_storage, scan_count, origin, &request)
-            .instrument(tracing::info_span!("cache.invalidation.request"))
-            .await
-        {
-            Ok(c) => count += c,
-            Err(err) => {
-                errors.push(err);
-            }
-        }
-        f64_histogram!(
-            "apollo.router.cache.invalidation.duration",
-            "Duration of the invalidation event execution.",
-            start.elapsed().as_secs_f64()
+    async fn handle_request(
+        &self,
+        redis_storage: &RedisCacheStorage,
+        origin: &'static str,
+        request: &InvalidationRequest,
+    ) -> Result<u64, InvalidationError> {
+        let key_prefix = request.key_prefix();
+        let subgraph = request.subgraph_name();
+        tracing::debug!(
+            "got invalidation request: {request:?}, will scan for: {}",
+            key_prefix
         );
+
+        let mut stream = redis_storage.scan(key_prefix.clone(), Some(self.scan_count));
+        let mut count = 0u64;
+        let mut error = None;
+
+        while let Some(res) = stream.next().await {
+            match res {
+                Err(e) => {
+                    tracing::error!(
+                        pattern = key_prefix,
+                        error = %e,
+                        message = "error scanning for key",
+                    );
+                    error = Some(e);
+                    break;
+                }
+                Ok(scan_res) => {
+                    if let Some(keys) = scan_res.results() {
+                        let keys = keys
+                            .iter()
+                            .filter_map(|k| k.as_str())
+                            .map(|k| RedisKey(k.to_string()))
+                            .collect::<Vec<_>>();
+                        if !keys.is_empty() {
+                            let deleted = redis_storage.delete(keys).await.unwrap_or(0) as u64;
+                            count += deleted;
+                        }
+                    }
+                    scan_res.next()?;
+                }
+            }
+        }
+
+        u64_counter!(
+            "apollo.router.operations.entity.invalidation.entry",
+            "Entity cache counter for invalidated entries",
+            count,
+            "origin" = origin,
+            "subgraph.name" = subgraph.clone()
+        );
+
+        u64_histogram!(
+            "apollo.router.cache.invalidation.keys",
+            "Number of invalidated keys per invalidation request.",
+            count
+        );
+
+        match error {
+            Some(err) => Err(err.into()),
+            None => Ok(count),
+        }
     }
 
-    if !errors.is_empty() {
-        Err(InvalidationErrors(errors).into())
-    } else {
-        Ok(count)
+    async fn handle_request_batch(
+        &self,
+        origin: &'static str,
+        requests: Vec<InvalidationRequest>,
+    ) -> Result<u64, InvalidationError> {
+        let mut count = 0;
+        let mut errors = Vec::new();
+        let mut futures = Vec::new();
+        for request in requests {
+            let redis_storage = match self.storage.get(request.subgraph_name()) {
+                Some(s) => s,
+                None => continue,
+            };
+
+            let semaphore = self.semaphore.clone();
+            let f = async move {
+                // limit the number of invalidation requests executing at any point in time
+                let _ = semaphore.acquire().await;
+
+                let start = Instant::now();
+
+                let res = self
+                    .handle_request(redis_storage, origin, &request)
+                    .instrument(tracing::info_span!("cache.invalidation.request"))
+                    .await;
+
+                f64_histogram!(
+                    "apollo.router.cache.invalidation.duration",
+                    "Duration of the invalidation event execution.",
+                    start.elapsed().as_secs_f64()
+                );
+                res
+            };
+            futures.push(f);
+        }
+        let mut stream: stream::FuturesUnordered<_> = futures.into_iter().collect();
+        while let Some(res) = stream.next().await {
+            match res {
+                Ok(c) => count += c,
+                Err(err) => {
+                    errors.push(err);
+                }
+            }
+        }
+
+        if !errors.is_empty() {
+            Err(InvalidationErrors(errors).into())
+        } else {
+            Ok(count)
+        }
     }
 }
 
