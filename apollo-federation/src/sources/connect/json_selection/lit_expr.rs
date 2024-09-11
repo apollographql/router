@@ -231,7 +231,7 @@ impl LitExpr {
         )
     }
 
-    pub(super) fn into_parsed(self) -> WithRange<Self> {
+    pub(super) fn into_with_range(self) -> WithRange<Self> {
         WithRange::new(self, None)
     }
 
@@ -329,8 +329,8 @@ mod tests {
             LitExpr::Object({
                 let mut map = IndexMap::default();
                 map.insert(
-                    Key::field("a").into_parsed(),
-                    LitExpr::Number(serde_json::Number::from(1)).into_parsed(),
+                    Key::field("a").into_with_range(),
+                    LitExpr::Number(serde_json::Number::from(1)).into_with_range(),
                 );
                 map
             }),
@@ -341,8 +341,8 @@ mod tests {
             LitExpr::Object({
                 let mut map = IndexMap::default();
                 map.insert(
-                    Key::quoted("a").into_parsed(),
-                    LitExpr::Number(serde_json::Number::from(1)).into_parsed(),
+                    Key::quoted("a").into_with_range(),
+                    LitExpr::Number(serde_json::Number::from(1)).into_with_range(),
                 );
                 map
             }),
@@ -352,12 +352,12 @@ mod tests {
             fn make_expected(a_key: Key, b_key: Key) -> LitExpr {
                 let mut map = IndexMap::default();
                 map.insert(
-                    a_key.into_parsed(),
-                    LitExpr::Number(serde_json::Number::from(1)).into_parsed(),
+                    a_key.into_with_range(),
+                    LitExpr::Number(serde_json::Number::from(1)).into_with_range(),
                 );
                 map.insert(
-                    b_key.into_parsed(),
-                    LitExpr::Number(serde_json::Number::from(2)).into_parsed(),
+                    b_key.into_with_range(),
+                    LitExpr::Number(serde_json::Number::from(2)).into_with_range(),
                 );
                 LitExpr::Object(map)
             }
@@ -413,15 +413,18 @@ mod tests {
         {
             let expected = LitExpr::Path(PathSelection {
                 path: PathList::Key(
-                    Key::field("a").into_parsed(),
+                    Key::field("a").into_with_range(),
                     PathList::Key(
-                        Key::field("b").into_parsed(),
-                        PathList::Key(Key::field("c").into_parsed(), PathList::Empty.into_parsed())
-                            .into_parsed(),
+                        Key::field("b").into_with_range(),
+                        PathList::Key(
+                            Key::field("c").into_with_range(),
+                            PathList::Empty.into_with_range(),
+                        )
+                        .into_with_range(),
                     )
-                    .into_parsed(),
+                    .into_with_range(),
                 )
-                .into_parsed(),
+                .into_with_range(),
             });
 
             check_parse("a.b.c", expected.clone());
@@ -431,10 +434,10 @@ mod tests {
         {
             let expected = LitExpr::Path(PathSelection {
                 path: PathList::Key(
-                    Key::field("data").into_parsed(),
-                    PathList::Empty.into_parsed(),
+                    Key::field("data").into_with_range(),
+                    PathList::Empty.into_with_range(),
                 )
-                .into_parsed(),
+                .into_with_range(),
             });
             check_parse(".data", expected.clone());
             check_parse(" . data ", expected.clone());
@@ -444,37 +447,40 @@ mod tests {
             let expected = LitExpr::Array(vec![
                 LitExpr::Path(PathSelection {
                     path: PathList::Key(
-                        Key::field("a").into_parsed(),
-                        PathList::Empty.into_parsed(),
+                        Key::field("a").into_with_range(),
+                        PathList::Empty.into_with_range(),
                     )
-                    .into_parsed(),
+                    .into_with_range(),
                 })
-                .into_parsed(),
+                .into_with_range(),
                 LitExpr::Path(PathSelection {
                     path: PathList::Key(
-                        Key::field("b").into_parsed(),
-                        PathList::Key(Key::field("c").into_parsed(), PathList::Empty.into_parsed())
-                            .into_parsed(),
-                    )
-                    .into_parsed(),
-                })
-                .into_parsed(),
-                LitExpr::Path(PathSelection {
-                    path: PathList::Key(
-                        Key::field("d").into_parsed(),
+                        Key::field("b").into_with_range(),
                         PathList::Key(
-                            Key::field("e").into_parsed(),
-                            PathList::Key(
-                                Key::field("f").into_parsed(),
-                                PathList::Empty.into_parsed(),
-                            )
-                            .into_parsed(),
+                            Key::field("c").into_with_range(),
+                            PathList::Empty.into_with_range(),
                         )
-                        .into_parsed(),
+                        .into_with_range(),
                     )
-                    .into_parsed(),
+                    .into_with_range(),
                 })
-                .into_parsed(),
+                .into_with_range(),
+                LitExpr::Path(PathSelection {
+                    path: PathList::Key(
+                        Key::field("d").into_with_range(),
+                        PathList::Key(
+                            Key::field("e").into_with_range(),
+                            PathList::Key(
+                                Key::field("f").into_with_range(),
+                                PathList::Empty.into_with_range(),
+                            )
+                            .into_with_range(),
+                        )
+                        .into_with_range(),
+                    )
+                    .into_with_range(),
+                })
+                .into_with_range(),
             ]);
 
             check_parse("[.a, b.c, .d.e.f]", expected.clone());
@@ -503,34 +509,34 @@ mod tests {
             let expected = LitExpr::Object({
                 let mut map = IndexMap::default();
                 map.insert(
-                    Key::field("a").into_parsed(),
+                    Key::field("a").into_with_range(),
                     LitExpr::Path(PathSelection {
                         path: PathList::Var(
-                            KnownVariable::Args.into_parsed(),
+                            KnownVariable::Args.into_with_range(),
                             PathList::Key(
-                                Key::field("a").into_parsed(),
-                                PathList::Empty.into_parsed(),
+                                Key::field("a").into_with_range(),
+                                PathList::Empty.into_with_range(),
                             )
-                            .into_parsed(),
+                            .into_with_range(),
                         )
-                        .into_parsed(),
+                        .into_with_range(),
                     })
-                    .into_parsed(),
+                    .into_with_range(),
                 );
                 map.insert(
-                    Key::field("b").into_parsed(),
+                    Key::field("b").into_with_range(),
                     LitExpr::Path(PathSelection {
                         path: PathList::Var(
-                            KnownVariable::This.into_parsed(),
+                            KnownVariable::This.into_with_range(),
                             PathList::Key(
-                                Key::field("b").into_parsed(),
-                                PathList::Empty.into_parsed(),
+                                Key::field("b").into_with_range(),
+                                PathList::Empty.into_with_range(),
                             )
-                            .into_parsed(),
+                            .into_with_range(),
                         )
-                        .into_parsed(),
+                        .into_with_range(),
                     })
-                    .into_parsed(),
+                    .into_with_range(),
                 );
                 map
             });

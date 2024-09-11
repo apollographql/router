@@ -31,7 +31,7 @@ impl KnownVariable {
         }
     }
 
-    pub(super) fn into_parsed(self) -> WithRange<Self> {
+    pub(super) fn into_with_range(self) -> WithRange<Self> {
         WithRange::new(self, None)
     }
 }
