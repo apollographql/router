@@ -309,19 +309,9 @@ impl ExternalVarPaths for PathSelection {
                 }
                 paths.extend(tail.external_var_paths());
             }
-            PathList::Key(_, tail) => {
-                paths.extend(tail.external_var_paths());
+            other => {
+                paths.extend(other.external_var_paths());
             }
-            PathList::Method(_, opt_args, tail) => {
-                if let Some(args) = opt_args {
-                    for lit_arg in &args.args {
-                        paths.extend(lit_arg.external_var_paths());
-                    }
-                }
-                paths.extend(tail.external_var_paths());
-            }
-            PathList::Selection(sub) => paths.extend(sub.external_var_paths()),
-            PathList::Empty => {}
         };
         paths
     }
