@@ -593,7 +593,7 @@ impl FetchDependencyGraphNodePath {
                 // Type conditions on the last element of a path don't imply different subgraph fetches.
                 // They would only translate to a potentially new fragment.
                 // So instead of applying a type condition to the last element of a path
-                // We keep track of type conditions and apply them to the parent if applicable. 
+                // We keep track of type conditions and apply them to the parent if applicable.
                 // EG:
                 // foo.bar|[baz, qux] # |[baz, qux] aren't necessary
                 // foo.bar|[baz, qux].quux # |[baz, qux] apply to the parents, they are necessary
