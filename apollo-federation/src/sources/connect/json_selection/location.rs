@@ -342,7 +342,7 @@ mod tests {
                                             )],
                                             range: Some(24..36),
                                         }),
-                                        WithRange::new(PathList::Empty, None),
+                                        WithRange::new(PathList::Empty, Some(36..36)),
                                     ),
                                     Some(16..36)
                                 ),

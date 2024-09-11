@@ -8,9 +8,9 @@ use nom::combinator::map;
 use nom::combinator::opt;
 use nom::combinator::recognize;
 use nom::multi::many0;
-use nom::sequence::delimited;
 use nom::sequence::pair;
 use nom::sequence::preceded;
+use nom::sequence::terminated;
 use nom::sequence::tuple;
 use nom::IResult;
 use nom::Slice;
@@ -61,9 +61,26 @@ impl JSONSelection {
 
     pub fn parse(input: &str) -> IResult<&str, Self> {
         let input_span = Span::new(input);
+
         match alt((
-            all_consuming(map(SubSelection::parse_naked, Self::Named)),
-            all_consuming(map(PathSelection::parse, Self::Path)),
+            all_consuming(terminated(
+                map(SubSelection::parse_naked, Self::Named),
+                // By convention, most ::parse methods do not consume trailing
+                // spaces_or_comments, so we need to consume them here in order
+                // to satisfy the all_consuming requirement.
+                spaces_or_comments,
+            )),
+            all_consuming(terminated(
+                map(PathSelection::parse, Self::Path),
+                // It's tempting to hoist the all_consuming(terminated(...))
+                // checks outside the alt((...)) so we only need to handle
+                // trailing spaces_or_comments once, but that won't work because
+                // the Self::Named case should fail when parsing a single
+                // PathSelection, and that failure typically happens because the
+                // SubSelection::parse_naked method does not consume the entire
+                // input, which is caught by the first all_consuming above.
+                spaces_or_comments,
+            )),
         ))(input_span)
         {
             Ok((remainder, selection)) => {
@@ -169,10 +186,11 @@ impl NamedSelection {
     fn parse_field(input: Span) -> IResult<Span, Self> {
         tuple((
             opt(Alias::parse),
-            delimited(spaces_or_comments, Key::parse, spaces_or_comments),
+            Key::parse,
+            spaces_or_comments,
             opt(SubSelection::parse),
         ))(input)
-        .map(|(remainder, (alias, name, selection))| {
+        .map(|(remainder, (alias, name, _, selection))| {
             (remainder, Self::Field(alias, name, selection))
         })
     }
@@ -371,29 +389,27 @@ impl PathList {
     }
 
     fn parse_with_depth(input: Span, depth: usize) -> IResult<Span, WithRange<Self>> {
+        // If the input is empty (i.e. this method will end up returning
+        // PathList::Empty), we want the OffsetRange to be an empty range at the
+        // end of the previously parsed PathList elements, not separated from
+        // them by trailing spaces or comments, so we need to capture the empty
+        // range before consuming leading spaces_or_comments.
+        let offset_if_empty = input.location_offset();
+        let range_if_empty: OffsetRange = Some(offset_if_empty..offset_if_empty);
+
+        // Consume leading spaces_or_comments for all cases below.
         let (input, _spaces) = spaces_or_comments(input)?;
 
         // Variable references (including @ references) and key references
         // without a leading . are accepted only at depth 0, or at the beginning
         // of the PathSelection.
         if depth == 0 {
-            if let Ok((suffix, (_, dollar, opt_var, _))) = tuple((
-                spaces_or_comments,
-                ranged_span("$"),
-                opt(parse_identifier_no_space),
-                spaces_or_comments,
-            ))(input)
+            if let Ok((suffix, (dollar, opt_var))) =
+                tuple((ranged_span("$"), opt(parse_identifier_no_space)))(input)
             {
                 let dollar_range = dollar.range();
                 let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
-                let full_range = merge_ranges(
-                    dollar_range.clone(),
-                    if matches!(rest.node(), Self::Empty) {
-                        None
-                    } else {
-                        rest.range()
-                    },
-                );
+                let full_range = merge_ranges(dollar_range.clone(), rest.range());
                 return if let Some(var) = opt_var {
                     let full_name = format!("{}{}", dollar.node(), var.as_str());
                     if let Some(known_var) = KnownVariable::from_str(full_name.as_str()) {
@@ -421,25 +437,16 @@ impl PathList {
                 };
             }
 
-            if let Ok((suffix, (_, at, _))) =
-                tuple((spaces_or_comments, ranged_span("@"), spaces_or_comments))(input)
-            {
-                let (input, rest) = Self::parse_with_depth(suffix, depth + 1)?;
-                let full_range = merge_ranges(
-                    at.range(),
-                    if matches!(rest.node(), Self::Empty) {
-                        None
-                    } else {
-                        rest.range()
-                    },
-                );
+            if let Ok((suffix, at)) = ranged_span("@")(input) {
+                let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
+                let full_range = merge_ranges(at.range(), rest.range());
                 // Because we include the $ in the variable name for ordinary
                 // variables, we have the freedom to store other symbols as
                 // special variables, such as @ for the current value. In fact,
                 // as long as we can parse the token(s) as a PathList::Var, the
                 // name of a variable could technically be any string we like.
                 return Ok((
-                    input,
+                    remainder,
                     WithRange::new(
                         Self::Var(WithRange::new(KnownVariable::AtSign, at.range()), rest),
                         full_range,
@@ -448,21 +455,14 @@ impl PathList {
             }
 
             if let Ok((suffix, key)) = Key::parse(input) {
-                let (input, rest) = Self::parse_with_depth(suffix, depth + 1)?;
+                let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
                 return match rest.node() {
                     Self::Empty | Self::Selection(_) => Err(nom::Err::Error(
-                        nom::error::Error::new(input, nom::error::ErrorKind::IsNot),
+                        nom::error::Error::new(remainder, nom::error::ErrorKind::IsNot),
                     )),
                     _ => {
-                        let full_range = merge_ranges(
-                            key.range(),
-                            if matches!(rest.node(), Self::Empty) {
-                                None
-                            } else {
-                                rest.range()
-                            },
-                        );
-                        Ok((input, WithRange::new(Self::Key(key, rest), full_range)))
+                        let full_range = merge_ranges(key.range(), rest.range());
+                        Ok((remainder, WithRange::new(Self::Key(key, rest), full_range)))
                     }
                 };
             }
@@ -471,24 +471,13 @@ impl PathList {
         // The .key case is applicable at any depth. If it comes first in the
         // path selection, $.key is implied, but the distinction is preserved
         // (using Self::Path rather than Self::Var) for accurate reprintability.
-        if let Ok((suffix, (_, dot, _, key))) = tuple((
-            spaces_or_comments,
-            ranged_span("."),
-            spaces_or_comments,
-            Key::parse,
-        ))(input)
+        if let Ok((suffix, (dot, _, key))) =
+            tuple((ranged_span("."), spaces_or_comments, Key::parse))(input)
         {
-            let (input, rest) = Self::parse_with_depth(suffix, depth + 1)?;
+            let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
             let dot_key_range = merge_ranges(dot.range(), key.range());
-            let full_range = merge_ranges(
-                dot_key_range,
-                if matches!(rest.node(), Self::Empty) {
-                    None
-                } else {
-                    rest.range()
-                },
-            );
-            return Ok((input, WithRange::new(Self::Key(key, rest), full_range)));
+            let full_range = merge_ranges(dot_key_range, rest.range());
+            return Ok((remainder, WithRange::new(Self::Key(key, rest), full_range)));
         }
 
         if depth == 0 {
@@ -502,29 +491,17 @@ impl PathList {
 
         // PathSelection can never start with a naked ->method (instead, use
         // $->method if you want to operate on the current value).
-        if let Ok((suffix, (_, arrow, _, method, args))) = tuple((
-            spaces_or_comments,
+        if let Ok((suffix, (arrow, _, method, args))) = tuple((
             ranged_span("->"),
             spaces_or_comments,
             parse_identifier,
             opt(MethodArgs::parse),
         ))(input)
         {
-            let (input, rest) = Self::parse_with_depth(suffix, depth + 1)?;
-            let full_range = merge_ranges(
-                arrow.range(),
-                if matches!(rest.node(), Self::Empty) {
-                    if let Some(args) = args.as_ref() {
-                        args.range()
-                    } else {
-                        method.range()
-                    }
-                } else {
-                    rest.range()
-                },
-            );
+            let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
+            let full_range = merge_ranges(arrow.range(), rest.range());
             return Ok((
-                input,
+                remainder,
                 WithRange::new(Self::Method(method, args, rest), full_range),
             ));
         }
@@ -541,7 +518,7 @@ impl PathList {
 
         // The Self::Empty enum case is used to indicate the end of a
         // PathSelection that has no SubSelection.
-        Ok((input, WithRange::new(Self::Empty, None)))
+        Ok((input, WithRange::new(Self::Empty, range_if_empty)))
     }
 
     pub(super) fn is_single_key(&self) -> bool {
@@ -651,10 +628,10 @@ impl SubSelection {
             spaces_or_comments,
             ranged_span("{"),
             Self::parse_naked,
-            ranged_span("}"),
             spaces_or_comments,
+            ranged_span("}"),
         ))(input)
-        .map(|(remainder, (_, open_brace, sub, close_brace, _))| {
+        .map(|(remainder, (_, open_brace, sub, _, close_brace))| {
             let range = merge_ranges(open_brace.range(), close_brace.range());
             (
                 remainder,
@@ -676,9 +653,8 @@ impl SubSelection {
             // NamedSelection, and is stored as a separate field from the
             // selections vector.
             opt(StarSelection::parse),
-            spaces_or_comments,
         ))(input)
-        .map(|(input, (_, selections, star, _))| {
+        .map(|(remainder, (_, selections, star))| {
             let range = merge_ranges(
                 selections.first().and_then(|first| first.range()),
                 selections.last().and_then(|last| last.range()),
@@ -689,7 +665,7 @@ impl SubSelection {
                 range
             };
             (
-                input,
+                remainder,
                 Self {
                     selections,
                     star,
@@ -796,10 +772,9 @@ impl StarSelection {
             opt(Alias::parse),
             spaces_or_comments,
             ranged_span("*"),
-            spaces_or_comments,
             opt(SubSelection::parse),
         ))(input)
-        .map(|(remainder, (alias, _, star, _, selection))| {
+        .map(|(remainder, (alias, _, star, selection))| {
             let range = star.range();
             let range = if let Some(alias) = alias.as_ref() {
                 merge_ranges(alias.range(), range)
@@ -857,8 +832,8 @@ impl Alias {
     }
 
     fn parse(input: Span) -> IResult<Span, Self> {
-        tuple((Key::parse, ranged_span(":"), spaces_or_comments))(input).map(
-            |(input, (name, colon, _))| {
+        tuple((Key::parse, spaces_or_comments, ranged_span(":")))(input).map(
+            |(input, (name, _, colon))| {
                 let range = merge_ranges(name.range(), colon.range());
                 (input, Self { name, range })
             },
@@ -955,11 +930,7 @@ impl Display for Key {
 // Identifier ::= [a-zA-Z_] NO_SPACE [0-9a-zA-Z_]*
 
 fn parse_identifier(input: Span) -> IResult<Span, WithRange<String>> {
-    delimited(
-        spaces_or_comments,
-        parse_identifier_no_space,
-        spaces_or_comments,
-    )(input)
+    preceded(spaces_or_comments, parse_identifier_no_space)(input)
 }
 
 fn parse_identifier_no_space(input: Span) -> IResult<Span, WithRange<String>> {
@@ -1012,7 +983,7 @@ pub fn parse_string_literal(input: Span) -> IResult<Span, WithRange<String>> {
 
             if let Some(remainder) = remainder {
                 Ok((
-                    spaces_or_comments(remainder)?.0,
+                    remainder,
                     WithRange::new(
                         chars.iter().collect::<String>(),
                         Some(start..remainder.location_offset()),
@@ -1062,8 +1033,11 @@ impl MethodArgs {
             opt(map(
                 tuple((
                     LitExpr::parse,
-                    many0(preceded(char(','), LitExpr::parse)),
-                    opt(char(',')),
+                    many0(preceded(
+                        tuple((spaces_or_comments, char(','))),
+                        LitExpr::parse,
+                    )),
+                    opt(tuple((spaces_or_comments, char(',')))),
                 )),
                 |(first, rest, _trailing_comma)| {
                     let mut output = vec![first];
@@ -1073,12 +1047,11 @@ impl MethodArgs {
             )),
             spaces_or_comments,
             ranged_span(")"),
-            spaces_or_comments,
         ))(input)
-        .map(|(input, (_, open_paren, _, args, _, close_paren, _))| {
+        .map(|(remainder, (_, open_paren, _, args, _, close_paren))| {
             let range = merge_ranges(open_paren.range(), close_paren.range());
             (
-                input,
+                remainder,
                 Self {
                     args: args.unwrap_or_default(),
                     range,
@@ -1093,12 +1066,13 @@ mod tests {
     use super::super::location::strip_ranges::StripRanges;
     use super::*;
     use crate::selection;
+    use crate::sources::connect::json_selection::helpers::span_is_all_spaces_or_comments;
 
     #[test]
     fn test_identifier() {
         fn check(input: &str, expected_name: &str) {
             let (remainder, name) = parse_identifier(Span::new(input)).unwrap();
-            assert_eq!(*remainder.fragment(), "");
+            assert!(span_is_all_spaces_or_comments(remainder));
             assert_eq!(name.node(), expected_name);
         }
 
@@ -1129,7 +1103,7 @@ mod tests {
     fn test_string_literal() {
         fn check(input: &str, expected: &str) {
             let (remainder, lit) = parse_string_literal(Span::new(input)).unwrap();
-            assert_eq!(*remainder.fragment(), "");
+            assert!(span_is_all_spaces_or_comments(remainder));
             assert_eq!(lit.node(), expected);
         }
         check("'hello world'", "hello world");
@@ -1143,7 +1117,7 @@ mod tests {
     fn test_key() {
         fn check(input: &str, expected: &Key) {
             let (remainder, key) = Key::parse(Span::new(input)).unwrap();
-            assert_eq!(*remainder.fragment(), "");
+            assert!(span_is_all_spaces_or_comments(remainder));
             assert_eq!(key.node(), expected);
         }
 
@@ -1158,7 +1132,7 @@ mod tests {
     fn test_alias() {
         fn check(input: &str, alias: &str) {
             let (remainder, parsed) = Alias::parse(Span::new(input)).unwrap();
-            assert_eq!(*remainder.fragment(), "");
+            assert!(span_is_all_spaces_or_comments(remainder));
             assert_eq!(parsed.name(), alias);
         }
 
@@ -1173,7 +1147,7 @@ mod tests {
     fn test_named_selection() {
         fn assert_result_and_name(input: &str, expected: NamedSelection, name: &str) {
             let (remainder, selection) = NamedSelection::parse(Span::new(input)).unwrap();
-            assert_eq!(*remainder.fragment(), "");
+            assert!(span_is_all_spaces_or_comments(remainder));
             let selection = selection.strip_ranges();
             assert_eq!(selection.node(), &expected);
             assert_eq!(selection.node().name(), name);
@@ -1586,7 +1560,7 @@ mod tests {
 
     fn check_path_selection(input: &str, expected: PathSelection) {
         let (remainder, path_selection) = PathSelection::parse(Span::new(input)).unwrap();
-        assert_eq!(*remainder.fragment(), "");
+        assert!(span_is_all_spaces_or_comments(remainder));
         assert_eq!(&path_selection.strip_ranges(), &expected);
         assert_eq!(
             selection!(input).strip_ranges(),
@@ -2397,7 +2371,7 @@ mod tests {
     fn test_subselection() {
         fn check_parsed(input: &str, expected: SubSelection) {
             let (remainder, parsed) = SubSelection::parse(Span::new(input)).unwrap();
-            assert_eq!(*remainder.fragment(), "");
+            assert!(span_is_all_spaces_or_comments(remainder));
             assert_eq!(parsed.strip_ranges(), expected);
         }
 
@@ -2480,7 +2454,7 @@ mod tests {
     fn test_star_selection() {
         fn check_parsed(input: &str, expected: StarSelection) {
             let (remainder, parsed) = StarSelection::parse(Span::new(input)).unwrap();
-            assert_eq!(*remainder.fragment(), "");
+            assert!(span_is_all_spaces_or_comments(remainder));
             assert_eq!(parsed.strip_ranges(), expected);
         }
 
@@ -2712,6 +2686,10 @@ mod tests {
     fn test_ranged_locations() {
         fn check(input: &str, expected: JSONSelection) {
             let (remainder, parsed) = JSONSelection::parse(input).unwrap();
+            // We can't (and don't want to) use span_is_all_spaces_or_comments
+            // here because remainder is a &str not a Span, and
+            // JSONSelection::parse is responsible for consuming the entire
+            // string when possible (see all_consuming).
             assert_eq!(remainder, "");
             assert_eq!(parsed, expected);
         }
@@ -2782,7 +2760,7 @@ mod tests {
                                 WithRange::new(
                                     PathList::Key(
                                         WithRange::new(Key::field("id"), Some(14..16)),
-                                        WithRange::new(PathList::Empty, None),
+                                        WithRange::new(PathList::Empty, Some(16..16)),
                                     ),
                                     Some(13..16),
                                 ),
@@ -2807,7 +2785,7 @@ mod tests {
                                 WithRange::new(
                                     PathList::Key(
                                         WithRange::new(Key::field("id"), Some(19..21)),
-                                        WithRange::new(PathList::Empty, None),
+                                        WithRange::new(PathList::Empty, Some(21..21)),
                                     ),
                                     Some(17..21),
                                 ),

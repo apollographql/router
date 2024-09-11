@@ -282,7 +282,9 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
                                 },
                                 WithRange {
                                     node: Empty,
-                                    range: None,
+                                    range: Some(
+                                        7..7,
+                                    ),
                                 },
                             ),
                             range: Some(

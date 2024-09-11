@@ -523,7 +523,9 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                                             },
                                             WithRange {
                                                 node: Empty,
-                                                range: None,
+                                                range: Some(
+                                                    17..17,
+                                                ),
                                             },
                                         ),
                                         range: Some(
@@ -633,7 +635,9 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                                                     },
                                                     WithRange {
                                                         node: Empty,
-                                                        range: None,
+                                                        range: Some(
+                                                            12..12,
+                                                        ),
                                                     },
                                                 ),
                                                 range: Some(
@@ -779,7 +783,9 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                                                     },
                                                     WithRange {
                                                         node: Empty,
-                                                        range: None,
+                                                        range: Some(
+                                                            12..12,
+                                                        ),
                                                     },
                                                 ),
                                                 range: Some(
@@ -852,7 +858,9 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                                             },
                                             WithRange {
                                                 node: Empty,
-                                                range: None,
+                                                range: Some(
+                                                    17..17,
+                                                ),
                                             },
                                         ),
                                         range: Some(

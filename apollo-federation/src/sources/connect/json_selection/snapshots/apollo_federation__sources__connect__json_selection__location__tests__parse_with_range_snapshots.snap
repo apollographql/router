@@ -204,7 +204,9 @@ Named(
                                                     ),
                                                     WithRange {
                                                         node: Empty,
-                                                        range: None,
+                                                        range: Some(
+                                                            182..182,
+                                                        ),
                                                     },
                                                 ),
                                                 range: Some(
@@ -275,7 +277,9 @@ Named(
                                                                                                 },
                                                                                                 WithRange {
                                                                                                     node: Empty,
-                                                                                                    range: None,
+                                                                                                    range: Some(
+                                                                                                        225..225,
+                                                                                                    ),
                                                                                                 },
                                                                                             ),
                                                                                             range: Some(
@@ -302,7 +306,9 @@ Named(
                                                     ),
                                                     WithRange {
                                                         node: Empty,
-                                                        range: None,
+                                                        range: Some(
+                                                            230..230,
+                                                        ),
                                                     },
                                                 ),
                                                 range: Some(
@@ -410,7 +416,9 @@ Named(
                                                     },
                                                     WithRange {
                                                         node: Empty,
-                                                        range: None,
+                                                        range: Some(
+                                                            288..288,
+                                                        ),
                                                     },
                                                 ),
                                                 range: Some(

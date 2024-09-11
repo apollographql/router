@@ -90,7 +90,9 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ne
                         },
                         WithRange {
                             node: Empty,
-                            range: None,
+                            range: Some(
+                                1..1,
+                            ),
                         },
                     ),
                     range: Some(

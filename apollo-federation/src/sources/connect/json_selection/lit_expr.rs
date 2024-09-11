@@ -65,14 +65,13 @@ impl LitExpr {
                     WithRange::new(Self::Path(p), range)
                 }),
             )),
-            spaces_or_comments,
         ))(input)
-        .map(|(input, (_, value, _))| (input, value))
+        .map(|(input, (_, value))| (input, value))
     }
 
     // LitNumber ::= "-"? ([0-9]+ ("." [0-9]*)? | "." [0-9]+)
     fn parse_number(input: Span) -> IResult<Span, WithRange<Self>> {
-        let (suffix, (_, neg, _, num, _)) = tuple((
+        let (suffix, (_, neg, _, num)) = tuple((
             spaces_or_comments,
             opt(ranged_span("-")),
             spaces_or_comments,
@@ -137,7 +136,6 @@ impl LitExpr {
                     },
                 ),
             )),
-            spaces_or_comments,
         ))(input)?;
 
         let mut number = String::new();
@@ -166,8 +164,11 @@ impl LitExpr {
             map(
                 opt(tuple((
                     Self::parse_property,
-                    many0(preceded(char(','), Self::parse_property)),
-                    opt(char(',')),
+                    many0(preceded(
+                        tuple((spaces_or_comments, char(','))),
+                        Self::parse_property,
+                    )),
+                    opt(tuple((spaces_or_comments, char(',')))),
                 ))),
                 |properties| {
                     let mut output = IndexMap::default();
@@ -182,9 +183,8 @@ impl LitExpr {
             ),
             spaces_or_comments,
             ranged_span("}"),
-            spaces_or_comments,
         ))(input)
-        .map(|(input, (_, open_brace, _, output, _, close_brace, _))| {
+        .map(|(input, (_, open_brace, _, output, _, close_brace))| {
             let range = merge_ranges(open_brace.range(), close_brace.range());
             (input, WithRange::new(output, range))
         })
@@ -192,8 +192,8 @@ impl LitExpr {
 
     // LitProperty ::= Key ":" LitExpr
     fn parse_property(input: Span) -> IResult<Span, (WithRange<Key>, WithRange<Self>)> {
-        tuple((Key::parse, char(':'), Self::parse))(input)
-            .map(|(input, (key, _, value))| (input, (key, value)))
+        tuple((Key::parse, spaces_or_comments, char(':'), Self::parse))(input)
+            .map(|(input, (key, _, _colon, value))| (input, (key, value)))
     }
 
     // LitArray ::= "[" (LitExpr ("," LitExpr)* ","?)? "]"
@@ -205,8 +205,11 @@ impl LitExpr {
             map(
                 opt(tuple((
                     Self::parse,
-                    many0(preceded(char(','), Self::parse)),
-                    opt(char(',')),
+                    many0(preceded(
+                        tuple((spaces_or_comments, char(','))),
+                        Self::parse,
+                    )),
+                    opt(tuple((spaces_or_comments, char(',')))),
                 ))),
                 |elements| {
                     let mut output = vec![];
@@ -219,14 +222,11 @@ impl LitExpr {
             ),
             spaces_or_comments,
             ranged_span("]"),
-            spaces_or_comments,
         ))(input)
-        .map(
-            |(input, (_, open_bracket, _, output, _, close_bracket, _))| {
-                let range = merge_ranges(open_bracket.range(), close_bracket.range());
-                (input, WithRange::new(output, range))
-            },
-        )
+        .map(|(input, (_, open_bracket, _, output, _, close_bracket))| {
+            let range = merge_ranges(open_bracket.range(), close_bracket.range());
+            (input, WithRange::new(output, range))
+        })
     }
 
     pub(super) fn into_with_range(self) -> WithRange<Self> {
@@ -269,12 +269,13 @@ mod tests {
     use super::super::known_var::KnownVariable;
     use super::super::location::strip_ranges::StripRanges;
     use super::*;
+    use crate::sources::connect::json_selection::helpers::span_is_all_spaces_or_comments;
     use crate::sources::connect::json_selection::PathList;
 
     fn check_parse(input: &str, expected: LitExpr) {
         match LitExpr::parse(Span::new(input)) {
             Ok((remainder, parsed)) => {
-                assert_eq!(*remainder.fragment(), "");
+                assert!(span_is_all_spaces_or_comments(remainder));
                 assert_eq!(parsed.strip_ranges(), WithRange::new(expected, None));
             }
             Err(e) => panic!("Failed to parse '{}': {:?}", input, e),

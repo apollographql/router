@@ -695,7 +695,9 @@ mod tests {
                                     },
                                     WithRange {
                                         node: Empty,
-                                        range: None,
+                                        range: Some(
+                                            1..1,
+                                        ),
                                     },
                                 ),
                                 range: Some(
@@ -730,7 +732,9 @@ mod tests {
                                     },
                                     WithRange {
                                         node: Empty,
-                                        range: None,
+                                        range: Some(
+                                            1..1,
+                                        ),
                                     },
                                 ),
                                 range: Some(
@@ -855,7 +859,9 @@ mod tests {
                                     },
                                     WithRange {
                                         node: Empty,
-                                        range: None,
+                                        range: Some(
+                                            5..5,
+                                        ),
                                     },
                                 ),
                                 range: Some(
@@ -906,7 +912,9 @@ mod tests {
                                     },
                                     WithRange {
                                         node: Empty,
-                                        range: None,
+                                        range: Some(
+                                            5..5,
+                                        ),
                                     },
                                 ),
                                 range: Some(
@@ -2007,7 +2015,9 @@ mod tests {
                                     },
                                     WithRange {
                                         node: Empty,
-                                        range: None,
+                                        range: Some(
+                                            5..5,
+                                        ),
                                     },
                                 ),
                                 range: Some(

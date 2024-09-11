@@ -60,6 +60,13 @@ pub fn spaces_or_comments(input: Span) -> IResult<Span, WithRange<&str>> {
     }
 }
 
+pub fn span_is_all_spaces_or_comments(input: Span) -> bool {
+    match spaces_or_comments(input) {
+        Ok((remainder, _)) => remainder.fragment().is_empty(),
+        _ => false,
+    }
+}
+
 pub fn json_type_name(v: &JSON) -> &str {
     match v {
         JSON::Array(_) => "array",
