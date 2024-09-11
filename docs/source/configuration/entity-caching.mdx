@@ -252,7 +252,7 @@ The `count` field indicates the number of keys that were removed from Redis.
 
 #### Invalidation through subgraph response extensions
 
-A subgraph can return an `invalidation` array with invalidation requests in its response's `extensions` field.
+A subgraph can return an `invalidation` array with invalidation requests in its response's `extensions` field. This can be used to invalidate entries in response to a mutation.
 
 ```json
 {
@@ -282,7 +282,7 @@ Invalidation requests are also reported under the following spans:
 - `cache.invalidation.batch` - span covering the processing of a list of invalidation requests. It has a label `origin` that can be either `endpoint` or `extensions`.
 - `cache.invalidation.request` - span covering the processing of a single invalidation request.
 
-### Failure cases
+#### Failure cases
 
 Entity caching will greatly reduce traffic to subgraphs. Should there be an availability issue with a Redis cache, this could cause traffic to subgraphs to increase to a level where infrastructure becomes overwhelmed. To avoid such issues, the router should be configured with [rate limiting for subgraph requests](/router/configuration/traffic-shaping/#rate-limiting-1) to avoid overwhelming the subgraphs. It could also be paired with [subgraph query deduplication](/router/configuration/traffic-shaping/#query-deduplication) to further reduce traffic.
 
