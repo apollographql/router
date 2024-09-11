@@ -21,6 +21,9 @@ use super::coordinates::field_with_connect_directive_entity_true_coordinate;
 use super::extended_type::ObjectCategory;
 use super::Code;
 use super::Message;
+use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
+use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_RESOLVABLE_ARGUMENT_NAME;
 use crate::sources::connect::expand::visitors::FieldVisitor;
 use crate::sources::connect::expand::visitors::GroupVisitor;
 use crate::sources::connect::spec::schema::CONNECT_ENTITY_ARGUMENT_NAME;
@@ -104,9 +107,20 @@ pub(super) fn validate_entity_arg(
                     let key_fields = object_type
                         .directives
                         .iter()
-                        .filter(|directive| directive.name == "key")
+                        .filter(|directive| directive.name == FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC)
+                        .filter(|directive| {
+                            directive
+                                .arguments
+                                .iter()
+                                .find(|arg| arg.name == FEDERATION_RESOLVABLE_ARGUMENT_NAME)
+                                .and_then(|arg| arg.value.to_bool())
+                                .unwrap_or(true)
+                        })
                         .filter_map(|directive| {
-                            directive.arguments.iter().find(|arg| arg.name == "fields")
+                            directive
+                                .arguments
+                                .iter()
+                                .find(|arg| arg.name == FEDERATION_FIELDS_ARGUMENT_NAME)
                         })
                         .map(|fields| &*fields.value)
                         .filter_map(|key_fields| key_fields.as_str())
