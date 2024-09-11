@@ -122,7 +122,7 @@ fn validate_value(
     http::HeaderValue::try_from(str_value)
         .map_err(|_| Message {
             code: Code::InvalidHttpHeaderValue,
-            message: format!("The value `{value}` at {coordinate} is an invalid HTTP header",),
+            message: format!("The value `{value}` at {coordinate} is an invalid HTTP header"),
             locations: value.line_column_range(source_map).into_iter().collect(),
         })
         .err()

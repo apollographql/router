@@ -25,7 +25,7 @@ pub(crate) fn validate_template(
         URLTemplate::from_str(str_value).map_err(|url_template::Error { message, location }| {
             Message {
                 code: Code::InvalidUrl,
-                message: format!("{coordinate} must be a valid URL template. {message}",),
+                message: format!("{coordinate} must be a valid URL template. {message}"),
                 locations: select_substring_location(
                     value.line_column_range(sources),
                     str_value,

@@ -457,11 +457,11 @@ mod test_parse {
     fn test_path_list() {
         assert_debug_snapshot!(URLTemplate::from_str("/abc"));
 
-        assert_debug_snapshot!(URLTemplate::from_str("/abc/def"),);
+        assert_debug_snapshot!(URLTemplate::from_str("/abc/def"));
 
-        assert_debug_snapshot!(URLTemplate::from_str("/abc/{$args.def}"),);
+        assert_debug_snapshot!(URLTemplate::from_str("/abc/{$args.def}"));
 
-        assert_debug_snapshot!(URLTemplate::from_str("/abc/{$this.def.thing}/ghi"),);
+        assert_debug_snapshot!(URLTemplate::from_str("/abc/{$this.def.thing}/ghi"));
     }
 
     #[test]

@@ -225,7 +225,7 @@ fn validate_field(
         else {
             errors.push(Message {
                 code: Code::GraphQLError,
-                message: format!("{coordinate} must have a `{HTTP_ARGUMENT_NAME}` argument.",),
+                message: format!("{coordinate} must have a `{HTTP_ARGUMENT_NAME}` argument."),
                 locations: connect_directive
                     .line_column_range(source_map)
                     .into_iter()

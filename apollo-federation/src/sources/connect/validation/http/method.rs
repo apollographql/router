@@ -35,7 +35,7 @@ pub(crate) fn validate<'arg>(
     let Some(method) = methods.next() else {
         return Err(Message {
             code: Code::MissingHttpMethod,
-            message: format!("{coordinate} must specify an HTTP method.",),
+            message: format!("{coordinate} must specify an HTTP method."),
             locations: http_arg_node
                 .line_column_range(source_map)
                 .into_iter()
@@ -52,7 +52,7 @@ pub(crate) fn validate<'arg>(
             .collect();
         return Err(Message {
             code: Code::MultipleHttpMethods,
-            message: format!("{coordinate} cannot specify more than one HTTP method.",),
+            message: format!("{coordinate} cannot specify more than one HTTP method."),
             locations,
         });
     }
