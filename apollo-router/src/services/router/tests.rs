@@ -186,7 +186,7 @@ async fn it_fails_on_no_query() {
 
 #[tokio::test]
 async fn test_http_max_request_bytes() {
-    /// Size of the JSON serialization of the request created by `fn canned_new`
+    /// Size of the JSON serialization of the request created by `fn canned_new`
     /// in `apollo-router/src/services/supergraph.rs`
     const CANNED_REQUEST_LEN: usize = 391;
 

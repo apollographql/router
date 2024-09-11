@@ -1,0 +1,48 @@
+---
+source: apollo-router/src/plugins/authorization/authenticated.rs
+expression: first_response
+---
+{
+  "data": {
+    "__schema": {
+      "types": [
+        {
+          "name": "Query"
+        },
+        {
+          "name": "T"
+        },
+        {
+          "name": "String"
+        },
+        {
+          "name": "Boolean"
+        },
+        {
+          "name": "__Schema"
+        },
+        {
+          "name": "__Type"
+        },
+        {
+          "name": "__TypeKind"
+        },
+        {
+          "name": "__Field"
+        },
+        {
+          "name": "__InputValue"
+        },
+        {
+          "name": "__EnumValue"
+        },
+        {
+          "name": "__Directive"
+        },
+        {
+          "name": "__DirectiveLocation"
+        }
+      ]
+    }
+  }
+}

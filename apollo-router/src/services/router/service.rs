@@ -10,6 +10,7 @@ use futures::future::BoxFuture;
 use futures::stream;
 use futures::stream::once;
 use futures::stream::StreamExt;
+use futures::TryFutureExt;
 use http::header::CONTENT_TYPE;
 use http::header::VARY;
 use http::request::Parts;
@@ -86,7 +87,6 @@ pub(crate) struct RouterService {
     apq_layer: APQLayer,
     persisted_query_layer: Arc<PersistedQueryLayer>,
     query_analysis_layer: QueryAnalysisLayer,
-    http_max_request_bytes: usize,
     batching: Batching,
 }
 
@@ -96,7 +96,6 @@ impl RouterService {
         apq_layer: APQLayer,
         persisted_query_layer: Arc<PersistedQueryLayer>,
         query_analysis_layer: QueryAnalysisLayer,
-        http_max_request_bytes: usize,
         batching: Batching,
     ) -> Self {
         RouterService {
@@ -104,7 +103,6 @@ impl RouterService {
             apq_layer,
             persisted_query_layer,
             query_analysis_layer,
-            http_max_request_bytes,
             batching,
         }
     }
@@ -272,57 +270,25 @@ impl RouterService {
             });
         }
 
-        // FIXME: use a try block when available: https://github.com/rust-lang/rust/issues/31436
-        let content_length = (|| {
-            parts
-                .headers
-                .get(http::header::CONTENT_LENGTH)?
-                .to_str()
-                .ok()?
-                .parse()
-                .ok()
-        })();
-        if content_length.unwrap_or(0) > self.http_max_request_bytes {
-            Err(TranslateError {
-                status: StatusCode::PAYLOAD_TOO_LARGE,
-                error: "payload too large for the `http_max_request_bytes` configuration",
-                extension_code: "INVALID_GRAPHQL_REQUEST",
-                extension_details: "payload too large".to_string(),
-            })
-        } else {
-            let body = http_body::Limited::new(body, self.http_max_request_bytes);
-            let bytes = get_body_bytes(body)
-                .instrument(tracing::debug_span!("receive_body"))
-                .await
-                .map_err(|e| {
-                    if e.is::<http_body::LengthLimitError>() {
-                        TranslateError {
-                            status: StatusCode::PAYLOAD_TOO_LARGE,
-                            error:
-                                "payload too large for the `http_max_request_bytes` configuration",
-                            extension_code: "INVALID_GRAPHQL_REQUEST",
-                            extension_details: "payload too large".to_string(),
-                        }
-                    } else {
-                        TranslateError {
-                            status: StatusCode::BAD_REQUEST,
-                            error: "failed to get the request body",
-                            extension_code: "INVALID_GRAPHQL_REQUEST",
-                            extension_details: format!("failed to get the request body: {e}"),
-                        }
-                    }
-                })?;
-
-            let value = serde_json_bytes::Value::from_bytes(bytes).map_err(|e| TranslateError {
+        let bytes = get_body_bytes(body)
+            .instrument(tracing::debug_span!("receive_body"))
+            .await
+            .map_err(|e| TranslateError {
                 status: StatusCode::BAD_REQUEST,
-                error: "failed to deserialize the request body into JSON",
+                error: "failed to get the request body",
                 extension_code: "INVALID_GRAPHQL_REQUEST",
-                extension_details: format!("failed to deserialize the request body into JSON: {e}"),
+                extension_details: format!("failed to get the request body: {e}"),
             })?;
 
-            let request = http::Request::from_parts(parts, value);
-            Ok(JsonRequest { request, context })
-        }
+        let value = serde_json_bytes::Value::from_bytes(bytes).map_err(|e| TranslateError {
+            status: StatusCode::BAD_REQUEST,
+            error: "failed to deserialize the request body into JSON",
+            extension_code: "INVALID_GRAPHQL_REQUEST",
+            extension_details: format!("failed to deserialize the request body into JSON: {e}"),
+        })?;
+
+        let request = http::Request::from_parts(parts, value);
+        Ok(JsonRequest { request, context })
     }
 
     async fn translate_query_request(&self, parts: &Parts) -> Result<Value, TranslateError> {
@@ -530,7 +496,6 @@ pub(crate) struct RouterCreator {
     apq_layer: APQLayer,
     pub(crate) persisted_query_layer: Arc<PersistedQueryLayer>,
     query_analysis_layer: QueryAnalysisLayer,
-    http_max_request_bytes: usize,
     batching: Batching,
 }
 
@@ -580,7 +545,6 @@ impl RouterCreator {
             static_page,
             apq_layer,
             query_analysis_layer,
-            http_max_request_bytes: configuration.limits.http_max_request_bytes,
             persisted_query_layer,
             batching: configuration.batching.clone(),
         })
@@ -599,7 +563,6 @@ impl RouterCreator {
             self.apq_layer.clone(),
             self.persisted_query_layer.clone(),
             self.query_analysis_layer.clone(),
-            self.http_max_request_bytes,
             self.batching.clone(),
         ));
 

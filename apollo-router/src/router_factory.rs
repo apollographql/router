@@ -294,34 +294,20 @@ impl YamlRouterFactory {
     ) -> Result<SupergraphCreator, BoxError> {
         let query_planner_span = tracing::info_span!("query_planner_creation");
         // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-        let bridge_query_planner =
-            match previous_supergraph.as_ref().map(|router| router.planners()) {
-                None => {
-                    BridgeQueryPlannerPool::new(
-                        schema.clone(),
-                        configuration.clone(),
-                        configuration
-                            .supergraph
-                            .query_planning
-                            .experimental_query_planner_parallelism()?,
-                    )
-                    .instrument(query_planner_span)
-                    .await?
-                }
-                Some(planners) => {
-                    BridgeQueryPlannerPool::new_from_planners(
-                        planners,
-                        schema.clone(),
-                        configuration.clone(),
-                        configuration
-                            .supergraph
-                            .query_planning
-                            .experimental_query_planner_parallelism()?,
-                    )
-                    .instrument(query_planner_span)
-                    .await?
-                }
-            };
+        let bridge_query_planner = BridgeQueryPlannerPool::new(
+            previous_supergraph
+                .as_ref()
+                .map(|router| router.js_planners())
+                .unwrap_or_default(),
+            schema.clone(),
+            configuration.clone(),
+            configuration
+                .supergraph
+                .query_planning
+                .experimental_query_planner_parallelism()?,
+        )
+        .instrument(query_planner_span)
+        .await?;
 
         let schema_changed = previous_supergraph
             .map(|supergraph_creator| supergraph_creator.schema().raw_sdl == schema.raw_sdl)
@@ -686,6 +672,7 @@ pub(crate) async fn create_plugins(
             }
         }
     }
+    add_mandatory_apollo_plugin!("limits");
     add_mandatory_apollo_plugin!("traffic_shaping");
     add_optional_apollo_plugin!("forbid_mutations");
     add_optional_apollo_plugin!("subscription");
@@ -695,11 +682,11 @@ pub(crate) async fn create_plugins(
     add_optional_apollo_plugin!("preview_file_uploads");
     add_optional_apollo_plugin!("preview_entity_cache");
     add_mandatory_apollo_plugin!("progressive_override");
+    add_optional_apollo_plugin!("demand_control");
 
     // This relative ordering is documented in `docs/source/customizations/native.mdx`:
     add_optional_apollo_plugin!("rhai");
     add_optional_apollo_plugin!("coprocessor");
-    add_optional_apollo_plugin!("preview_demand_control");
     add_user_plugins!();
 
     // Macros above remove from `apollo_plugin_factories`, so anything left at the end

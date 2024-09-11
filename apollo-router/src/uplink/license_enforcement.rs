@@ -384,11 +384,11 @@ impl LicenseEnforcementReport {
                 .name("Batching support")
                 .build(),
             ConfigurationRestriction::builder()
-                .path("$.preview_demand_control")
+                .path("$.demand_control")
                 .name("Demand control plugin")
                 .build(),
             ConfigurationRestriction::builder()
-                .path("$.telemetry.apollo.experimental_apollo_metrics_reference_mode")
+                .path("$.telemetry.apollo.metrics_reference_mode")
                 .value("extended")
                 .name("Apollo metrics extended references")
                 .build(),

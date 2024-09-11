@@ -5,6 +5,12 @@ description: Subgraph entity caching for GraphOS Router with GraphOS Enterprise.
 minVersion: 1.40.0
 ---
 
+<SummitCallout
+  topic="graph performance"
+  workshopName="Better, faster, stronger: Advanced configurations to boost your router performance"
+  URL="https://reg.summit.graphql.com/flow/apollo/summit24/AttendeePortal/page/catalog/session/1712947098784001VPCx"
+/>
+
 <EnterpriseFeature />
 
 <PreviewFeature />
@@ -205,7 +211,7 @@ telemetry:
       cache: # Cache instruments configuration
         apollo.router.operations.entity.cache: # A counter which counts the number of cache hit and miss for subgraph requests
           attributes:
-            entity.type: true # Include the entity type name. default: false
+            graphql.type.name: true # Include the entity type name. default: false
             subgraph.name: # Custom attributes to include the subgraph name in the metric
               subgraph_name: true
             supergraph.operation.name: # Add custom attribute to display the supergraph operation name
