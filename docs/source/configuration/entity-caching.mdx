@@ -157,6 +157,7 @@ preview_entity_cache:
     # this should only be exposed to internal networks
     listen: "127.0.0.1:3000"
     path: "/invalidation"
+    scan_count: 1000
 
   subgraph:
     all:
@@ -175,6 +176,22 @@ preview_entity_cache:
           # override the shared key for this particular subgraph. If another key is provided, the invalidation requests for this subgraph's entities will not be executed
           shared_key: "czn5qvjylm231m90hu00hgsuayhyhgjv"
 ```
+
+##### `listen`
+
+The address and port to listen on for invalidation requests.
+
+##### `path`
+
+The path to listen on for invalidation requests.
+
+##### `shared_key`
+
+A string that will be used to authenticate invalidation requests.
+
+##### `scan_count`
+
+The number of keys to scan in a single `SCAN` command. This can be used to reduce the number of requests to Redis.
 
 #### Invalidation request format
 
