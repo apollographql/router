@@ -1,0 +1,72 @@
+---
+source: apollo-federation/src/sources/connect/expand/tests/mod.rs
+expression: raw_sdl
+input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/keys.graphql
+---
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY) @join__directive(graphs: [], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1"}) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on ENUM | INPUT_OBJECT | INTERFACE | OBJECT | SCALAR | UNION
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, overrideLabel: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on INTERFACE | OBJECT
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments!) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+enum link__Purpose {
+  """
+  SECURITY features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """EXECUTION features provide metadata necessary for operation execution."""
+  EXECUTION
+}
+
+scalar link__Import
+
+scalar join__FieldSet
+
+scalar join__DirectiveArguments
+
+enum join__Graph {
+  ONE_QUERY_T2_0 @join__graph(name: "one_Query_t2_0", url: "none")
+  ONE_QUERY_T_0 @join__graph(name: "one_Query_t_0", url: "none")
+  ONE_T_R1_0 @join__graph(name: "one_T_r1_0", url: "none")
+  ONE_T_R2_0 @join__graph(name: "one_T_r2_0", url: "none")
+  ONE_T_R3_0 @join__graph(name: "one_T_r3_0", url: "none")
+  ONE_T_R4_0 @join__graph(name: "one_T_r4_0", url: "none")
+  ONE_T_R5_0 @join__graph(name: "one_T_r5_0", url: "none")
+}
+
+type T @join__type(graph: ONE_QUERY_T2_0, key: "id id2") @join__type(graph: ONE_QUERY_T_0, key: "id") @join__type(graph: ONE_T_R1_0, key: "id") @join__type(graph: ONE_T_R2_0, key: "id id2") @join__type(graph: ONE_T_R3_0, key: "id id2") @join__type(graph: ONE_T_R4_0, key: "id") @join__type(graph: ONE_T_R5_0, key: "id id2") {
+  id: ID! @join__field(graph: ONE_QUERY_T2_0) @join__field(graph: ONE_QUERY_T_0) @join__field(graph: ONE_T_R1_0) @join__field(graph: ONE_T_R2_0) @join__field(graph: ONE_T_R3_0) @join__field(graph: ONE_T_R4_0) @join__field(graph: ONE_T_R5_0)
+  id2: ID! @join__field(graph: ONE_QUERY_T2_0) @join__field(graph: ONE_QUERY_T_0) @join__field(graph: ONE_T_R2_0)
+  r1: R @join__field(graph: ONE_T_R1_0)
+  r2: R @join__field(graph: ONE_T_R2_0)
+  r3: R @join__field(graph: ONE_T_R3_0)
+  r4: R @join__field(graph: ONE_T_R4_0)
+  r5: R @join__field(graph: ONE_T_R5_0)
+}
+
+type Query @join__type(graph: ONE_QUERY_T2_0) @join__type(graph: ONE_QUERY_T_0) @join__type(graph: ONE_T_R1_0) @join__type(graph: ONE_T_R2_0) @join__type(graph: ONE_T_R3_0) @join__type(graph: ONE_T_R4_0) @join__type(graph: ONE_T_R5_0) {
+  t2(id: ID!, id2: ID!): T @join__field(graph: ONE_QUERY_T2_0)
+  t(id: ID!): T @join__field(graph: ONE_QUERY_T_0)
+  _: ID @inaccessible @join__field(graph: ONE_T_R1_0) @join__field(graph: ONE_T_R2_0) @join__field(graph: ONE_T_R3_0) @join__field(graph: ONE_T_R4_0) @join__field(graph: ONE_T_R5_0)
+}
+
+type R @join__type(graph: ONE_T_R1_0) @join__type(graph: ONE_T_R2_0) @join__type(graph: ONE_T_R3_0) @join__type(graph: ONE_T_R4_0) @join__type(graph: ONE_T_R5_0) {
+  id: ID! @join__field(graph: ONE_T_R1_0) @join__field(graph: ONE_T_R2_0) @join__field(graph: ONE_T_R3_0) @join__field(graph: ONE_T_R4_0) @join__field(graph: ONE_T_R5_0)
+  id2: ID! @join__field(graph: ONE_T_R1_0) @join__field(graph: ONE_T_R2_0) @join__field(graph: ONE_T_R3_0) @join__field(graph: ONE_T_R4_0) @join__field(graph: ONE_T_R5_0)
+}
