@@ -6,7 +6,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_e
 [
     Message {
         code: EntityResolverArgumentMismatch,
-        message: "`Query.product` with `@connect(entity: true)` has invalid arguments. Field `id` on `CountryInput` does not exist on `Country`.",
+        message: "`Query.product` with `@connect(entity: true)` has invalid arguments. Field `id` on `CountryInput` does not have a matching field `id` on `Country`.",
         locations: [
             LineColumn {
                 line: 49,

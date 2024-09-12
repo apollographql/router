@@ -396,7 +396,7 @@ impl<'schema> ArgumentVisitor<'schema> {
                     Some(Err(Message {
                         code: Code::EntityResolverArgumentMismatch,
                         message: format!(
-                            "{coordinate} has invalid arguments. Field `{name}` on `{input_type}` does not exist on `{entity_type}`.",
+                            "{coordinate} has invalid arguments. Field `{name}` on `{input_type}` does not have a matching field `{name}` on `{entity_type}`.",
                             coordinate = field_with_connect_directive_entity_true_coordinate(
                                 self.connect_directive_name,
                                 self.entity_arg_value.as_ref(),
