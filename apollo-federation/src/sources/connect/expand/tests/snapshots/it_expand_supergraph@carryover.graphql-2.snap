@@ -57,46 +57,105 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                 selections: [
                     Field(
                         None,
-                        "id",
+                        WithRange {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                0..2,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "tagged",
+                        WithRange {
+                            node: Field(
+                                "tagged",
+                            ),
+                            range: Some(
+                                3..9,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "hidden",
+                        WithRange {
+                            node: Field(
+                                "hidden",
+                            ),
+                            range: Some(
+                                10..16,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "custom",
+                        WithRange {
+                            node: Field(
+                                "custom",
+                            ),
+                            range: Some(
+                                17..23,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "authenticated",
+                        WithRange {
+                            node: Field(
+                                "authenticated",
+                            ),
+                            range: Some(
+                                24..37,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "requiresScopes",
+                        WithRange {
+                            node: Field(
+                                "requiresScopes",
+                            ),
+                            range: Some(
+                                38..52,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "policy",
+                        WithRange {
+                            node: Field(
+                                "policy",
+                            ),
+                            range: Some(
+                                53..59,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "overridden",
+                        WithRange {
+                            node: Field(
+                                "overridden",
+                            ),
+                            range: Some(
+                                60..70,
+                            ),
+                        },
                         None,
                     ),
                 ],
                 star: None,
+                range: Some(
+                    0..70,
+                ),
             },
         ),
         config: None,
@@ -167,46 +226,105 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                 selections: [
                     Field(
                         None,
-                        "id",
+                        WithRange {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                0..2,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "tagged",
+                        WithRange {
+                            node: Field(
+                                "tagged",
+                            ),
+                            range: Some(
+                                3..9,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "hidden",
+                        WithRange {
+                            node: Field(
+                                "hidden",
+                            ),
+                            range: Some(
+                                10..16,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "custom",
+                        WithRange {
+                            node: Field(
+                                "custom",
+                            ),
+                            range: Some(
+                                17..23,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "authenticated",
+                        WithRange {
+                            node: Field(
+                                "authenticated",
+                            ),
+                            range: Some(
+                                24..37,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "requiresScopes",
+                        WithRange {
+                            node: Field(
+                                "requiresScopes",
+                            ),
+                            range: Some(
+                                38..52,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "policy",
+                        WithRange {
+                            node: Field(
+                                "policy",
+                            ),
+                            range: Some(
+                                53..59,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "overridden",
+                        WithRange {
+                            node: Field(
+                                "overridden",
+                            ),
+                            range: Some(
+                                60..70,
+                            ),
+                        },
                         None,
                     ),
                 ],
                 star: None,
+                range: Some(
+                    0..70,
+                ),
             },
         ),
         config: None,
@@ -286,11 +404,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                 selections: [
                     Field(
                         None,
-                        "id",
+                        WithRange {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                0..2,
+                            ),
+                        },
                         None,
                     ),
                 ],
                 star: None,
+                range: Some(
+                    0..2,
+                ),
             },
         ),
         config: None,

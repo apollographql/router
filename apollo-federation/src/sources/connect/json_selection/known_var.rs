@@ -1,3 +1,5 @@
+use super::location::WithRange;
+
 #[derive(PartialEq, Eq, Clone, Hash)]
 pub(crate) enum KnownVariable {
     This,
@@ -27,6 +29,10 @@ impl KnownVariable {
             Self::Dollar => "$",
             Self::AtSign => "@",
         }
+    }
+
+    pub(super) fn into_with_range(self) -> WithRange<Self> {
+        WithRange::new(self, None)
     }
 }
 

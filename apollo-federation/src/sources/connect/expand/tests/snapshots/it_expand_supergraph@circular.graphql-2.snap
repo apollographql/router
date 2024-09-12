@@ -68,11 +68,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ci
                 selections: [
                     Field(
                         None,
-                        "id",
+                        WithRange {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                0..2,
+                            ),
+                        },
                         None,
                     ),
                 ],
                 star: None,
+                range: Some(
+                    0..2,
+                ),
             },
         ),
         config: None,
@@ -150,11 +160,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ci
                 selections: [
                     Field(
                         None,
-                        "id",
+                        WithRange {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                0..2,
+                            ),
+                        },
                         None,
                     ),
                 ],
                 star: None,
+                range: Some(
+                    0..2,
+                ),
             },
         ),
         config: None,

@@ -9,6 +9,9 @@ use serde_json_bytes::Value as JSON;
 use crate::sources::connect::json_selection::helpers::json_type_name;
 use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::lit_expr::LitExpr;
+use crate::sources::connect::json_selection::location::merge_ranges;
+use crate::sources::connect::json_selection::location::Ranged;
+use crate::sources::connect::json_selection::location::WithRange;
 use crate::sources::connect::json_selection::ApplyToError;
 use crate::sources::connect::json_selection::ApplyToInternal;
 use crate::sources::connect::json_selection::MethodArgs;
@@ -16,18 +19,22 @@ use crate::sources::connect::json_selection::PathList;
 use crate::sources::connect::json_selection::VarsWithPathsMap;
 
 pub(super) fn typeof_method(
-    method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &PathList,
+    tail: &WithRange<PathList>,
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
-    if let Some(MethodArgs(_)) = method_args {
+    if method_args.is_some() {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} does not take any arguments", method_name),
+            format!(
+                "Method ->{} does not take any arguments",
+                method_name.as_ref()
+            ),
             input_path.to_vec(),
+            method_name.range(),
         ));
         None
     } else {
@@ -37,15 +44,16 @@ pub(super) fn typeof_method(
 }
 
 pub(super) fn eq_method(
-    method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &PathList,
+    tail: &WithRange<PathList>,
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
-    if let Some(MethodArgs(args)) = method_args {
+    if let Some(method_args) = method_args {
+        let args = &method_args.args;
         if args.len() == 1 {
             let matches = if let Some(value) = args[0].apply_to_path(data, vars, input_path, errors)
             {
@@ -57,8 +65,12 @@ pub(super) fn eq_method(
         }
     }
     errors.insert(ApplyToError::new(
-        format!("Method ->{} requires exactly one argument", method_name),
+        format!(
+            "Method ->{} requires exactly one argument",
+            method_name.as_ref()
+        ),
         input_path.to_vec(),
+        method_name.range(),
     ));
     None
 }
@@ -69,17 +81,17 @@ pub(super) fn eq_method(
 // providing a final catch-all case easy, since the last
 // pair can be [true, <default>].
 pub(super) fn match_if_method(
-    method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &PathList,
+    tail: &WithRange<PathList>,
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
-    if let Some(MethodArgs(args)) = method_args {
-        for pair in args {
-            if let LitExpr::Array(pair) = pair {
+    if let Some(method_args) = method_args {
+        for pair in &method_args.args {
+            if let LitExpr::Array(pair) = pair.as_ref() {
                 if pair.len() == 2 {
                     if let Some(JSON::Bool(true)) =
                         pair[0].apply_to_path(data, vars, input_path, errors)
@@ -97,41 +109,50 @@ pub(super) fn match_if_method(
     errors.insert(ApplyToError::new(
         format!(
             "Method ->{} did not match any [condition, value] pair",
-            method_name
+            method_name.as_ref(),
         ),
         input_path.to_vec(),
+        merge_ranges(
+            method_name.range(),
+            method_args.and_then(|args| args.range()),
+        ),
     ));
     None
 }
 
 pub(super) fn arithmetic_method(
-    method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
     op: impl Fn(&Number, &Number) -> Option<Number>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
-    if let Some(MethodArgs(args)) = method_args {
+    if let Some(method_args) = method_args {
         if let JSON::Number(result) = data {
             let mut result = result.clone();
-            for arg in args {
+            for arg in &method_args.args {
                 let value_opt = arg.apply_to_path(data, vars, input_path, errors);
                 if let Some(JSON::Number(n)) = value_opt {
                     if let Some(new_result) = op(&result, &n) {
                         result = new_result;
                     } else {
                         errors.insert(ApplyToError::new(
-                            format!("Method ->{} failed on argument {}", method_name, n),
+                            format!("Method ->{} failed on argument {}", method_name.as_ref(), n),
                             input_path.to_vec(),
+                            arg.range(),
                         ));
                         return None;
                     }
                 } else {
                     errors.insert(ApplyToError::new(
-                        format!("Method ->{} requires numeric arguments", method_name),
+                        format!(
+                            "Method ->{} requires numeric arguments",
+                            method_name.as_ref()
+                        ),
                         input_path.to_vec(),
+                        arg.range(),
                     ));
                     return None;
                 }
@@ -139,15 +160,23 @@ pub(super) fn arithmetic_method(
             Some(JSON::Number(result))
         } else {
             errors.insert(ApplyToError::new(
-                format!("Method ->{} requires numeric arguments", method_name),
+                format!(
+                    "Method ->{} requires numeric arguments",
+                    method_name.as_ref()
+                ),
                 input_path.to_vec(),
+                method_name.range(),
             ));
             None
         }
     } else {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} requires at least one argument", method_name),
+            format!(
+                "Method ->{} requires at least one argument",
+                method_name.as_ref()
+            ),
             input_path.to_vec(),
+            method_name.range(),
         ));
         None
     }
@@ -175,12 +204,12 @@ infix_math_op!(rem_op, %);
 macro_rules! infix_math_method {
     ($name:ident, $op:ident) => {
         pub(super) fn $name(
-            method_name: &str,
-            method_args: &Option<MethodArgs>,
+            method_name: &WithRange<String>,
+            method_args: Option<&MethodArgs>,
             data: &JSON,
             vars: &VarsWithPathsMap,
             input_path: &InputPath<JSON>,
-            tail: &PathList,
+            tail: &WithRange<PathList>,
             errors: &mut IndexSet<ApplyToError>,
         ) -> Option<JSON> {
             if let Some(result) = arithmetic_method(
@@ -206,16 +235,16 @@ infix_math_method!(div_method, div_op);
 infix_math_method!(mod_method, rem_op);
 
 pub(super) fn has_method(
-    method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &PathList,
+    tail: &WithRange<PathList>,
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
-    if let Some(MethodArgs(args)) = method_args {
-        match args.first() {
+    if let Some(method_args) = method_args {
+        match method_args.args.first() {
             Some(arg) => match &arg.apply_to_path(data, vars, input_path, errors) {
                 Some(json_index @ JSON::Number(n)) => match (data, n.as_i64()) {
                     (JSON::Array(array), Some(index)) => {
@@ -271,16 +300,18 @@ pub(super) fn has_method(
             },
             None => {
                 errors.insert(ApplyToError::new(
-                    format!("Method ->{} requires an argument", method_name),
+                    format!("Method ->{} requires an argument", method_name.as_ref()),
                     input_path.to_vec(),
+                    method_name.range(),
                 ));
                 None
             }
         }
     } else {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} requires an argument", method_name),
+            format!("Method ->{} requires an argument", method_name.as_ref()),
             input_path.to_vec(),
+            method_name.range(),
         ));
         None
     }
@@ -289,16 +320,16 @@ pub(super) fn has_method(
 // Returns the array or string element at the given index, as Option<JSON>. If
 // the index is out of bounds, returns None and reports an error.
 pub(super) fn get_method(
-    method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &PathList,
+    tail: &WithRange<PathList>,
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
-    if let Some(MethodArgs(args)) = method_args {
-        if let Some(index_literal) = args.first() {
+    if let Some(method_args) = method_args {
+        if let Some(index_literal) = method_args.args.first() {
             match &index_literal.apply_to_path(data, vars, input_path, errors) {
                 Some(JSON::Number(n)) => match (data, n.as_i64()) {
                     (JSON::Array(array), Some(i)) => {
@@ -312,10 +343,12 @@ pub(super) fn get_method(
                         } else {
                             errors.insert(ApplyToError::new(
                                 format!(
-                                    "Method ->{}({}) array index out of bounds",
-                                    method_name, i,
+                                    "Method ->{}({}) index out of bounds",
+                                    method_name.as_ref(),
+                                    i,
                                 ),
                                 input_path.to_vec(),
+                                index_literal.range(),
                             ));
                             None
                         }
@@ -337,18 +370,24 @@ pub(super) fn get_method(
                         } else {
                             errors.insert(ApplyToError::new(
                                 format!(
-                                    "Method ->{}({}) string index out of bounds",
-                                    method_name, i,
+                                    "Method ->{}({}) index out of bounds",
+                                    method_name.as_ref(),
+                                    i,
                                 ),
                                 input_path.to_vec(),
+                                index_literal.range(),
                             ));
                             None
                         }
                     }
                     (_, None) => {
                         errors.insert(ApplyToError::new(
-                            format!("Method ->{} requires an integer index", method_name),
+                            format!(
+                                "Method ->{} requires an integer index",
+                                method_name.as_ref()
+                            ),
                             input_path.to_vec(),
+                            index_literal.range(),
                         ));
                         None
                     }
@@ -356,10 +395,11 @@ pub(super) fn get_method(
                         errors.insert(ApplyToError::new(
                             format!(
                                 "Method ->{} requires an array or string input, not {}",
-                                method_name,
+                                method_name.as_ref(),
                                 json_type_name(data),
                             ),
                             input_path.to_vec(),
+                            method_name.range(),
                         ));
                         None
                     }
@@ -370,16 +410,26 @@ pub(super) fn get_method(
                             tail.apply_to_path(value, vars, input_path, errors)
                         } else {
                             errors.insert(ApplyToError::new(
-                                format!("Method ->{}({}) object key not found", method_name, key),
+                                format!(
+                                    "Method ->{}({}) object key not found",
+                                    method_name.as_ref(),
+                                    key
+                                ),
                                 input_path.to_vec(),
+                                index_literal.range(),
                             ));
                             None
                         }
                     }
                     _ => {
                         errors.insert(ApplyToError::new(
-                            format!("Method ->{}({}) requires an object input", method_name, key),
+                            format!(
+                                "Method ->{}({}) requires an object input",
+                                method_name.as_ref(),
+                                key
+                            ),
                             input_path.to_vec(),
+                            merge_ranges(method_name.range(), method_args.range()),
                         ));
                         None
                     }
@@ -388,49 +438,61 @@ pub(super) fn get_method(
                     errors.insert(ApplyToError::new(
                         format!(
                             "Method ->{}({}) requires an integer or string argument",
-                            method_name, value,
+                            method_name.as_ref(),
+                            value,
                         ),
                         input_path.to_vec(),
+                        index_literal.range(),
                     ));
                     None
                 }
                 None => {
                     errors.insert(ApplyToError::new(
-                        format!("Method ->{} received undefined argument", method_name),
+                        format!(
+                            "Method ->{} received undefined argument",
+                            method_name.as_ref()
+                        ),
                         input_path.to_vec(),
+                        index_literal.range(),
                     ));
                     None
                 }
             }
         } else {
             errors.insert(ApplyToError::new(
-                format!("Method ->{} requires an argument", method_name),
+                format!("Method ->{} requires an argument", method_name.as_ref()),
                 input_path.to_vec(),
+                method_name.range(),
             ));
             None
         }
     } else {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} requires an argument", method_name),
+            format!("Method ->{} requires an argument", method_name.as_ref()),
             input_path.to_vec(),
+            method_name.range(),
         ));
         None
     }
 }
 
 pub(super) fn keys_method(
-    method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &PathList,
+    tail: &WithRange<PathList>,
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
-    if let Some(MethodArgs(_)) = method_args {
+    if method_args.is_some() {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} does not take any arguments", method_name),
+            format!(
+                "Method ->{} does not take any arguments",
+                method_name.as_ref()
+            ),
             input_path.to_vec(),
+            method_name.range(),
         ));
         return None;
     }
@@ -444,10 +506,11 @@ pub(super) fn keys_method(
             errors.insert(ApplyToError::new(
                 format!(
                     "Method ->{} requires an object input, not {}",
-                    method_name,
+                    method_name.as_ref(),
                     json_type_name(data),
                 ),
                 input_path.to_vec(),
+                method_name.range(),
             ));
             None
         }
@@ -455,18 +518,22 @@ pub(super) fn keys_method(
 }
 
 pub(super) fn values_method(
-    method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &PathList,
+    tail: &WithRange<PathList>,
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
-    if let Some(MethodArgs(_)) = method_args {
+    if method_args.is_some() {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} does not take any arguments", method_name),
+            format!(
+                "Method ->{} does not take any arguments",
+                method_name.as_ref()
+            ),
             input_path.to_vec(),
+            method_name.range(),
         ));
         return None;
     }
@@ -480,10 +547,11 @@ pub(super) fn values_method(
             errors.insert(ApplyToError::new(
                 format!(
                     "Method ->{} requires an object input, not {}",
-                    method_name,
+                    method_name.as_ref(),
                     json_type_name(data),
                 ),
                 input_path.to_vec(),
+                method_name.range(),
             ));
             None
         }
@@ -491,18 +559,22 @@ pub(super) fn values_method(
 }
 
 pub(super) fn not_method(
-    method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &PathList,
+    tail: &WithRange<PathList>,
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
     if method_args.is_some() {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} does not take any arguments", method_name),
+            format!(
+                "Method ->{} does not take any arguments",
+                method_name.as_ref()
+            ),
             input_path.to_vec(),
+            method_name.range(),
         ));
         None
     } else {
@@ -521,17 +593,17 @@ fn is_truthy(data: &JSON) -> bool {
 }
 
 pub(super) fn or_method(
-    method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &PathList,
+    tail: &WithRange<PathList>,
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
-    if let Some(MethodArgs(args)) = method_args {
+    if let Some(method_args) = method_args {
         let mut result = is_truthy(data);
-        for arg in args {
+        for arg in &method_args.args {
             if result {
                 break;
             }
@@ -543,25 +615,26 @@ pub(super) fn or_method(
         tail.apply_to_path(&JSON::Bool(result), vars, input_path, errors)
     } else {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} requires arguments", method_name),
+            format!("Method ->{} requires arguments", method_name.as_ref()),
             input_path.to_vec(),
+            method_name.range(),
         ));
         None
     }
 }
 
 pub(super) fn and_method(
-    method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &PathList,
+    tail: &WithRange<PathList>,
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
-    if let Some(MethodArgs(args)) = method_args {
+    if let Some(method_args) = method_args {
         let mut result = is_truthy(data);
-        for arg in args {
+        for arg in &method_args.args {
             if !result {
                 break;
             }
@@ -573,8 +646,9 @@ pub(super) fn and_method(
         tail.apply_to_path(&JSON::Bool(result), vars, input_path, errors)
     } else {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} requires arguments", method_name),
+            format!("Method ->{} requires arguments", method_name.as_ref()),
             input_path.to_vec(),
+            method_name.range(),
         ));
         None
     }

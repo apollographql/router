@@ -80,10 +80,25 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ne
         },
         selection: Path(
             PathSelection {
-                path: Var(
-                    $,
-                    Empty,
-                ),
+                path: WithRange {
+                    node: Var(
+                        WithRange {
+                            node: $,
+                            range: Some(
+                                0..1,
+                            ),
+                        },
+                        WithRange {
+                            node: Empty,
+                            range: Some(
+                                1..1,
+                            ),
+                        },
+                    ),
+                    range: Some(
+                        0..1,
+                    ),
+                },
             },
         ),
         config: None,

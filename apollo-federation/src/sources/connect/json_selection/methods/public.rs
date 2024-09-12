@@ -6,6 +6,9 @@ use serde_json_bytes::Value as JSON;
 use crate::sources::connect::json_selection::helpers::json_type_name;
 use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::lit_expr::LitExpr;
+use crate::sources::connect::json_selection::location::merge_ranges;
+use crate::sources::connect::json_selection::location::Ranged;
+use crate::sources::connect::json_selection::location::WithRange;
 use crate::sources::connect::json_selection::ApplyToError;
 use crate::sources::connect::json_selection::ApplyToInternal;
 use crate::sources::connect::json_selection::MethodArgs;
@@ -13,39 +16,40 @@ use crate::sources::connect::json_selection::PathList;
 use crate::sources::connect::json_selection::VarsWithPathsMap;
 
 pub(super) fn echo_method(
-    method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &PathList,
+    tail: &WithRange<PathList>,
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
-    if let Some(MethodArgs(args)) = method_args {
-        if let Some(arg) = args.first() {
+    if let Some(method_args) = method_args {
+        if let Some(arg) = method_args.args.first() {
             return arg
                 .apply_to_path(data, vars, input_path, errors)
                 .and_then(|value| tail.apply_to_path(&value, vars, input_path, errors));
         }
     }
     errors.insert(ApplyToError::new(
-        format!("Method ->{} requires one argument", method_name),
+        format!("Method ->{} requires one argument", method_name.as_ref()),
         input_path.to_vec(),
+        method_name.range(),
     ));
     None
 }
 
 pub(super) fn map_method(
-    method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &PathList,
+    tail: &WithRange<PathList>,
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
-    if let Some(MethodArgs(args)) = method_args {
-        if let Some(first_arg) = args.first() {
+    if let Some(args) = method_args {
+        if let Some(first_arg) = args.args.first() {
             if let JSON::Array(array) = data {
                 let mut output = Vec::with_capacity(array.len());
 
@@ -69,36 +73,38 @@ pub(super) fn map_method(
             }
         } else {
             errors.insert(ApplyToError::new(
-                format!("Method ->{} requires one argument", method_name),
+                format!("Method ->{} requires one argument", method_name.as_ref()),
                 input_path.to_vec(),
+                method_name.range(),
             ));
             None
         }
     } else {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} requires one argument", method_name),
+            format!("Method ->{} requires one argument", method_name.as_ref()),
             input_path.to_vec(),
+            method_name.range(),
         ));
         None
     }
 }
 
 pub(super) fn match_method(
-    method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &PathList,
+    tail: &WithRange<PathList>,
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
     // Takes any number of pairs [key, value], and returns value for the first
     // key that equals the data. If none of the pairs match, returns None.
     // Typically, the final pair will use @ as its key to ensure some default
     // value is returned.
-    if let Some(MethodArgs(args)) = method_args {
-        for pair in args {
-            if let LitExpr::Array(pair) = pair {
+    if let Some(method_args) = method_args {
+        for pair in &method_args.args {
+            if let LitExpr::Array(pair) = pair.as_ref() {
                 if pair.len() == 2 {
                     if let Some(candidate) = pair[0].apply_to_path(data, vars, input_path, errors) {
                         if candidate == *data {
@@ -116,26 +122,34 @@ pub(super) fn match_method(
     errors.insert(ApplyToError::new(
         format!(
             "Method ->{} did not match any [candidate, value] pair",
-            method_name
+            method_name.as_ref(),
         ),
         input_path.to_vec(),
+        merge_ranges(
+            method_name.range(),
+            method_args.and_then(|args| args.range()),
+        ),
     ));
     None
 }
 
 pub(super) fn first_method(
-    method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &PathList,
+    tail: &WithRange<PathList>,
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
-    if let Some(MethodArgs(_)) = method_args {
+    if method_args.is_some() {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} does not take any arguments", method_name),
+            format!(
+                "Method ->{} does not take any arguments",
+                method_name.as_ref()
+            ),
             input_path.to_vec(),
+            method_name.range(),
         ));
         return None;
     }
@@ -157,18 +171,22 @@ pub(super) fn first_method(
 }
 
 pub(super) fn last_method(
-    method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &PathList,
+    tail: &WithRange<PathList>,
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
-    if let Some(MethodArgs(_)) = method_args {
+    if method_args.is_some() {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} does not take any arguments", method_name),
+            format!(
+                "Method ->{} does not take any arguments",
+                method_name.as_ref()
+            ),
             input_path.to_vec(),
+            method_name.range(),
         ));
         return None;
     }
@@ -190,12 +208,12 @@ pub(super) fn last_method(
 }
 
 pub(super) fn slice_method(
-    method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &PathList,
+    tail: &WithRange<PathList>,
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
     let length = if let JSON::Array(array) = data {
@@ -204,21 +222,27 @@ pub(super) fn slice_method(
         s.as_str().len() as i64
     } else {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} requires an array or string input", method_name),
+            format!(
+                "Method ->{} requires an array or string input",
+                method_name.as_ref()
+            ),
             input_path.to_vec(),
+            method_name.range(),
         ));
         return None;
     };
 
-    if let Some(MethodArgs(args)) = method_args {
-        let start = args
+    if let Some(method_args) = method_args {
+        let start = method_args
+            .args
             .first()
             .and_then(|arg| arg.apply_to_path(data, vars, input_path, errors))
             .and_then(|n| n.as_i64())
             .unwrap_or(0)
             .max(0)
             .min(length) as usize;
-        let end = args
+        let end = method_args
+            .args
             .get(1)
             .and_then(|arg| arg.apply_to_path(data, vars, input_path, errors))
             .and_then(|n| n.as_i64())
@@ -258,18 +282,22 @@ pub(super) fn slice_method(
 }
 
 pub(super) fn size_method(
-    method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &PathList,
+    tail: &WithRange<PathList>,
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
-    if let Some(MethodArgs(_)) = method_args {
+    if method_args.is_some() {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} does not take any arguments", method_name),
+            format!(
+                "Method ->{} does not take any arguments",
+                method_name.as_ref()
+            ),
             input_path.to_vec(),
+            method_name.range(),
         ));
         return None;
     }
@@ -293,10 +321,11 @@ pub(super) fn size_method(
             errors.insert(ApplyToError::new(
                 format!(
                     "Method ->{} requires an array, string, or object input, not {}",
-                    method_name,
+                    method_name.as_ref(),
                     json_type_name(data),
                 ),
                 input_path.to_vec(),
+                method_name.range(),
             ));
             None
         }
@@ -308,18 +337,22 @@ pub(super) fn size_method(
 // like an option, but GraphQL doesn't handle heterogeneous lists (or tuples) as
 // well as it handles objects with named properties like { key, value }.
 pub(super) fn entries_method(
-    method_name: &str,
-    method_args: &Option<MethodArgs>,
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &PathList,
+    tail: &WithRange<PathList>,
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
-    if let Some(MethodArgs(_)) = method_args {
+    if method_args.is_some() {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} does not take any arguments", method_name),
+            format!(
+                "Method ->{} does not take any arguments",
+                method_name.as_ref()
+            ),
             input_path.to_vec(),
+            method_name.range(),
         ));
         return None;
     }
@@ -341,10 +374,11 @@ pub(super) fn entries_method(
             errors.insert(ApplyToError::new(
                 format!(
                     "Method ->{} requires an object input, not {}",
-                    method_name,
+                    method_name.as_ref(),
                     json_type_name(data),
                 ),
                 input_path.to_vec(),
+                method_name.range(),
             ));
             None
         }

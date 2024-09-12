@@ -49,16 +49,33 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/no
                 selections: [
                     Field(
                         None,
-                        "id",
+                        WithRange {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                0..2,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "a",
+                        WithRange {
+                            node: Field(
+                                "a",
+                            ),
+                            range: Some(
+                                3..4,
+                            ),
+                        },
                         None,
                     ),
                 ],
                 star: None,
+                range: Some(
+                    0..4,
+                ),
             },
         ),
         config: None,
@@ -122,21 +139,45 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/no
                 selections: [
                     Field(
                         None,
-                        "id",
+                        WithRange {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                0..2,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "a",
+                        WithRange {
+                            node: Field(
+                                "a",
+                            ),
+                            range: Some(
+                                3..4,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "b",
+                        WithRange {
+                            node: Field(
+                                "b",
+                            ),
+                            range: Some(
+                                5..6,
+                            ),
+                        },
                         None,
                     ),
                 ],
                 star: None,
+                range: Some(
+                    0..6,
+                ),
             },
         ),
         config: None,

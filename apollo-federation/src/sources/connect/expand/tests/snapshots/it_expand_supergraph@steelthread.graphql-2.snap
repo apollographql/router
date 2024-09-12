@@ -57,16 +57,33 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
                 selections: [
                     Field(
                         None,
-                        "id",
+                        WithRange {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                0..2,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "name",
+                        WithRange {
+                            node: Field(
+                                "name",
+                            ),
+                            range: Some(
+                                3..7,
+                            ),
+                        },
                         None,
                     ),
                 ],
                 star: None,
+                range: Some(
+                    0..7,
+                ),
             },
         ),
         config: None,
@@ -137,21 +154,45 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
                 selections: [
                     Field(
                         None,
-                        "id",
+                        WithRange {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                0..2,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "name",
+                        WithRange {
+                            node: Field(
+                                "name",
+                            ),
+                            range: Some(
+                                3..7,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "username",
+                        WithRange {
+                            node: Field(
+                                "username",
+                            ),
+                            range: Some(
+                                8..16,
+                            ),
+                        },
                         None,
                     ),
                 ],
                 star: None,
+                range: Some(
+                    0..16,
+                ),
             },
         ),
         config: None,
@@ -221,15 +262,40 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
         },
         selection: Path(
             PathSelection {
-                path: Var(
-                    $,
-                    Key(
-                        Field(
-                            "phone",
-                        ),
-                        Empty,
+                path: WithRange {
+                    node: Var(
+                        WithRange {
+                            node: $,
+                            range: Some(
+                                0..1,
+                            ),
+                        },
+                        WithRange {
+                            node: Key(
+                                WithRange {
+                                    node: Field(
+                                        "phone",
+                                    ),
+                                    range: Some(
+                                        2..7,
+                                    ),
+                                },
+                                WithRange {
+                                    node: Empty,
+                                    range: Some(
+                                        7..7,
+                                    ),
+                                },
+                            ),
+                            range: Some(
+                                1..7,
+                            ),
+                        },
                     ),
-                ),
+                    range: Some(
+                        0..7,
+                    ),
+                },
             },
         ),
         config: None,

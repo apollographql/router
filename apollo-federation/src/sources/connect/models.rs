@@ -330,16 +330,33 @@ mod tests {
                         selections: [
                             Field(
                                 None,
-                                "id",
+                                WithRange {
+                                    node: Field(
+                                        "id",
+                                    ),
+                                    range: Some(
+                                        0..2,
+                                    ),
+                                },
                                 None,
                             ),
                             Field(
                                 None,
-                                "name",
+                                WithRange {
+                                    node: Field(
+                                        "name",
+                                    ),
+                                    range: Some(
+                                        3..7,
+                                    ),
+                                },
                                 None,
                             ),
                         ],
                         star: None,
+                        range: Some(
+                            0..7,
+                        ),
                     },
                 ),
                 config: None,
@@ -423,21 +440,45 @@ mod tests {
                         selections: [
                             Field(
                                 None,
-                                "id",
+                                WithRange {
+                                    node: Field(
+                                        "id",
+                                    ),
+                                    range: Some(
+                                        0..2,
+                                    ),
+                                },
                                 None,
                             ),
                             Field(
                                 None,
-                                "title",
+                                WithRange {
+                                    node: Field(
+                                        "title",
+                                    ),
+                                    range: Some(
+                                        3..8,
+                                    ),
+                                },
                                 None,
                             ),
                             Field(
                                 None,
-                                "body",
+                                WithRange {
+                                    node: Field(
+                                        "body",
+                                    ),
+                                    range: Some(
+                                        9..13,
+                                    ),
+                                },
                                 None,
                             ),
                         ],
                         star: None,
+                        range: Some(
+                            0..13,
+                        ),
                     },
                 ),
                 config: None,
