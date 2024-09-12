@@ -11,7 +11,6 @@ pub type Span<'a> = LocatedSpan<&'a str>;
 // Additionally, AST nodes that are structs can store their own range as a
 // field, so they can implement Ranged<T> without the WithRange<T> wrapper.
 pub trait Ranged<T> {
-    fn node(&self) -> &T;
     fn range(&self) -> OffsetRange;
 }
 
@@ -70,10 +69,6 @@ where
 }
 
 impl<T> Ranged<T> for WithRange<T> {
-    fn node(&self) -> &T {
-        self.node.as_ref()
-    }
-
     fn range(&self) -> OffsetRange {
         self.range.clone()
     }
@@ -130,7 +125,6 @@ pub(super) mod strip_ranges {
     use super::super::known_var::KnownVariable;
     use super::super::lit_expr::LitExpr;
     use super::super::parser::*;
-    use super::Ranged;
     use super::WithRange;
 
     /// Including location information in the AST introduces unnecessary
@@ -144,7 +138,7 @@ pub(super) mod strip_ranges {
 
     impl StripRanges for WithRange<String> {
         fn strip_ranges(&self) -> Self {
-            WithRange::new(self.node().clone(), None)
+            WithRange::new(self.as_ref().clone(), None)
         }
     }
 
@@ -233,7 +227,7 @@ pub(super) mod strip_ranges {
 
     impl StripRanges for WithRange<Key> {
         fn strip_ranges(&self) -> Self {
-            WithRange::new(self.node().clone(), None)
+            WithRange::new(self.as_ref().clone(), None)
         }
     }
 
@@ -277,7 +271,7 @@ pub(super) mod strip_ranges {
 
     impl StripRanges for WithRange<KnownVariable> {
         fn strip_ranges(&self) -> Self {
-            WithRange::new(self.node().clone(), None)
+            WithRange::new(self.as_ref().clone(), None)
         }
     }
 }

@@ -31,7 +31,7 @@ pub(super) fn typeof_method(
         errors.insert(ApplyToError::new(
             format!(
                 "Method ->{} does not take any arguments",
-                method_name.node()
+                method_name.as_ref()
             ),
             input_path.to_vec(),
             method_name.range(),
@@ -67,7 +67,7 @@ pub(super) fn eq_method(
     errors.insert(ApplyToError::new(
         format!(
             "Method ->{} requires exactly one argument",
-            method_name.node()
+            method_name.as_ref()
         ),
         input_path.to_vec(),
         method_name.range(),
@@ -91,7 +91,7 @@ pub(super) fn match_if_method(
 ) -> Option<JSON> {
     if let Some(method_args) = method_args {
         for pair in &method_args.args {
-            if let LitExpr::Array(pair) = pair.node() {
+            if let LitExpr::Array(pair) = pair.as_ref() {
                 if pair.len() == 2 {
                     if let Some(JSON::Bool(true)) =
                         pair[0].apply_to_path(data, vars, input_path, errors)
@@ -109,7 +109,7 @@ pub(super) fn match_if_method(
     errors.insert(ApplyToError::new(
         format!(
             "Method ->{} did not match any [condition, value] pair",
-            method_name.node(),
+            method_name.as_ref(),
         ),
         input_path.to_vec(),
         merge_ranges(
@@ -139,7 +139,7 @@ pub(super) fn arithmetic_method(
                         result = new_result;
                     } else {
                         errors.insert(ApplyToError::new(
-                            format!("Method ->{} failed on argument {}", method_name.node(), n),
+                            format!("Method ->{} failed on argument {}", method_name.as_ref(), n),
                             input_path.to_vec(),
                             arg.range(),
                         ));
@@ -147,7 +147,10 @@ pub(super) fn arithmetic_method(
                     }
                 } else {
                     errors.insert(ApplyToError::new(
-                        format!("Method ->{} requires numeric arguments", method_name.node()),
+                        format!(
+                            "Method ->{} requires numeric arguments",
+                            method_name.as_ref()
+                        ),
                         input_path.to_vec(),
                         arg.range(),
                     ));
@@ -157,7 +160,10 @@ pub(super) fn arithmetic_method(
             Some(JSON::Number(result))
         } else {
             errors.insert(ApplyToError::new(
-                format!("Method ->{} requires numeric arguments", method_name.node()),
+                format!(
+                    "Method ->{} requires numeric arguments",
+                    method_name.as_ref()
+                ),
                 input_path.to_vec(),
                 method_name.range(),
             ));
@@ -167,7 +173,7 @@ pub(super) fn arithmetic_method(
         errors.insert(ApplyToError::new(
             format!(
                 "Method ->{} requires at least one argument",
-                method_name.node()
+                method_name.as_ref()
             ),
             input_path.to_vec(),
             method_name.range(),
@@ -294,7 +300,7 @@ pub(super) fn has_method(
             },
             None => {
                 errors.insert(ApplyToError::new(
-                    format!("Method ->{} requires an argument", method_name.node()),
+                    format!("Method ->{} requires an argument", method_name.as_ref()),
                     input_path.to_vec(),
                     method_name.range(),
                 ));
@@ -303,7 +309,7 @@ pub(super) fn has_method(
         }
     } else {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} requires an argument", method_name.node()),
+            format!("Method ->{} requires an argument", method_name.as_ref()),
             input_path.to_vec(),
             method_name.range(),
         ));
@@ -338,7 +344,7 @@ pub(super) fn get_method(
                             errors.insert(ApplyToError::new(
                                 format!(
                                     "Method ->{}({}) array index out of bounds",
-                                    method_name.node(),
+                                    method_name.as_ref(),
                                     i,
                                 ),
                                 input_path.to_vec(),
@@ -365,7 +371,7 @@ pub(super) fn get_method(
                             errors.insert(ApplyToError::new(
                                 format!(
                                     "Method ->{}({}) string index out of bounds",
-                                    method_name.node(),
+                                    method_name.as_ref(),
                                     i,
                                 ),
                                 input_path.to_vec(),
@@ -376,7 +382,10 @@ pub(super) fn get_method(
                     }
                     (_, None) => {
                         errors.insert(ApplyToError::new(
-                            format!("Method ->{} requires an integer index", method_name.node()),
+                            format!(
+                                "Method ->{} requires an integer index",
+                                method_name.as_ref()
+                            ),
                             input_path.to_vec(),
                             index_literal.range(),
                         ));
@@ -386,7 +395,7 @@ pub(super) fn get_method(
                         errors.insert(ApplyToError::new(
                             format!(
                                 "Method ->{} requires an array or string input, not {}",
-                                method_name.node(),
+                                method_name.as_ref(),
                                 json_type_name(data),
                             ),
                             input_path.to_vec(),
@@ -403,7 +412,7 @@ pub(super) fn get_method(
                             errors.insert(ApplyToError::new(
                                 format!(
                                     "Method ->{}({}) object key not found",
-                                    method_name.node(),
+                                    method_name.as_ref(),
                                     key
                                 ),
                                 input_path.to_vec(),
@@ -416,7 +425,7 @@ pub(super) fn get_method(
                         errors.insert(ApplyToError::new(
                             format!(
                                 "Method ->{}({}) requires an object input",
-                                method_name.node(),
+                                method_name.as_ref(),
                                 key
                             ),
                             input_path.to_vec(),
@@ -429,7 +438,7 @@ pub(super) fn get_method(
                     errors.insert(ApplyToError::new(
                         format!(
                             "Method ->{}({}) requires an integer or string argument",
-                            method_name.node(),
+                            method_name.as_ref(),
                             value,
                         ),
                         input_path.to_vec(),
@@ -441,7 +450,7 @@ pub(super) fn get_method(
                     errors.insert(ApplyToError::new(
                         format!(
                             "Method ->{} received undefined argument",
-                            method_name.node()
+                            method_name.as_ref()
                         ),
                         input_path.to_vec(),
                         index_literal.range(),
@@ -451,7 +460,7 @@ pub(super) fn get_method(
             }
         } else {
             errors.insert(ApplyToError::new(
-                format!("Method ->{} requires an argument", method_name.node()),
+                format!("Method ->{} requires an argument", method_name.as_ref()),
                 input_path.to_vec(),
                 method_name.range(),
             ));
@@ -459,7 +468,7 @@ pub(super) fn get_method(
         }
     } else {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} requires an argument", method_name.node()),
+            format!("Method ->{} requires an argument", method_name.as_ref()),
             input_path.to_vec(),
             method_name.range(),
         ));
@@ -480,7 +489,7 @@ pub(super) fn keys_method(
         errors.insert(ApplyToError::new(
             format!(
                 "Method ->{} does not take any arguments",
-                method_name.node()
+                method_name.as_ref()
             ),
             input_path.to_vec(),
             method_name.range(),
@@ -497,7 +506,7 @@ pub(super) fn keys_method(
             errors.insert(ApplyToError::new(
                 format!(
                     "Method ->{} requires an object input, not {}",
-                    method_name.node(),
+                    method_name.as_ref(),
                     json_type_name(data),
                 ),
                 input_path.to_vec(),
@@ -521,7 +530,7 @@ pub(super) fn values_method(
         errors.insert(ApplyToError::new(
             format!(
                 "Method ->{} does not take any arguments",
-                method_name.node()
+                method_name.as_ref()
             ),
             input_path.to_vec(),
             method_name.range(),
@@ -538,7 +547,7 @@ pub(super) fn values_method(
             errors.insert(ApplyToError::new(
                 format!(
                     "Method ->{} requires an object input, not {}",
-                    method_name.node(),
+                    method_name.as_ref(),
                     json_type_name(data),
                 ),
                 input_path.to_vec(),
@@ -562,7 +571,7 @@ pub(super) fn not_method(
         errors.insert(ApplyToError::new(
             format!(
                 "Method ->{} does not take any arguments",
-                method_name.node()
+                method_name.as_ref()
             ),
             input_path.to_vec(),
             method_name.range(),
@@ -606,7 +615,7 @@ pub(super) fn or_method(
         tail.apply_to_path(&JSON::Bool(result), vars, input_path, errors)
     } else {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} requires arguments", method_name.node()),
+            format!("Method ->{} requires arguments", method_name.as_ref()),
             input_path.to_vec(),
             method_name.range(),
         ));
@@ -637,7 +646,7 @@ pub(super) fn and_method(
         tail.apply_to_path(&JSON::Bool(result), vars, input_path, errors)
     } else {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} requires arguments", method_name.node()),
+            format!("Method ->{} requires arguments", method_name.as_ref()),
             input_path.to_vec(),
             method_name.range(),
         ));

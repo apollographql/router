@@ -80,7 +80,6 @@ pub fn json_type_name(v: &JSON) -> &str {
 
 #[cfg(test)]
 mod tests {
-    use super::super::location::Ranged;
     use super::*;
 
     #[test]
@@ -89,7 +88,7 @@ mod tests {
             match spaces_or_comments(Span::new(input)) {
                 Ok((remainder, parsed)) => {
                     assert_eq!(*remainder.fragment(), exp_remainder);
-                    assert_eq!(*parsed.node(), exp_spaces);
+                    assert_eq!(*parsed.as_ref(), exp_spaces);
                 }
                 Err(e) => panic!("error: {:?}", e),
             }

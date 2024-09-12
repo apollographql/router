@@ -8,7 +8,6 @@
 use itertools::Itertools;
 
 use super::lit_expr::LitExpr;
-use super::location::Ranged;
 use super::location::WithRange;
 use crate::sources::connect::json_selection::JSONSelection;
 use crate::sources::connect::json_selection::MethodArgs;
@@ -116,7 +115,7 @@ impl PrettyPrintable for PathSelection {
 
 impl PrettyPrintable for WithRange<PathSelection> {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
-        self.node()
+        self.as_ref()
             .pretty_print_with_indentation(inline, indentation)
     }
 }
@@ -129,7 +128,7 @@ impl PrettyPrintable for WithRange<PathList> {
             result.push_str(indent_chars(indentation).as_str());
         }
 
-        match self.node() {
+        match self.as_ref() {
             PathList::Var(var, tail) => {
                 let rest = tail.pretty_print_with_indentation(true, indentation);
                 result.push_str(var.as_str());
@@ -200,7 +199,7 @@ impl PrettyPrintable for WithRange<LitExpr> {
             result.push_str(indent_chars(indentation).as_str());
         }
 
-        match self.node() {
+        match self.as_ref() {
             LitExpr::String(s) => {
                 let safely_quoted = serde_json_bytes::Value::String(s.clone().into()).to_string();
                 result.push_str(safely_quoted.as_str());

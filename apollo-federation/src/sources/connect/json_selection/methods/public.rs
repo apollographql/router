@@ -32,7 +32,7 @@ pub(super) fn echo_method(
         }
     }
     errors.insert(ApplyToError::new(
-        format!("Method ->{} requires one argument", method_name.node()),
+        format!("Method ->{} requires one argument", method_name.as_ref()),
         input_path.to_vec(),
         method_name.range(),
     ));
@@ -73,7 +73,7 @@ pub(super) fn map_method(
             }
         } else {
             errors.insert(ApplyToError::new(
-                format!("Method ->{} requires one argument", method_name.node()),
+                format!("Method ->{} requires one argument", method_name.as_ref()),
                 input_path.to_vec(),
                 method_name.range(),
             ));
@@ -81,7 +81,7 @@ pub(super) fn map_method(
         }
     } else {
         errors.insert(ApplyToError::new(
-            format!("Method ->{} requires one argument", method_name.node()),
+            format!("Method ->{} requires one argument", method_name.as_ref()),
             input_path.to_vec(),
             method_name.range(),
         ));
@@ -104,7 +104,7 @@ pub(super) fn match_method(
     // value is returned.
     if let Some(method_args) = method_args {
         for pair in &method_args.args {
-            if let LitExpr::Array(pair) = pair.node() {
+            if let LitExpr::Array(pair) = pair.as_ref() {
                 if pair.len() == 2 {
                     if let Some(candidate) = pair[0].apply_to_path(data, vars, input_path, errors) {
                         if candidate == *data {
@@ -122,7 +122,7 @@ pub(super) fn match_method(
     errors.insert(ApplyToError::new(
         format!(
             "Method ->{} did not match any [candidate, value] pair",
-            method_name.node(),
+            method_name.as_ref(),
         ),
         input_path.to_vec(),
         merge_ranges(
@@ -146,7 +146,7 @@ pub(super) fn first_method(
         errors.insert(ApplyToError::new(
             format!(
                 "Method ->{} does not take any arguments",
-                method_name.node()
+                method_name.as_ref()
             ),
             input_path.to_vec(),
             method_name.range(),
@@ -183,7 +183,7 @@ pub(super) fn last_method(
         errors.insert(ApplyToError::new(
             format!(
                 "Method ->{} does not take any arguments",
-                method_name.node()
+                method_name.as_ref()
             ),
             input_path.to_vec(),
             method_name.range(),
@@ -224,7 +224,7 @@ pub(super) fn slice_method(
         errors.insert(ApplyToError::new(
             format!(
                 "Method ->{} requires an array or string input",
-                method_name.node()
+                method_name.as_ref()
             ),
             input_path.to_vec(),
             method_name.range(),
@@ -294,7 +294,7 @@ pub(super) fn size_method(
         errors.insert(ApplyToError::new(
             format!(
                 "Method ->{} does not take any arguments",
-                method_name.node()
+                method_name.as_ref()
             ),
             input_path.to_vec(),
             method_name.range(),
@@ -321,7 +321,7 @@ pub(super) fn size_method(
             errors.insert(ApplyToError::new(
                 format!(
                     "Method ->{} requires an array, string, or object input, not {}",
-                    method_name.node(),
+                    method_name.as_ref(),
                     json_type_name(data),
                 ),
                 input_path.to_vec(),
@@ -349,7 +349,7 @@ pub(super) fn entries_method(
         errors.insert(ApplyToError::new(
             format!(
                 "Method ->{} does not take any arguments",
-                method_name.node()
+                method_name.as_ref()
             ),
             input_path.to_vec(),
             method_name.range(),
@@ -374,7 +374,7 @@ pub(super) fn entries_method(
             errors.insert(ApplyToError::new(
                 format!(
                     "Method ->{} requires an object input, not {}",
-                    method_name.node(),
+                    method_name.as_ref(),
                     json_type_name(data),
                 ),
                 input_path.to_vec(),

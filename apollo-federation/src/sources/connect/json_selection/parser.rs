@@ -141,10 +141,6 @@ pub enum NamedSelection {
 // separate storage for its own range, and therefore does not need to be wrapped
 // as WithRange<NamedSelection>, but merely needs to implement the Ranged trait.
 impl Ranged<NamedSelection> for NamedSelection {
-    fn node(&self) -> &NamedSelection {
-        self
-    }
-
     fn range(&self) -> OffsetRange {
         match self {
             Self::Field(alias, key, sub) => {
@@ -274,10 +270,6 @@ pub struct PathSelection {
 // not need to be wrapped as WithRange<PathSelection>, but merely needs to
 // implement the Ranged trait.
 impl Ranged<PathSelection> for PathSelection {
-    fn node(&self) -> &PathSelection {
-        self
-    }
-
     fn range(&self) -> OffsetRange {
         self.path.range()
     }
@@ -317,7 +309,7 @@ impl PathSelection {
 impl ExternalVarPaths for PathSelection {
     fn external_var_paths(&self) -> Vec<&PathSelection> {
         let mut paths = vec![];
-        match self.path.node() {
+        match self.path.as_ref() {
             PathList::Var(var_name, tail) => {
                 // The $ and @ variables refer to parts of the current JSON
                 // data, so they do not need to be surfaced as external variable
@@ -411,7 +403,7 @@ impl PathList {
                 let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
                 let full_range = merge_ranges(dollar_range.clone(), rest.range());
                 return if let Some(var) = opt_var {
-                    let full_name = format!("{}{}", dollar.node(), var.as_str());
+                    let full_name = format!("{}{}", dollar.as_ref(), var.as_str());
                     if let Some(known_var) = KnownVariable::from_str(full_name.as_str()) {
                         let var_range = merge_ranges(dollar_range.clone(), var.range());
                         let ranged_known_var = WithRange::new(known_var, var_range);
@@ -456,7 +448,7 @@ impl PathList {
 
             if let Ok((suffix, key)) = Key::parse(input) {
                 let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
-                return match rest.node() {
+                return match rest.as_ref() {
                     Self::Empty | Self::Selection(_) => Err(nom::Err::Error(
                         nom::error::Error::new(remainder, nom::error::ErrorKind::IsNot),
                     )),
@@ -610,10 +602,6 @@ pub struct SubSelection {
 }
 
 impl Ranged<SubSelection> for SubSelection {
-    fn node(&self) -> &SubSelection {
-        self
-    }
-
     // Since SubSelection is a struct, we can store its range directly as a
     // field of the struct, allowing SubSelection to implement the Ranged trait
     // without a WithRange<SubSelection> wrapper.
@@ -746,10 +734,6 @@ pub struct StarSelection {
 }
 
 impl Ranged<StarSelection> for StarSelection {
-    fn node(&self) -> &StarSelection {
-        self
-    }
-
     fn range(&self) -> OffsetRange {
         self.range.clone()
     }
@@ -807,10 +791,6 @@ pub struct Alias {
 }
 
 impl Ranged<Alias> for Alias {
-    fn node(&self) -> &Alias {
-        self
-    }
-
     fn range(&self) -> OffsetRange {
         self.range.clone()
     }
@@ -1011,10 +991,6 @@ pub struct MethodArgs {
 }
 
 impl Ranged<MethodArgs> for MethodArgs {
-    fn node(&self) -> &MethodArgs {
-        self
-    }
-
     fn range(&self) -> OffsetRange {
         self.range.clone()
     }
@@ -1075,7 +1051,7 @@ mod tests {
         fn check(input: &str, expected_name: &str) {
             let (remainder, name) = parse_identifier(Span::new(input)).unwrap();
             assert!(span_is_all_spaces_or_comments(remainder));
-            assert_eq!(name.node(), expected_name);
+            assert_eq!(name.as_ref(), expected_name);
         }
 
         check("hello", "hello");
@@ -1086,7 +1062,7 @@ mod tests {
 
         fn check_no_space(input: &str, expected_name: &str) {
             let name = parse_identifier_no_space(Span::new(input)).unwrap().1;
-            assert_eq!(name.node(), expected_name);
+            assert_eq!(name.as_ref(), expected_name);
         }
 
         check_no_space("oyez", "oyez");
@@ -1106,7 +1082,7 @@ mod tests {
         fn check(input: &str, expected: &str) {
             let (remainder, lit) = parse_string_literal(Span::new(input)).unwrap();
             assert!(span_is_all_spaces_or_comments(remainder));
-            assert_eq!(lit.node(), expected);
+            assert_eq!(lit.as_ref(), expected);
         }
         check("'hello world'", "hello world");
         check("\"hello world\"", "hello world");
@@ -1120,7 +1096,7 @@ mod tests {
         fn check(input: &str, expected: &Key) {
             let (remainder, key) = Key::parse(Span::new(input)).unwrap();
             assert!(span_is_all_spaces_or_comments(remainder));
-            assert_eq!(key.node(), expected);
+            assert_eq!(key.as_ref(), expected);
         }
 
         check("hello", &Key::field("hello"));
@@ -1151,8 +1127,8 @@ mod tests {
             let (remainder, selection) = NamedSelection::parse(Span::new(input)).unwrap();
             assert!(span_is_all_spaces_or_comments(remainder));
             let selection = selection.strip_ranges();
-            assert_eq!(selection.node(), &expected);
-            assert_eq!(selection.node().name(), name);
+            assert_eq!(selection, expected);
+            assert_eq!(selection.name(), name);
             assert_eq!(
                 selection!(input).strip_ranges(),
                 JSONSelection::Named(SubSelection {
