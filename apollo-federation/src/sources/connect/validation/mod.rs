@@ -431,7 +431,9 @@ pub enum Code {
     MissingHttpMethod,
     /// The `entity` argument should only be used on the root `Query` field.
     EntityNotOnRootQuery,
-    /// The `entity` argument should only be used with non-list, object types.
+    /// The arguments to the entity reference resolver do not match the entity type.
+    EntityResolverArgumentMismatch,
+    /// The `entity` argument should only be used with non-list, nullable, object types.
     EntityTypeInvalid,
     /// A syntax error in `selection`
     InvalidJsonSelection,
