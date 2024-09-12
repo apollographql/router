@@ -240,20 +240,23 @@ impl ApplyToInternal for PathSelection {
         input_path: &InputPath<JSON>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
-        // If this is a KeyPath, instead of using data as given, we need to
-        // evaluate the path starting from the current value of $. To evaluate
-        // the KeyPath against data, prefix it with @. This logic supports
-        // method chaining like obj->has('a')->and(obj->has('b')), where both
-        // obj references are interpreted as $.obj.
-        if matches!(self.path.as_ref(), PathList::Key(_, _)) {
-            if let Some((dollar_data, dollar_path)) = vars.get(&KnownVariable::Dollar) {
-                return self
-                    .path
-                    .apply_to_path(dollar_data, vars, dollar_path, errors);
+        match (self.path.as_ref(), vars.get(&KnownVariable::Dollar)) {
+            // If this is a KeyPath, instead of using data as given, we need to
+            // evaluate the path starting from the current value of $. To evaluate
+            // the KeyPath against data, prefix it with @. This logic supports
+            // method chaining like obj->has('a')->and(obj->has('b')), where both
+            // obj references are interpreted as $.obj.
+            (PathList::Key(_, _), Some((dollar_data, dollar_path))) => {
+                self.path
+                    .apply_to_path(dollar_data, vars, dollar_path, errors)
             }
+
             // If $ is undefined for some reason, fall back to using data...
+            // TODO: Since $ should never be undefined, we might want to
+            // guarantee its existence at compile time, somehow.
+            // (PathList::Key(_, _), None) => todo!(),
+            _ => self.path.apply_to_path(data, vars, input_path, errors),
         }
-        self.path.apply_to_path(data, vars, input_path, errors)
     }
 }
 
