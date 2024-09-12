@@ -350,6 +350,7 @@ mod test {
                 CacheStorage::new(NonZeroUsize::new(10).unwrap(), None, "test")
                     .await
                     .unwrap();
+            cache.activate();
 
             cache.insert("test".to_string(), Stuff {}).await;
             assert_gauge!(
@@ -385,6 +386,7 @@ mod test {
                 CacheStorage::new(NonZeroUsize::new(10).unwrap(), None, "test")
                     .await
                     .unwrap();
+            cache.activate();
 
             cache.insert("test".to_string(), Stuff {}).await;
             // This metric won't exist
@@ -418,6 +420,7 @@ mod test {
                 CacheStorage::new(NonZeroUsize::new(1).unwrap(), None, "test")
                     .await
                     .unwrap();
+            cache.activate();
 
             cache
                 .insert(
