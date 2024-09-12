@@ -1,0 +1,4 @@
+persisted_queries:
+  enabled: true
+  experimental_prewarm_query_plan_cache:
+    on_reload: false

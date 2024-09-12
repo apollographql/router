@@ -1,0 +1,14 @@
+---
+source: apollo-router/src/plugins/authorization/authenticated.rs
+expression: first_response
+---
+{
+  "errors": [
+    {
+      "message": "Mixed queries with both schema introspection and concrete fields are not supported",
+      "extensions": {
+        "code": "MIXED_INTROSPECTION"
+      }
+    }
+  ]
+}
