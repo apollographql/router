@@ -437,14 +437,28 @@ mod helpers {
 
             // The body of the request might include references to input arguments / sibling fields
             // that will need to be handled, so we extract any referenced variables now
-            let body_parameters = extract_params_from_body(connector);
+            let body_parameters = connector
+                .transport
+                .body
+                .as_ref()
+                .map(extract_params_from_selection)
+                .into_iter()
+                .flatten();
 
-            let parameters = connector.transport.connect_template.variables().cloned();
+            // The HTTP body might contain references to $this, so we grab those usages as well
+            let url_parameters = connector.transport.connect_template.variables().cloned();
+
+            // The actual selection might make use of the $this variable, so we grab them too
+            let selection_parameters = extract_params_from_selection(&connector.selection);
+
             // We'll need to collect all synthesized keys for the output type, adding a federation
             // `@key` directive once completed.
             let mut keys = Vec::new();
-            for Variable { var_type, path, .. } in
-                Iterator::chain(body_parameters.into_iter(), parameters).unique()
+            for Variable { var_type, path, .. } in body_parameters
+                .into_iter()
+                .chain(url_parameters)
+                .chain(selection_parameters)
+                .unique()
             {
                 match var_type {
                     // Arguments should be added to the synthesized key, since they are mandatory
@@ -737,14 +751,13 @@ mod helpers {
         }
     }
 
-    fn extract_params_from_body(connector: &Connector) -> impl Iterator<Item = Variable> + '_ {
-        connector
-            .transport
-            .body
-            .as_ref()
-            .map(|body| body.external_var_paths())
+    /// Extract all seen parameters from a JSONSelection
+    fn extract_params_from_selection(
+        selection: &JSONSelection,
+    ) -> impl Iterator<Item = Variable> + '_ {
+        selection
+            .external_var_paths()
             .into_iter()
-            .flatten()
             .flat_map(|var_path| {
                 let (known_type, keys) = var_path.var_name_and_nested_keys()?;
                 let var_type = match known_type {
