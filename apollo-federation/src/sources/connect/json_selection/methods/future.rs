@@ -343,7 +343,7 @@ pub(super) fn get_method(
                         } else {
                             errors.insert(ApplyToError::new(
                                 format!(
-                                    "Method ->{}({}) array index out of bounds",
+                                    "Method ->{}({}) index out of bounds",
                                     method_name.as_ref(),
                                     i,
                                 ),
@@ -370,7 +370,7 @@ pub(super) fn get_method(
                         } else {
                             errors.insert(ApplyToError::new(
                                 format!(
-                                    "Method ->{}({}) string index out of bounds",
+                                    "Method ->{}({}) index out of bounds",
                                     method_name.as_ref(),
                                     i,
                                 ),

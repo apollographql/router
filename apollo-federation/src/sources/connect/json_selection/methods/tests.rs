@@ -1,3 +1,4 @@
+use insta::assert_debug_snapshot;
 use serde_json_bytes::json;
 
 use super::*;
@@ -505,7 +506,7 @@ fn test_array_methods() {
         (
             None,
             vec![ApplyToError::from_json(&json!({
-                "message": "Method ->get(3) array index out of bounds",
+                "message": "Method ->get(3) index out of bounds",
                 "path": [],
                 "range": [7, 8],
             }))]
@@ -517,7 +518,7 @@ fn test_array_methods() {
         (
             None,
             vec![ApplyToError::from_json(&json!({
-                "message": "Method ->get(-4) array index out of bounds",
+                "message": "Method ->get(-4) index out of bounds",
                 "path": [],
                 "range": [7, 9],
             }))]
@@ -682,24 +683,49 @@ fn test_string_methods() {
         (
             None,
             vec![ApplyToError::from_json(&json!({
-                "message": "Method ->get(4) string index out of bounds",
+                "message": "Method ->get(4) index out of bounds",
                 "path": [],
                 "range": [7, 8],
             }))]
         ),
     );
 
-    assert_eq!(
-        selection!("$->get($->echo(-5)->mul(2)  )").apply_to(&json!("oyez")),
-        (
+    {
+        let expected = (
             None,
             vec![ApplyToError::from_json(&json!({
-                "message": "Method ->get(-10) string index out of bounds",
+                "message": "Method ->get(-10) index out of bounds",
                 "path": [],
                 "range": [7, 26],
-            }))]
-        ),
-    );
+            }))],
+        );
+        assert_eq!(
+            selection!("$->get($->echo(-5)->mul(2))").apply_to(&json!("oyez")),
+            expected.clone(),
+        );
+        assert_eq!(
+            // The extra spaces here should not affect the error.range, as long
+            // as we don't accidentally capture trailing spaces in the range.
+            selection!("$->get($->echo(-5)->mul(2)  )").apply_to(&json!("oyez")),
+            expected.clone(),
+        );
+        // All these extra spaces certainly do affect the error.range, but it's
+        // worth testing that we get all the ranges right, even with so much
+        // space that could be accidentally captured.
+        let selection_with_spaces = selection!(" $ -> get ( $ -> echo ( - 5 ) -> mul ( 2 ) ) ");
+        assert_eq!(
+            selection_with_spaces.apply_to(&json!("oyez")),
+            (
+                None,
+                vec![ApplyToError::from_json(&json!({
+                    "message": "Method ->get(-10) index out of bounds",
+                    "path": [],
+                    "range": [12, 42],
+                }))]
+            )
+        );
+        assert_debug_snapshot!(selection_with_spaces);
+    }
 
     assert_eq!(
         selection!("$->get(true)").apply_to(&json!("input")),
