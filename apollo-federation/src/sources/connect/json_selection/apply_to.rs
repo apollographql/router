@@ -1,7 +1,6 @@
 /// ApplyTo is a trait for applying a JSONSelection to a JSON value, collecting
 /// any/all errors encountered in the process.
 use std::hash::Hash;
-use std::hash::Hasher;
 
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
@@ -100,26 +99,11 @@ pub(super) trait ApplyToInternal {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone, Hash)]
 pub struct ApplyToError {
     message: String,
     path: Vec<JSON>,
     range: OffsetRange,
-}
-
-impl Hash for ApplyToError {
-    fn hash<H: Hasher>(&self, hasher: &mut H) {
-        // Although serde_json::Value (aka JSON) does not implement the Hash
-        // trait, we can fix the order of the properties and hash the resulting
-        // JSON dictionary. Note that we skip the range property here, because
-        // errors should be deduplicated based on their message and path only.
-        json!({
-            "message": self.message,
-            "path": self.path,
-        })
-        .to_string()
-        .hash(hasher);
-    }
 }
 
 impl ApplyToError {
