@@ -151,8 +151,8 @@ impl ApplyToError {
         self.message.as_str()
     }
 
-    pub fn path(&self) -> Vec<JSON> {
-        self.path.clone()
+    pub fn path(&self) -> &[JSON] {
+        self.path.as_slice()
     }
 
     pub fn range(&self) -> OffsetRange {
