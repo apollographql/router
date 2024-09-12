@@ -220,3 +220,21 @@ async fn test_graphql_metrics() {
             .assert_metrics_contains(r#"custom_histogram_sum{graphql_field_name="topProducts",graphql_field_type="Product",graphql_type_name="Query",otel_scope_name="apollo/router"} 3"#, None)
             .await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_gauges_on_reload() {
+    let mut router = IntegrationTest::builder()
+        .config(include_str!("fixtures/no-telemetry.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    router.execute_default_query().await;
+    router.update_config(PROMETHEUS_CONFIG).await;
+    router.assert_reloaded().await;
+    router.execute_default_query().await;
+    router
+        .assert_metrics_contains(r#"apollo_router_cache_storage_estimated_size{kind="query planner",type="memory",otel_scope_name="apollo/router"} "#, None)
+        .await;
+}

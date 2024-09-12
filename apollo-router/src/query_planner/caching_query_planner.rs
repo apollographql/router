@@ -84,6 +84,12 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
     legacy_introspection_caching: bool,
 }
 
+impl<T: Clone> CachingQueryPlanner<T> {
+    pub(crate) fn activate(&self) {
+        self.cache.activate()
+    }
+}
+
 fn init_query_plan_from_redis(
     subgraph_schemas: &SubgraphSchemas,
     cache_entry: &mut Result<QueryPlannerContent, Arc<QueryPlannerError>>,

@@ -797,6 +797,7 @@ impl PluggableSupergraphServiceBuilder {
 
         let schema = self.planner.schema();
         let subgraph_schemas = self.planner.subgraph_schemas();
+
         let query_planner_service = CachingQueryPlanner::new(
             self.planner,
             schema.clone(),
@@ -814,13 +815,9 @@ impl PluggableSupergraphServiceBuilder {
             }
         }
 
-        /*for (_, service) in self.subgraph_services.iter_mut() {
-            if let Some(subgraph) =
-                (service as &mut dyn std::any::Any).downcast_mut::<SubgraphService>()
-            {
-                subgraph.client_factory.plugins = plugins.clone();
-            }
-        }*/
+        // We need a non-fallible hook so that once we know we are going live with a pipeline we do final initialization.
+        // For now just shoe-horn something in, but if we ever reintroduce the query planner hook in plugins and activate then this can be made clean.
+        query_planner_service.activate();
 
         let subgraph_service_factory = Arc::new(SubgraphServiceFactory::new(
             self.subgraph_services
