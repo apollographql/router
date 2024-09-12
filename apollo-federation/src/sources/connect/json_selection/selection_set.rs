@@ -174,7 +174,7 @@ impl SubSelection {
             // Keep the old range even though it may be inaccurate after the
             // removal of selections, since it still indicates where the
             // original SubSelection came from.
-            range: self.range,
+            range: self.range.clone(),
         }
     }
 }

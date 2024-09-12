@@ -66,16 +66,33 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                 selections: [
                     Field(
                         None,
-                        "id",
+                        WithRange {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                0..2,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "id2",
+                        WithRange {
+                            node: Field(
+                                "id2",
+                            ),
+                            range: Some(
+                                3..6,
+                            ),
+                        },
                         None,
                     ),
                 ],
                 star: None,
+                range: Some(
+                    0..6,
+                ),
             },
         ),
         config: None,
@@ -158,16 +175,33 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                 selections: [
                     Field(
                         None,
-                        "id",
+                        WithRange {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                0..2,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "id2",
+                        WithRange {
+                            node: Field(
+                                "id2",
+                            ),
+                            range: Some(
+                                3..6,
+                            ),
+                        },
                         None,
                     ),
                 ],
                 star: None,
+                range: Some(
+                    0..6,
+                ),
             },
         ),
         config: None,
@@ -238,16 +272,33 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                 selections: [
                     Field(
                         None,
-                        "id",
+                        WithRange {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                0..2,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "id2",
+                        WithRange {
+                            node: Field(
+                                "id2",
+                            ),
+                            range: Some(
+                                3..6,
+                            ),
+                        },
                         None,
                     ),
                 ],
                 star: None,
+                range: Some(
+                    0..6,
+                ),
             },
         ),
         config: None,
@@ -330,16 +381,33 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                 selections: [
                     Field(
                         None,
-                        "id",
+                        WithRange {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                0..2,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "id2",
+                        WithRange {
+                            node: Field(
+                                "id2",
+                            ),
+                            range: Some(
+                                3..6,
+                            ),
+                        },
                         None,
                     ),
                 ],
                 star: None,
+                range: Some(
+                    0..6,
+                ),
             },
         ),
         config: None,
@@ -410,27 +478,70 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                 selections: [
                     Field(
                         None,
-                        "id",
+                        WithRange {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                0..2,
+                            ),
+                        },
                         None,
                     ),
                     Path(
                         Alias {
-                            name: "id2",
+                            name: WithRange {
+                                node: Field(
+                                    "id2",
+                                ),
+                                range: Some(
+                                    3..6,
+                                ),
+                            },
+                            range: Some(
+                                3..7,
+                            ),
                         },
                         PathSelection {
-                            path: Var(
-                                $this,
-                                Key(
-                                    Field(
-                                        "id2",
-                                    ),
-                                    Empty,
+                            path: WithRange {
+                                node: Var(
+                                    WithRange {
+                                        node: $this,
+                                        range: Some(
+                                            8..13,
+                                        ),
+                                    },
+                                    WithRange {
+                                        node: Key(
+                                            WithRange {
+                                                node: Field(
+                                                    "id2",
+                                                ),
+                                                range: Some(
+                                                    14..17,
+                                                ),
+                                            },
+                                            WithRange {
+                                                node: Empty,
+                                                range: None,
+                                            },
+                                        ),
+                                        range: Some(
+                                            13..17,
+                                        ),
+                                    },
                                 ),
-                            ),
+                                range: Some(
+                                    8..17,
+                                ),
+                            },
                         },
                     ),
                 ],
                 star: None,
+                range: Some(
+                    0..17,
+                ),
             },
         ),
         config: None,
@@ -489,22 +600,58 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                         selections: [
                             Path(
                                 Alias {
-                                    name: "id",
+                                    name: WithRange {
+                                        node: Field(
+                                            "id",
+                                        ),
+                                        range: Some(
+                                            0..2,
+                                        ),
+                                    },
+                                    range: Some(
+                                        0..3,
+                                    ),
                                 },
                                 PathSelection {
-                                    path: Var(
-                                        $this,
-                                        Key(
-                                            Field(
-                                                "id",
-                                            ),
-                                            Empty,
+                                    path: WithRange {
+                                        node: Var(
+                                            WithRange {
+                                                node: $this,
+                                                range: Some(
+                                                    4..9,
+                                                ),
+                                            },
+                                            WithRange {
+                                                node: Key(
+                                                    WithRange {
+                                                        node: Field(
+                                                            "id",
+                                                        ),
+                                                        range: Some(
+                                                            10..12,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Empty,
+                                                        range: None,
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    9..12,
+                                                ),
+                                            },
                                         ),
-                                    ),
+                                        range: Some(
+                                            4..12,
+                                        ),
+                                    },
                                 },
                             ),
                         ],
                         star: None,
+                        range: Some(
+                            0..12,
+                        ),
                     },
                 ),
             ),
@@ -514,16 +661,33 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                 selections: [
                     Field(
                         None,
-                        "id",
+                        WithRange {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                0..2,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "id2",
+                        WithRange {
+                            node: Field(
+                                "id2",
+                            ),
+                            range: Some(
+                                3..6,
+                            ),
+                        },
                         None,
                     ),
                 ],
                 star: None,
+                range: Some(
+                    0..6,
+                ),
             },
         ),
         config: None,
@@ -582,22 +746,58 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                         selections: [
                             Path(
                                 Alias {
-                                    name: "id",
+                                    name: WithRange {
+                                        node: Field(
+                                            "id",
+                                        ),
+                                        range: Some(
+                                            0..2,
+                                        ),
+                                    },
+                                    range: Some(
+                                        0..3,
+                                    ),
                                 },
                                 PathSelection {
-                                    path: Var(
-                                        $this,
-                                        Key(
-                                            Field(
-                                                "id",
-                                            ),
-                                            Empty,
+                                    path: WithRange {
+                                        node: Var(
+                                            WithRange {
+                                                node: $this,
+                                                range: Some(
+                                                    4..9,
+                                                ),
+                                            },
+                                            WithRange {
+                                                node: Key(
+                                                    WithRange {
+                                                        node: Field(
+                                                            "id",
+                                                        ),
+                                                        range: Some(
+                                                            10..12,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Empty,
+                                                        range: None,
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    9..12,
+                                                ),
+                                            },
                                         ),
-                                    ),
+                                        range: Some(
+                                            4..12,
+                                        ),
+                                    },
                                 },
                             ),
                         ],
                         star: None,
+                        range: Some(
+                            0..12,
+                        ),
                     },
                 ),
             ),
@@ -607,27 +807,70 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                 selections: [
                     Field(
                         None,
-                        "id",
+                        WithRange {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                0..2,
+                            ),
+                        },
                         None,
                     ),
                     Path(
                         Alias {
-                            name: "id2",
+                            name: WithRange {
+                                node: Field(
+                                    "id2",
+                                ),
+                                range: Some(
+                                    3..6,
+                                ),
+                            },
+                            range: Some(
+                                3..7,
+                            ),
                         },
                         PathSelection {
-                            path: Var(
-                                $this,
-                                Key(
-                                    Field(
-                                        "id2",
-                                    ),
-                                    Empty,
+                            path: WithRange {
+                                node: Var(
+                                    WithRange {
+                                        node: $this,
+                                        range: Some(
+                                            8..13,
+                                        ),
+                                    },
+                                    WithRange {
+                                        node: Key(
+                                            WithRange {
+                                                node: Field(
+                                                    "id2",
+                                                ),
+                                                range: Some(
+                                                    14..17,
+                                                ),
+                                            },
+                                            WithRange {
+                                                node: Empty,
+                                                range: None,
+                                            },
+                                        ),
+                                        range: Some(
+                                            13..17,
+                                        ),
+                                    },
                                 ),
-                            ),
+                                range: Some(
+                                    8..17,
+                                ),
+                            },
                         },
                     ),
                 ],
                 star: None,
+                range: Some(
+                    0..17,
+                ),
             },
         ),
         config: None,

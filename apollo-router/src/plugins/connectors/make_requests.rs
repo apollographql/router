@@ -557,10 +557,7 @@ mod tests {
                                             "f",
                                         ),
                                         range: Some(
-                                            (
-                                                0,
-                                                1,
-                                            ),
+                                            0..1,
                                         ),
                                     },
                                     None,
@@ -568,10 +565,7 @@ mod tests {
                             ],
                             star: None,
                             range: Some(
-                                (
-                                    0,
-                                    1,
-                                ),
+                                0..1,
                             ),
                         },
                     ),
@@ -605,10 +599,7 @@ mod tests {
                                             "f",
                                         ),
                                         range: Some(
-                                            (
-                                                0,
-                                                1,
-                                            ),
+                                            0..1,
                                         ),
                                     },
                                     None,
@@ -616,10 +607,7 @@ mod tests {
                             ],
                             star: None,
                             range: Some(
-                                (
-                                    0,
-                                    1,
-                                ),
+                                0..1,
                             ),
                         },
                     ),
@@ -702,10 +690,7 @@ mod tests {
                                     WithRange {
                                         node: $,
                                         range: Some(
-                                            (
-                                                0,
-                                                1,
-                                            ),
+                                            0..1,
                                         ),
                                     },
                                     WithRange {
@@ -714,10 +699,7 @@ mod tests {
                                     },
                                 ),
                                 range: Some(
-                                    (
-                                        0,
-                                        1,
-                                    ),
+                                    0..1,
                                 ),
                             },
                         },
@@ -743,10 +725,7 @@ mod tests {
                                     WithRange {
                                         node: $,
                                         range: Some(
-                                            (
-                                                0,
-                                                1,
-                                            ),
+                                            0..1,
                                         ),
                                     },
                                     WithRange {
@@ -755,10 +734,7 @@ mod tests {
                                     },
                                 ),
                                 range: Some(
-                                    (
-                                        0,
-                                        1,
-                                    ),
+                                    0..1,
                                 ),
                             },
                         },
@@ -874,10 +850,7 @@ mod tests {
                                             "data",
                                         ),
                                         range: Some(
-                                            (
-                                                1,
-                                                5,
-                                            ),
+                                            1..5,
                                         ),
                                     },
                                     WithRange {
@@ -886,10 +859,7 @@ mod tests {
                                     },
                                 ),
                                 range: Some(
-                                    (
-                                        0,
-                                        5,
-                                    ),
+                                    0..5,
                                 ),
                             },
                         },
@@ -931,10 +901,7 @@ mod tests {
                                             "data",
                                         ),
                                         range: Some(
-                                            (
-                                                1,
-                                                5,
-                                            ),
+                                            1..5,
                                         ),
                                     },
                                     WithRange {
@@ -943,10 +910,7 @@ mod tests {
                                     },
                                 ),
                                 range: Some(
-                                    (
-                                        0,
-                                        5,
-                                    ),
+                                    0..5,
                                 ),
                             },
                         },
@@ -1136,10 +1100,7 @@ mod tests {
                                         "field",
                                     ),
                                     range: Some(
-                                        (
-                                            0,
-                                            5,
-                                        ),
+                                        0..5,
                                     ),
                                 },
                                 None,
@@ -1161,10 +1122,7 @@ mod tests {
                                         "field",
                                     ),
                                     range: Some(
-                                        (
-                                            0,
-                                            5,
-                                        ),
+                                        0..5,
                                     ),
                                 },
                                 None,
@@ -1172,10 +1130,7 @@ mod tests {
                         ],
                         star: None,
                         range: Some(
-                            (
-                                0,
-                                5,
-                            ),
+                            0..5,
                         ),
                     },
                 ),
@@ -1254,10 +1209,7 @@ mod tests {
                                         "field",
                                     ),
                                     range: Some(
-                                        (
-                                            0,
-                                            5,
-                                        ),
+                                        0..5,
                                     ),
                                 },
                                 None,
@@ -1279,10 +1231,7 @@ mod tests {
                                         "field",
                                     ),
                                     range: Some(
-                                        (
-                                            0,
-                                            5,
-                                        ),
+                                        0..5,
                                     ),
                                 },
                                 None,
@@ -1290,10 +1239,7 @@ mod tests {
                         ],
                         star: None,
                         range: Some(
-                            (
-                                0,
-                                5,
-                            ),
+                            0..5,
                         ),
                     },
                 ),
@@ -1404,10 +1350,7 @@ mod tests {
                                         "field",
                                     ),
                                     range: Some(
-                                        (
-                                            0,
-                                            5,
-                                        ),
+                                        0..5,
                                     ),
                                 },
                                 Some(
@@ -1420,10 +1363,7 @@ mod tests {
                                                         "field",
                                                     ),
                                                     range: Some(
-                                                        (
-                                                            8,
-                                                            13,
-                                                        ),
+                                                        8..13,
                                                     ),
                                                 },
                                                 None,
@@ -1431,10 +1371,7 @@ mod tests {
                                         ],
                                         star: None,
                                         range: Some(
-                                            (
-                                                6,
-                                                15,
-                                            ),
+                                            6..15,
                                         ),
                                     },
                                 ),
@@ -1442,10 +1379,7 @@ mod tests {
                         ],
                         star: None,
                         range: Some(
-                            (
-                                0,
-                                15,
-                            ),
+                            0..15,
                         ),
                     },
                 ),
@@ -1473,10 +1407,7 @@ mod tests {
                                         "field",
                                     ),
                                     range: Some(
-                                        (
-                                            0,
-                                            5,
-                                        ),
+                                        0..5,
                                     ),
                                 },
                                 Some(
@@ -1499,10 +1430,7 @@ mod tests {
                                                         "field",
                                                     ),
                                                     range: Some(
-                                                        (
-                                                            8,
-                                                            13,
-                                                        ),
+                                                        8..13,
                                                     ),
                                                 },
                                                 None,
@@ -1510,10 +1438,7 @@ mod tests {
                                         ],
                                         star: None,
                                         range: Some(
-                                            (
-                                                6,
-                                                15,
-                                            ),
+                                            6..15,
                                         ),
                                     },
                                 ),
@@ -1521,10 +1446,7 @@ mod tests {
                         ],
                         star: None,
                         range: Some(
-                            (
-                                0,
-                                15,
-                            ),
+                            0..15,
                         ),
                     },
                 ),
@@ -1655,10 +1577,7 @@ mod tests {
                                         "selected",
                                     ),
                                     range: Some(
-                                        (
-                                            0,
-                                            8,
-                                        ),
+                                        0..8,
                                     ),
                                 },
                                 None,
@@ -1666,10 +1585,7 @@ mod tests {
                         ],
                         star: None,
                         range: Some(
-                            (
-                                0,
-                                8,
-                            ),
+                            0..8,
                         ),
                     },
                 ),
@@ -1705,10 +1621,7 @@ mod tests {
                                         "selected",
                                     ),
                                     range: Some(
-                                        (
-                                            0,
-                                            8,
-                                        ),
+                                        0..8,
                                     ),
                                 },
                                 None,
@@ -1716,10 +1629,7 @@ mod tests {
                         ],
                         star: None,
                         range: Some(
-                            (
-                                0,
-                                8,
-                            ),
+                            0..8,
                         ),
                     },
                 ),
@@ -1755,10 +1665,7 @@ mod tests {
                                         "selected",
                                     ),
                                     range: Some(
-                                        (
-                                            0,
-                                            8,
-                                        ),
+                                        0..8,
                                     ),
                                 },
                                 None,
@@ -1766,10 +1673,7 @@ mod tests {
                         ],
                         star: None,
                         range: Some(
-                            (
-                                0,
-                                8,
-                            ),
+                            0..8,
                         ),
                     },
                 ),
@@ -1805,10 +1709,7 @@ mod tests {
                                         "selected",
                                     ),
                                     range: Some(
-                                        (
-                                            0,
-                                            8,
-                                        ),
+                                        0..8,
                                     ),
                                 },
                                 None,
@@ -1816,10 +1717,7 @@ mod tests {
                         ],
                         star: None,
                         range: Some(
-                            (
-                                0,
-                                8,
-                            ),
+                            0..8,
                         ),
                     },
                 ),
@@ -1953,10 +1851,7 @@ mod tests {
                                         "selected",
                                     ),
                                     range: Some(
-                                        (
-                                            0,
-                                            8,
-                                        ),
+                                        0..8,
                                     ),
                                 },
                                 None,
@@ -1964,10 +1859,7 @@ mod tests {
                         ],
                         star: None,
                         range: Some(
-                            (
-                                0,
-                                8,
-                            ),
+                            0..8,
                         ),
                     },
                 ),
@@ -2001,10 +1893,7 @@ mod tests {
                                         "selected",
                                     ),
                                     range: Some(
-                                        (
-                                            0,
-                                            8,
-                                        ),
+                                        0..8,
                                     ),
                                 },
                                 None,
@@ -2012,10 +1901,7 @@ mod tests {
                         ],
                         star: None,
                         range: Some(
-                            (
-                                0,
-                                8,
-                            ),
+                            0..8,
                         ),
                     },
                 ),
@@ -2116,10 +2002,7 @@ mod tests {
                                             "data",
                                         ),
                                         range: Some(
-                                            (
-                                                1,
-                                                5,
-                                            ),
+                                            1..5,
                                         ),
                                     },
                                     WithRange {
@@ -2128,10 +2011,7 @@ mod tests {
                                     },
                                 ),
                                 range: Some(
-                                    (
-                                        0,
-                                        5,
-                                    ),
+                                    0..5,
                                 ),
                             },
                         },

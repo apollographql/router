@@ -387,7 +387,7 @@ impl PathList {
                 let dollar_range = dollar.range();
                 let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
                 let full_range = merge_ranges(
-                    dollar_range,
+                    dollar_range.clone(),
                     if matches!(rest.node(), Self::Empty) {
                         None
                     } else {
@@ -397,7 +397,7 @@ impl PathList {
                 return if let Some(var) = opt_var {
                     let full_name = format!("{}{}", dollar.node(), var.as_str());
                     if let Some(known_var) = KnownVariable::from_str(full_name.as_str()) {
-                        let var_range = merge_ranges(dollar_range, var.range());
+                        let var_range = merge_ranges(dollar_range.clone(), var.range());
                         let parsed_known_var = WithRange::new(known_var, var_range);
                         Ok((
                             remainder,
@@ -412,7 +412,8 @@ impl PathList {
                         )))
                     }
                 } else {
-                    let parsed_dollar_var = WithRange::new(KnownVariable::Dollar, dollar_range);
+                    let parsed_dollar_var =
+                        WithRange::new(KnownVariable::Dollar, dollar_range.clone());
                     Ok((
                         remainder,
                         WithRange::new(Self::Var(parsed_dollar_var, rest), full_range),
@@ -640,7 +641,7 @@ impl Ranged<SubSelection> for SubSelection {
     // field of the struct, allowing SubSelection to implement the Ranged trait
     // without a WithRange<SubSelection> wrapper.
     fn range(&self) -> OffsetRange {
-        self.range
+        self.range.clone()
     }
 }
 
@@ -774,7 +775,7 @@ impl Ranged<StarSelection> for StarSelection {
     }
 
     fn range(&self) -> OffsetRange {
-        self.range
+        self.range.clone()
     }
 }
 
@@ -836,7 +837,7 @@ impl Ranged<Alias> for Alias {
     }
 
     fn range(&self) -> OffsetRange {
-        self.range
+        self.range.clone()
     }
 }
 
@@ -969,7 +970,7 @@ fn parse_identifier_no_space(input: Span) -> IResult<Span, WithRange<String>> {
         )),
     ))(input)
     .map(|(remainder, name)| {
-        let range = Some((name.location_offset(), remainder.location_offset()));
+        let range = Some(name.location_offset()..remainder.location_offset());
         (remainder, WithRange::new(name.to_string(), range))
     })
 }
@@ -1014,7 +1015,7 @@ pub fn parse_string_literal(input: Span) -> IResult<Span, WithRange<String>> {
                     spaces_or_comments(remainder)?.0,
                     WithRange::new(
                         chars.iter().collect::<String>(),
-                        Some((start, remainder.location_offset())),
+                        Some(start..remainder.location_offset()),
                     ),
                 ))
             } else {
@@ -1044,7 +1045,7 @@ impl Ranged<MethodArgs> for MethodArgs {
     }
 
     fn range(&self) -> OffsetRange {
-        self.range
+        self.range.clone()
     }
 }
 
@@ -2720,10 +2721,10 @@ mod tests {
             JSONSelection::Named(SubSelection {
                 selections: vec![NamedSelection::Field(
                     None,
-                    WithRange::new(Key::field("hello"), Some((0, 5))),
+                    WithRange::new(Key::field("hello"), Some(0..5)),
                     None,
                 )],
-                range: Some((0, 5)),
+                range: Some(0..5),
                 ..Default::default()
             }),
         );
@@ -2733,10 +2734,10 @@ mod tests {
             JSONSelection::Named(SubSelection {
                 selections: vec![NamedSelection::Field(
                     None,
-                    WithRange::new(Key::field("hello"), Some((2, 7))),
+                    WithRange::new(Key::field("hello"), Some(2..7)),
                     None,
                 )],
-                range: Some((2, 7)),
+                range: Some(2..7),
                 ..Default::default()
             }),
         );
@@ -2746,25 +2747,25 @@ mod tests {
             JSONSelection::Named(SubSelection {
                 selections: vec![NamedSelection::Field(
                     None,
-                    WithRange::new(Key::field("hello"), Some((2, 7))),
+                    WithRange::new(Key::field("hello"), Some(2..7)),
                     Some(SubSelection {
                         selections: vec![
                             NamedSelection::Field(
                                 None,
-                                WithRange::new(Key::field("hi"), Some((11, 13))),
+                                WithRange::new(Key::field("hi"), Some(11..13)),
                                 None,
                             ),
                             NamedSelection::Field(
                                 None,
-                                WithRange::new(Key::field("name"), Some((14, 18))),
+                                WithRange::new(Key::field("name"), Some(14..18)),
                                 None,
                             ),
                         ],
-                        range: Some((9, 20)),
+                        range: Some(9..20),
                         ..Default::default()
                     }),
                 )],
-                range: Some((2, 20)),
+                range: Some(2..20),
                 ..Default::default()
             }),
         );
@@ -2774,22 +2775,22 @@ mod tests {
             JSONSelection::Path(PathSelection {
                 path: WithRange::new(
                     PathList::Var(
-                        WithRange::new(KnownVariable::Args, Some((0, 5))),
+                        WithRange::new(KnownVariable::Args, Some(0..5)),
                         WithRange::new(
                             PathList::Key(
-                                WithRange::new(Key::field("product"), Some((6, 13))),
+                                WithRange::new(Key::field("product"), Some(6..13)),
                                 WithRange::new(
                                     PathList::Key(
-                                        WithRange::new(Key::field("id"), Some((14, 16))),
+                                        WithRange::new(Key::field("id"), Some(14..16)),
                                         WithRange::new(PathList::Empty, None),
                                     ),
-                                    Some((13, 16)),
+                                    Some(13..16),
                                 ),
                             ),
-                            Some((5, 16)),
+                            Some(5..16),
                         ),
                     ),
-                    Some((0, 16)),
+                    Some(0..16),
                 ),
             }),
         );
@@ -2799,22 +2800,22 @@ mod tests {
             JSONSelection::Path(PathSelection {
                 path: WithRange::new(
                     PathList::Var(
-                        WithRange::new(KnownVariable::Args, Some((1, 6))),
+                        WithRange::new(KnownVariable::Args, Some(1..6)),
                         WithRange::new(
                             PathList::Key(
-                                WithRange::new(Key::field("product"), Some((9, 16))),
+                                WithRange::new(Key::field("product"), Some(9..16)),
                                 WithRange::new(
                                     PathList::Key(
-                                        WithRange::new(Key::field("id"), Some((19, 21))),
+                                        WithRange::new(Key::field("id"), Some(19..21)),
                                         WithRange::new(PathList::Empty, None),
                                     ),
-                                    Some((17, 21)),
+                                    Some(17..21),
                                 ),
                             ),
-                            Some((7, 21)),
+                            Some(7..21),
                         ),
                     ),
-                    Some((1, 21)),
+                    Some(1..21),
                 ),
             }),
         );
@@ -2825,21 +2826,21 @@ mod tests {
                 selections: vec![
                     NamedSelection::Field(
                         None,
-                        WithRange::new(Key::field("before"), Some((0, 6))),
+                        WithRange::new(Key::field("before"), Some(0..6)),
                         None,
                     ),
                     NamedSelection::Path(
                         Alias {
-                            name: WithRange::new(Key::field("product"), Some((7, 14))),
-                            range: Some((7, 15)),
+                            name: WithRange::new(Key::field("product"), Some(7..14)),
+                            range: Some(7..15),
                         },
                         PathSelection {
                             path: WithRange::new(
                                 PathList::Var(
-                                    WithRange::new(KnownVariable::Args, Some((15, 20))),
+                                    WithRange::new(KnownVariable::Args, Some(15..20)),
                                     WithRange::new(
                                         PathList::Key(
-                                            WithRange::new(Key::field("product"), Some((21, 28))),
+                                            WithRange::new(Key::field("product"), Some(21..28)),
                                             WithRange::new(
                                                 PathList::Selection(SubSelection {
                                                     selections: vec![
@@ -2847,7 +2848,7 @@ mod tests {
                                                             None,
                                                             WithRange::new(
                                                                 Key::field("id"),
-                                                                Some((29, 31)),
+                                                                Some(29..31),
                                                             ),
                                                             None,
                                                         ),
@@ -2855,31 +2856,31 @@ mod tests {
                                                             None,
                                                             WithRange::new(
                                                                 Key::field("name"),
-                                                                Some((32, 36)),
+                                                                Some(32..36),
                                                             ),
                                                             None,
                                                         ),
                                                     ],
-                                                    range: Some((28, 37)),
+                                                    range: Some(28..37),
                                                     ..Default::default()
                                                 }),
-                                                Some((28, 37)),
+                                                Some(28..37),
                                             ),
                                         ),
-                                        Some((20, 37)),
+                                        Some(20..37),
                                     ),
                                 ),
-                                Some((15, 37)),
+                                Some(15..37),
                             ),
                         },
                     ),
                     NamedSelection::Field(
                         None,
-                        WithRange::new(Key::field("after"), Some((37, 42))),
+                        WithRange::new(Key::field("after"), Some(37..42)),
                         None,
                     ),
                 ],
-                range: Some((0, 42)),
+                range: Some(0..42),
                 ..Default::default()
             }),
         );

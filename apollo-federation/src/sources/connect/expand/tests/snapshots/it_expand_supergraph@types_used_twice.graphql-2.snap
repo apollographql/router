@@ -54,10 +54,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                                 "a",
                             ),
                             range: Some(
-                                (
-                                    0,
-                                    1,
-                                ),
+                                0..1,
                             ),
                         },
                         Some(
@@ -70,10 +67,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                                                 "id",
                                             ),
                                             range: Some(
-                                                (
-                                                    4,
-                                                    6,
-                                                ),
+                                                4..6,
                                             ),
                                         },
                                         None,
@@ -81,10 +75,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                                 ],
                                 star: None,
                                 range: Some(
-                                    (
-                                        2,
-                                        8,
-                                    ),
+                                    2..8,
                                 ),
                             },
                         ),
@@ -96,10 +87,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                                 "b",
                             ),
                             range: Some(
-                                (
-                                    9,
-                                    10,
-                                ),
+                                9..10,
                             ),
                         },
                         Some(
@@ -112,10 +100,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                                                 "a",
                                             ),
                                             range: Some(
-                                                (
-                                                    13,
-                                                    14,
-                                                ),
+                                                13..14,
                                             ),
                                         },
                                         Some(
@@ -128,10 +113,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                                                                 "id",
                                                             ),
                                                             range: Some(
-                                                                (
-                                                                    17,
-                                                                    19,
-                                                                ),
+                                                                17..19,
                                                             ),
                                                         },
                                                         None,
@@ -139,10 +121,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                                                 ],
                                                 star: None,
                                                 range: Some(
-                                                    (
-                                                        15,
-                                                        21,
-                                                    ),
+                                                    15..21,
                                                 ),
                                             },
                                         ),
@@ -150,10 +129,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                                 ],
                                 star: None,
                                 range: Some(
-                                    (
-                                        11,
-                                        23,
-                                    ),
+                                    11..23,
                                 ),
                             },
                         ),
@@ -161,10 +137,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                 ],
                 star: None,
                 range: Some(
-                    (
-                        0,
-                        23,
-                    ),
+                    0..23,
                 ),
             },
         ),

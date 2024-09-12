@@ -149,7 +149,7 @@ impl ApplyToError {
                                         if let (Some(start), Some(end)) =
                                             (range[0].as_u64(), range[1].as_u64())
                                         {
-                                            return Some((start as usize, end as usize));
+                                            return Some(start as usize..end as usize);
                                         }
                                     }
                                 }
@@ -172,7 +172,7 @@ impl ApplyToError {
     }
 
     pub fn range(&self) -> OffsetRange {
-        self.range
+        self.range.clone()
     }
 }
 
@@ -896,7 +896,7 @@ mod tests {
             (Some(json!({"hello": "world"})), vec![],)
         );
 
-        fn make_yellow_errors_expected(yellow_range: (usize, usize)) -> Vec<ApplyToError> {
+        fn make_yellow_errors_expected(yellow_range: std::ops::Range<usize>) -> Vec<ApplyToError> {
             vec![ApplyToError::new(
                 "Property .yellow not found in object".to_string(),
                 vec![json!("yellow")],
@@ -905,15 +905,15 @@ mod tests {
         }
         assert_eq!(
             selection!("yellow").apply_to(&data),
-            (Some(json!({})), make_yellow_errors_expected((0, 6))),
+            (Some(json!({})), make_yellow_errors_expected(0..6)),
         );
         assert_eq!(
             selection!(".yellow").apply_to(&data),
-            (None, make_yellow_errors_expected((1, 7))),
+            (None, make_yellow_errors_expected(1..7)),
         );
         assert_eq!(
             selection!("$.yellow").apply_to(&data),
-            (None, make_yellow_errors_expected((2, 8))),
+            (None, make_yellow_errors_expected(2..8)),
         );
 
         assert_eq!(
@@ -922,7 +922,7 @@ mod tests {
         );
 
         fn make_quoted_yellow_expected(
-            yellow_range: (usize, usize),
+            yellow_range: std::ops::Range<usize>,
         ) -> (Option<JSON>, Vec<ApplyToError>) {
             (
                 None,
@@ -935,11 +935,11 @@ mod tests {
         }
         assert_eq!(
             selection!(".nested.'yellow'").apply_to(&data),
-            make_quoted_yellow_expected((8, 16)),
+            make_quoted_yellow_expected(8..16),
         );
         assert_eq!(
             selection!("$.nested.'yellow'").apply_to(&data),
-            make_quoted_yellow_expected((9, 17)),
+            make_quoted_yellow_expected(9..17),
         );
 
         fn make_nested_path_expected(

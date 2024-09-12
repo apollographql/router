@@ -65,10 +65,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                 WithRange {
                                     node: $args,
                                     range: Some(
-                                        (
-                                            0,
-                                            5,
-                                        ),
+                                        0..5,
                                     ),
                                 },
                                 WithRange {
@@ -78,10 +75,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                 "input",
                                             ),
                                             range: Some(
-                                                (
-                                                    6,
-                                                    11,
-                                                ),
+                                                6..11,
                                             ),
                                         },
                                         WithRange {
@@ -95,10 +89,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                     "name",
                                                                 ),
                                                                 range: Some(
-                                                                    (
-                                                                        14,
-                                                                        18,
-                                                                    ),
+                                                                    14..18,
                                                                 ),
                                                             },
                                                             None,
@@ -110,10 +101,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                     "username",
                                                                 ),
                                                                 range: Some(
-                                                                    (
-                                                                        19,
-                                                                        27,
-                                                                    ),
+                                                                    19..27,
                                                                 ),
                                                             },
                                                             None,
@@ -125,10 +113,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                     "email",
                                                                 ),
                                                                 range: Some(
-                                                                    (
-                                                                        28,
-                                                                        33,
-                                                                    ),
+                                                                    28..33,
                                                                 ),
                                                             },
                                                             None,
@@ -140,10 +125,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                     "status",
                                                                 ),
                                                                 range: Some(
-                                                                    (
-                                                                        34,
-                                                                        40,
-                                                                    ),
+                                                                    34..40,
                                                                 ),
                                                             },
                                                             None,
@@ -155,10 +137,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                     "address",
                                                                 ),
                                                                 range: Some(
-                                                                    (
-                                                                        41,
-                                                                        48,
-                                                                    ),
+                                                                    41..48,
                                                                 ),
                                                             },
                                                             Some(
@@ -171,10 +150,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                                     "street",
                                                                                 ),
                                                                                 range: Some(
-                                                                                    (
-                                                                                        51,
-                                                                                        57,
-                                                                                    ),
+                                                                                    51..57,
                                                                                 ),
                                                                             },
                                                                             None,
@@ -186,10 +162,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                                     "suite",
                                                                                 ),
                                                                                 range: Some(
-                                                                                    (
-                                                                                        58,
-                                                                                        63,
-                                                                                    ),
+                                                                                    58..63,
                                                                                 ),
                                                                             },
                                                                             None,
@@ -201,10 +174,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                                     "city",
                                                                                 ),
                                                                                 range: Some(
-                                                                                    (
-                                                                                        64,
-                                                                                        68,
-                                                                                    ),
+                                                                                    64..68,
                                                                                 ),
                                                                             },
                                                                             None,
@@ -216,10 +186,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                                     "zipcode",
                                                                                 ),
                                                                                 range: Some(
-                                                                                    (
-                                                                                        69,
-                                                                                        76,
-                                                                                    ),
+                                                                                    69..76,
                                                                                 ),
                                                                             },
                                                                             None,
@@ -231,10 +198,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                                     "geo",
                                                                                 ),
                                                                                 range: Some(
-                                                                                    (
-                                                                                        77,
-                                                                                        80,
-                                                                                    ),
+                                                                                    77..80,
                                                                                 ),
                                                                             },
                                                                             Some(
@@ -247,10 +211,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                                                     "lat",
                                                                                                 ),
                                                                                                 range: Some(
-                                                                                                    (
-                                                                                                        83,
-                                                                                                        86,
-                                                                                                    ),
+                                                                                                    83..86,
                                                                                                 ),
                                                                                             },
                                                                                             None,
@@ -262,10 +223,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                                                     "lng",
                                                                                                 ),
                                                                                                 range: Some(
-                                                                                                    (
-                                                                                                        87,
-                                                                                                        90,
-                                                                                                    ),
+                                                                                                    87..90,
                                                                                                 ),
                                                                                             },
                                                                                             None,
@@ -273,10 +231,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                                     ],
                                                                                     star: None,
                                                                                     range: Some(
-                                                                                        (
-                                                                                            81,
-                                                                                            92,
-                                                                                        ),
+                                                                                        81..92,
                                                                                     ),
                                                                                 },
                                                                             ),
@@ -284,10 +239,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                     ],
                                                                     star: None,
                                                                     range: Some(
-                                                                        (
-                                                                            49,
-                                                                            94,
-                                                                        ),
+                                                                        49..94,
                                                                     ),
                                                                 },
                                                             ),
@@ -295,34 +247,22 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                     ],
                                                     star: None,
                                                     range: Some(
-                                                        (
-                                                            12,
-                                                            96,
-                                                        ),
+                                                        12..96,
                                                     ),
                                                 },
                                             ),
                                             range: Some(
-                                                (
-                                                    12,
-                                                    96,
-                                                ),
+                                                12..96,
                                             ),
                                         },
                                     ),
                                     range: Some(
-                                        (
-                                            5,
-                                            96,
-                                        ),
+                                        5..96,
                                     ),
                                 },
                             ),
                             range: Some(
-                                (
-                                    0,
-                                    96,
-                                ),
+                                0..96,
                             ),
                         },
                     },
@@ -339,10 +279,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                 "id",
                             ),
                             range: Some(
-                                (
-                                    0,
-                                    2,
-                                ),
+                                0..2,
                             ),
                         },
                         None,
@@ -350,10 +287,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                 ],
                 star: None,
                 range: Some(
-                    (
-                        0,
-                        2,
-                    ),
+                    0..2,
                 ),
             },
         ),
@@ -425,17 +359,11 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                             "emailDomain",
                                         ),
                                         range: Some(
-                                            (
-                                                0,
-                                                11,
-                                            ),
+                                            0..11,
                                         ),
                                     },
                                     range: Some(
-                                        (
-                                            0,
-                                            12,
-                                        ),
+                                        0..12,
                                     ),
                                 },
                                 PathSelection {
@@ -444,10 +372,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                             WithRange {
                                                 node: $args,
                                                 range: Some(
-                                                    (
-                                                        13,
-                                                        18,
-                                                    ),
+                                                    13..18,
                                                 ),
                                             },
                                             WithRange {
@@ -457,10 +382,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                             "email",
                                                         ),
                                                         range: Some(
-                                                            (
-                                                                19,
-                                                                24,
-                                                            ),
+                                                            19..24,
                                                         ),
                                                     },
                                                     WithRange {
@@ -469,18 +391,12 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                     },
                                                 ),
                                                 range: Some(
-                                                    (
-                                                        18,
-                                                        24,
-                                                    ),
+                                                    18..24,
                                                 ),
                                             },
                                         ),
                                         range: Some(
-                                            (
-                                                13,
-                                                24,
-                                            ),
+                                            13..24,
                                         ),
                                     },
                                 },
@@ -488,10 +404,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                         ],
                         star: None,
                         range: Some(
-                            (
-                                0,
-                                24,
-                            ),
+                            0..24,
                         ),
                     },
                 ),
@@ -507,10 +420,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                 "id",
                             ),
                             range: Some(
-                                (
-                                    0,
-                                    2,
-                                ),
+                                0..2,
                             ),
                         },
                         None,
@@ -522,10 +432,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                 "name",
                             ),
                             range: Some(
-                                (
-                                    3,
-                                    7,
-                                ),
+                                3..7,
                             ),
                         },
                         None,
@@ -533,10 +440,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                 ],
                 star: None,
                 range: Some(
-                    (
-                        0,
-                        7,
-                    ),
+                    0..7,
                 ),
             },
         ),
@@ -613,10 +517,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                 "id",
                             ),
                             range: Some(
-                                (
-                                    0,
-                                    2,
-                                ),
+                                0..2,
                             ),
                         },
                         None,
@@ -628,10 +529,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                 "name",
                             ),
                             range: Some(
-                                (
-                                    3,
-                                    7,
-                                ),
+                                3..7,
                             ),
                         },
                         None,
@@ -643,10 +541,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                 "company",
                             ),
                             range: Some(
-                                (
-                                    8,
-                                    15,
-                                ),
+                                8..15,
                             ),
                         },
                         Some(
@@ -659,10 +554,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                 "name",
                                             ),
                                             range: Some(
-                                                (
-                                                    20,
-                                                    24,
-                                                ),
+                                                20..24,
                                             ),
                                         },
                                         None,
@@ -674,10 +566,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                 "catchPhrase",
                                             ),
                                             range: Some(
-                                                (
-                                                    27,
-                                                    38,
-                                                ),
+                                                27..38,
                                             ),
                                         },
                                         None,
@@ -689,10 +578,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                 "bs",
                                             ),
                                             range: Some(
-                                                (
-                                                    41,
-                                                    43,
-                                                ),
+                                                41..43,
                                             ),
                                         },
                                         None,
@@ -700,10 +586,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                 ],
                                 star: None,
                                 range: Some(
-                                    (
-                                        16,
-                                        45,
-                                    ),
+                                    16..45,
                                 ),
                             },
                         ),
@@ -711,10 +594,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                 ],
                 star: None,
                 range: Some(
-                    (
-                        0,
-                        45,
-                    ),
+                    0..45,
                 ),
             },
         ),
@@ -784,10 +664,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                 "id",
                             ),
                             range: Some(
-                                (
-                                    0,
-                                    2,
-                                ),
+                                0..2,
                             ),
                         },
                         None,
@@ -799,10 +676,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                 "name",
                             ),
                             range: Some(
-                                (
-                                    3,
-                                    7,
-                                ),
+                                3..7,
                             ),
                         },
                         None,
@@ -814,10 +688,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                 "username",
                             ),
                             range: Some(
-                                (
-                                    8,
-                                    16,
-                                ),
+                                8..16,
                             ),
                         },
                         None,
@@ -829,10 +700,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                 "email",
                             ),
                             range: Some(
-                                (
-                                    17,
-                                    22,
-                                ),
+                                17..22,
                             ),
                         },
                         None,
@@ -844,10 +712,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                 "address",
                             ),
                             range: Some(
-                                (
-                                    23,
-                                    30,
-                                ),
+                                23..30,
                             ),
                         },
                         Some(
@@ -860,10 +725,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                 "street",
                                             ),
                                             range: Some(
-                                                (
-                                                    35,
-                                                    41,
-                                                ),
+                                                35..41,
                                             ),
                                         },
                                         None,
@@ -875,10 +737,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                 "suite",
                                             ),
                                             range: Some(
-                                                (
-                                                    44,
-                                                    49,
-                                                ),
+                                                44..49,
                                             ),
                                         },
                                         None,
@@ -890,10 +749,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                 "city",
                                             ),
                                             range: Some(
-                                                (
-                                                    52,
-                                                    56,
-                                                ),
+                                                52..56,
                                             ),
                                         },
                                         None,
@@ -905,10 +761,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                 "zipcode",
                                             ),
                                             range: Some(
-                                                (
-                                                    59,
-                                                    66,
-                                                ),
+                                                59..66,
                                             ),
                                         },
                                         None,
@@ -920,10 +773,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                 "geo",
                                             ),
                                             range: Some(
-                                                (
-                                                    69,
-                                                    72,
-                                                ),
+                                                69..72,
                                             ),
                                         },
                                         Some(
@@ -936,10 +786,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                 "lat",
                                                             ),
                                                             range: Some(
-                                                                (
-                                                                    79,
-                                                                    82,
-                                                                ),
+                                                                79..82,
                                                             ),
                                                         },
                                                         None,
@@ -951,10 +798,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                                 "lng",
                                                             ),
                                                             range: Some(
-                                                                (
-                                                                    87,
-                                                                    90,
-                                                                ),
+                                                                87..90,
                                                             ),
                                                         },
                                                         None,
@@ -962,10 +806,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                 ],
                                                 star: None,
                                                 range: Some(
-                                                    (
-                                                        73,
-                                                        94,
-                                                    ),
+                                                    73..94,
                                                 ),
                                             },
                                         ),
@@ -973,10 +814,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                 ],
                                 star: None,
                                 range: Some(
-                                    (
-                                        31,
-                                        96,
-                                    ),
+                                    31..96,
                                 ),
                             },
                         ),
@@ -988,10 +826,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                 "phone",
                             ),
                             range: Some(
-                                (
-                                    97,
-                                    102,
-                                ),
+                                97..102,
                             ),
                         },
                         None,
@@ -1003,10 +838,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                 "website",
                             ),
                             range: Some(
-                                (
-                                    103,
-                                    110,
-                                ),
+                                103..110,
                             ),
                         },
                         None,
@@ -1018,10 +850,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                 "company",
                             ),
                             range: Some(
-                                (
-                                    111,
-                                    118,
-                                ),
+                                111..118,
                             ),
                         },
                         Some(
@@ -1034,10 +863,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                 "name",
                                             ),
                                             range: Some(
-                                                (
-                                                    123,
-                                                    127,
-                                                ),
+                                                123..127,
                                             ),
                                         },
                                         None,
@@ -1049,10 +875,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                 "catchPhrase",
                                             ),
                                             range: Some(
-                                                (
-                                                    130,
-                                                    141,
-                                                ),
+                                                130..141,
                                             ),
                                         },
                                         None,
@@ -1064,10 +887,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                 "bs",
                                             ),
                                             range: Some(
-                                                (
-                                                    144,
-                                                    146,
-                                                ),
+                                                144..146,
                                             ),
                                         },
                                         None,
@@ -1079,10 +899,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                                 "email",
                                             ),
                                             range: Some(
-                                                (
-                                                    149,
-                                                    154,
-                                                ),
+                                                149..154,
                                             ),
                                         },
                                         None,
@@ -1090,10 +907,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                                 ],
                                 star: None,
                                 range: Some(
-                                    (
-                                        119,
-                                        156,
-                                    ),
+                                    119..156,
                                 ),
                             },
                         ),
@@ -1101,10 +915,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                 ],
                 star: None,
                 range: Some(
-                    (
-                        0,
-                        156,
-                    ),
+                    0..156,
                 ),
             },
         ),

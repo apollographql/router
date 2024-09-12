@@ -335,10 +335,7 @@ mod tests {
                                         "id",
                                     ),
                                     range: Some(
-                                        (
-                                            0,
-                                            2,
-                                        ),
+                                        0..2,
                                     ),
                                 },
                                 None,
@@ -350,10 +347,7 @@ mod tests {
                                         "name",
                                     ),
                                     range: Some(
-                                        (
-                                            3,
-                                            7,
-                                        ),
+                                        3..7,
                                     ),
                                 },
                                 None,
@@ -361,10 +355,7 @@ mod tests {
                         ],
                         star: None,
                         range: Some(
-                            (
-                                0,
-                                7,
-                            ),
+                            0..7,
                         ),
                     },
                 ),
@@ -454,10 +445,7 @@ mod tests {
                                         "id",
                                     ),
                                     range: Some(
-                                        (
-                                            0,
-                                            2,
-                                        ),
+                                        0..2,
                                     ),
                                 },
                                 None,
@@ -469,10 +457,7 @@ mod tests {
                                         "title",
                                     ),
                                     range: Some(
-                                        (
-                                            3,
-                                            8,
-                                        ),
+                                        3..8,
                                     ),
                                 },
                                 None,
@@ -484,10 +469,7 @@ mod tests {
                                         "body",
                                     ),
                                     range: Some(
-                                        (
-                                            9,
-                                            13,
-                                        ),
+                                        9..13,
                                     ),
                                 },
                                 None,
@@ -495,10 +477,7 @@ mod tests {
                         ],
                         star: None,
                         range: Some(
-                            (
-                                0,
-                                13,
-                            ),
+                            0..13,
                         ),
                     },
                 ),

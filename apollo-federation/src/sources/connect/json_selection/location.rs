@@ -20,7 +20,7 @@ pub trait Ranged<T> {
 // of the first character, and the second element is the offset of the character
 // just past the end of the range. Offsets start at 0 for the first character in
 // the file, following nom_locate's span.location_offset() convention.
-pub type OffsetRange = Option<(usize, usize)>;
+pub type OffsetRange = Option<std::ops::Range<usize>>;
 
 // The most common implementation of the Ranged<T> trait is the WithRange<T>
 // struct, used to wrap any AST node that (a) needs its own location information
@@ -75,7 +75,7 @@ impl<T> Ranged<T> for WithRange<T> {
     }
 
     fn range(&self) -> OffsetRange {
-        self.range
+        self.range.clone()
     }
 }
 
@@ -98,8 +98,9 @@ impl<T> WithRange<T> {
 
 pub(super) fn merge_ranges(left: OffsetRange, right: OffsetRange) -> OffsetRange {
     match (left, right) {
-        (Some((left_start, _left_end)), Some((_right_start, right_end))) => {
-            Some((left_start, right_end))
+        // Tolerate out-of-order and overlapping ranges.
+        (Some(left_range), Some(right_range)) => {
+            Some(left_range.start.min(right_range.start)..left_range.end.max(right_range.end))
         }
         (Some(left_range), None) => Some(left_range),
         (None, Some(right_range)) => Some(right_range),
@@ -117,7 +118,7 @@ where
 {
     map(tag(s), |t: Span<'b>| {
         let start = t.location_offset();
-        let range = Some((start, start + s.len()));
+        let range = Some(start..start + s.len());
         WithRange::new(*t.fragment(), range)
     })
 }
@@ -299,10 +300,17 @@ mod tests {
 
     #[test]
     fn test_merge_ranges() {
+        // Simple cases:
         assert_eq!(merge_ranges(None, None), None);
-        assert_eq!(merge_ranges(Some((0, 1)), None), Some((0, 1)));
-        assert_eq!(merge_ranges(None, Some((0, 1))), Some((0, 1)));
-        assert_eq!(merge_ranges(Some((0, 1)), Some((1, 2))), Some((0, 2)));
+        assert_eq!(merge_ranges(Some(0..1), None), Some(0..1));
+        assert_eq!(merge_ranges(None, Some(0..1)), Some(0..1));
+        assert_eq!(merge_ranges(Some(0..1), Some(1..2)), Some(0..2));
+
+        // Out-of-order and overlapping ranges:
+        assert_eq!(merge_ranges(Some(1..2), Some(0..1)), Some(0..2));
+        assert_eq!(merge_ranges(Some(0..1), Some(1..2)), Some(0..2));
+        assert_eq!(merge_ranges(Some(0..2), Some(1..3)), Some(0..3));
+        assert_eq!(merge_ranges(Some(1..3), Some(0..2)), Some(0..3));
     }
 
     #[test]
@@ -317,34 +325,34 @@ mod tests {
             JSONSelection::Named(SubSelection {
                 selections: vec![NamedSelection::Path(
                     Alias {
-                        name: WithRange::new(Key::field("__typename"), Some((2, 12))),
-                        range: Some((2, 13)),
+                        name: WithRange::new(Key::field("__typename"), Some(2..12)),
+                        range: Some(2..13),
                     },
                     PathSelection {
                         path: WithRange::new(
                             PathList::Var(
-                                WithRange::new(KnownVariable::AtSign, Some((14, 15))),
+                                WithRange::new(KnownVariable::AtSign, Some(14..15)),
                                 WithRange::new(
                                     PathList::Method(
-                                        WithRange::new("echo".to_string(), Some((19, 23))),
+                                        WithRange::new("echo".to_string(), Some(19..23)),
                                         Some(MethodArgs {
                                             args: vec![WithRange::new(
                                                 LitExpr::String("Frog".to_string()),
-                                                Some((26, 32)),
+                                                Some(26..32),
                                             )],
-                                            range: Some((24, 36)),
+                                            range: Some(24..36),
                                         }),
                                         WithRange::new(PathList::Empty, None),
                                     ),
-                                    Some((16, 36))
+                                    Some(16..36)
                                 ),
                             ),
-                            Some((14, 36))
+                            Some(14..36)
                         ),
                     },
                 ),],
                 star: None,
-                range: Some((2, 36)),
+                range: Some(2..36),
             }),
         );
     }

@@ -53,7 +53,7 @@ pub fn spaces_or_comments(input: Span) -> IResult<Span, WithRange<&str>> {
                 WithRange::new(
                     input.slice(0..end_of_slice).fragment(),
                     // The location of the parsed spaces and comments
-                    Some((start, end)),
+                    Some(start..end),
                 ),
             ));
         }

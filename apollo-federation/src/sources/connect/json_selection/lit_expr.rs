@@ -88,10 +88,9 @@ impl LitExpr {
                         ))),
                     ),
                     |(int, frac)| {
-                        let int_range = Some((
-                            int.location_offset(),
-                            int.location_offset() + int.fragment().len(),
-                        ));
+                        let int_range = Some(
+                            int.location_offset()..int.location_offset() + int.fragment().len(),
+                        );
 
                         let mut s = String::new();
                         s.push_str(int.fragment());
@@ -100,10 +99,10 @@ impl LitExpr {
                             let frac_range = merge_ranges(
                                 dot.range(),
                                 if frac.len() > 0 {
-                                    Some((
-                                        frac.location_offset(),
-                                        frac.location_offset() + frac.fragment().len(),
-                                    ))
+                                    Some(
+                                        frac.location_offset()
+                                            ..frac.location_offset() + frac.fragment().len(),
+                                    )
                                 } else {
                                     None
                                 },
@@ -130,10 +129,9 @@ impl LitExpr {
                         recognize(many1(one_of("0123456789"))),
                     )),
                     |(_, dot, _, frac)| {
-                        let frac_range = Some((
-                            frac.location_offset(),
-                            frac.location_offset() + frac.fragment().len(),
-                        ));
+                        let frac_range = Some(
+                            frac.location_offset()..frac.location_offset() + frac.fragment().len(),
+                        );
                         let full_range = merge_ranges(dot.range(), frac_range);
                         WithRange::new(format!("0.{}", frac.fragment()), full_range)
                     },
