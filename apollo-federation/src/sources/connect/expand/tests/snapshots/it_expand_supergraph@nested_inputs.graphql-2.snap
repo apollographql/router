@@ -6,7 +6,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ne
 {
     "connectors_Query_foo_0": Connector {
         id: ConnectId {
-            label: "connectors.example http: GET /{$args.bar!}/{$args.doubleBaz.buzz!}/{$args.baz.quux.quaz!}",
+            label: "connectors.example http: GET /{$args.bar}/{$args.doubleBaz.buzz}/{$args.baz.quux.quaz}",
             subgraph_name: "connectors",
             source_name: Some(
                 "example",
@@ -38,35 +38,35 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ne
             connect_template: URLTemplate {
                 base: None,
                 path: [
-                    ParameterValue {
+                    Component {
                         parts: [
                             Var(
-                                VariableExpression {
-                                    var_path: "$args.bar",
-                                    batch_separator: None,
-                                    required: true,
+                                Variable {
+                                    var_type: Args,
+                                    path: "bar",
+                                    location: 2..11,
                                 },
                             ),
                         ],
                     },
-                    ParameterValue {
+                    Component {
                         parts: [
                             Var(
-                                VariableExpression {
-                                    var_path: "$args.doubleBaz.buzz",
-                                    batch_separator: None,
-                                    required: true,
+                                Variable {
+                                    var_type: Args,
+                                    path: "doubleBaz.buzz",
+                                    location: 14..34,
                                 },
                             ),
                         ],
                     },
-                    ParameterValue {
+                    Component {
                         parts: [
                             Var(
-                                VariableExpression {
-                                    var_path: "$args.baz.quux.quaz",
-                                    batch_separator: None,
-                                    required: true,
+                                Variable {
+                                    var_type: Args,
+                                    path: "baz.quux.quaz",
+                                    location: 37..56,
                                 },
                             ),
                         ],

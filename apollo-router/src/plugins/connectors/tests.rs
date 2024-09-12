@@ -293,7 +293,7 @@ async fn max_requests() {
             "@"
           ],
           "extensions": {
-            "service": "connectors.json http: GET /users/{$args.id!}",
+            "service": "connectors.json http: GET /users/{$args.id}",
             "code": "REQUEST_LIMIT_EXCEEDED"
           }
         }
@@ -363,7 +363,7 @@ async fn source_max_requests() {
             "@"
           ],
           "extensions": {
-            "service": "connectors.json http: GET /users/{$args.id!}",
+            "service": "connectors.json http: GET /users/{$args.id}",
             "code": "REQUEST_LIMIT_EXCEEDED"
           }
         }

@@ -38,7 +38,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
             connect_template: URLTemplate {
                 base: None,
                 path: [
-                    ParameterValue {
+                    Component {
                         parts: [
                             Text(
                                 "t",
@@ -105,7 +105,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
     },
     "one_Query_t_0": Connector {
         id: ConnectId {
-            label: "one.json http: GET /t/{$args.id!}",
+            label: "one.json http: GET /t/{$args.id}",
             subgraph_name: "one",
             source_name: Some(
                 "json",
@@ -137,20 +137,20 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
             connect_template: URLTemplate {
                 base: None,
                 path: [
-                    ParameterValue {
+                    Component {
                         parts: [
                             Text(
                                 "t",
                             ),
                         ],
                     },
-                    ParameterValue {
+                    Component {
                         parts: [
                             Var(
-                                VariableExpression {
-                                    var_path: "$args.id",
-                                    batch_separator: None,
-                                    required: true,
+                                Variable {
+                                    var_type: Args,
+                                    path: "id",
+                                    location: 4..12,
                                 },
                             ),
                         ],
@@ -217,7 +217,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
     },
     "one_T_r_0": Connector {
         id: ConnectId {
-            label: "one.json http: GET /t/{$this.id!}/r",
+            label: "one.json http: GET /t/{$this.id}/r",
             subgraph_name: "one",
             source_name: Some(
                 "json",
@@ -249,25 +249,25 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
             connect_template: URLTemplate {
                 base: None,
                 path: [
-                    ParameterValue {
+                    Component {
                         parts: [
                             Text(
                                 "t",
                             ),
                         ],
                     },
-                    ParameterValue {
+                    Component {
                         parts: [
                             Var(
-                                VariableExpression {
-                                    var_path: "$this.id",
-                                    batch_separator: None,
-                                    required: true,
+                                Variable {
+                                    var_type: This,
+                                    path: "id",
+                                    location: 4..12,
                                 },
                             ),
                         ],
                     },
-                    ParameterValue {
+                    Component {
                         parts: [
                             Text(
                                 "r",

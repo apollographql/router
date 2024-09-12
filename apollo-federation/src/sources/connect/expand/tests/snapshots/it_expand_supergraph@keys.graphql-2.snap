@@ -6,7 +6,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
 {
     "one_Query_t_0": Connector {
         id: ConnectId {
-            label: "one. http: GET http://localhost/ts/{$args.id!}",
+            label: "one. http: GET http://localhost/ts/{$args.id}",
             subgraph_name: "one",
             source_name: None,
             directive: ObjectOrInterfaceFieldDirectivePosition {
@@ -36,20 +36,20 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                     },
                 ),
                 path: [
-                    ParameterValue {
+                    Component {
                         parts: [
                             Text(
                                 "ts",
                             ),
                         ],
                     },
-                    ParameterValue {
+                    Component {
                         parts: [
                             Var(
-                                VariableExpression {
-                                    var_path: "$args.id",
-                                    batch_separator: None,
-                                    required: true,
+                                Variable {
+                                    var_type: Args,
+                                    path: "id",
+                                    location: 21..29,
                                 },
                             ),
                         ],
@@ -86,7 +86,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
     },
     "one_Query_t2_0": Connector {
         id: ConnectId {
-            label: "one. http: GET http://localhost/ts/{$args.id!}?id2={$args.id2}",
+            label: "one. http: GET http://localhost/ts/{$args.id}?id2={$args.id2}",
             subgraph_name: "one",
             source_name: None,
             directive: ObjectOrInterfaceFieldDirectivePosition {
@@ -116,33 +116,33 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                     },
                 ),
                 path: [
-                    ParameterValue {
+                    Component {
                         parts: [
                             Text(
                                 "ts",
                             ),
                         ],
                     },
-                    ParameterValue {
+                    Component {
                         parts: [
                             Var(
-                                VariableExpression {
-                                    var_path: "$args.id",
-                                    batch_separator: None,
-                                    required: true,
+                                Variable {
+                                    var_type: Args,
+                                    path: "id",
+                                    location: 21..29,
                                 },
                             ),
                         ],
                     },
                 ],
                 query: {
-                    "id2": ParameterValue {
+                    "id2": Component {
                         parts: [
                             Var(
-                                VariableExpression {
-                                    var_path: "$args.id2",
-                                    batch_separator: None,
-                                    required: false,
+                                Variable {
+                                    var_type: Args,
+                                    path: "id2",
+                                    location: 36..45,
                                 },
                             ),
                         ],
@@ -178,7 +178,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
     },
     "one_T_r1_0": Connector {
         id: ConnectId {
-            label: "one. http: GET http://localhost/rs/{$this.id!}",
+            label: "one. http: GET http://localhost/rs/{$this.id}",
             subgraph_name: "one",
             source_name: None,
             directive: ObjectOrInterfaceFieldDirectivePosition {
@@ -208,20 +208,20 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                     },
                 ),
                 path: [
-                    ParameterValue {
+                    Component {
                         parts: [
                             Text(
                                 "rs",
                             ),
                         ],
                     },
-                    ParameterValue {
+                    Component {
                         parts: [
                             Var(
-                                VariableExpression {
-                                    var_path: "$this.id",
-                                    batch_separator: None,
-                                    required: true,
+                                Variable {
+                                    var_type: This,
+                                    path: "id",
+                                    location: 21..29,
                                 },
                             ),
                         ],
@@ -258,7 +258,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
     },
     "one_T_r2_0": Connector {
         id: ConnectId {
-            label: "one. http: GET http://localhost/rs/{$this.id!}?id2={$this.id2}",
+            label: "one. http: GET http://localhost/rs/{$this.id}?id2={$this.id2}",
             subgraph_name: "one",
             source_name: None,
             directive: ObjectOrInterfaceFieldDirectivePosition {
@@ -288,33 +288,33 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                     },
                 ),
                 path: [
-                    ParameterValue {
+                    Component {
                         parts: [
                             Text(
                                 "rs",
                             ),
                         ],
                     },
-                    ParameterValue {
+                    Component {
                         parts: [
                             Var(
-                                VariableExpression {
-                                    var_path: "$this.id",
-                                    batch_separator: None,
-                                    required: true,
+                                Variable {
+                                    var_type: This,
+                                    path: "id",
+                                    location: 21..29,
                                 },
                             ),
                         ],
                     },
                 ],
                 query: {
-                    "id2": ParameterValue {
+                    "id2": Component {
                         parts: [
                             Var(
-                                VariableExpression {
-                                    var_path: "$this.id2",
-                                    batch_separator: None,
-                                    required: false,
+                                Variable {
+                                    var_type: This,
+                                    path: "id2",
+                                    location: 36..45,
                                 },
                             ),
                         ],
@@ -350,7 +350,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
     },
     "one_T_r3_0": Connector {
         id: ConnectId {
-            label: "one. http: GET http://localhost/rs/{$this.id!}",
+            label: "one. http: GET http://localhost/rs/{$this.id}",
             subgraph_name: "one",
             source_name: None,
             directive: ObjectOrInterfaceFieldDirectivePosition {
@@ -380,20 +380,20 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                     },
                 ),
                 path: [
-                    ParameterValue {
+                    Component {
                         parts: [
                             Text(
                                 "rs",
                             ),
                         ],
                     },
-                    ParameterValue {
+                    Component {
                         parts: [
                             Var(
-                                VariableExpression {
-                                    var_path: "$this.id",
-                                    batch_separator: None,
-                                    required: true,
+                                Variable {
+                                    var_type: This,
+                                    path: "id",
+                                    location: 21..29,
                                 },
                             ),
                         ],
@@ -471,7 +471,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                     },
                 ),
                 path: [
-                    ParameterValue {
+                    Component {
                         parts: [
                             Text(
                                 "rs",
@@ -564,7 +564,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
                     },
                 ),
                 path: [
-                    ParameterValue {
+                    Component {
                         parts: [
                             Text(
                                 "rs",

@@ -38,7 +38,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
             connect_template: URLTemplate {
                 base: None,
                 path: [
-                    ParameterValue {
+                    Component {
                         parts: [
                             Text(
                                 "users",
@@ -75,7 +75,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
     },
     "connectors_Query_user_0": Connector {
         id: ConnectId {
-            label: "connectors.json http: GET /users/{$args.id!}",
+            label: "connectors.json http: GET /users/{$args.id}",
             subgraph_name: "connectors",
             source_name: Some(
                 "json",
@@ -107,20 +107,20 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
             connect_template: URLTemplate {
                 base: None,
                 path: [
-                    ParameterValue {
+                    Component {
                         parts: [
                             Text(
                                 "users",
                             ),
                         ],
                     },
-                    ParameterValue {
+                    Component {
                         parts: [
                             Var(
-                                VariableExpression {
-                                    var_path: "$args.id",
-                                    batch_separator: None,
-                                    required: true,
+                                Variable {
+                                    var_type: Args,
+                                    path: "id",
+                                    location: 8..16,
                                 },
                             ),
                         ],
@@ -162,7 +162,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
     },
     "connectors_User_d_1": Connector {
         id: ConnectId {
-            label: "connectors.json http: GET /users/{$this.c!}",
+            label: "connectors.json http: GET /users/{$this.c}",
             subgraph_name: "connectors",
             source_name: Some(
                 "json",
@@ -194,20 +194,20 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
             connect_template: URLTemplate {
                 base: None,
                 path: [
-                    ParameterValue {
+                    Component {
                         parts: [
                             Text(
                                 "users",
                             ),
                         ],
                     },
-                    ParameterValue {
+                    Component {
                         parts: [
                             Var(
-                                VariableExpression {
-                                    var_path: "$this.c",
-                                    batch_separator: None,
-                                    required: true,
+                                Variable {
+                                    var_type: This,
+                                    path: "c",
+                                    location: 8..15,
                                 },
                             ),
                         ],
