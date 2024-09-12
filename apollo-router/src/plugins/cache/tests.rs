@@ -30,7 +30,7 @@ pub(crate) struct MockStore {
 }
 
 impl MockStore {
-    fn new() -> MockStore {
+    pub(crate) fn new() -> MockStore {
         MockStore {
             map: Arc::new(Mutex::new(HashMap::new())),
         }
