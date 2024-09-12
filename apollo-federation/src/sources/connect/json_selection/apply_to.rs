@@ -294,8 +294,8 @@ impl ApplyToInternal for WithRange<PathList> {
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
         match self.as_ref() {
-            PathList::Var(parsed_var_name, tail) => {
-                let var_name = parsed_var_name.as_ref();
+            PathList::Var(ranged_var_name, tail) => {
+                let var_name = ranged_var_name.as_ref();
                 if var_name == &KnownVariable::AtSign {
                     // We represent @ as a variable name in PathList::Var, but
                     // it is never stored in the vars map, because it is always
@@ -311,7 +311,7 @@ impl ApplyToInternal for WithRange<PathList> {
                     errors.insert(ApplyToError::new(
                         format!("Variable {} not found", var_name.as_str()),
                         input_path.to_vec(),
-                        parsed_var_name.range(),
+                        ranged_var_name.range(),
                     ));
                     None
                 }

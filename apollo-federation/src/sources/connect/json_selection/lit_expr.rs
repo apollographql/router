@@ -20,7 +20,7 @@ use nom::IResult;
 
 use super::helpers::spaces_or_comments;
 use super::location::merge_ranges;
-use super::location::parsed_span;
+use super::location::ranged_span;
 use super::location::Ranged;
 use super::location::Span;
 use super::location::WithRange;
@@ -49,13 +49,13 @@ impl LitExpr {
             alt((
                 map(parse_string_literal, |s| s.take_as(Self::String)),
                 Self::parse_number,
-                map(parsed_span("true"), |t| {
+                map(ranged_span("true"), |t| {
                     WithRange::new(Self::Bool(true), t.range())
                 }),
-                map(parsed_span("false"), |f| {
+                map(ranged_span("false"), |f| {
                     WithRange::new(Self::Bool(false), f.range())
                 }),
-                map(parsed_span("null"), |n| {
+                map(ranged_span("null"), |n| {
                     WithRange::new(Self::Null, n.range())
                 }),
                 Self::parse_object,
@@ -74,7 +74,7 @@ impl LitExpr {
     fn parse_number(input: Span) -> IResult<Span, WithRange<Self>> {
         let (suffix, (_, neg, _, num, _)) = tuple((
             spaces_or_comments,
-            opt(parsed_span("-")),
+            opt(ranged_span("-")),
             spaces_or_comments,
             alt((
                 map(
@@ -82,7 +82,7 @@ impl LitExpr {
                         recognize(many1(one_of("0123456789"))),
                         opt(tuple((
                             spaces_or_comments,
-                            parsed_span("."),
+                            ranged_span("."),
                             spaces_or_comments,
                             recognize(many0(one_of("0123456789"))),
                         ))),
@@ -124,7 +124,7 @@ impl LitExpr {
                 map(
                     tuple((
                         spaces_or_comments,
-                        parsed_span("."),
+                        ranged_span("."),
                         spaces_or_comments,
                         recognize(many1(one_of("0123456789"))),
                     )),
@@ -161,7 +161,7 @@ impl LitExpr {
     fn parse_object(input: Span) -> IResult<Span, WithRange<Self>> {
         tuple((
             spaces_or_comments,
-            parsed_span("{"),
+            ranged_span("{"),
             spaces_or_comments,
             map(
                 opt(tuple((
@@ -181,7 +181,7 @@ impl LitExpr {
                 },
             ),
             spaces_or_comments,
-            parsed_span("}"),
+            ranged_span("}"),
             spaces_or_comments,
         ))(input)
         .map(|(input, (_, open_brace, _, output, _, close_brace, _))| {
@@ -200,7 +200,7 @@ impl LitExpr {
     fn parse_array(input: Span) -> IResult<Span, WithRange<Self>> {
         tuple((
             spaces_or_comments,
-            parsed_span("["),
+            ranged_span("["),
             spaces_or_comments,
             map(
                 opt(tuple((
@@ -218,7 +218,7 @@ impl LitExpr {
                 },
             ),
             spaces_or_comments,
-            parsed_span("]"),
+            ranged_span("]"),
             spaces_or_comments,
         ))(input)
         .map(

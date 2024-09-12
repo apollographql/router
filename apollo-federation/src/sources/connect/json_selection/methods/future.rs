@@ -52,8 +52,8 @@ pub(super) fn eq_method(
     tail: &WithRange<PathList>,
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
-    if let Some(parsed_args) = method_args {
-        let args = &parsed_args.args;
+    if let Some(method_args) = method_args {
+        let args = &method_args.args;
         if args.len() == 1 {
             let matches = if let Some(value) = args[0].apply_to_path(data, vars, input_path, errors)
             {
@@ -89,8 +89,8 @@ pub(super) fn match_if_method(
     tail: &WithRange<PathList>,
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
-    if let Some(parsed_args) = method_args {
-        for pair in &parsed_args.args {
+    if let Some(method_args) = method_args {
+        for pair in &method_args.args {
             if let LitExpr::Array(pair) = pair.node() {
                 if pair.len() == 2 {
                     if let Some(JSON::Bool(true)) =
@@ -129,10 +129,10 @@ pub(super) fn arithmetic_method(
     input_path: &InputPath<JSON>,
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
-    if let Some(parsed_args) = method_args {
+    if let Some(method_args) = method_args {
         if let JSON::Number(result) = data {
             let mut result = result.clone();
-            for arg in &parsed_args.args {
+            for arg in &method_args.args {
                 let value_opt = arg.apply_to_path(data, vars, input_path, errors);
                 if let Some(JSON::Number(n)) = value_opt {
                     if let Some(new_result) = op(&result, &n) {
@@ -237,8 +237,8 @@ pub(super) fn has_method(
     tail: &WithRange<PathList>,
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
-    if let Some(parsed_args) = method_args {
-        match parsed_args.args.first() {
+    if let Some(method_args) = method_args {
+        match method_args.args.first() {
             Some(arg) => match &arg.apply_to_path(data, vars, input_path, errors) {
                 Some(json_index @ JSON::Number(n)) => match (data, n.as_i64()) {
                     (JSON::Array(array), Some(index)) => {
@@ -322,8 +322,8 @@ pub(super) fn get_method(
     tail: &WithRange<PathList>,
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
-    if let Some(parsed_args) = method_args {
-        if let Some(index_literal) = parsed_args.args.first() {
+    if let Some(method_args) = method_args {
+        if let Some(index_literal) = method_args.args.first() {
             match &index_literal.apply_to_path(data, vars, input_path, errors) {
                 Some(JSON::Number(n)) => match (data, n.as_i64()) {
                     (JSON::Array(array), Some(i)) => {
@@ -413,11 +413,6 @@ pub(super) fn get_method(
                         }
                     }
                     _ => {
-                        println!(
-                            "method ->{} got parsed_args.range() of {:?}",
-                            method_name.node(),
-                            parsed_args.range()
-                        );
                         errors.insert(ApplyToError::new(
                             format!(
                                 "Method ->{}({}) requires an object input",
@@ -425,7 +420,7 @@ pub(super) fn get_method(
                                 key
                             ),
                             input_path.to_vec(),
-                            merge_ranges(method_name.range(), parsed_args.range()),
+                            merge_ranges(method_name.range(), method_args.range()),
                         ));
                         None
                     }
@@ -597,9 +592,9 @@ pub(super) fn or_method(
     tail: &WithRange<PathList>,
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
-    if let Some(parsed_args) = method_args {
+    if let Some(method_args) = method_args {
         let mut result = is_truthy(data);
-        for arg in &parsed_args.args {
+        for arg in &method_args.args {
             if result {
                 break;
             }
@@ -628,9 +623,9 @@ pub(super) fn and_method(
     tail: &WithRange<PathList>,
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
-    if let Some(parsed_args) = method_args {
+    if let Some(method_args) = method_args {
         let mut result = is_truthy(data);
-        for arg in &parsed_args.args {
+        for arg in &method_args.args {
             if !result {
                 break;
             }

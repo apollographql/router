@@ -110,7 +110,7 @@ pub(super) fn merge_ranges(left: OffsetRange, right: OffsetRange) -> OffsetRange
 
 // Parser combinator that matches a &str and returns a WithRange<&str> with the
 // matched string and the range of the match.
-pub(super) fn parsed_span<'a, 'b>(
+pub(super) fn ranged_span<'a, 'b>(
     s: &'a str,
 ) -> impl FnMut(Span<'b>) -> IResult<Span<'b>, WithRange<&'b str>> + 'a
 where

@@ -24,8 +24,8 @@ pub(super) fn echo_method(
     tail: &WithRange<PathList>,
     errors: &mut IndexSet<ApplyToError>,
 ) -> Option<JSON> {
-    if let Some(parsed_args) = method_args {
-        if let Some(arg) = parsed_args.args.first() {
+    if let Some(method_args) = method_args {
+        if let Some(arg) = method_args.args.first() {
             return arg
                 .apply_to_path(data, vars, input_path, errors)
                 .and_then(|value| tail.apply_to_path(&value, vars, input_path, errors));
@@ -102,8 +102,8 @@ pub(super) fn match_method(
     // key that equals the data. If none of the pairs match, returns None.
     // Typically, the final pair will use @ as its key to ensure some default
     // value is returned.
-    if let Some(parsed_args) = method_args {
-        for pair in &parsed_args.args {
+    if let Some(method_args) = method_args {
+        for pair in &method_args.args {
             if let LitExpr::Array(pair) = pair.node() {
                 if pair.len() == 2 {
                     if let Some(candidate) = pair[0].apply_to_path(data, vars, input_path, errors) {
@@ -232,8 +232,8 @@ pub(super) fn slice_method(
         return None;
     };
 
-    if let Some(parsed_args) = method_args {
-        let start = parsed_args
+    if let Some(method_args) = method_args {
+        let start = method_args
             .args
             .first()
             .and_then(|arg| arg.apply_to_path(data, vars, input_path, errors))
@@ -241,7 +241,7 @@ pub(super) fn slice_method(
             .unwrap_or(0)
             .max(0)
             .min(length) as usize;
-        let end = parsed_args
+        let end = method_args
             .args
             .get(1)
             .and_then(|arg| arg.apply_to_path(data, vars, input_path, errors))

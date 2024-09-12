@@ -20,7 +20,7 @@ use super::helpers::spaces_or_comments;
 use super::known_var::KnownVariable;
 use super::lit_expr::LitExpr;
 use super::location::merge_ranges;
-use super::location::parsed_span;
+use super::location::ranged_span;
 use super::location::OffsetRange;
 use super::location::Ranged;
 use super::location::Span;
@@ -379,7 +379,7 @@ impl PathList {
         if depth == 0 {
             if let Ok((suffix, (_, dollar, opt_var, _))) = tuple((
                 spaces_or_comments,
-                parsed_span("$"),
+                ranged_span("$"),
                 opt(parse_identifier_no_space),
                 spaces_or_comments,
             ))(input)
@@ -398,10 +398,10 @@ impl PathList {
                     let full_name = format!("{}{}", dollar.node(), var.as_str());
                     if let Some(known_var) = KnownVariable::from_str(full_name.as_str()) {
                         let var_range = merge_ranges(dollar_range.clone(), var.range());
-                        let parsed_known_var = WithRange::new(known_var, var_range);
+                        let ranged_known_var = WithRange::new(known_var, var_range);
                         Ok((
                             remainder,
-                            WithRange::new(Self::Var(parsed_known_var, rest), full_range),
+                            WithRange::new(Self::Var(ranged_known_var, rest), full_range),
                         ))
                     } else {
                         // Reject unknown variables at parse time.
@@ -412,17 +412,17 @@ impl PathList {
                         )))
                     }
                 } else {
-                    let parsed_dollar_var =
+                    let ranged_dollar_var =
                         WithRange::new(KnownVariable::Dollar, dollar_range.clone());
                     Ok((
                         remainder,
-                        WithRange::new(Self::Var(parsed_dollar_var, rest), full_range),
+                        WithRange::new(Self::Var(ranged_dollar_var, rest), full_range),
                     ))
                 };
             }
 
             if let Ok((suffix, (_, at, _))) =
-                tuple((spaces_or_comments, parsed_span("@"), spaces_or_comments))(input)
+                tuple((spaces_or_comments, ranged_span("@"), spaces_or_comments))(input)
             {
                 let (input, rest) = Self::parse_with_depth(suffix, depth + 1)?;
                 let full_range = merge_ranges(
@@ -473,7 +473,7 @@ impl PathList {
         // (using Self::Path rather than Self::Var) for accurate reprintability.
         if let Ok((suffix, (_, dot, _, key))) = tuple((
             spaces_or_comments,
-            parsed_span("."),
+            ranged_span("."),
             spaces_or_comments,
             Key::parse,
         ))(input)
@@ -504,7 +504,7 @@ impl PathList {
         // $->method if you want to operate on the current value).
         if let Ok((suffix, (_, arrow, _, method, args))) = tuple((
             spaces_or_comments,
-            parsed_span("->"),
+            ranged_span("->"),
             spaces_or_comments,
             parse_identifier,
             opt(MethodArgs::parse),
@@ -649,9 +649,9 @@ impl SubSelection {
     pub(crate) fn parse(input: Span) -> IResult<Span, Self> {
         tuple((
             spaces_or_comments,
-            parsed_span("{"),
+            ranged_span("{"),
             Self::parse_naked,
-            parsed_span("}"),
+            ranged_span("}"),
             spaces_or_comments,
         ))(input)
         .map(|(remainder, (_, open_brace, sub, close_brace, _))| {
@@ -795,7 +795,7 @@ impl StarSelection {
             // spaces when they match, and they are both optional here.
             opt(Alias::parse),
             spaces_or_comments,
-            parsed_span("*"),
+            ranged_span("*"),
             spaces_or_comments,
             opt(SubSelection::parse),
         ))(input)
@@ -857,7 +857,7 @@ impl Alias {
     }
 
     fn parse(input: Span) -> IResult<Span, Self> {
-        tuple((Key::parse, parsed_span(":"), spaces_or_comments))(input).map(
+        tuple((Key::parse, ranged_span(":"), spaces_or_comments))(input).map(
             |(input, (name, colon, _))| {
                 let range = merge_ranges(name.range(), colon.range());
                 (input, Self { name, range })
@@ -1057,7 +1057,7 @@ impl MethodArgs {
     fn parse(input: Span) -> IResult<Span, Self> {
         tuple((
             spaces_or_comments,
-            parsed_span("("),
+            ranged_span("("),
             spaces_or_comments,
             opt(map(
                 tuple((
@@ -1072,7 +1072,7 @@ impl MethodArgs {
                 },
             )),
             spaces_or_comments,
-            parsed_span(")"),
+            ranged_span(")"),
             spaces_or_comments,
         ))(input)
         .map(|(input, (_, open_paren, _, args, _, close_paren, _))| {
@@ -2709,7 +2709,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parsed_locations() {
+    fn test_ranged_locations() {
         fn check(input: &str, expected: JSONSelection) {
             let (remainder, parsed) = JSONSelection::parse(input).unwrap();
             assert_eq!(remainder, "");
