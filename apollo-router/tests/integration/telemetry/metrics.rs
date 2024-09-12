@@ -237,4 +237,22 @@ async fn test_gauges_on_reload() {
     router
         .assert_metrics_contains(r#"apollo_router_cache_storage_estimated_size{kind="query planner",type="memory",otel_scope_name="apollo/router"} "#, None)
         .await;
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_query_planning_queued{otel_scope_name="apollo/router"} "#,
+            None,
+        )
+        .await;
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_v8_heap_total_bytes{otel_scope_name="apollo/router"} "#,
+            None,
+        )
+        .await;
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_v8_heap_total_bytes{otel_scope_name="apollo/router"} "#,
+            None,
+        )
+        .await;
 }
