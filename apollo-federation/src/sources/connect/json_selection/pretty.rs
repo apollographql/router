@@ -8,7 +8,6 @@
 use itertools::Itertools;
 
 use super::lit_expr::LitExpr;
-use super::location::WithRange;
 use crate::sources::connect::json_selection::JSONSelection;
 use crate::sources::connect::json_selection::MethodArgs;
 use crate::sources::connect::json_selection::NamedSelection;
@@ -113,14 +112,7 @@ impl PrettyPrintable for PathSelection {
     }
 }
 
-impl PrettyPrintable for WithRange<PathSelection> {
-    fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
-        self.as_ref()
-            .pretty_print_with_indentation(inline, indentation)
-    }
-}
-
-impl PrettyPrintable for WithRange<PathList> {
+impl PrettyPrintable for PathList {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
         let mut result = String::new();
 
@@ -128,18 +120,18 @@ impl PrettyPrintable for WithRange<PathList> {
             result.push_str(indent_chars(indentation).as_str());
         }
 
-        match self.as_ref() {
-            PathList::Var(var, tail) => {
+        match self {
+            Self::Var(var, tail) => {
                 let rest = tail.pretty_print_with_indentation(true, indentation);
                 result.push_str(var.as_str());
                 result.push_str(rest.as_str());
             }
-            PathList::Key(key, tail) => {
+            Self::Key(key, tail) => {
                 let rest = tail.pretty_print_with_indentation(true, indentation);
                 result.push_str(key.dotted().as_str());
                 result.push_str(rest.as_str());
             }
-            PathList::Method(method, args, tail) => {
+            Self::Method(method, args, tail) => {
                 result.push_str("->");
                 result.push_str(method.as_str());
                 if let Some(args) = args {
@@ -153,12 +145,12 @@ impl PrettyPrintable for WithRange<PathList> {
                         .as_str(),
                 );
             }
-            PathList::Selection(sub) => {
+            Self::Selection(sub) => {
                 let sub = sub.pretty_print_with_indentation(true, indentation);
                 result.push(' ');
                 result.push_str(sub.as_str());
             }
-            PathList::Empty => {}
+            Self::Empty => {}
         }
 
         result
@@ -192,22 +184,22 @@ impl PrettyPrintable for MethodArgs {
     }
 }
 
-impl PrettyPrintable for WithRange<LitExpr> {
+impl PrettyPrintable for LitExpr {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
         let mut result = String::new();
         if !inline {
             result.push_str(indent_chars(indentation).as_str());
         }
 
-        match self.as_ref() {
-            LitExpr::String(s) => {
+        match self {
+            Self::String(s) => {
                 let safely_quoted = serde_json_bytes::Value::String(s.clone().into()).to_string();
                 result.push_str(safely_quoted.as_str());
             }
-            LitExpr::Number(n) => result.push_str(n.to_string().as_str()),
-            LitExpr::Bool(b) => result.push_str(b.to_string().as_str()),
-            LitExpr::Null => result.push_str("null"),
-            LitExpr::Object(map) => {
+            Self::Number(n) => result.push_str(n.to_string().as_str()),
+            Self::Bool(b) => result.push_str(b.to_string().as_str()),
+            Self::Null => result.push_str("null"),
+            Self::Object(map) => {
                 result.push('{');
                 let mut is_first = true;
                 for (key, value) in map {
@@ -227,7 +219,7 @@ impl PrettyPrintable for WithRange<LitExpr> {
                 }
                 result.push('}');
             }
-            LitExpr::Array(vec) => {
+            Self::Array(vec) => {
                 result.push('[');
                 let mut is_first = true;
                 for value in vec {
@@ -244,7 +236,7 @@ impl PrettyPrintable for WithRange<LitExpr> {
                 }
                 result.push(']');
             }
-            LitExpr::Path(path) => {
+            Self::Path(path) => {
                 let path = path.pretty_print_with_indentation(inline, indentation);
                 result.push_str(path.as_str());
             }
