@@ -1212,7 +1212,7 @@ mod quickstart_tests {
             variables,
             Some(json!({
                 "preview_connectors": {
-                    "snapshot": {
+                    "experimental_snapshots": {
                         "enabled": true,
                         "offline": true, // Setting this to false will update REST API responses
                         "path": "./src/plugins/connectors/testdata/rest_api_snapshots"

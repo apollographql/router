@@ -28,7 +28,7 @@ pub(crate) struct ConnectorsConfig {
 
     /// Configuration for HTTP response snapshots
     #[serde(default)]
-    pub(crate) snapshot: SnapshotConfiguration,
+    pub(crate) experimental_snapshots: SnapshotConfiguration,
 }
 
 /// Configuration for a connector subgraph

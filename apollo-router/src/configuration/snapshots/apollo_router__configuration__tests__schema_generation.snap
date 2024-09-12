@@ -1788,6 +1788,10 @@ expression: "&schema"
           "description": "Enables connector debugging information on response extensions if the feature is enabled",
           "type": "boolean"
         },
+        "experimental_snapshots": {
+          "$ref": "#/definitions/SnapshotConfiguration",
+          "description": "#/definitions/SnapshotConfiguration"
+        },
         "max_requests_per_operation_per_source": {
           "default": null,
           "description": "The maximum number of requests for a connector source",
@@ -1795,10 +1799,6 @@ expression: "&schema"
           "minimum": 0.0,
           "nullable": true,
           "type": "integer"
-        },
-        "snapshot": {
-          "$ref": "#/definitions/SnapshotConfiguration",
-          "description": "#/definitions/SnapshotConfiguration"
         },
         "subgraphs": {
           "additionalProperties": {

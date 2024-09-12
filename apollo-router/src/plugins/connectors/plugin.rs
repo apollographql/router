@@ -64,10 +64,10 @@ impl Plugin for Connectors {
                 .and_then(|v| v.parse().ok()));
 
         let snapshot_config = SnapshotConfig {
-            enabled: init.config.snapshot.enabled.unwrap_or(false),
-            offline: init.config.snapshot.offline.unwrap_or(false),
-            update: init.config.snapshot.update.unwrap_or(false),
-            path: init.config.snapshot.path,
+            enabled: init.config.experimental_snapshots.enabled.unwrap_or(false),
+            offline: init.config.experimental_snapshots.offline.unwrap_or(false),
+            update: init.config.experimental_snapshots.update.unwrap_or(false),
+            path: init.config.experimental_snapshots.path,
         };
         if snapshot_config.enabled {
             tracing::warn!(
