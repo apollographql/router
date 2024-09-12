@@ -1,0 +1,64 @@
+{
+    "enterprise": true,
+    "redis": true,
+    "actions": [
+        {
+            "type": "Start",
+            "schema_path": "./supergraph.graphql",
+            "configuration_path": "./configuration.yaml",
+            "subgraphs": {
+                "jsonPlaceholder": {
+                    "requests": [
+                        {
+                            "request": {
+                                "method": "GET",
+                                "path": "/posts"
+                            },
+                            "response": {
+                                "body": [
+                                    {
+                                        "userId": 0,
+                                        "id": 1,
+                                        "title": "Test",
+                                        "body": "Hello World"
+                                    },
+                                    {
+                                        "userId": 1,
+                                        "id": 2,
+                                        "title": "Test2",
+                                        "body": "AAAA"
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "Request",
+            "request": {
+                "query": "query Posts { posts { id body title }}"
+            },
+            "expected_response": {
+                "data": {
+                    "posts": [
+                        {
+                            "id": 1,
+                            "body": "Hello World",
+                            "title": "Test"
+                        },
+                        {
+                            "id": 2,
+                            "body": "AAAA",
+                            "title": "Test2"
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "Stop"
+        }
+    ]
+}

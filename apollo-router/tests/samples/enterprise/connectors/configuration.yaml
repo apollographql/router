@@ -1,0 +1,86 @@
+override_subgraph_url:
+  connectors: http://localhost:4005
+include_subgraph_errors:
+  all: true
+
+preview_connectors:
+  subgraphs:
+    connectors:
+      sources:
+        jsonPlaceholder:
+          override_url: http://localhost:4007
+      # schema:
+      #   sdl: |
+      #     extend schema
+      #       @link(url: "https://specs.apollo.dev/federation/v2.8")
+      #       @link(
+      #         url: "https://specs.apollo.dev/connect/v0.1"
+      #         import: ["@connect", "@source"]
+      #       )
+      #       @source(
+      #         name: "jsonPlaceholder"
+      #         http: { baseURL: "https://jsonplaceholder.typicode.com/" }
+      #       )
+      #     type Post {
+      #       id: ID!
+      #       body: String
+      #       title: String
+      #       author: User
+      #     }
+      #     type User {
+      #       id: ID!
+      #       name: String
+      #       username: String
+      #       posts: [Post]
+      #         @connect(
+      #           source: "jsonPlaceholder"
+      #           http: { GET: "/users/{$$this.id}/posts" }
+      #           selection: """
+      #           id
+      #           title
+      #           body
+      #           """
+      #         )
+      #     }
+      #     type Query {
+      #       posts: [Post]
+      #         @connect(
+      #           source: "jsonPlaceholder"
+      #           http: { GET: "/posts" }
+      #           selection: """
+      #           id
+      #           title
+      #           body
+      #           author: { id: userId }
+      #           """
+      #         )
+      #       post(id: ID!): Post
+      #         @connect(
+      #           source: "jsonPlaceholder"
+      #           http: { GET: "/posts/{$$args.id}" }
+      #           selection: """
+      #           id
+      #           title
+      #           body
+      #           author: { id: userId }
+      #           """
+      #           entity: true
+      #         )
+      #       user(id: ID!): User
+      #         @connect(
+      #           source: "jsonPlaceholder"
+      #           http: { GET: "/users/{$$args.id}" }
+      #           selection: """
+      #           id
+      #           name
+      #           username
+      #           """
+      #           entity: true
+      #         )
+      #     }
+
+telemetry:
+  exporters:
+    logging:
+      stdout:
+        format: text
