@@ -2,7 +2,7 @@ extend schema
   @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect"])
 
 type Query {
-  user(id: ID!): User
+  user(id: ID!): User!
     @connect(
       http: { GET: "http://127.0.0.1:8000/resources/{$args.id}" }
       entity: true
@@ -13,10 +13,4 @@ type Query {
 type User {
   id: ID!
   name: String!
-  favoriteColor: String
-    @connect(
-      http: { GET: "http://127.0.0.1:8000/resources" }
-      entity: true
-      selection: "$"
-    )
 }
