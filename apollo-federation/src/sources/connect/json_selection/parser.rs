@@ -1063,6 +1063,8 @@ impl MethodArgs {
 
 #[cfg(test)]
 mod tests {
+    use insta::assert_debug_snapshot;
+
     use super::super::location::strip_ranges::StripRanges;
     use super::*;
     use crate::selection;
@@ -1457,9 +1459,8 @@ mod tests {
             );
         }
 
-        assert_eq!(
-            selection!(
-                "
+        assert_debug_snapshot!(selection!(
+            "
             # Comments are supported because we parse them as whitespace
             topLevelAlias: topLevelField {
                 identifier: 'property name with spaces'
@@ -1478,84 +1479,7 @@ mod tests {
                 # under the given alias
                 siblingGroup: { brother sister }
             }"
-            )
-            .strip_ranges(),
-            JSONSelection::Named(SubSelection {
-                selections: vec![NamedSelection::Field(
-                    Some(Alias::new("topLevelAlias")),
-                    Key::field("topLevelField").into_with_range(),
-                    Some(SubSelection {
-                        selections: vec![
-                            NamedSelection::Field(
-                                Some(Alias::new("identifier")),
-                                Key::quoted("property name with spaces").into_with_range(),
-                                None,
-                            ),
-                            NamedSelection::Field(
-                                None,
-                                Key::quoted("unaliased non-identifier property").into_with_range(),
-                                None,
-                            ),
-                            NamedSelection::Field(
-                                Some(Alias::quoted("non-identifier alias")),
-                                Key::field("identifier").into_with_range(),
-                                None,
-                            ),
-                            NamedSelection::Path(
-                                Alias::new("pathSelection"),
-                                PathSelection::from_slice(
-                                    &[
-                                        Key::Field("some".to_string()),
-                                        Key::Field("nested".to_string()),
-                                        Key::Field("path".to_string()),
-                                    ],
-                                    Some(SubSelection {
-                                        selections: vec![
-                                            NamedSelection::Field(
-                                                Some(Alias::new("still")),
-                                                Key::field("yet").into_with_range(),
-                                                None,
-                                            ),
-                                            NamedSelection::Field(
-                                                None,
-                                                Key::field("more").into_with_range(),
-                                                None,
-                                            ),
-                                            NamedSelection::Field(
-                                                None,
-                                                Key::field("properties").into_with_range(),
-                                                None,
-                                            ),
-                                        ],
-                                        ..Default::default()
-                                    })
-                                ),
-                            ),
-                            NamedSelection::Group(
-                                Alias::new("siblingGroup"),
-                                SubSelection {
-                                    selections: vec![
-                                        NamedSelection::Field(
-                                            None,
-                                            Key::field("brother").into_with_range(),
-                                            None
-                                        ),
-                                        NamedSelection::Field(
-                                            None,
-                                            Key::field("sister").into_with_range(),
-                                            None
-                                        ),
-                                    ],
-                                    ..Default::default()
-                                },
-                            ),
-                        ],
-                        ..Default::default()
-                    }),
-                )],
-                ..Default::default()
-            }),
-        );
+        ));
     }
 
     fn check_path_selection(input: &str, expected: PathSelection) {
