@@ -117,34 +117,22 @@ impl ApplyToError {
 
     #[cfg(test)]
     pub(crate) fn from_json(json: &JSON) -> Self {
-        if let JSON::Object(error) = json {
-            if let Some(JSON::String(message)) = error.get("message") {
-                if let Some(JSON::Array(path)) = error.get("path") {
-                    if path
-                        .iter()
-                        .all(|element| matches!(element, JSON::String(_) | JSON::Number(_)))
-                    {
-                        return Self {
-                            message: message.as_str().to_string(),
-                            path: path.clone(),
-                            range: error.get("range").and_then(|range| {
-                                if let JSON::Array(range) = range {
-                                    if range.len() == 2 {
-                                        if let (Some(start), Some(end)) =
-                                            (range[0].as_u64(), range[1].as_u64())
-                                        {
-                                            return Some(start as usize..end as usize);
-                                        }
-                                    }
-                                }
-                                None
-                            }),
-                        };
-                    }
-                }
-            }
+        let error = json.as_object().unwrap();
+        let message = error.get("message").unwrap().as_str().unwrap().to_string();
+        let path = error.get("path").unwrap().as_array().unwrap().clone();
+        let range = error.get("range").unwrap().as_array().unwrap();
+
+        Self {
+            message,
+            path,
+            range: if range.len() == 2 {
+                let start = range[0].as_u64().unwrap() as usize;
+                let end = range[1].as_u64().unwrap() as usize;
+                Some(start..end)
+            } else {
+                None
+            },
         }
-        panic!("Invalid ApplyToError JSON: {}", json);
     }
 
     pub fn message(&self) -> &str {
