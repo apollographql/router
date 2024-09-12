@@ -1164,16 +1164,23 @@ mod tests {
         Schema::parse(
             r#"
            schema
-             @core(feature: "https://specs.apollo.dev/core/v0.1"),
-             @core(feature: "https://specs.apollo.dev/join/v0.1")
+             @link(url: "https://specs.apollo.dev/link/v1.0")
+             @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
            {
              query: Query
            }
-           directive @core(feature: String!) repeatable on SCHEMA
+
            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+           directive @link( url: String as: String for: link__Purpose import: [link__Import]) repeatable on SCHEMA
+           scalar link__Import
 
            enum join__Graph {
-               FAKE @join__graph(name:"fake" url: "http://localhost:4001/fake")
+             FAKE @join__graph(name:"fake" url: "http://localhost:4001/fake")
+           }
+
+           enum link__Purpose {
+             SECURITY
+             EXECUTION
            }
 
            type Query {

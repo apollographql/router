@@ -2,9 +2,8 @@ schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
   query: Query
+  mutation: Mutation
 }
-
-directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
 directive @join__field(
   graph: join__Graph
@@ -31,11 +30,6 @@ directive @join__type(
   isInterfaceObject: Boolean! = false
 ) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
 
-directive @join__unionMember(
-  graph: join__Graph!
-  member: String!
-) repeatable on UNION
-
 directive @link(
   url: String
   as: String
@@ -43,30 +37,24 @@ directive @link(
   import: [link__Import]
 ) repeatable on SCHEMA
 
-directive @transform(from: String!) on FIELD
-
-directive @stream on FIELD
-
 scalar join__FieldSet
+scalar link__Import
 
 enum join__Graph {
-  X @join__graph(name: "X", url: "http://X")
-  Y @join__graph(name: "Y", url: "http://Y")
+  A @join__graph(name: "A", url: "http://localhost:4001")
+  B @join__graph(name: "B", url: "http://localhost:4004")
 }
-
-scalar link__Import
 
 enum link__Purpose {
   SECURITY
   EXECUTION
 }
 
-type Query @join__type(graph: X) @join__type(graph: Y) {
-  t: T @join__field(graph: X)
+type Mutation @join__type(graph: A) @join__type(graph: B) {
+  mutationA: Mutation @join__field(graph: A)
+  mutationB: Boolean @join__field(graph: B)
 }
 
-type T @join__type(graph: X, key: "id") {
-  id: ID @join__field(graph: X)
-  x: String @join__field(graph: X)
-  y: String @join__field(graph: Y)
+type Query @join__type(graph: A) @join__type(graph: B) {
+  query: Boolean @join__field(graph: A)
 }

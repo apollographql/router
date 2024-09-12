@@ -1,11 +1,11 @@
-extend type Mutation {
-  createReview(upc: ID!, id: ID!, body: String): Review
-}
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/federation/v2.3"
+    import: ["@key", "@external", "@provides"]
+  )
 
-extend type Product @key(fields: "upc") {
-  upc: String! @external
-  reviews: [Review]
-  reviewsForAuthor(authorID: ID!): [Review]
+type Mutation {
+  createReview(upc: ID!, id: ID!, body: String): Review
 }
 
 type Review @key(fields: "id") {
@@ -15,8 +15,14 @@ type Review @key(fields: "id") {
   product: Product
 }
 
-extend type User @key(fields: "id") {
-  id: ID! @external
+type User @key(fields: "id") {
+  id: ID!
   username: String @external
   reviews: [Review]
+}
+
+type Product @key(fields: "upc") {
+  upc: String!
+  reviews: [Review]
+  reviewsForAuthor(authorID: ID!): [Review]
 }
