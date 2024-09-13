@@ -92,13 +92,15 @@ pub(super) fn match_if_method(
     input_path: &InputPath<JSON>,
     tail: &WithRange<PathList>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
+    let mut errors = Vec::new();
+
     if let Some(MethodArgs { args, .. }) = method_args {
         for pair in args {
             if let LitExpr::Array(pair) = pair.as_ref() {
                 if pair.len() == 2 {
-                    // TODO What happens to condition_errors if the condition is not a match?
                     let (condition_opt, condition_errors) =
                         pair[0].apply_to_path(data, vars, input_path);
+                    errors.extend(condition_errors);
 
                     if let Some(JSON::Bool(true)) = condition_opt {
                         return pair[1]
@@ -106,7 +108,7 @@ pub(super) fn match_if_method(
                             .and_then_collecting_errors(|value| {
                                 tail.apply_to_path(value, vars, input_path)
                             })
-                            .prepend_errors(&condition_errors);
+                            .prepend_errors(&errors);
                     };
                 }
             }
@@ -114,17 +116,20 @@ pub(super) fn match_if_method(
     }
     (
         None,
-        vec![ApplyToError::new(
-            format!(
-                "Method ->{} did not match any [condition, value] pair",
-                method_name.as_ref(),
+        immutable_vec_push(
+            &errors,
+            ApplyToError::new(
+                format!(
+                    "Method ->{} did not match any [condition, value] pair",
+                    method_name.as_ref(),
+                ),
+                input_path.to_vec(),
+                merge_ranges(
+                    method_name.range(),
+                    method_args.and_then(|args| args.range()),
+                ),
             ),
-            input_path.to_vec(),
-            merge_ranges(
-                method_name.range(),
-                method_args.and_then(|args| args.range()),
-            ),
-        )],
+        ),
     )
 }
 

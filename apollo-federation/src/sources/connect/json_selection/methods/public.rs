@@ -119,6 +119,7 @@ pub(super) fn match_method(
                     let (candidate_opt, candidate_errors) =
                         pair[0].apply_to_path(data, vars, input_path);
                     errors.extend(candidate_errors);
+
                     if let Some(candidate) = candidate_opt {
                         if candidate == *data {
                             return pair[1]
