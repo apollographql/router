@@ -185,18 +185,17 @@ pub(super) fn carryover_directives(
                 .get_directive(&directive_name)
                 .and_then(|referencers| {
                     if referencers.len() > 0 {
-                        if SchemaDefinitionPosition
+                        if !SchemaDefinitionPosition
                             .get(to.schema())
                             .directives
                             .iter()
-                            .find(|d| {
+                            .any(|d| {
                                 d.name == DEFAULT_LINK_NAME
                                     && d.argument_by_name("url")
                                         .and_then(|url| url.as_str())
-                                        .map(|url| link.url.to_string() == url.to_string())
+                                        .map(|url| link.url.to_string() == *url)
                                         .unwrap_or_default()
                             })
-                            .is_none()
                         {
                             SchemaDefinitionPosition
                                 .insert_directive(to, link.to_directive_application().into())?;

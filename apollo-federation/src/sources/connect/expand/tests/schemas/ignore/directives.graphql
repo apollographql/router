@@ -88,6 +88,7 @@ type Query
   requiresScopes: String @join__field(graph: ONE) @requiresScopes(scopes: ["scope"])
   policy: String @join__field(graph: ONE) @policy(policies: [["admin"]])
   overridden: String @join__field(graph: ONE, override: "two", overrideLabel: "label") @join__field(graph: TWO, overrideLabel: "label")
+  customAgain: String @join__field(graph: TWO) @custom1
 }
 
 scalar requiresScopes__Scope
