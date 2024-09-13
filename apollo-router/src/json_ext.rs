@@ -479,12 +479,11 @@ impl ValueExt for Value {
         match self {
             Value::Null => apollo_compiler::ast::Value::Null,
             Value::Bool(b) => apollo_compiler::ast::Value::Boolean(*b),
+            Value::Number(n) if n.is_f64() => {
+                apollo_compiler::ast::Value::Float(n.as_f64().expect("is float").into())
+            }
             Value::Number(n) => {
-                if n.is_f64() {
-                    apollo_compiler::ast::Value::Float(n.as_f64().expect("is float").into())
-                } else {
-                    apollo_compiler::ast::Value::Int((n.as_i64().expect("is int") as i32).into())
-                }
+                apollo_compiler::ast::Value::Int((n.as_i64().expect("is int") as i32).into())
             }
             Value::String(s) => apollo_compiler::ast::Value::String(s.as_str().to_string()),
             Value::Array(inner_vars) => apollo_compiler::ast::Value::List(
@@ -508,7 +507,7 @@ impl ValueExt for Value {
     }
 
     fn as_i32(&self) -> Option<i32> {
-        self.as_i64().and_then(|i| i.to_i32())
+        self.as_i64()?.to_i32()
     }
 }
 

@@ -140,8 +140,8 @@ impl Instrumented for GraphQLInstruments {
                 .visit(
                     &executable_document,
                     response,
-                    &ctx.extensions()
-                        .with_lock(|lock| lock.get().cloned())
+                    &ctx.get_demand_control_context()
+                        .map(|c| c.variables)
                         .unwrap_or_default(),
                 );
             }
