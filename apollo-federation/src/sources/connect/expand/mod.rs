@@ -601,31 +601,10 @@ mod helpers {
                     }
                 }?;
             } else {
-                // If we don't have a key, but the type is an interfaceObject
-                // we'll try just copying over the defined keys.
-                let output_ty = output_type.get(self.original_schema.schema())?;
-                let has_interface_object = output_ty
-                    .directives()
-                    .iter()
-                    .any(|d| d.name == name!("federation__interfaceObject"));
-                if has_interface_object {
-                    let keys = output_ty
-                        .directives()
-                        .iter()
-                        .filter(|d| d.name == name!("federation__key"));
-                    for key in keys {
-                        match &output_type {
-                            TypeDefinitionPosition::Object(o) => {
-                                o.insert_directive(to_schema, key.clone())
-                            }
-                            TypeDefinitionPosition::Interface(i) => {
-                                i.insert_directive(to_schema, key.clone())
-                            }
-
-                            _ => Ok(()),
-                        }?;
-                    }
-                }
+                // TODO: if the type has @interfaceObject and it doesn't have a key at this point
+                // we'll need to add a key — this is a requirement for using @interfaceObject.
+                // most likely we'll just copy over keys from the original supergraph, but we
+                // need to think through the implications of that.
             }
 
             Ok(())

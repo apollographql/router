@@ -1196,6 +1196,7 @@ async fn error_redacted() {
 }
 
 #[tokio::test]
+#[ignore] // we currently disallow interfaceObject, will revisit later
 async fn test_interface_object() {
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
