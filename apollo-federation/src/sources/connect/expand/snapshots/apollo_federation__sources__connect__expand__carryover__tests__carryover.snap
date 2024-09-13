@@ -2,7 +2,7 @@
 source: apollo-federation/src/sources/connect/expand/carryover.rs
 expression: schema.schema().serialize().to_string()
 ---
-schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) @join__directive(graphs: [], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1"}) @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY) @link(url: "https://specs.apollo.dev/tag/v0.3") @link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY) @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", for: SECURITY) @link(url: "https://specs.apollo.dev/policy/v0.1", for: SECURITY) @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom"]) {
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) @join__directive(graphs: [], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1"}) @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY) @link(url: "https://specs.apollo.dev/tag/v0.3") @link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY) @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", for: SECURITY) @link(url: "https://specs.apollo.dev/policy/v0.1", for: SECURITY) @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom1", "@custom2", "@custom3"]) {
   query: Query
 }
 
@@ -32,7 +32,11 @@ directive @requiresScopes(scopes: [[requiresScopes__Scope!]!]!) on FIELD_DEFINIT
 
 directive @policy(policies: [[policy__Policy!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
 
-directive @custom on OBJECT | FIELD_DEFINITION
+directive @custom1 on OBJECT | FIELD_DEFINITION
+
+directive @custom2 on OBJECT | FIELD_DEFINITION
+
+directive @custom3 on OBJECT | FIELD_DEFINITION
 
 enum link__Purpose {
   """
@@ -57,11 +61,15 @@ enum join__Graph {
 type Query @join__type(graph: ONE) @join__type(graph: TWO) {
   tagged: String @join__field(graph: ONE) @tag(name: "tag")
   hidden: String @join__field(graph: ONE) @inaccessible
-  custom: String @join__field(graph: ONE) @custom
+  custom: T @join__field(graph: ONE) @custom1
   authenticated: String @join__field(graph: ONE) @authenticated
   requiresScopes: String @join__field(graph: ONE) @requiresScopes(scopes: ["scope"])
   policy: String @join__field(graph: ONE) @policy(policies: [["admin"]])
   overridden: String @join__field(graph: ONE, override: "two", overrideLabel: "label") @join__field(graph: TWO)
+}
+
+type T @join__type(graph: ONE) @custom2 {
+  field: String @join__field(graph: ONE) @custom3
 }
 
 scalar requiresScopes__Scope
