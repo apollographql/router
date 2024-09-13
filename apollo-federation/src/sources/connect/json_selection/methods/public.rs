@@ -24,8 +24,8 @@ pub(super) fn echo_method(
     input_path: &InputPath<JSON>,
     tail: &WithRange<PathList>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    if let Some(method_args) = method_args {
-        if let Some(arg) = method_args.args.first() {
+    if let Some(MethodArgs { args, .. }) = method_args {
+        if let Some(arg) = args.first() {
             return arg
                 .apply_to_path(data, vars, input_path)
                 .and_then_collecting_errors(|value| tail.apply_to_path(value, vars, input_path));
@@ -112,8 +112,8 @@ pub(super) fn match_method(
     // value is returned.
     let mut errors = Vec::new();
 
-    if let Some(method_args) = method_args {
-        for pair in &method_args.args {
+    if let Some(MethodArgs { args, .. }) = method_args {
+        for pair in args {
             if let LitExpr::Array(pair) = pair.as_ref() {
                 if pair.len() == 2 {
                     let (candidate_opt, candidate_errors) =
@@ -265,11 +265,10 @@ pub(super) fn slice_method(
         );
     };
 
-    if let Some(method_args) = method_args {
+    if let Some(MethodArgs { args, .. }) = method_args {
         let mut errors = Vec::new();
 
-        let start = method_args
-            .args
+        let start = args
             .first()
             .and_then(|arg| {
                 let (value_opt, apply_errors) = arg.apply_to_path(data, vars, input_path);
@@ -281,8 +280,7 @@ pub(super) fn slice_method(
             .max(0)
             .min(length) as usize;
 
-        let end = method_args
-            .args
+        let end = args
             .get(1)
             .and_then(|arg| {
                 let (value_opt, apply_errors) = arg.apply_to_path(data, vars, input_path);

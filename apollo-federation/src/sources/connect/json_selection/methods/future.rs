@@ -53,8 +53,7 @@ pub(super) fn eq_method(
     input_path: &InputPath<JSON>,
     tail: &WithRange<PathList>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    if let Some(method_args) = method_args {
-        let args = &method_args.args;
+    if let Some(MethodArgs { args, .. }) = method_args {
         if args.len() == 1 {
             let (value_opt, arg_errors) = args[0].apply_to_path(data, vars, input_path);
             let matches = if let Some(value) = value_opt {
@@ -93,8 +92,8 @@ pub(super) fn match_if_method(
     input_path: &InputPath<JSON>,
     tail: &WithRange<PathList>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    if let Some(method_args) = method_args {
-        for pair in &method_args.args {
+    if let Some(MethodArgs { args, .. }) = method_args {
+        for pair in args {
             if let LitExpr::Array(pair) = pair.as_ref() {
                 if pair.len() == 2 {
                     // TODO What happens to condition_errors if the condition is not a match?
@@ -137,11 +136,11 @@ pub(super) fn arithmetic_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    if let Some(method_args) = method_args {
+    if let Some(MethodArgs { args, .. }) = method_args {
         if let JSON::Number(result) = data {
             let mut result = result.clone();
             let mut errors = Vec::new();
-            for arg in &method_args.args {
+            for arg in args {
                 let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path);
                 errors.extend(arg_errors);
                 if let Some(JSON::Number(n)) = value_opt {
@@ -258,8 +257,8 @@ pub(super) fn has_method(
     input_path: &InputPath<JSON>,
     tail: &WithRange<PathList>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    if let Some(method_args) = method_args {
-        match method_args.args.first() {
+    if let Some(MethodArgs { args, .. }) = method_args {
+        match args.first() {
             Some(arg) => match &arg.apply_to_path(data, vars, input_path) {
                 (Some(json_index @ JSON::Number(n)), arg_errors) => match (data, n.as_i64()) {
                     (JSON::Array(array), Some(index)) => {
@@ -352,8 +351,8 @@ pub(super) fn get_method(
     input_path: &InputPath<JSON>,
     tail: &WithRange<PathList>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    if let Some(method_args) = method_args {
-        if let Some(index_literal) = method_args.args.first() {
+    if let Some(MethodArgs { args, .. }) = method_args {
+        if let Some(index_literal) = args.first() {
             match &index_literal.apply_to_path(data, vars, input_path) {
                 (Some(JSON::Number(n)), index_errors) => match (data, n.as_i64()) {
                     (JSON::Array(array), Some(i)) => {
@@ -481,7 +480,10 @@ pub(super) fn get_method(
                                     key
                                 ),
                                 input_path.to_vec(),
-                                merge_ranges(method_name.range(), method_args.range()),
+                                merge_ranges(
+                                    method_name.range(),
+                                    method_args.and_then(|args| args.range()),
+                                ),
                             ),
                         ),
                     ),
@@ -665,11 +667,11 @@ pub(super) fn or_method(
     input_path: &InputPath<JSON>,
     tail: &WithRange<PathList>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    if let Some(method_args) = method_args {
+    if let Some(MethodArgs { args, .. }) = method_args {
         let mut result = is_truthy(data);
         let mut errors = Vec::new();
 
-        for arg in &method_args.args {
+        for arg in args {
             if result {
                 break;
             }
@@ -700,11 +702,11 @@ pub(super) fn and_method(
     input_path: &InputPath<JSON>,
     tail: &WithRange<PathList>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    if let Some(method_args) = method_args {
+    if let Some(MethodArgs { args, .. }) = method_args {
         let mut result = is_truthy(data);
         let mut errors = Vec::new();
 
-        for arg in &method_args.args {
+        for arg in args {
             if !result {
                 break;
             }
