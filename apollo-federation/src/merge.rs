@@ -614,35 +614,12 @@ impl Merger {
                     &field.directives,
                 );
 
-                for arg in field.arguments.iter() {
-                    let arguments_to_merge = &mut supergraph_field.make_mut().arguments;
-                    let argument_to_merge = arguments_to_merge
-                        .iter_mut()
-                        .find_map(|a| (a.name == arg.name).then(|| a.make_mut()));
-
-                    if let Some(argument) = argument_to_merge {
-                        self.add_inaccessible(
-                            directive_names,
-                            &mut argument.directives,
-                            &arg.directives,
-                        );
-                    } else {
-                        let mut argument = InputValueDefinition {
-                            name: arg.name.clone(),
-                            description: arg.description.clone(),
-                            directives: Default::default(),
-                            ty: arg.ty.clone(),
-                            default_value: arg.default_value.clone(),
-                        };
-
-                        self.add_inaccessible(
-                            directive_names,
-                            &mut argument.directives,
-                            &arg.directives,
-                        );
-                        arguments_to_merge.push(argument.into());
-                    };
-                }
+                fields::merge_arguments(
+                    field.arguments.iter(),
+                    &mut supergraph_field.make_mut().arguments,
+                    self,
+                    directive_names,
+                );
 
                 let requires_directive_option = field
                     .directives

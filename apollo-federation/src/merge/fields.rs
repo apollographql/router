@@ -30,6 +30,6 @@ pub(super) fn merge_arguments(
 
             merger.add_inaccessible(directive_names, &mut argument.directives, &arg.directives);
             arguments_to_merge.push(argument.into());
-        };
+        }
     }
 }
