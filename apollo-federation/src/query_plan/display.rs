@@ -356,7 +356,7 @@ fn write_selections(
 impl fmt::Display for FetchDataPathElement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Key(conditions, name) => {
+            Self::Key(name, conditions) => {
                 f.write_str(name)?;
                 write_conditions(conditions, f)
             }

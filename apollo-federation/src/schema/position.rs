@@ -188,15 +188,6 @@ impl TypeDefinitionPosition {
         )
     }
 
-    pub(crate) fn as_composite_type(&self) -> Option<CompositeTypeDefinitionPosition> {
-        match self {
-            TypeDefinitionPosition::Object(o) => Some(o.clone().into()),
-            TypeDefinitionPosition::Interface(i) => Some(i.clone().into()),
-            TypeDefinitionPosition::Union(u) => Some(u.clone().into()),
-            _ => None,
-        }
-    }
-
     pub(crate) fn type_name(&self) -> &Name {
         match self {
             TypeDefinitionPosition::Scalar(type_) => &type_.type_name,

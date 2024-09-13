@@ -550,21 +550,13 @@ impl FetchDependencyGraphNodePath {
             .clone()
             .into_iter()
             .map(|pt| {
-                let field = self
-                    .schema
-                    .get_type(pt)?
-                    .as_composite_type()
-                    .unwrap()
+                let field = CompositeTypeDefinitionPosition::try_from(self.schema.get_type(pt)?)?
                     .field(element.name().clone())?
                     .get(self.schema.schema())?;
                 let typ = self
                     .schema
                     .get_type(field.ty.inner_named_type().clone())?
-                    .as_composite_type()
-                    // TODO: check with the team, we probably want to replace it with something more meaningful.
-                    .ok_or_else(|| {
-                        FederationError::internal("field type is not a composite type")
-                    })?;
+                    .try_into()?;
                 Ok(self
                     .schema
                     .possible_runtime_types(typ)?
@@ -606,10 +598,10 @@ impl FetchDependencyGraphNodePath {
                                 conditions.iter().cloned().collect(),
                             ));
                         }
-                        Some(FetchDataPathElement::Key(_, name)) => {
+                        Some(FetchDataPathElement::Key(name, _)) => {
                             new_path.push(FetchDataPathElement::Key(
-                                conditions.iter().cloned().collect(),
                                 name,
+                                conditions.iter().cloned().collect(),
                             ));
                         }
                         Some(other) => new_path.push(other),
@@ -618,8 +610,8 @@ impl FetchDependencyGraphNodePath {
                 }
 
                 new_path.push(FetchDataPathElement::Key(
-                    Default::default(),
                     field.response_name(),
+                    Default::default(),
                 ));
 
                 // TODO: is there a simpler way to find a field’s type from `&Field`?
@@ -3988,7 +3980,7 @@ fn compute_input_rewrites_on_key_fetch(
     {
         // rewrite path: [ ... on <input_type_name>, __typename ]
         let type_cond = FetchDataPathElement::TypenameEquals(input_type_name.clone());
-        let typename_field_elem = FetchDataPathElement::Key(Default::default(), TYPENAME_FIELD);
+        let typename_field_elem = FetchDataPathElement::Key(TYPENAME_FIELD, Default::default());
         let rewrite = FetchDataRewrite::ValueSetter(FetchDataValueSetter {
             path: vec![type_cond, typename_field_elem],
             set_value_to: dest_type.type_name().to_string().into(),
@@ -4668,7 +4660,7 @@ mod tests {
         let query_root = valid_schema
             .get_type(name!("Query"))
             .unwrap()
-            .as_composite_type()
+            .try_into()
             .unwrap();
 
         let path = FetchDependencyGraphNodePath::new(valid_schema, false, query_root).unwrap();
@@ -4730,7 +4722,7 @@ mod tests {
         let query_root = valid_schema
             .get_type(name!("Query"))
             .unwrap()
-            .as_composite_type()
+            .try_into()
             .unwrap();
 
         let path = FetchDependencyGraphNodePath::new(valid_schema, true, query_root).unwrap();
@@ -4786,10 +4778,10 @@ mod tests {
         let parent_type = schema
             .get_type(parent_type_name)
             .unwrap()
-            .as_composite_type()
+            .try_into()
             .unwrap();
         let type_condition =
-            type_condition_name.map(|n| schema.get_type(n).unwrap().as_composite_type().unwrap());
+            type_condition_name.map(|n| schema.get_type(n).unwrap().try_into().unwrap());
         OpPathElement::InlineFragment(super::InlineFragment::new(InlineFragmentData {
             schema: schema.clone(),
             parent_type_position: parent_type,
@@ -4805,7 +4797,7 @@ mod tests {
             response_path
                 .iter()
                 .map(|element| match element {
-                    FetchDataPathElement::Key(conditions, name) => {
+                    FetchDataPathElement::Key(name, conditions) => {
                         format!("{}{}", cond_to_string(conditions), name)
                     }
                     FetchDataPathElement::AnyIndex(conditions) => {

@@ -308,8 +308,8 @@ impl From<&'_ next::FetchDataPathElement> for crate::json_ext::PathElement {
     fn from(value: &'_ next::FetchDataPathElement) -> Self {
         // TODO: Go all in on Name eventually
         match value {
-            next::FetchDataPathElement::Key(conditions, value) => Self::Key(
-                value.to_string(),
+            next::FetchDataPathElement::Key(name, conditions) => Self::Key(
+                name.to_string(),
                 if conditions.is_empty() {
                     None
                 } else {

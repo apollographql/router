@@ -1324,7 +1324,7 @@ mod field_selection {
         }
 
         pub(crate) fn as_path_element(&self) -> FetchDataPathElement {
-            FetchDataPathElement::Key(Default::default(), self.response_name())
+            FetchDataPathElement::Key(self.response_name(), Default::default())
         }
     }
 
@@ -2772,7 +2772,7 @@ impl SelectionSet {
                      response_name,
                      alias,
                  }| {
-                    path.push(FetchDataPathElement::Key(Default::default(), alias));
+                    path.push(FetchDataPathElement::Key(alias, Default::default()));
                     Arc::new(FetchDataRewrite::KeyRenamer(FetchDataKeyRenamer {
                         path,
                         rename_key_to: response_name,
@@ -2801,7 +2801,7 @@ impl SelectionSet {
                 remaining.push(alias);
             } else {
                 at_current_level.insert(
-                    FetchDataPathElement::Key(Default::default(), alias.response_name.clone()),
+                    FetchDataPathElement::Key(alias.response_name.clone(), Default::default()),
                     alias,
                 );
             }
@@ -3111,8 +3111,8 @@ fn compute_aliases_for_non_merging_fields(
                                 let mut selections = s.clone();
                                 let mut p = path.clone();
                                 p.push(FetchDataPathElement::Key(
-                                    Default::default(),
                                     response_name.clone(),
+                                    Default::default(),
                                 ));
                                 selections.push(SelectionSetAtPath {
                                     path: p,
@@ -3139,7 +3139,7 @@ fn compute_aliases_for_non_merging_fields(
                     let selections = match field.selection_set.as_ref() {
                         Some(s) => {
                             let mut p = path.clone();
-                            p.push(FetchDataPathElement::Key(Default::default(), alias.clone()));
+                            p.push(FetchDataPathElement::Key(alias.clone(), Default::default()));
                             Some(vec![SelectionSetAtPath {
                                 path: p,
                                 selections: Some(s.clone()),
@@ -3171,8 +3171,8 @@ fn compute_aliases_for_non_merging_fields(
                 {
                     Some(s) => {
                         path.push(FetchDataPathElement::Key(
-                            Default::default(),
                             response_name.clone(),
+                            Default::default(),
                         ));
                         Some(vec![SelectionSetAtPath {
                             path,
