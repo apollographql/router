@@ -78,6 +78,16 @@ pub fn json_type_name(v: &JSON) -> &str {
     }
 }
 
+pub fn immutable_vec_push<T>(vec: &[T], item: T) -> Vec<T>
+where
+    T: Clone,
+{
+    let mut new_vec = Vec::with_capacity(vec.len() + 1);
+    new_vec.extend_from_slice(vec);
+    new_vec.push(item);
+    new_vec
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

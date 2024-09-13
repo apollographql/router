@@ -2,10 +2,11 @@
 // JSONSelection strings in connector schemas, but have proposed implementations
 // and tests. After careful review, they may one day move to public.rs.
 
-use apollo_compiler::collections::IndexSet;
 use serde_json::Number;
 use serde_json_bytes::Value as JSON;
 
+use crate::sources::connect::json_selection::apply_to::ApplyToResultMethods;
+use crate::sources::connect::json_selection::helpers::immutable_vec_push;
 use crate::sources::connect::json_selection::helpers::json_type_name;
 use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::lit_expr::LitExpr;
@@ -25,21 +26,22 @@ pub(super) fn typeof_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
     tail: &WithRange<PathList>,
-    errors: &mut IndexSet<ApplyToError>,
-) -> Option<JSON> {
+) -> (Option<JSON>, Vec<ApplyToError>) {
     if method_args.is_some() {
-        errors.insert(ApplyToError::new(
-            format!(
-                "Method ->{} does not take any arguments",
-                method_name.as_ref()
-            ),
-            input_path.to_vec(),
-            method_name.range(),
-        ));
-        None
+        (
+            None,
+            vec![ApplyToError::new(
+                format!(
+                    "Method ->{} does not take any arguments",
+                    method_name.as_ref()
+                ),
+                input_path.to_vec(),
+                method_name.range(),
+            )],
+        )
     } else {
         let typeof_string = JSON::String(json_type_name(data).to_string().into());
-        tail.apply_to_path(&typeof_string, vars, input_path, errors)
+        tail.apply_to_path(&typeof_string, vars, input_path)
     }
 }
 
@@ -50,29 +52,32 @@ pub(super) fn eq_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
     tail: &WithRange<PathList>,
-    errors: &mut IndexSet<ApplyToError>,
-) -> Option<JSON> {
+) -> (Option<JSON>, Vec<ApplyToError>) {
     if let Some(method_args) = method_args {
         let args = &method_args.args;
         if args.len() == 1 {
-            let matches = if let Some(value) = args[0].apply_to_path(data, vars, input_path, errors)
-            {
+            let (value_opt, arg_errors) = args[0].apply_to_path(data, vars, input_path);
+            let matches = if let Some(value) = value_opt {
                 data == &value
             } else {
                 false
             };
-            return tail.apply_to_path(&JSON::Bool(matches), vars, input_path, errors);
+            return tail
+                .apply_to_path(&JSON::Bool(matches), vars, input_path)
+                .prepend_errors(&arg_errors);
         }
     }
-    errors.insert(ApplyToError::new(
-        format!(
-            "Method ->{} requires exactly one argument",
-            method_name.as_ref()
-        ),
-        input_path.to_vec(),
-        method_name.range(),
-    ));
-    None
+    (
+        None,
+        vec![ApplyToError::new(
+            format!(
+                "Method ->{} requires exactly one argument",
+                method_name.as_ref()
+            ),
+            input_path.to_vec(),
+            method_name.range(),
+        )],
+    )
 }
 
 // Like ->match, but expects the first element of each pair
@@ -87,37 +92,41 @@ pub(super) fn match_if_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
     tail: &WithRange<PathList>,
-    errors: &mut IndexSet<ApplyToError>,
-) -> Option<JSON> {
+) -> (Option<JSON>, Vec<ApplyToError>) {
     if let Some(method_args) = method_args {
         for pair in &method_args.args {
             if let LitExpr::Array(pair) = pair.as_ref() {
                 if pair.len() == 2 {
-                    if let Some(JSON::Bool(true)) =
-                        pair[0].apply_to_path(data, vars, input_path, errors)
-                    {
+                    // TODO What happens to condition_errors if the condition is not a match?
+                    let (condition_opt, condition_errors) =
+                        pair[0].apply_to_path(data, vars, input_path);
+
+                    if let Some(JSON::Bool(true)) = condition_opt {
                         return pair[1]
-                            .apply_to_path(data, vars, input_path, errors)
-                            .and_then(|value| {
-                                tail.apply_to_path(&value, vars, input_path, errors)
-                            });
+                            .apply_to_path(data, vars, input_path)
+                            .and_then_collecting_errors(|value| {
+                                tail.apply_to_path(value, vars, input_path)
+                            })
+                            .prepend_errors(&condition_errors);
                     };
                 }
             }
         }
     }
-    errors.insert(ApplyToError::new(
-        format!(
-            "Method ->{} did not match any [condition, value] pair",
-            method_name.as_ref(),
-        ),
-        input_path.to_vec(),
-        merge_ranges(
-            method_name.range(),
-            method_args.and_then(|args| args.range()),
-        ),
-    ));
-    None
+    (
+        None,
+        vec![ApplyToError::new(
+            format!(
+                "Method ->{} did not match any [condition, value] pair",
+                method_name.as_ref(),
+            ),
+            input_path.to_vec(),
+            merge_ranges(
+                method_name.range(),
+                method_args.and_then(|args| args.range()),
+            ),
+        )],
+    )
 }
 
 pub(super) fn arithmetic_method(
@@ -127,58 +136,77 @@ pub(super) fn arithmetic_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    errors: &mut IndexSet<ApplyToError>,
-) -> Option<JSON> {
+) -> (Option<JSON>, Vec<ApplyToError>) {
     if let Some(method_args) = method_args {
         if let JSON::Number(result) = data {
             let mut result = result.clone();
+            let mut errors = Vec::new();
             for arg in &method_args.args {
-                let value_opt = arg.apply_to_path(data, vars, input_path, errors);
+                let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path);
+                errors.extend(arg_errors);
                 if let Some(JSON::Number(n)) = value_opt {
                     if let Some(new_result) = op(&result, &n) {
                         result = new_result;
                     } else {
-                        errors.insert(ApplyToError::new(
-                            format!("Method ->{} failed on argument {}", method_name.as_ref(), n),
-                            input_path.to_vec(),
-                            arg.range(),
-                        ));
-                        return None;
+                        return (
+                            None,
+                            immutable_vec_push(
+                                &errors,
+                                ApplyToError::new(
+                                    format!(
+                                        "Method ->{} failed on argument {}",
+                                        method_name.as_ref(),
+                                        n
+                                    ),
+                                    input_path.to_vec(),
+                                    arg.range(),
+                                ),
+                            ),
+                        );
                     }
                 } else {
-                    errors.insert(ApplyToError::new(
-                        format!(
-                            "Method ->{} requires numeric arguments",
-                            method_name.as_ref()
+                    return (
+                        None,
+                        immutable_vec_push(
+                            &errors,
+                            ApplyToError::new(
+                                format!(
+                                    "Method ->{} requires numeric arguments",
+                                    method_name.as_ref()
+                                ),
+                                input_path.to_vec(),
+                                arg.range(),
+                            ),
                         ),
-                        input_path.to_vec(),
-                        arg.range(),
-                    ));
-                    return None;
+                    );
                 }
             }
-            Some(JSON::Number(result))
+            (Some(JSON::Number(result)), errors)
         } else {
-            errors.insert(ApplyToError::new(
+            (
+                None,
+                vec![ApplyToError::new(
+                    format!(
+                        "Method ->{} requires numeric arguments",
+                        method_name.as_ref()
+                    ),
+                    input_path.to_vec(),
+                    method_name.range(),
+                )],
+            )
+        }
+    } else {
+        (
+            None,
+            vec![ApplyToError::new(
                 format!(
-                    "Method ->{} requires numeric arguments",
+                    "Method ->{} requires at least one argument",
                     method_name.as_ref()
                 ),
                 input_path.to_vec(),
                 method_name.range(),
-            ));
-            None
-        }
-    } else {
-        errors.insert(ApplyToError::new(
-            format!(
-                "Method ->{} requires at least one argument",
-                method_name.as_ref()
-            ),
-            input_path.to_vec(),
-            method_name.range(),
-        ));
-        None
+            )],
+        )
     }
 }
 
@@ -210,21 +238,9 @@ macro_rules! infix_math_method {
             vars: &VarsWithPathsMap,
             input_path: &InputPath<JSON>,
             tail: &WithRange<PathList>,
-            errors: &mut IndexSet<ApplyToError>,
-        ) -> Option<JSON> {
-            if let Some(result) = arithmetic_method(
-                method_name,
-                method_args,
-                &$op,
-                data,
-                vars,
-                input_path,
-                errors,
-            ) {
-                tail.apply_to_path(&result, vars, input_path, errors)
-            } else {
-                None
-            }
+        ) -> (Option<JSON>, Vec<ApplyToError>) {
+            arithmetic_method(method_name, method_args, $op, data, vars, input_path)
+                .and_then_collecting_errors(|result| tail.apply_to_path(&result, vars, input_path))
         }
     };
 }
@@ -241,12 +257,11 @@ pub(super) fn has_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
     tail: &WithRange<PathList>,
-    errors: &mut IndexSet<ApplyToError>,
-) -> Option<JSON> {
+) -> (Option<JSON>, Vec<ApplyToError>) {
     if let Some(method_args) = method_args {
         match method_args.args.first() {
-            Some(arg) => match &arg.apply_to_path(data, vars, input_path, errors) {
-                Some(json_index @ JSON::Number(n)) => match (data, n.as_i64()) {
+            Some(arg) => match &arg.apply_to_path(data, vars, input_path) {
+                (Some(json_index @ JSON::Number(n)), arg_errors) => match (data, n.as_i64()) {
                     (JSON::Array(array), Some(index)) => {
                         let ilen = array.len() as i64;
                         // Negative indices count from the end of the array
@@ -255,9 +270,10 @@ pub(super) fn has_method(
                             &JSON::Bool(index >= 0 && index < ilen),
                             vars,
                             &input_path.append(json_index.clone()),
-                            errors,
                         )
+                        .prepend_errors(arg_errors)
                     }
+
                     (json_key @ JSON::String(s), Some(index)) => {
                         let ilen = s.as_str().len() as i64;
                         // Negative indices count from the end of the array
@@ -266,54 +282,63 @@ pub(super) fn has_method(
                             &JSON::Bool(index >= 0 && index < ilen),
                             vars,
                             &input_path.append(json_key.clone()),
-                            errors,
                         )
+                        .prepend_errors(arg_errors)
                     }
-                    _ => tail.apply_to_path(
-                        &JSON::Bool(false),
-                        vars,
-                        &input_path.append(json_index.clone()),
-                        errors,
-                    ),
+
+                    _ => tail
+                        .apply_to_path(
+                            &JSON::Bool(false),
+                            vars,
+                            &input_path.append(json_index.clone()),
+                        )
+                        .prepend_errors(arg_errors),
                 },
-                Some(json_key @ JSON::String(s)) => match data {
-                    JSON::Object(map) => tail.apply_to_path(
-                        &JSON::Bool(map.contains_key(s.as_str())),
-                        vars,
-                        &input_path.append(json_key.clone()),
-                        errors,
-                    ),
-                    _ => tail.apply_to_path(
-                        &JSON::Bool(false),
-                        vars,
-                        &input_path.append(json_key.clone()),
-                        errors,
-                    ),
+
+                (Some(json_key @ JSON::String(s)), arg_errors) => match data {
+                    JSON::Object(map) => tail
+                        .apply_to_path(
+                            &JSON::Bool(map.contains_key(s.as_str())),
+                            vars,
+                            &input_path.append(json_key.clone()),
+                        )
+                        .prepend_errors(arg_errors),
+
+                    _ => tail
+                        .apply_to_path(
+                            &JSON::Bool(false),
+                            vars,
+                            &input_path.append(json_key.clone()),
+                        )
+                        .prepend_errors(arg_errors),
                 },
-                Some(value) => tail.apply_to_path(
-                    &JSON::Bool(false),
-                    vars,
-                    &input_path.append(value.clone()),
-                    errors,
-                ),
-                None => tail.apply_to_path(&JSON::Bool(false), vars, input_path, errors),
+
+                (Some(value), arg_errors) => tail
+                    .apply_to_path(&JSON::Bool(false), vars, &input_path.append(value.clone()))
+                    .prepend_errors(arg_errors),
+
+                (None, arg_errors) => tail
+                    .apply_to_path(&JSON::Bool(false), vars, input_path)
+                    .prepend_errors(arg_errors),
             },
-            None => {
-                errors.insert(ApplyToError::new(
+            None => (
+                None,
+                vec![ApplyToError::new(
                     format!("Method ->{} requires an argument", method_name.as_ref()),
                     input_path.to_vec(),
                     method_name.range(),
-                ));
-                None
-            }
+                )],
+            ),
         }
     } else {
-        errors.insert(ApplyToError::new(
-            format!("Method ->{} requires an argument", method_name.as_ref()),
-            input_path.to_vec(),
-            method_name.range(),
-        ));
-        None
+        (
+            None,
+            vec![ApplyToError::new(
+                format!("Method ->{} requires an argument", method_name.as_ref()),
+                input_path.to_vec(),
+                method_name.range(),
+            )],
+        )
     }
 }
 
@@ -326,12 +351,11 @@ pub(super) fn get_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
     tail: &WithRange<PathList>,
-    errors: &mut IndexSet<ApplyToError>,
-) -> Option<JSON> {
+) -> (Option<JSON>, Vec<ApplyToError>) {
     if let Some(method_args) = method_args {
         if let Some(index_literal) = method_args.args.first() {
-            match &index_literal.apply_to_path(data, vars, input_path, errors) {
-                Some(JSON::Number(n)) => match (data, n.as_i64()) {
+            match &index_literal.apply_to_path(data, vars, input_path) {
+                (Some(JSON::Number(n)), index_errors) => match (data, n.as_i64()) {
                     (JSON::Array(array), Some(i)) => {
                         // Negative indices count from the end of the array
                         if let Some(element) = array.get(if i < 0 {
@@ -339,20 +363,27 @@ pub(super) fn get_method(
                         } else {
                             i as usize
                         }) {
-                            tail.apply_to_path(element, vars, input_path, errors)
+                            tail.apply_to_path(element, vars, input_path)
+                                .prepend_errors(index_errors)
                         } else {
-                            errors.insert(ApplyToError::new(
-                                format!(
-                                    "Method ->{}({}) index out of bounds",
-                                    method_name.as_ref(),
-                                    i,
+                            (
+                                None,
+                                immutable_vec_push(
+                                    index_errors,
+                                    ApplyToError::new(
+                                        format!(
+                                            "Method ->{}({}) index out of bounds",
+                                            method_name.as_ref(),
+                                            i,
+                                        ),
+                                        input_path.to_vec(),
+                                        index_literal.range(),
+                                    ),
                                 ),
-                                input_path.to_vec(),
-                                index_literal.range(),
-                            ));
-                            None
+                            )
                         }
                     }
+
                     (JSON::String(s), Some(i)) => {
                         let s_str = s.as_str();
                         let ilen = s_str.len() as i64;
@@ -365,114 +396,145 @@ pub(super) fn get_method(
                                 &JSON::String(single_char_string.into()),
                                 vars,
                                 input_path,
-                                errors,
                             )
+                            .prepend_errors(index_errors)
                         } else {
-                            errors.insert(ApplyToError::new(
+                            (
+                                None,
+                                immutable_vec_push(
+                                    index_errors,
+                                    ApplyToError::new(
+                                        format!(
+                                            "Method ->{}({}) index out of bounds",
+                                            method_name.as_ref(),
+                                            i,
+                                        ),
+                                        input_path.to_vec(),
+                                        index_literal.range(),
+                                    ),
+                                ),
+                            )
+                        }
+                    }
+
+                    (_, None) => (
+                        None,
+                        immutable_vec_push(
+                            index_errors,
+                            ApplyToError::new(
                                 format!(
-                                    "Method ->{}({}) index out of bounds",
-                                    method_name.as_ref(),
-                                    i,
+                                    "Method ->{} requires an integer index",
+                                    method_name.as_ref()
                                 ),
                                 input_path.to_vec(),
                                 index_literal.range(),
-                            ));
-                            None
-                        }
-                    }
-                    (_, None) => {
-                        errors.insert(ApplyToError::new(
-                            format!(
-                                "Method ->{} requires an integer index",
-                                method_name.as_ref()
                             ),
-                            input_path.to_vec(),
-                            index_literal.range(),
-                        ));
-                        None
-                    }
-                    _ => {
-                        errors.insert(ApplyToError::new(
-                            format!(
-                                "Method ->{} requires an array or string input, not {}",
-                                method_name.as_ref(),
-                                json_type_name(data),
+                        ),
+                    ),
+                    _ => (
+                        None,
+                        immutable_vec_push(
+                            index_errors,
+                            ApplyToError::new(
+                                format!(
+                                    "Method ->{} requires an array or string input, not {}",
+                                    method_name.as_ref(),
+                                    json_type_name(data),
+                                ),
+                                input_path.to_vec(),
+                                method_name.range(),
                             ),
-                            input_path.to_vec(),
-                            method_name.range(),
-                        ));
-                        None
-                    }
+                        ),
+                    ),
                 },
-                Some(key @ JSON::String(s)) => match data {
+                (Some(key @ JSON::String(s)), index_errors) => match data {
                     JSON::Object(map) => {
                         if let Some(value) = map.get(s.as_str()) {
-                            tail.apply_to_path(value, vars, input_path, errors)
+                            tail.apply_to_path(value, vars, input_path)
+                                .prepend_errors(index_errors)
                         } else {
-                            errors.insert(ApplyToError::new(
+                            (
+                                None,
+                                immutable_vec_push(
+                                    index_errors,
+                                    ApplyToError::new(
+                                        format!(
+                                            "Method ->{}({}) object key not found",
+                                            method_name.as_ref(),
+                                            key
+                                        ),
+                                        input_path.to_vec(),
+                                        index_literal.range(),
+                                    ),
+                                ),
+                            )
+                        }
+                    }
+                    _ => (
+                        None,
+                        immutable_vec_push(
+                            index_errors,
+                            ApplyToError::new(
                                 format!(
-                                    "Method ->{}({}) object key not found",
+                                    "Method ->{}({}) requires an object input",
                                     method_name.as_ref(),
                                     key
                                 ),
                                 input_path.to_vec(),
-                                index_literal.range(),
-                            ));
-                            None
-                        }
-                    }
-                    _ => {
-                        errors.insert(ApplyToError::new(
+                                merge_ranges(method_name.range(), method_args.range()),
+                            ),
+                        ),
+                    ),
+                },
+                (Some(value), index_errors) => (
+                    None,
+                    immutable_vec_push(
+                        index_errors,
+                        ApplyToError::new(
                             format!(
-                                "Method ->{}({}) requires an object input",
+                                "Method ->{}({}) requires an integer or string argument",
                                 method_name.as_ref(),
-                                key
+                                value,
                             ),
                             input_path.to_vec(),
-                            merge_ranges(method_name.range(), method_args.range()),
-                        ));
-                        None
-                    }
-                },
-                Some(value) => {
-                    errors.insert(ApplyToError::new(
-                        format!(
-                            "Method ->{}({}) requires an integer or string argument",
-                            method_name.as_ref(),
-                            value,
+                            index_literal.range(),
                         ),
-                        input_path.to_vec(),
-                        index_literal.range(),
-                    ));
-                    None
-                }
-                None => {
-                    errors.insert(ApplyToError::new(
-                        format!(
-                            "Method ->{} received undefined argument",
-                            method_name.as_ref()
+                    ),
+                ),
+                (None, index_errors) => (
+                    None,
+                    immutable_vec_push(
+                        index_errors,
+                        ApplyToError::new(
+                            format!(
+                                "Method ->{} received undefined argument",
+                                method_name.as_ref()
+                            ),
+                            input_path.to_vec(),
+                            index_literal.range(),
                         ),
-                        input_path.to_vec(),
-                        index_literal.range(),
-                    ));
-                    None
-                }
+                    ),
+                ),
             }
         } else {
-            errors.insert(ApplyToError::new(
+            (
+                None,
+                vec![ApplyToError::new(
+                    format!("Method ->{} requires an argument", method_name.as_ref()),
+                    input_path.to_vec(),
+                    method_name.range(),
+                )],
+            )
+        }
+    } else {
+        (
+            None,
+            vec![ApplyToError::new(
                 format!("Method ->{} requires an argument", method_name.as_ref()),
                 input_path.to_vec(),
                 method_name.range(),
-            ));
-            None
-        }
-    } else {
-        errors.insert(ApplyToError::new(
-            format!("Method ->{} requires an argument", method_name.as_ref()),
-            input_path.to_vec(),
-            method_name.range(),
-        ));
-        None
+            )],
+        )
     }
 }
 
@@ -483,27 +545,29 @@ pub(super) fn keys_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
     tail: &WithRange<PathList>,
-    errors: &mut IndexSet<ApplyToError>,
-) -> Option<JSON> {
+) -> (Option<JSON>, Vec<ApplyToError>) {
     if method_args.is_some() {
-        errors.insert(ApplyToError::new(
-            format!(
-                "Method ->{} does not take any arguments",
-                method_name.as_ref()
-            ),
-            input_path.to_vec(),
-            method_name.range(),
-        ));
-        return None;
+        return (
+            None,
+            vec![ApplyToError::new(
+                format!(
+                    "Method ->{} does not take any arguments",
+                    method_name.as_ref()
+                ),
+                input_path.to_vec(),
+                method_name.range(),
+            )],
+        );
     }
 
     match data {
         JSON::Object(map) => {
             let keys = map.keys().map(|key| JSON::String(key.clone())).collect();
-            tail.apply_to_path(&JSON::Array(keys), vars, input_path, errors)
+            tail.apply_to_path(&JSON::Array(keys), vars, input_path)
         }
-        _ => {
-            errors.insert(ApplyToError::new(
+        _ => (
+            None,
+            vec![ApplyToError::new(
                 format!(
                     "Method ->{} requires an object input, not {}",
                     method_name.as_ref(),
@@ -511,9 +575,8 @@ pub(super) fn keys_method(
                 ),
                 input_path.to_vec(),
                 method_name.range(),
-            ));
-            None
-        }
+            )],
+        ),
     }
 }
 
@@ -524,27 +587,29 @@ pub(super) fn values_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
     tail: &WithRange<PathList>,
-    errors: &mut IndexSet<ApplyToError>,
-) -> Option<JSON> {
+) -> (Option<JSON>, Vec<ApplyToError>) {
     if method_args.is_some() {
-        errors.insert(ApplyToError::new(
-            format!(
-                "Method ->{} does not take any arguments",
-                method_name.as_ref()
-            ),
-            input_path.to_vec(),
-            method_name.range(),
-        ));
-        return None;
+        return (
+            None,
+            vec![ApplyToError::new(
+                format!(
+                    "Method ->{} does not take any arguments",
+                    method_name.as_ref()
+                ),
+                input_path.to_vec(),
+                method_name.range(),
+            )],
+        );
     }
 
     match data {
         JSON::Object(map) => {
             let values = map.values().cloned().collect();
-            tail.apply_to_path(&JSON::Array(values), vars, input_path, errors)
+            tail.apply_to_path(&JSON::Array(values), vars, input_path)
         }
-        _ => {
-            errors.insert(ApplyToError::new(
+        _ => (
+            None,
+            vec![ApplyToError::new(
                 format!(
                     "Method ->{} requires an object input, not {}",
                     method_name.as_ref(),
@@ -552,9 +617,8 @@ pub(super) fn values_method(
                 ),
                 input_path.to_vec(),
                 method_name.range(),
-            ));
-            None
-        }
+            )],
+        ),
     }
 }
 
@@ -565,20 +629,21 @@ pub(super) fn not_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
     tail: &WithRange<PathList>,
-    errors: &mut IndexSet<ApplyToError>,
-) -> Option<JSON> {
+) -> (Option<JSON>, Vec<ApplyToError>) {
     if method_args.is_some() {
-        errors.insert(ApplyToError::new(
-            format!(
-                "Method ->{} does not take any arguments",
-                method_name.as_ref()
-            ),
-            input_path.to_vec(),
-            method_name.range(),
-        ));
-        None
+        (
+            None,
+            vec![ApplyToError::new(
+                format!(
+                    "Method ->{} does not take any arguments",
+                    method_name.as_ref()
+                ),
+                input_path.to_vec(),
+                method_name.range(),
+            )],
+        )
     } else {
-        tail.apply_to_path(&JSON::Bool(!is_truthy(data)), vars, input_path, errors)
+        tail.apply_to_path(&JSON::Bool(!is_truthy(data)), vars, input_path)
     }
 }
 
@@ -599,27 +664,31 @@ pub(super) fn or_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
     tail: &WithRange<PathList>,
-    errors: &mut IndexSet<ApplyToError>,
-) -> Option<JSON> {
+) -> (Option<JSON>, Vec<ApplyToError>) {
     if let Some(method_args) = method_args {
         let mut result = is_truthy(data);
+        let mut errors = Vec::new();
+
         for arg in &method_args.args {
             if result {
                 break;
             }
-            result = arg
-                .apply_to_path(data, vars, input_path, errors)
-                .map(|value| is_truthy(&value))
-                .unwrap_or(false);
+            let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path);
+            errors.extend(arg_errors);
+            result = value_opt.map(|value| is_truthy(&value)).unwrap_or(false);
         }
-        tail.apply_to_path(&JSON::Bool(result), vars, input_path, errors)
+
+        tail.apply_to_path(&JSON::Bool(result), vars, input_path)
+            .prepend_errors(&errors)
     } else {
-        errors.insert(ApplyToError::new(
-            format!("Method ->{} requires arguments", method_name.as_ref()),
-            input_path.to_vec(),
-            method_name.range(),
-        ));
-        None
+        (
+            None,
+            vec![ApplyToError::new(
+                format!("Method ->{} requires arguments", method_name.as_ref()),
+                input_path.to_vec(),
+                method_name.range(),
+            )],
+        )
     }
 }
 
@@ -630,26 +699,30 @@ pub(super) fn and_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
     tail: &WithRange<PathList>,
-    errors: &mut IndexSet<ApplyToError>,
-) -> Option<JSON> {
+) -> (Option<JSON>, Vec<ApplyToError>) {
     if let Some(method_args) = method_args {
         let mut result = is_truthy(data);
+        let mut errors = Vec::new();
+
         for arg in &method_args.args {
             if !result {
                 break;
             }
-            result = arg
-                .apply_to_path(data, vars, input_path, errors)
-                .map(|value| is_truthy(&value))
-                .unwrap_or(false);
+            let (value_opt, arg_errors) = arg.apply_to_path(data, vars, input_path);
+            errors.extend(arg_errors);
+            result = value_opt.map(|value| is_truthy(&value)).unwrap_or(false);
         }
-        tail.apply_to_path(&JSON::Bool(result), vars, input_path, errors)
+
+        tail.apply_to_path(&JSON::Bool(result), vars, input_path)
+            .prepend_errors(&errors)
     } else {
-        errors.insert(ApplyToError::new(
-            format!("Method ->{} requires arguments", method_name.as_ref()),
-            input_path.to_vec(),
-            method_name.range(),
-        ));
-        None
+        (
+            None,
+            vec![ApplyToError::new(
+                format!("Method ->{} requires arguments", method_name.as_ref()),
+                input_path.to_vec(),
+                method_name.range(),
+            )],
+        )
     }
 }
