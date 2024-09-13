@@ -201,6 +201,12 @@ impl<'a> From<FieldLookupError<'a>> for DemandControlError {
     }
 }
 
+#[derive(Clone)]
+pub(crate) struct DemandControlContext {
+    pub(crate) strategy: Strategy,
+    pub(crate) variables: Object,
+}
+
 impl Context {
     pub(crate) fn insert_estimated_cost(&self, cost: f64) -> Result<(), DemandControlError> {
         self.insert(COST_ESTIMATED_KEY, cost)
@@ -250,6 +256,14 @@ impl Context {
     pub(crate) fn get_cost_strategy(&self) -> Result<Option<String>, DemandControlError> {
         self.get::<&str, String>(COST_STRATEGY_KEY)
             .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))
+    }
+
+    pub(crate) fn insert_demand_control_context(&self, ctx: DemandControlContext) {
+        self.extensions().with_lock(|mut lock| lock.insert(ctx));
+    }
+
+    pub(crate) fn get_demand_control_context(&self) -> Option<DemandControlContext> {
+        self.extensions().with_lock(|lock| lock.get().cloned())
     }
 }
 
@@ -307,8 +321,11 @@ impl Plugin for DemandControl {
             ServiceBuilder::new()
                 .checkpoint(move |req: execution::Request| {
                     req.context
-                        .extensions()
-                        .with_lock(|mut lock| lock.insert(strategy.clone()));
+                        .insert_demand_control_context(DemandControlContext {
+                            strategy: strategy.clone(),
+                            variables: req.supergraph_request.body().variables.clone(),
+                        });
+
                     // On the request path we need to check for estimates, checkpoint is used to do this, short-circuiting the request if it's too expensive.
                     Ok(match strategy.on_execution_request(&req) {
                         Ok(_) => ControlFlow::Continue(req),
@@ -329,9 +346,11 @@ impl Plugin for DemandControl {
                         .context
                         .unsupported_executable_document()
                         .expect("must have document");
-                    let strategy = resp.context.extensions().with_lock(|lock| {
-                        lock.get::<Strategy>().expect("must have strategy").clone()
-                    });
+                    let strategy = resp
+                        .context
+                        .get_demand_control_context()
+                        .map(|ctx| ctx.strategy)
+                        .expect("must have strategy");
                     let context = resp.context.clone();
 
                     // We want to sequence this code to run after all the subgraph responses have been scored.
@@ -392,9 +411,7 @@ impl Plugin for DemandControl {
             let subgraph_name_map_fut = subgraph_name.to_owned();
             ServiceBuilder::new()
                 .checkpoint(move |req: subgraph::Request| {
-                    let strategy = req.context.extensions().with_lock(|lock| {
-                        lock.get::<Strategy>().expect("must have strategy").clone()
-                    });
+                    let strategy = req.context.get_demand_control_context().map(|c| c.strategy).expect("must have strategy");
 
                     // On the request path we need to check for estimates, checkpoint is used to do this, short-circuiting the request if it's too expensive.
                     Ok(match strategy.on_subgraph_request(&req) {
@@ -424,9 +441,7 @@ impl Plugin for DemandControl {
                     },
                     |(subgraph_name, req): (String, Arc<Valid<ExecutableDocument>>), fut| async move {
                         let resp: subgraph::Response = fut.await?;
-                        let strategy = resp.context.extensions().with_lock(|lock| {
-                            lock.get::<Strategy>().expect("must have strategy").clone()
-                        });
+                        let strategy = resp.context.get_demand_control_context().map(|c| c.strategy).expect("must have strategy");
                         Ok(match strategy.on_subgraph_response(req.as_ref(), &resp) {
                             Ok(_) => resp,
                             Err(err) => subgraph::Response::builder()
@@ -464,6 +479,7 @@ mod test {
     use crate::graphql::Response;
     use crate::metrics::FutureMetricsExt;
     use crate::plugins::demand_control::DemandControl;
+    use crate::plugins::demand_control::DemandControlContext;
     use crate::plugins::demand_control::DemandControlError;
     use crate::plugins::test::PluginTestHarness;
     use crate::query_planner::fetch::QueryHash;
@@ -622,7 +638,10 @@ mod test {
         let strategy = plugin.strategy_factory.create();
 
         let ctx = context();
-        ctx.extensions().with_lock(|mut lock| lock.insert(strategy));
+        ctx.insert_demand_control_context(DemandControlContext {
+            strategy,
+            variables: Default::default(),
+        });
         let mut req = subgraph::Request::fake_builder()
             .subgraph_name("test")
             .context(ctx)
