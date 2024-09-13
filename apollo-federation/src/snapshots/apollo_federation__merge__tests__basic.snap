@@ -50,16 +50,19 @@ type Query @join__type(graph: BASIC_1) @join__type(graph: BASIC_2) {
 
 interface I @join__type(graph: BASIC_1) @join__type(graph: BASIC_2) {
   id: ID! @join__field(graph: BASIC_1) @join__field(graph: BASIC_2)
+  f(x: ID, y: YInput): T @join__field(graph: BASIC_2)
 }
 
 type A implements I @join__type(graph: BASIC_1) @join__implements(graph: BASIC_1, interface: "I") @join__type(graph: BASIC_2) @join__implements(graph: BASIC_2, interface: "I") {
   id: ID! @join__field(graph: BASIC_1) @join__field(graph: BASIC_2)
   a: S @join__field(graph: BASIC_1) @join__field(graph: BASIC_2)
+  f(x: ID, y: YInput): T @join__field(graph: BASIC_2)
 }
 
 type B implements I @join__type(graph: BASIC_1) @join__implements(graph: BASIC_1, interface: "I") @join__type(graph: BASIC_2) @join__implements(graph: BASIC_2, interface: "I") {
   id: ID! @join__field(graph: BASIC_1) @join__field(graph: BASIC_2)
   b: E @join__field(graph: BASIC_1) @join__field(graph: BASIC_2)
+  f(x: ID, y: YInput): T @join__field(graph: BASIC_2)
 }
 
 union U @join__type(graph: BASIC_1) @join__unionMember(graph: BASIC_1, member: "A") @join__unionMember(graph: BASIC_1, member: "B") @join__type(graph: BASIC_2) @join__unionMember(graph: BASIC_2, member: "A") @join__unionMember(graph: BASIC_2, member: "B") = A | B
