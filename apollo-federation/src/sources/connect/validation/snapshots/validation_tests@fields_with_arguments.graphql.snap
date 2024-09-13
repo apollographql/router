@@ -1,6 +1,27 @@
 ---
 source: apollo-federation/src/sources/connect/validation/mod.rs
-expression: "format!(\"{:?}\", errors)"
-input_file: apollo-federation/src/sources/connect/validation/test_data/validation/fields_with_arguments.graphql
+expression: "format!(\"{:#?}\", errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/fields_with_arguments.graphql
 ---
-[Message { code: FieldWithArguments, message: "`@connect(selection:)` on `Query.ts` selects field `T.field`, which has arguments. Only fields with a connector can have arguments.", locations: [LineColumn { line: 9, column: 18 }..LineColumn { line: 12, column: 10 }, LineColumn { line: 18, column: 3 }..LineColumn { line: 18, column: 29 }] }]
+[
+    Message {
+        code: FieldWithArguments,
+        message: "`@connect(selection:)` on `Query.ts` selects field `T.field`, which has arguments. Only fields with a connector can have arguments.",
+        locations: [
+            LineColumn {
+                line: 9,
+                column: 18,
+            }..LineColumn {
+                line: 12,
+                column: 10,
+            },
+            LineColumn {
+                line: 18,
+                column: 3,
+            }..LineColumn {
+                line: 18,
+                column: 29,
+            },
+        ],
+    },
+]

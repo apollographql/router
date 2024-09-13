@@ -6,11 +6,14 @@ pub(crate) use common::IntegrationTest;
 mod coprocessor;
 mod docs;
 mod file_upload;
+mod introspection;
 mod lifecycle;
 mod operation_limits;
+mod operation_name;
 mod query_planner;
 mod subgraph_response;
 mod traffic_shaping;
+mod typename;
 
 #[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
 mod redis;

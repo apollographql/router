@@ -32,6 +32,8 @@ use thiserror::Error;
 use url::Url;
 
 use super::form_encoding::encode_json_as_form;
+use super::plugin::serialize_request;
+use super::plugin::ConnectorDebugHttpRequest;
 use crate::plugins::connectors::plugin::ConnectorContext;
 use crate::plugins::connectors::plugin::SelectionData;
 use crate::services::connect;
@@ -69,7 +71,8 @@ pub(crate) fn make_request(
     inputs: IndexMap<String, Value>,
     original_request: &connect::Request,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
-) -> Result<http::Request<RouterBody>, HttpJsonTransportError> {
+) -> Result<(http::Request<RouterBody>, Option<ConnectorDebugHttpRequest>), HttpJsonTransportError>
+{
     let flat_inputs = flatten_keys(&inputs);
     let uri = make_uri(
         transport.source_url.as_ref(),
@@ -117,9 +120,9 @@ pub(crate) fn make_request(
         .body(body.into())
         .map_err(HttpJsonTransportError::InvalidNewRequest)?;
 
-    if let Some(debug) = debug {
+    let debug_request = debug.as_ref().map(|_| {
         if is_form_urlencoded {
-            debug.lock().push_request(
+            serialize_request(
                 &request,
                 "form-urlencoded".to_string(),
                 form_body
@@ -131,9 +134,9 @@ pub(crate) fn make_request(
                     result: json_body,
                     errors: apply_to_errors,
                 }),
-            );
+            )
         } else {
-            debug.lock().push_request(
+            serialize_request(
                 &request,
                 "json".to_string(),
                 json_body.as_ref(),
@@ -143,11 +146,11 @@ pub(crate) fn make_request(
                     result: json_body.clone(),
                     errors: apply_to_errors,
                 }),
-            );
+            )
         }
-    }
+    });
 
-    Ok(request)
+    Ok((request, debug_request))
 }
 
 fn make_uri(
@@ -171,9 +174,7 @@ fn make_uri(
                 .map_err(HttpJsonTransportError::TemplateGenerationError)?,
         );
 
-    let query_params = template
-        .interpolate_query(inputs)
-        .map_err(HttpJsonTransportError::TemplateGenerationError)?;
+    let query_params = template.interpolate_query(inputs);
     if !query_params.is_empty() {
         url.query_pairs_mut().extend_pairs(query_params);
     }
@@ -277,6 +278,7 @@ pub(crate) enum HttpJsonTransportError {
 
 #[cfg(test)]
 mod test_make_uri {
+    use insta::assert_snapshot;
     use pretty_assertions::assert_eq;
     use serde_json_bytes::json;
 
@@ -285,11 +287,13 @@ mod test_make_uri {
     macro_rules! map {
         ($($key:expr => $value:expr),* $(,)?) => {
             {
-                let mut map = IndexMap::with_hasher(Default::default());
+                let mut variables = IndexMap::with_hasher(Default::default());
+                let mut this = IndexMap::with_hasher(Default::default());
                 $(
-                    map.insert($key.to_string(), json!($value));
+                    this.insert($key.to_string(), json!($value));
                 )*
-                flatten_keys(&map)
+                variables.insert("$this".to_string(), json!(this));
+                flatten_keys(&variables)
             }
         };
     }
@@ -327,7 +331,7 @@ mod test_make_uri {
         assert_eq!(
             make_uri(
                 Some(&Url::parse("https://localhost:8080/v1/").unwrap()),
-                &"/hello/{id}?id={id}".parse().unwrap(),
+                &"/hello/{$this.id}?id={$this.id}".parse().unwrap(),
                 &map! { "id" => 42 },
             )
             .unwrap()
@@ -340,8 +344,8 @@ mod test_make_uri {
         assert_eq!(
             make_uri(
                 Some(&Url::parse("https://localhost:8080/v1?foo=bar").unwrap()),
-                &"/hello/{id}?id={id}".parse().unwrap(),
-                &map! { "id" => 42 },
+                &"/hello/{$this.id}?id={$this.id}".parse().unwrap(),
+                &map! {"id" => 42 },
             )
             .unwrap()
             .as_str(),
@@ -353,8 +357,8 @@ mod test_make_uri {
         assert_eq!(
             make_uri(
                 Some(&Url::parse("https://localhost:8080/v1/?foo=bar").unwrap()),
-                &"/hello/{id}?id={id}".parse().unwrap(),
-                &map! { "id" => 42 },
+                &"/hello/{$this.id}?id={$this.id}".parse().unwrap(),
+                &map! {"id" => 42 },
             )
             .unwrap()
             .as_str(),
@@ -364,16 +368,16 @@ mod test_make_uri {
 
     #[test]
     fn path_cases() {
-        let template = "http://localhost/users/{user_id}?a={b}&c={d!}&e={f.g}"
+        let template = "http://localhost/users/{$this.user_id}?a={$this.b}&e={$this.f.g}"
             .parse()
             .unwrap();
 
-        assert_eq!(
+        assert_snapshot!(
             make_uri(None, &template, &Default::default())
                 .err()
                 .unwrap()
                 .to_string(),
-            "Could not generate path from inputs: Missing required variable user_id"
+            @"Could not generate path from inputs: Path parameter {$this.user_id} was missing one or more values in {}"
         );
 
         assert_eq!(
@@ -383,13 +387,12 @@ mod test_make_uri {
                 &map! {
                     "user_id" => 123,
                     "b" => "456",
-                    "d" => 789,
                     "f.g" => "abc"
                 }
             )
             .unwrap()
             .to_string(),
-            "http://localhost/users/123?a=456&c=789&e=abc"
+            "http://localhost/users/123?a=456&e=abc"
         );
 
         assert_eq!(
@@ -398,29 +401,12 @@ mod test_make_uri {
                 &template,
                 &map! {
                     "user_id" => 123,
-                    "d" => 789,
                     "f" => "not an object"
                 }
             )
             .unwrap()
             .to_string(),
-            "http://localhost/users/123?c=789"
-        );
-
-        assert_eq!(
-            make_uri(
-                None,
-                &template,
-                &map! {
-                    "b" => "456",
-                    "f.g" => "abc",
-                    "user_id" => "123"
-                }
-            )
-            .err()
-            .unwrap()
-            .to_string(),
-            r#"Could not generate path from inputs: Missing required variable d"#
+            "http://localhost/users/123"
         );
 
         assert_eq!(
@@ -429,14 +415,13 @@ mod test_make_uri {
                 &template,
                 &map! {
                     // The order of the variables should not matter.
-                    "d" => "789",
                     "b" => "456",
                     "user_id" => "123"
                 }
             )
             .unwrap()
             .to_string(),
-            "http://localhost/users/123?a=456&c=789"
+            "http://localhost/users/123?a=456"
         );
 
         assert_eq!(
@@ -446,7 +431,6 @@ mod test_make_uri {
                 &map! {
                     "user_id" => "123",
                     "b" => "a",
-                    "d" => "c",
                     "f.g" => "e",
                     // Extra variables should be ignored.
                     "extra" => "ignored"
@@ -454,49 +438,14 @@ mod test_make_uri {
             )
             .unwrap()
             .to_string(),
-            "http://localhost/users/123?a=a&c=c&e=e",
-        );
-
-        let template_with_nested_required_var =
-            "http://localhost/repositories/{user.login}/{repo.name}?testing={a.b.c!}"
-                .parse()
-                .unwrap();
-
-        assert_eq!(
-            make_uri(
-                None,
-                &template_with_nested_required_var,
-                &map! {
-                    "repo.name" => "repo",
-                    "user.login" => "user"
-                }
-            )
-            .err()
-            .unwrap()
-            .to_string(),
-            r#"Could not generate path from inputs: Missing required variable a.b.c"#
-        );
-
-        assert_eq!(
-            make_uri(
-                None,
-                &template_with_nested_required_var,
-                &map! {
-                    "user.login" => "user",
-                    "repo.name" => "repo",
-                    "a.b.c" => "value"
-                }
-            )
-            .unwrap()
-            .as_str(),
-            "http://localhost/repositories/user/repo?testing=value"
+            "http://localhost/users/123?a=a&e=e",
         );
     }
 
     #[test]
     fn multi_variable_parameter_values() {
         let template =
-            "http://localhost/locations/xyz({x},{y},{z})?required={b},{c};{d!}&optional=[{e},{f}]"
+            "http://localhost/locations/xyz({$this.x},{$this.y},{$this.z})?required={$this.b},{$this.c};{$this.d}&optional=[{$this.e},{$this.f}]"
                 .parse()
                 .unwrap();
 
@@ -578,7 +527,7 @@ mod test_make_uri {
             "http://localhost/locations/xyz(1,2,3)?required=4%2C5%3B6",
         );
 
-        assert_eq!(
+        assert_snapshot!(
             make_uri(
                 None,
                 &template,
@@ -591,10 +540,10 @@ mod test_make_uri {
             .err()
             .unwrap()
             .to_string(),
-            r#"Could not generate path from inputs: Missing required variable x"#,
+            @r###"Could not generate path from inputs: Path parameter xyz({$this.x},{$this.y},{$this.z}) was missing one or more values in {"$this.y": Number(2), "$this.z": Number(3)}"###,
         );
 
-        assert_eq!(
+        assert_snapshot!(
             make_uri(
                 None,
                 &template,
@@ -607,29 +556,10 @@ mod test_make_uri {
             .err()
             .unwrap()
             .to_string(),
-            r#"Could not generate path from inputs: Missing required variable z"#
+            @r###"Could not generate path from inputs: Path parameter xyz({$this.x},{$this.y},{$this.z}) was missing one or more values in {"$this.x": Number(1), "$this.y": Number(2)}"###
         );
 
-        assert_eq!(
-            make_uri(
-                None,
-                &template,
-                &map! {
-                    "b" => 4,
-                    "c" => 5,
-                    "x" => 1,
-                    "y" => 2,
-                    "z" => 3
-                    // "d" => 6,
-                }
-            )
-            .err()
-            .unwrap()
-            .to_string(),
-            r#"Could not generate path from inputs: Missing required variable d"#
-        );
-
-        assert_eq!(
+        assert_snapshot!(
             make_uri(
                 None,
                 &template,
@@ -642,32 +572,12 @@ mod test_make_uri {
                     "z" => 3
                 }
             )
-            .err()
             .unwrap()
             .to_string(),
-            r#"Could not generate path from inputs: Missing variable c for required parameter {b},{c};{d!} given variables {"b":4,"d":6,"x":1,"y":2,"z":3}"#
+            @"http://localhost/locations/xyz(1,2,3)"
         );
 
-        assert_eq!(
-            make_uri(
-                None,
-                &template,
-                &map! {
-                    // "b" => 4,
-                    // "c" => 5,
-                    "d" => 6,
-                    "x" => 1,
-                    "y" => 2,
-                    "z" => 3
-                }
-            )
-            .err()
-            .unwrap()
-            .to_string(),
-            r#"Could not generate path from inputs: Missing variable b for required parameter {b},{c};{d!} given variables {"d":6,"x":1,"y":2,"z":3}"#
-        );
-
-        let line_template = "http://localhost/line/{p1.x},{p1.y},{p1.z}/{p2.x},{p2.y},{p2.z}"
+        let line_template = "http://localhost/line/{$this.p1.x},{$this.p1.y},{$this.p1.z}/{$this.p2.x},{$this.p2.y},{$this.p2.z}"
             .parse()
             .unwrap();
 
@@ -689,7 +599,7 @@ mod test_make_uri {
             "http://localhost/line/1,2,3/4,5,6"
         );
 
-        assert_eq!(
+        assert_snapshot!(
             make_uri(
                 None,
                 &line_template,
@@ -705,10 +615,10 @@ mod test_make_uri {
             .err()
             .unwrap()
             .to_string(),
-            r#"Could not generate path from inputs: Missing required variable p2.z"#
+            @r###"Could not generate path from inputs: Path parameter {$this.p2.x},{$this.p2.y},{$this.p2.z} was missing one or more values in {"$this.p1.x": Number(1), "$this.p1.y": Number(2), "$this.p1.z": Number(3), "$this.p2.x": Number(4), "$this.p2.y": Number(5)}"###
         );
 
-        assert_eq!(
+        assert_snapshot!(
             make_uri(
                 None,
                 &line_template,
@@ -724,7 +634,7 @@ mod test_make_uri {
             .err()
             .unwrap()
             .to_string(),
-            r#"Could not generate path from inputs: Missing required variable p1.y"#
+            @r###"Could not generate path from inputs: Path parameter {$this.p1.x},{$this.p1.y},{$this.p1.z} was missing one or more values in {"$this.p1.x": Number(1), "$this.p1.z": Number(3), "$this.p2.x": Number(4), "$this.p2.y": Number(5), "$this.p2.z": Number(6)}"###
         );
     }
 
@@ -739,7 +649,7 @@ mod test_make_uri {
             "hash" => "a#b",
         };
 
-        let template = "http://localhost/{path}/{question_mark}?a={ampersand}&c={hash}"
+        let template = "http://localhost/{$this.path}/{$this.question_mark}?a={$this.ampersand}&c={$this.hash}"
             .parse()
             .expect("Failed to parse URL template");
         let url = make_uri(None, &template, vars).expect("Failed to generate URL");

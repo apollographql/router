@@ -13,16 +13,16 @@ use apollo_compiler::schema::ObjectType;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
+use itertools::Itertools;
 
-use super::coordinates::connect_directive_coordinate;
-use super::coordinates::connect_directive_http_coordinate;
-use super::coordinates::connect_directive_url_coordinate;
+use super::coordinates::ConnectDirectiveCoordinate;
+use super::coordinates::ConnectHTTPCoordinate;
+use super::coordinates::HttpHeadersCoordinate;
+use super::coordinates::HttpMethodCoordinate;
 use super::entity::validate_entity_arg;
-use super::http_headers::get_http_headers_arg;
-use super::http_headers::validate_headers_arg;
-use super::http_method::get_http_methods_arg;
-use super::http_method::validate_http_method_arg;
-use super::parse_url;
+use super::http::headers;
+use super::http::method;
+use super::http::url;
 use super::selection::validate_body_selection;
 use super::selection::validate_selection;
 use super::source_name::validate_source_name_arg;
@@ -150,11 +150,13 @@ fn validate_field(
 ) -> Vec<Message> {
     let source_map = &schema.sources;
     let mut errors = Vec::new();
-    let Some(connect_directive) = field
+    let connect_directives = field
         .directives
         .iter()
-        .find(|directive| directive.name == *connect_directive_name)
-    else {
+        .filter(|directive| directive.name == *connect_directive_name)
+        .collect_vec();
+
+    if connect_directives.is_empty() {
         match category {
             ObjectCategory::Query => errors.push(get_missing_connect_directive_message(
                 Code::QueryFieldMissingConnect,
@@ -176,6 +178,7 @@ fn validate_field(
         return errors;
     };
 
+    // mark the field with a @connect directive as seen
     seen_fields.insert((object.name.clone(), field.name.clone()));
 
     // direct recursion isn't allowed, like a connector on User.friends: [User]
@@ -192,129 +195,142 @@ fn validate_field(
                 });
     }
 
-    errors.extend(validate_selection(
-        field,
-        connect_directive,
-        object,
-        schema,
-        seen_fields,
-    ));
-
-    errors.extend(validate_entity_arg(
-        field,
-        connect_directive,
-        object,
-        schema,
-        source_map,
-        category,
-    ));
-
-    let Some((http_arg, http_arg_node)) = connect_directive
-        .argument_by_name(&HTTP_ARGUMENT_NAME)
-        .and_then(|arg| Some((arg.as_object()?, arg)))
-    else {
-        errors.push(Message {
-            code: Code::GraphQLError,
-            message: format!(
-                "{coordinate} must have a `{HTTP_ARGUMENT_NAME}` argument.",
-                coordinate =
-                    connect_directive_coordinate(connect_directive_name, object, &field.name),
-            ),
-            locations: connect_directive
-                .line_column_range(source_map)
-                .into_iter()
-                .collect(),
-        });
-        return errors;
-    };
-
-    let http_methods: Vec<_> = get_http_methods_arg(http_arg);
-
-    errors.extend(validate_http_method_arg(
-        &http_methods,
-        connect_directive_http_coordinate(connect_directive_name, object, &field.name),
-        http_arg_node,
-        source_map,
-    ));
-
-    let http_arg_url = http_methods.first().map(|(http_method, url)| {
-        (
-            url,
-            connect_directive_url_coordinate(
-                connect_directive_name,
-                http_method,
-                object,
-                &field.name,
-            ),
-        )
-    });
-
-    if let Some((_, body)) = http_arg
-        .iter()
-        .find(|(name, _)| name == &CONNECT_BODY_ARGUMENT_NAME)
-    {
-        if let Err(err) = validate_body_selection(connect_directive, object, field, schema, body) {
-            errors.push(err);
-        }
-    }
-
-    if let Some(source_name) = connect_directive
-        .arguments
-        .iter()
-        .find(|arg| arg.name == CONNECT_SOURCE_ARGUMENT_NAME)
-    {
-        errors.extend(validate_source_name_arg(
-            &field.name,
-            &object.name,
-            source_name,
-            source_map,
-            source_names,
-            source_directive_name,
-            &connect_directive.name,
+    for connect_directive in connect_directives {
+        errors.extend(validate_selection(
+            field,
+            connect_directive,
+            object,
+            schema,
+            seen_fields,
         ));
 
-        if let Some((url, url_coordinate)) = http_arg_url {
-            if parse_url(url, &url_coordinate, source_map).is_ok() {
-                errors.push(Message {
-                    code: Code::AbsoluteConnectUrlWithSource,
-                    message: format!(
-                        "{url_coordinate} contains the absolute URL {url} while also specifying a `{CONNECT_SOURCE_ARGUMENT_NAME}`. Either remove the `{CONNECT_SOURCE_ARGUMENT_NAME}` argument or change the URL to a path.",
-                    ),
-                    locations: url.line_column_range(source_map)
-                        .into_iter()
-                        .collect(),
-                });
+        errors.extend(validate_entity_arg(
+            field,
+            connect_directive,
+            object,
+            schema,
+            source_map,
+            category,
+        ));
+
+        let coordinate = ConnectDirectiveCoordinate {
+            connect_directive_name,
+            object_name: &object.name,
+            field_name: &field.name,
+        };
+
+        let Some((http_arg, http_arg_node)) = connect_directive
+            .argument_by_name(&HTTP_ARGUMENT_NAME)
+            .and_then(|arg| Some((arg.as_object()?, arg)))
+        else {
+            errors.push(Message {
+                code: Code::GraphQLError,
+                message: format!("{coordinate} must have a `{HTTP_ARGUMENT_NAME}` argument."),
+                locations: connect_directive
+                    .line_column_range(source_map)
+                    .into_iter()
+                    .collect(),
+            });
+            return errors;
+        };
+
+        let http_method = match method::validate(
+            http_arg,
+            ConnectHTTPCoordinate::from(coordinate),
+            http_arg_node,
+            source_map,
+        ) {
+            Ok(method) => Some(method),
+            Err(err) => {
+                errors.push(err);
+                None
             }
-        }
-    } else if let Some((url, url_coordinate)) = http_arg_url {
-        if let Some(err) = parse_url(url, &url_coordinate, source_map).err() {
-            // Attempt to detect if they were using a relative path without a source, no way to be perfect with this
-            if url
-                .as_str()
-                .is_some_and(|url| url.starts_with('/') || url.ends_with('/'))
+        };
+
+        if let Some((_, body)) = http_arg
+            .iter()
+            .find(|(name, _)| name == &CONNECT_BODY_ARGUMENT_NAME)
+        {
+            if let Err(err) =
+                validate_body_selection(connect_directive, object, field, schema, body)
             {
-                errors.push(Message {
-                    code: Code::RelativeConnectUrlWithoutSource,
-                    message: format!(
-                        "{url_coordinate} specifies the relative URL {url}, but no `{CONNECT_SOURCE_ARGUMENT_NAME}` is defined. Either use an absolute URL, or add a `@{source_directive_name}`."),
-                    locations: url.line_column_range(source_map).into_iter().collect()
-                });
-            } else {
                 errors.push(err);
             }
         }
-    }
 
-    if let Some(headers) = get_http_headers_arg(http_arg) {
-        errors.extend(validate_headers_arg(
-            connect_directive_name,
-            headers,
-            source_map,
-            Some(&object.name),
-            Some(&field.name),
-        ));
-    }
+        if let Some(source_name) = connect_directive
+            .arguments
+            .iter()
+            .find(|arg| arg.name == CONNECT_SOURCE_ARGUMENT_NAME)
+        {
+            errors.extend(validate_source_name_arg(
+                &field.name,
+                &object.name,
+                source_name,
+                source_map,
+                source_names,
+                source_directive_name,
+                &connect_directive.name,
+            ));
 
+            if let Some((http_method, url)) = http_method {
+                let coordinate = HttpMethodCoordinate {
+                    connect: coordinate,
+                    http_method,
+                };
+                if let Err(err) = url::validate_template(url, coordinate, source_map).and_then(|template| {
+                if template.base.is_some() {
+                    Err(Message {
+                        code: Code::AbsoluteConnectUrlWithSource,
+                        message: format!(
+                            "{coordinate} contains the absolute URL {url} while also specifying a `{CONNECT_SOURCE_ARGUMENT_NAME}`. Either remove the `{CONNECT_SOURCE_ARGUMENT_NAME}` argument or change the URL to a path.",
+                        ),
+                        locations: url.line_column_range(source_map)
+                            .into_iter()
+                            .collect(),
+                    })
+                } else {
+                    Ok(())
+                }
+            }) {
+                errors.push(err);
+                }
+            }
+        } else if let Some((http_method, url)) = http_method {
+            let coordinate = HttpMethodCoordinate {
+                connect: coordinate,
+                http_method,
+            };
+            if let Err(err) = url::validate_template(url, coordinate, source_map).and_then(|template| {
+                if template.base.is_none() {
+                Err(Message {
+                        code: Code::RelativeConnectUrlWithoutSource,
+                        message: format!(
+                            "{coordinate} specifies the relative URL {url}, but no `{CONNECT_SOURCE_ARGUMENT_NAME}` is defined. Either use an absolute URL including scheme (http://), or add a `@{source_directive_name}`."),
+                        locations: url.line_column_range(source_map).into_iter().collect()
+                    })
+                } else {
+                    Ok(())
+            }
+        }) {
+            errors.push(err);
+        }
+        }
+
+        errors.extend(
+            headers::validate_arg(
+                http_arg,
+                source_map,
+                HttpHeadersCoordinate::Connect {
+                    directive_name: connect_directive_name,
+                    object: &object.name,
+                    field: &field.name,
+                },
+            )
+            .into_iter()
+            .flatten(),
+        );
+    }
     errors
 }
 

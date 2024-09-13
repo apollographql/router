@@ -1,6 +1,20 @@
 ---
 source: apollo-federation/src/sources/connect/validation/mod.rs
-expression: "format!(\"{:?}\", errors)"
-input_file: apollo-federation/src/sources/connect/validation/test_data/validation/invalid_entity_arg_on_list_type.graphql
+expression: "format!(\"{:#?}\", errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_entity_arg_on_list_type.graphql
 ---
-[Message { code: EntityTypeInvalid, message: "`@connect(entity: true)` on `Query.users` is invalid. Entities can only be non-list, object types.", locations: [LineColumn { line: 8, column: 7 }..LineColumn { line: 8, column: 19 }] }]
+[
+    Message {
+        code: EntityTypeInvalid,
+        message: "`@connect(entity: true)` on `Query.users` is invalid. Entity connectors must return non-list, nullable, object types.",
+        locations: [
+            LineColumn {
+                line: 8,
+                column: 7,
+            }..LineColumn {
+                line: 8,
+                column: 19,
+            },
+        ],
+    },
+]

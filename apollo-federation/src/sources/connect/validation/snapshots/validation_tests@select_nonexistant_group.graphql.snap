@@ -1,6 +1,20 @@
 ---
 source: apollo-federation/src/sources/connect/validation/mod.rs
-expression: "format!(\"{:?}\", errors)"
-input_file: apollo-federation/src/sources/connect/validation/test_data/validation/select_nonexistant_group.graphql
+expression: "format!(\"{:#?}\", errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/select_nonexistant_group.graphql
 ---
-[Message { code: SelectedFieldNotFound, message: "`@connect(selection:)` on `Query.me` contains field `group`, which does not exist on `User`.", locations: [LineColumn { line: 8, column: 77 }..LineColumn { line: 8, column: 94 }] }]
+[
+    Message {
+        code: SelectedFieldNotFound,
+        message: "`@connect(selection:)` on `Query.me` contains field `group`, which does not exist on `User`.",
+        locations: [
+            LineColumn {
+                line: 8,
+                column: 77,
+            }..LineColumn {
+                line: 8,
+                column: 94,
+            },
+        ],
+    },
+]

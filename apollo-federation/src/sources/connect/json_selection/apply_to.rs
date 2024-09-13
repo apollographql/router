@@ -1,11 +1,9 @@
 /// ApplyTo is a trait for applying a JSONSelection to a JSON value, collecting
 /// any/all errors encountered in the process.
 use std::hash::Hash;
-use std::hash::Hasher;
 
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
-use itertools::Itertools;
 use serde_json_bytes::json;
 use serde_json_bytes::Map as JSONMap;
 use serde_json_bytes::Value as JSON;
@@ -14,6 +12,9 @@ use super::helpers::json_type_name;
 use super::immutable::InputPath;
 use super::known_var::KnownVariable;
 use super::lit_expr::LitExpr;
+use super::location::OffsetRange;
+use super::location::Ranged;
+use super::location::WithRange;
 use super::methods::lookup_arrow_method;
 use super::parser::*;
 
@@ -48,6 +49,7 @@ impl JSONSelection {
                 errors.insert(ApplyToError::new(
                     format!("Unknown variable {}", var_name),
                     vec![json!(var_name)],
+                    None,
                 ));
             }
         }
@@ -97,65 +99,52 @@ pub(super) trait ApplyToInternal {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub struct ApplyToError(JSON);
-
-impl Hash for ApplyToError {
-    fn hash<H: Hasher>(&self, hasher: &mut H) {
-        // Although serde_json::Value (aka JSON) does not implement the Hash
-        // trait, we can convert self.0 to a JSON string and hash that. To do
-        // this properly, we should ensure all object keys are serialized in
-        // lexicographic order before hashing, but the only object keys we use
-        // are "message" and "path", and they always appear in that order.
-        self.0.to_string().hash(hasher)
-    }
+#[derive(Debug, Eq, PartialEq, Clone, Hash)]
+pub struct ApplyToError {
+    message: String,
+    path: Vec<JSON>,
+    range: OffsetRange,
 }
 
 impl ApplyToError {
-    pub(crate) fn new(message: String, path: Vec<JSON>) -> Self {
-        Self(json!({
-            "message": message,
-            "path": JSON::Array(path),
-        }))
+    pub(crate) fn new(message: String, path: Vec<JSON>, range: OffsetRange) -> Self {
+        Self {
+            message,
+            path,
+            range,
+        }
     }
 
     #[cfg(test)]
     pub(crate) fn from_json(json: &JSON) -> Self {
-        if let JSON::Object(error) = json {
-            if let Some(JSON::String(message)) = error.get("message") {
-                if let Some(JSON::Array(path)) = error.get("path") {
-                    if path
-                        .iter()
-                        .all(|element| matches!(element, JSON::String(_) | JSON::Number(_)))
-                    {
-                        // Instead of simply returning Self(json.clone()), we
-                        // enforce that the "message" and "path" properties are
-                        // always in that order, as promised in the comment in
-                        // the hash method above.
-                        return Self(json!({
-                            "message": message,
-                            "path": path,
-                        }));
-                    }
-                }
-            }
+        let error = json.as_object().unwrap();
+        let message = error.get("message").unwrap().as_str().unwrap().to_string();
+        let path = error.get("path").unwrap().as_array().unwrap().clone();
+        let range = error.get("range").unwrap().as_array().unwrap();
+
+        Self {
+            message,
+            path,
+            range: if range.len() == 2 {
+                let start = range[0].as_u64().unwrap() as usize;
+                let end = range[1].as_u64().unwrap() as usize;
+                Some(start..end)
+            } else {
+                None
+            },
         }
-        panic!("invalid ApplyToError JSON: {:?}", json);
     }
 
-    pub fn message(&self) -> Option<&str> {
-        self.0
-            .as_object()
-            .and_then(|v| v.get("message"))
-            .and_then(|s| s.as_str())
+    pub fn message(&self) -> &str {
+        self.message.as_str()
     }
 
-    pub fn path(&self) -> Option<String> {
-        self.0
-            .as_object()
-            .and_then(|v| v.get("path"))
-            .and_then(|p| p.as_array())
-            .map(|l| l.iter().filter_map(|v| v.as_str()).join("."))
+    pub fn path(&self) -> &[JSON] {
+        self.path.as_slice()
+    }
+
+    pub fn range(&self) -> OffsetRange {
+        self.range.clone()
     }
 }
 
@@ -198,53 +187,43 @@ impl ApplyToInternal for NamedSelection {
 
         let mut output = JSONMap::new();
 
-        #[rustfmt::skip] // cargo fmt butchers this closure's formatting
-        let mut field_quoted_helper = |
-            alias: Option<&Alias>,
-            key: Key,
-            selection: &Option<SubSelection>,
-        | {
-            let input_path_with_key = input_path.append(key.to_json());
-            let name = key.as_str();
-            if let Some(child) = data.get(name) {
-                let output_name = alias.map_or(name, |alias| alias.name.as_str());
-                if let Some(selection) = selection {
-                    let value = selection.apply_to_path(child, vars, &input_path_with_key, errors);
-                    if let Some(value) = value {
-                        output.insert(output_name, value);
+        match self {
+            Self::Field(alias, key, selection) => {
+                let input_path_with_key = input_path.append(key.to_json());
+                let name = key.as_str();
+                if let Some(child) = data.get(name) {
+                    let output_name = alias.as_ref().map_or(name, |alias| alias.name());
+                    if let Some(selection) = selection {
+                        let value =
+                            selection.apply_to_path(child, vars, &input_path_with_key, errors);
+                        if let Some(value) = value {
+                            output.insert(output_name, value);
+                        }
+                    } else {
+                        output.insert(output_name, child.clone());
                     }
                 } else {
-                    output.insert(output_name, child.clone());
+                    errors.insert(ApplyToError::new(
+                        format!(
+                            "Property {} not found in {}",
+                            key.dotted(),
+                            json_type_name(data),
+                        ),
+                        input_path_with_key.to_vec(),
+                        key.range(),
+                    ));
                 }
-            } else {
-                errors.insert(ApplyToError::new(
-                    format!(
-                        "Property {} not found in {}",
-                        key.dotted(),
-                        json_type_name(data),
-                    ),
-                    input_path_with_key.to_vec(),
-                ));
-            }
-        };
-
-        match self {
-            Self::Field(alias, name, selection) => {
-                field_quoted_helper(alias.as_ref(), Key::Field(name.clone()), selection);
-            }
-            Self::Quoted(alias, name, selection) => {
-                field_quoted_helper(Some(alias), Key::Quoted(name.clone()), selection);
             }
             Self::Path(alias, path_selection) => {
                 let value = path_selection.apply_to_path(data, vars, input_path, errors);
                 if let Some(value) = value {
-                    output.insert(alias.name.clone(), value);
+                    output.insert(alias.name(), value);
                 }
             }
             Self::Group(alias, sub_selection) => {
                 let value = sub_selection.apply_to_path(data, vars, input_path, errors);
                 if let Some(value) = value {
-                    output.insert(alias.name.clone(), value);
+                    output.insert(alias.name(), value);
                 }
             }
         };
@@ -261,39 +240,27 @@ impl ApplyToInternal for PathSelection {
         input_path: &InputPath<JSON>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
-        match &self.path {
+        match (self.path.as_ref(), vars.get(&KnownVariable::Dollar)) {
             // If this is a KeyPath, instead of using data as given, we need to
-            // evaluate the path starting from the current value of $. To
-            // evaluate the KeyPath against data, prefix it with @. This logic
-            // supports method chaining like obj->has('a')->and(obj->has('b')),
-            // where both obj references are interpreted as $.obj.
-            PathList::Key(key, tail) => {
-                if let Some((dollar_data, dollar_path)) = vars.get(&KnownVariable::Dollar) {
-                    let input_path_with_key = dollar_path.append(key.to_json());
-                    if let Some(child) = dollar_data.get(key.as_str()) {
-                        tail.apply_to_path(child, vars, &input_path_with_key, errors)
-                    } else {
-                        errors.insert(ApplyToError::new(
-                            format!(
-                                "Property {} not found in {}",
-                                key.dotted(),
-                                json_type_name(dollar_data),
-                            ),
-                            input_path_with_key.to_vec(),
-                        ));
-                        None
-                    }
-                } else {
-                    // If $ is undefined for some reason, fall back to using data.
-                    self.path.apply_to_path(data, vars, input_path, errors)
-                }
+            // evaluate the path starting from the current value of $. To evaluate
+            // the KeyPath against data, prefix it with @. This logic supports
+            // method chaining like obj->has('a')->and(obj->has('b')), where both
+            // obj references are interpreted as $.obj.
+            (PathList::Key(_, _), Some((dollar_data, dollar_path))) => {
+                self.path
+                    .apply_to_path(dollar_data, vars, dollar_path, errors)
             }
-            path => path.apply_to_path(data, vars, input_path, errors),
+
+            // If $ is undefined for some reason, fall back to using data...
+            // TODO: Since $ should never be undefined, we might want to
+            // guarantee its existence at compile time, somehow.
+            // (PathList::Key(_, _), None) => todo!(),
+            _ => self.path.apply_to_path(data, vars, input_path, errors),
         }
     }
 }
 
-impl ApplyToInternal for PathList {
+impl ApplyToInternal for WithRange<PathList> {
     fn apply_to_path(
         &self,
         data: &JSON,
@@ -301,8 +268,9 @@ impl ApplyToInternal for PathList {
         input_path: &InputPath<JSON>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
-        match self {
-            Self::Var(var_name, tail) => {
+        match self.as_ref() {
+            PathList::Var(ranged_var_name, tail) => {
+                let var_name = ranged_var_name.as_ref();
                 if var_name == &KnownVariable::AtSign {
                     // We represent @ as a variable name in PathList::Var, but
                     // it is never stored in the vars map, because it is always
@@ -318,11 +286,12 @@ impl ApplyToInternal for PathList {
                     errors.insert(ApplyToError::new(
                         format!("Variable {} not found", var_name.as_str()),
                         input_path.to_vec(),
+                        ranged_var_name.range(),
                     ));
                     None
                 }
             }
-            Self::Key(key, tail) => {
+            PathList::Key(key, tail) => {
                 if let JSON::Array(array) = data {
                     return self.apply_to_array(array, vars, input_path, errors);
                 }
@@ -337,6 +306,7 @@ impl ApplyToInternal for PathList {
                             json_type_name(data),
                         ),
                         input_path_with_key.to_vec(),
+                        key.range(),
                     ));
                     return None;
                 }
@@ -351,31 +321,35 @@ impl ApplyToInternal for PathList {
                             json_type_name(data),
                         ),
                         input_path_with_key.to_vec(),
+                        key.range(),
                     ));
                     None
                 }
             }
-            Self::Method(method_name, method_args, tail) => {
+            PathList::Method(method_name, method_args, tail) => {
                 if let Some(method) = lookup_arrow_method(method_name) {
                     method(
-                        method_name.as_str(),
-                        method_args,
+                        method_name,
+                        method_args.as_ref(),
                         data,
                         vars,
                         input_path,
-                        tail.as_ref(),
+                        tail,
                         errors,
                     )
                 } else {
                     errors.insert(ApplyToError::new(
-                        format!("Method ->{} not found", method_name),
+                        format!("Method ->{} not found", method_name.as_ref()),
                         input_path.to_vec(),
+                        method_name.range(),
                     ));
                     None
                 }
             }
-            Self::Selection(selection) => selection.apply_to_path(data, vars, input_path, errors),
-            Self::Empty => {
+            PathList::Selection(selection) => {
+                selection.apply_to_path(data, vars, input_path, errors)
+            }
+            PathList::Empty => {
                 // If data is not an object here, we want to preserve its value
                 // without an error.
                 Some(data.clone())
@@ -384,7 +358,7 @@ impl ApplyToInternal for PathList {
     }
 }
 
-impl ApplyToInternal for LitExpr {
+impl ApplyToInternal for WithRange<LitExpr> {
     fn apply_to_path(
         &self,
         data: &JSON,
@@ -392,21 +366,21 @@ impl ApplyToInternal for LitExpr {
         input_path: &InputPath<JSON>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
-        match self {
-            Self::String(s) => Some(JSON::String(s.clone().into())),
-            Self::Number(n) => Some(JSON::Number(n.clone())),
-            Self::Bool(b) => Some(JSON::Bool(*b)),
-            Self::Null => Some(JSON::Null),
-            Self::Object(map) => {
+        match self.as_ref() {
+            LitExpr::String(s) => Some(JSON::String(s.clone().into())),
+            LitExpr::Number(n) => Some(JSON::Number(n.clone())),
+            LitExpr::Bool(b) => Some(JSON::Bool(*b)),
+            LitExpr::Null => Some(JSON::Null),
+            LitExpr::Object(map) => {
                 let mut output = JSONMap::with_capacity(map.len());
                 for (key, value) in map {
                     if let Some(value_json) = value.apply_to_path(data, vars, input_path, errors) {
-                        output.insert(key.clone(), value_json);
+                        output.insert(key.as_str(), value_json);
                     }
                 }
                 Some(JSON::Object(output))
             }
-            Self::Array(vec) => {
+            LitExpr::Array(vec) => {
                 let mut output = Vec::with_capacity(vec.len());
                 for value in vec {
                     output.push(
@@ -417,7 +391,7 @@ impl ApplyToInternal for LitExpr {
                 }
                 Some(JSON::Array(output))
             }
-            Self::Path(path) => path.apply_to_path(data, vars, input_path, errors),
+            LitExpr::Path(path) => path.apply_to_path(data, vars, input_path, errors),
         }
     }
 }
@@ -448,7 +422,7 @@ impl ApplyToInternal for SubSelection {
         let mut output = JSONMap::new();
         let mut input_names = IndexSet::default();
 
-        for named_selection in &self.selections {
+        for named_selection in self.selections.iter() {
             let value = named_selection.apply_to_path(data, &vars, input_path, errors);
 
             // If value is an object, extend output with its keys and their values.
@@ -464,11 +438,8 @@ impl ApplyToInternal for SubSelection {
                     NamedSelection::Field(_, name, _) => {
                         input_names.insert(name.as_str());
                     }
-                    NamedSelection::Quoted(_, name, _) => {
-                        input_names.insert(name.as_str());
-                    }
                     NamedSelection::Path(_, path_selection) => {
-                        if let PathList::Key(key, _) = &path_selection.path {
+                        if let PathList::Key(key, _) = path_selection.path.as_ref() {
                             input_names.insert(key.as_str());
                         }
                     }
@@ -481,17 +452,25 @@ impl ApplyToInternal for SubSelection {
 
         match &self.star {
             // Aliased but not subselected, e.g. "a b c rest: *"
-            Some(StarSelection(Some(alias), None)) => {
+            Some(StarSelection {
+                alias: Some(alias),
+                selection: None,
+                ..
+            }) => {
                 let mut star_output = JSONMap::new();
                 for (key, value) in &data_map {
                     if !input_names.contains(key.as_str()) {
                         star_output.insert(key.clone(), value.clone());
                     }
                 }
-                output.insert(alias.name.clone(), JSON::Object(star_output));
+                output.insert(alias.name(), JSON::Object(star_output));
             }
             // Aliased and subselected, e.g. "alias: * { hello }"
-            Some(StarSelection(Some(alias), Some(selection))) => {
+            Some(StarSelection {
+                alias: Some(alias),
+                selection: Some(selection),
+                ..
+            }) => {
                 let mut star_output = JSONMap::new();
                 for (key, value) in &data_map {
                     if !input_names.contains(key.as_str()) {
@@ -502,10 +481,14 @@ impl ApplyToInternal for SubSelection {
                         }
                     }
                 }
-                output.insert(alias.name.clone(), JSON::Object(star_output));
+                output.insert(alias.name(), JSON::Object(star_output));
             }
             // Not aliased but subselected, e.g. "parent { * { hello } }"
-            Some(StarSelection(None, Some(selection))) => {
+            Some(StarSelection {
+                alias: None,
+                selection: Some(selection),
+                ..
+            }) => {
                 for (key, value) in &data_map {
                     if !input_names.contains(key.as_str()) {
                         if let Some(selected) =
@@ -517,7 +500,11 @@ impl ApplyToInternal for SubSelection {
                 }
             }
             // Neither aliased nor subselected, e.g. "parent { * }" or just "*"
-            Some(StarSelection(None, None)) => {
+            Some(StarSelection {
+                alias: None,
+                selection: None,
+                ..
+            }) => {
                 for (key, value) in &data_map {
                     if !input_names.contains(key.as_str()) {
                         output.insert(key.clone(), value.clone());
@@ -884,21 +871,24 @@ mod tests {
             (Some(json!({"hello": "world"})), vec![],)
         );
 
-        let yellow_errors_expected = vec![ApplyToError::from_json(&json!({
-            "message": "Property .yellow not found in object",
-            "path": ["yellow"],
-        }))];
+        fn make_yellow_errors_expected(yellow_range: std::ops::Range<usize>) -> Vec<ApplyToError> {
+            vec![ApplyToError::new(
+                "Property .yellow not found in object".to_string(),
+                vec![json!("yellow")],
+                Some(yellow_range),
+            )]
+        }
         assert_eq!(
             selection!("yellow").apply_to(&data),
-            (Some(json!({})), yellow_errors_expected.clone())
+            (Some(json!({})), make_yellow_errors_expected(0..6)),
         );
         assert_eq!(
             selection!(".yellow").apply_to(&data),
-            (None, yellow_errors_expected.clone())
+            (None, make_yellow_errors_expected(1..7)),
         );
         assert_eq!(
             selection!("$.yellow").apply_to(&data),
-            (None, yellow_errors_expected.clone())
+            (None, make_yellow_errors_expected(2..8)),
         );
 
         assert_eq!(
@@ -906,72 +896,90 @@ mod tests {
             (Some(json!(123)), vec![],)
         );
 
-        let quoted_yellow_expected = (
-            None,
-            vec![ApplyToError::from_json(&json!({
-                "message": "Property .\"yellow\" not found in object",
-                "path": ["nested", "yellow"],
-            }))],
-        );
+        fn make_quoted_yellow_expected(
+            yellow_range: std::ops::Range<usize>,
+        ) -> (Option<JSON>, Vec<ApplyToError>) {
+            (
+                None,
+                vec![ApplyToError::new(
+                    "Property .\"yellow\" not found in object".to_string(),
+                    vec![json!("nested"), json!("yellow")],
+                    Some(yellow_range),
+                )],
+            )
+        }
         assert_eq!(
             selection!(".nested.'yellow'").apply_to(&data),
-            quoted_yellow_expected,
+            make_quoted_yellow_expected(8..16),
         );
         assert_eq!(
             selection!("$.nested.'yellow'").apply_to(&data),
-            quoted_yellow_expected,
+            make_quoted_yellow_expected(9..17),
         );
 
-        let nested_path_expected = (
-            Some(json!({
-                "world": true,
-            })),
-            vec![
-                ApplyToError::from_json(&json!({
-                    "message": "Property .hola not found in object",
-                    "path": ["nested", "hola"],
+        fn make_nested_path_expected(
+            hola_range: (usize, usize),
+            yellow_range: (usize, usize),
+        ) -> (Option<JSON>, Vec<ApplyToError>) {
+            (
+                Some(json!({
+                    "world": true,
                 })),
-                ApplyToError::from_json(&json!({
-                    "message": "Property .yellow not found in object",
-                    "path": ["nested", "yellow"],
-                })),
-            ],
-        );
+                vec![
+                    ApplyToError::from_json(&json!({
+                        "message": "Property .hola not found in object",
+                        "path": ["nested", "hola"],
+                        "range": hola_range,
+                    })),
+                    ApplyToError::from_json(&json!({
+                        "message": "Property .yellow not found in object",
+                        "path": ["nested", "yellow"],
+                        "range": yellow_range,
+                    })),
+                ],
+            )
+        }
         assert_eq!(
             selection!(".nested { hola yellow world }").apply_to(&data),
-            nested_path_expected,
+            make_nested_path_expected((10, 14), (15, 21)),
         );
         assert_eq!(
             selection!("$.nested { hola yellow world }").apply_to(&data),
-            nested_path_expected,
+            make_nested_path_expected((11, 15), (16, 22)),
         );
 
-        let partial_array_expected = (
-            Some(json!({
-                "partial": [
-                    { "hello": 1, "goodbye": "farewell" },
-                    { "hello": "two" },
-                    { "hello": 3.0 },
+        fn make_partial_array_expected(
+            goodbye_range: (usize, usize),
+        ) -> (Option<JSON>, Vec<ApplyToError>) {
+            (
+                Some(json!({
+                    "partial": [
+                        { "hello": 1, "goodbye": "farewell" },
+                        { "hello": "two" },
+                        { "hello": 3.0 },
+                    ],
+                })),
+                vec![
+                    ApplyToError::from_json(&json!({
+                        "message": "Property .goodbye not found in object",
+                        "path": ["array", 1, "goodbye"],
+                        "range": goodbye_range,
+                    })),
+                    ApplyToError::from_json(&json!({
+                        "message": "Property .goodbye not found in object",
+                        "path": ["array", 2, "goodbye"],
+                        "range": goodbye_range,
+                    })),
                 ],
-            })),
-            vec![
-                ApplyToError::from_json(&json!({
-                    "message": "Property .goodbye not found in object",
-                    "path": ["array", 1, "goodbye"],
-                })),
-                ApplyToError::from_json(&json!({
-                    "message": "Property .goodbye not found in object",
-                    "path": ["array", 2, "goodbye"],
-                })),
-            ],
-        );
+            )
+        }
         assert_eq!(
             selection!("partial: .array { hello goodbye }").apply_to(&data),
-            partial_array_expected,
+            make_partial_array_expected((24, 31)),
         );
         assert_eq!(
             selection!("partial: $.array { hello goodbye }").apply_to(&data),
-            partial_array_expected,
+            make_partial_array_expected((25, 32)),
         );
 
         assert_eq!(
@@ -993,10 +1001,12 @@ mod tests {
                     ApplyToError::from_json(&json!({
                         "message": "Property .smello not found in object",
                         "path": ["array", 0, "smello"],
+                        "range": [31, 37],
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .smello not found in object",
                         "path": ["array", 1, "smello"],
+                        "range": [31, 37],
                     })),
                 ],
             )
@@ -1016,10 +1026,12 @@ mod tests {
                     ApplyToError::from_json(&json!({
                         "message": "Property .smello not found in object",
                         "path": ["array", 0, "smello"],
+                        "range": [14, 20],
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .smello not found in object",
                         "path": ["array", 1, "smello"],
+                        "range": [14, 20],
                     })),
                 ],
             )
@@ -1037,6 +1049,7 @@ mod tests {
                 vec![ApplyToError::from_json(&json!({
                     "message": "Property .smelly not found in object",
                     "path": ["nested", "smelly"],
+                    "range": [27, 33],
                 })),],
             )
         );
@@ -1055,7 +1068,8 @@ mod tests {
                 vec![ApplyToError::from_json(&json!({
                     "message": "Property .smelly not found in object",
                     "path": ["nested", "smelly"],
-                })),],
+                    "range": [34, 40],
+                }))],
             )
         );
     }
@@ -1087,58 +1101,71 @@ mod tests {
             ],
         });
 
-        let array_of_arrays_x_expected = (
-            Some(json!([[0], [1, 1, 1], [2, 2], [], [null, 4, 4, null, 4],])),
-            vec![
-                ApplyToError::from_json(&json!({
-                    "message": "Property .x not found in null",
-                    "path": ["arrayOfArrays", 4, 0, "x"],
-                })),
-                ApplyToError::from_json(&json!({
-                    "message": "Property .x not found in null",
-                    "path": ["arrayOfArrays", 4, 3, "x"],
-                })),
-            ],
-        );
+        fn make_array_of_arrays_x_expected(
+            x_range: (usize, usize),
+        ) -> (Option<JSON>, Vec<ApplyToError>) {
+            (
+                Some(json!([[0], [1, 1, 1], [2, 2], [], [null, 4, 4, null, 4]])),
+                vec![
+                    ApplyToError::from_json(&json!({
+                        "message": "Property .x not found in null",
+                        "path": ["arrayOfArrays", 4, 0, "x"],
+                        "range": x_range,
+                    })),
+                    ApplyToError::from_json(&json!({
+                        "message": "Property .x not found in null",
+                        "path": ["arrayOfArrays", 4, 3, "x"],
+                        "range": x_range,
+                    })),
+                ],
+            )
+        }
         assert_eq!(
             selection!(".arrayOfArrays.x").apply_to(&data),
-            array_of_arrays_x_expected,
+            make_array_of_arrays_x_expected((15, 16)),
         );
         assert_eq!(
             selection!("$.arrayOfArrays.x").apply_to(&data),
-            array_of_arrays_x_expected,
+            make_array_of_arrays_x_expected((16, 17)),
         );
 
-        let array_of_arrays_y_expected = (
-            Some(json!([
-                [0],
-                [0, 1, 2],
-                [0, 1],
-                [],
-                [null, 1, null, null, 4],
-            ])),
-            vec![
-                ApplyToError::from_json(&json!({
-                    "message": "Property .y not found in null",
-                    "path": ["arrayOfArrays", 4, 0, "y"],
-                })),
-                ApplyToError::from_json(&json!({
-                    "message": "Property .y not found in object",
-                    "path": ["arrayOfArrays", 4, 2, "y"],
-                })),
-                ApplyToError::from_json(&json!({
-                    "message": "Property .y not found in null",
-                    "path": ["arrayOfArrays", 4, 3, "y"],
-                })),
-            ],
-        );
+        fn make_array_of_arrays_y_expected(
+            y_range: (usize, usize),
+        ) -> (Option<JSON>, Vec<ApplyToError>) {
+            (
+                Some(json!([
+                    [0],
+                    [0, 1, 2],
+                    [0, 1],
+                    [],
+                    [null, 1, null, null, 4],
+                ])),
+                vec![
+                    ApplyToError::from_json(&json!({
+                        "message": "Property .y not found in null",
+                        "path": ["arrayOfArrays", 4, 0, "y"],
+                        "range": y_range,
+                    })),
+                    ApplyToError::from_json(&json!({
+                        "message": "Property .y not found in object",
+                        "path": ["arrayOfArrays", 4, 2, "y"],
+                        "range": y_range,
+                    })),
+                    ApplyToError::from_json(&json!({
+                        "message": "Property .y not found in null",
+                        "path": ["arrayOfArrays", 4, 3, "y"],
+                        "range": y_range,
+                    })),
+                ],
+            )
+        }
         assert_eq!(
             selection!(".arrayOfArrays.y").apply_to(&data),
-            array_of_arrays_y_expected
+            make_array_of_arrays_y_expected((15, 16)),
         );
         assert_eq!(
             selection!("$.arrayOfArrays.y").apply_to(&data),
-            array_of_arrays_y_expected
+            make_array_of_arrays_y_expected((16, 17)),
         );
 
         assert_eq!(
@@ -1172,76 +1199,91 @@ mod tests {
                     ApplyToError::from_json(&json!({
                         "message": "Property .x not found in null",
                         "path": ["arrayOfArrays", 4, 0, "x"],
+                        "range": [23, 24],
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .y not found in null",
                         "path": ["arrayOfArrays", 4, 0, "y"],
+                        "range": [25, 26],
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .y not found in object",
                         "path": ["arrayOfArrays", 4, 2, "y"],
+                        "range": [25, 26],
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .x not found in null",
                         "path": ["arrayOfArrays", 4, 3, "x"],
+                        "range": [23, 24],
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .y not found in null",
                         "path": ["arrayOfArrays", 4, 3, "y"],
+                        "range": [25, 26],
                     })),
                 ],
             ),
         );
 
-        let array_of_arrays_x_y_expected = (
-            Some(json!({
-                "ys": [
-                    [0],
-                    [0, 1, 2],
-                    [0, 1],
-                    [],
-                    [null, 1, null, null, 4],
+        fn make_array_of_arrays_x_y_expected(
+            x_range: (usize, usize),
+            y_range: (usize, usize),
+        ) -> (Option<JSON>, Vec<ApplyToError>) {
+            (
+                Some(json!({
+                    "ys": [
+                        [0],
+                        [0, 1, 2],
+                        [0, 1],
+                        [],
+                        [null, 1, null, null, 4],
+                    ],
+                    "xs": [
+                        [0],
+                        [1, 1, 1],
+                        [2, 2],
+                        [],
+                        [null, 4, 4, null, 4],
+                    ],
+                })),
+                vec![
+                    ApplyToError::from_json(&json!({
+                        "message": "Property .y not found in null",
+                        "path": ["arrayOfArrays", 4, 0, "y"],
+                        "range": y_range,
+                    })),
+                    ApplyToError::from_json(&json!({
+                        "message": "Property .y not found in object",
+                        "path": ["arrayOfArrays", 4, 2, "y"],
+                        "range": y_range,
+                    })),
+                    ApplyToError::from_json(&json!({
+                        // Reversing the order of "path" and "message" here to make
+                        // sure that doesn't affect the deduplication logic.
+                        "path": ["arrayOfArrays", 4, 3, "y"],
+                        "message": "Property .y not found in null",
+                        "range": y_range,
+                    })),
+                    ApplyToError::from_json(&json!({
+                        "message": "Property .x not found in null",
+                        "path": ["arrayOfArrays", 4, 0, "x"],
+                        "range": x_range,
+                    })),
+                    ApplyToError::from_json(&json!({
+                        "message": "Property .x not found in null",
+                        "path": ["arrayOfArrays", 4, 3, "x"],
+                        "range": x_range,
+                    })),
                 ],
-                "xs": [
-                    [0],
-                    [1, 1, 1],
-                    [2, 2],
-                    [],
-                    [null, 4, 4, null, 4],
-                ],
-            })),
-            vec![
-                ApplyToError::from_json(&json!({
-                    "message": "Property .y not found in null",
-                    "path": ["arrayOfArrays", 4, 0, "y"],
-                })),
-                ApplyToError::from_json(&json!({
-                    "message": "Property .y not found in object",
-                    "path": ["arrayOfArrays", 4, 2, "y"],
-                })),
-                ApplyToError::from_json(&json!({
-                    // Reversing the order of "path" and "message" here to make
-                    // sure that doesn't affect the deduplication logic.
-                    "path": ["arrayOfArrays", 4, 3, "y"],
-                    "message": "Property .y not found in null",
-                })),
-                ApplyToError::from_json(&json!({
-                    "message": "Property .x not found in null",
-                    "path": ["arrayOfArrays", 4, 0, "x"],
-                })),
-                ApplyToError::from_json(&json!({
-                    "message": "Property .x not found in null",
-                    "path": ["arrayOfArrays", 4, 3, "x"],
-                })),
-            ],
-        );
+            )
+        }
         assert_eq!(
             selection!("ys: .arrayOfArrays.y xs: .arrayOfArrays.x").apply_to(&data),
-            array_of_arrays_x_y_expected,
+            make_array_of_arrays_x_y_expected((40, 41), (19, 20)),
         );
         assert_eq!(
             selection!("ys: $.arrayOfArrays.y xs: $.arrayOfArrays.x").apply_to(&data),
-            array_of_arrays_x_y_expected,
+            make_array_of_arrays_x_y_expected((42, 43), (20, 21)),
         );
     }
 
@@ -1297,6 +1339,7 @@ mod tests {
                 vec![ApplyToError::from_json(&json!({
                     "message": "Variable $args not found",
                     "path": ["nested", "path"],
+                    "range": [18, 23],
                 }))],
             ),
         );
@@ -1311,6 +1354,7 @@ mod tests {
                 vec![ApplyToError::from_json(&json!({
                     "message": "Property .id not found in object",
                     "path": ["$args", "id"],
+                    "range": [10, 12],
                 }))],
             ),
         );

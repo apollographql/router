@@ -1,0 +1,40 @@
+---
+source: apollo-federation/src/sources/connect/url_template.rs
+expression: "URLTemplate::from_str(\"/location/{$this.lat},{$this.lon}\")"
+---
+Ok(
+    URLTemplate {
+        base: None,
+        path: [
+            Component {
+                parts: [
+                    Text(
+                        "location",
+                    ),
+                ],
+            },
+            Component {
+                parts: [
+                    Var(
+                        Variable {
+                            var_type: This,
+                            path: "lat",
+                            location: 11..20,
+                        },
+                    ),
+                    Text(
+                        ",",
+                    ),
+                    Var(
+                        Variable {
+                            var_type: This,
+                            path: "lon",
+                            location: 23..32,
+                        },
+                    ),
+                ],
+            },
+        ],
+        query: {},
+    },
+)

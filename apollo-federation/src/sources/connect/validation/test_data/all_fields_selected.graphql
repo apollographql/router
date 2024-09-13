@@ -1,0 +1,68 @@
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/federation/v2.10"
+    import: ["@key", "@external", "@requires"]
+  )
+  @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect"])
+
+type Query {
+  ts: [T]
+    @connect(
+      http: { GET: "http://test/ts" }
+      selection: """
+      id
+      child {
+        id
+      }
+      wrapped: {
+        id
+      }
+      unwrapped: .foo.bar
+      """
+    )
+    @connect(
+      http: { GET: "http://test/v2/ts" }
+      selection: """
+      id
+      secondUsed
+      """
+    )
+}
+
+type T @key(fields: "id") {
+  id: ID!
+  unselected: String!
+  child: C
+  wrapped: D
+  unwrapped: String!
+  external: External @external
+  computed: String!
+    @requires(fields: "external")
+    @connect(
+      http: {
+        GET: "http://test/computed?id={$this.id}&external={$this.external}"
+      }
+      selection: "$"
+    )
+
+  secondUnused: String
+  secondUsed: String
+}
+
+type C {
+  id: ID!
+  unselected: String
+}
+
+type D {
+  id: ID!
+  unselected: String
+}
+
+type Unused {
+  unselected: ID!
+}
+
+type External {
+  id: ID! @external
+}

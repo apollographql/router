@@ -1,6 +1,20 @@
 ---
 source: apollo-federation/src/sources/connect/validation/mod.rs
-expression: "format!(\"{:?}\", errors)"
-input_file: apollo-federation/src/sources/connect/validation/test_data/validation/invalid_entity_arg_on_field.graphql
+expression: "format!(\"{:#?}\", errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_entity_arg_on_field.graphql
 ---
-[Message { code: EntityNotOnRootQuery, message: "`@connect(entity: true)` on `User.favoriteColor` is invalid. Entity resolvers can only be declared on root `Query` fields.", locations: [LineColumn { line: 19, column: 7 }..LineColumn { line: 19, column: 19 }] }]
+[
+    Message {
+        code: EntityNotOnRootQuery,
+        message: "`@connect(entity: true)` on `User.favoriteColor` is invalid. Entity resolvers can only be declared on root `Query` fields.",
+        locations: [
+            LineColumn {
+                line: 19,
+                column: 7,
+            }..LineColumn {
+                line: 19,
+                column: 19,
+            },
+        ],
+    },
+]

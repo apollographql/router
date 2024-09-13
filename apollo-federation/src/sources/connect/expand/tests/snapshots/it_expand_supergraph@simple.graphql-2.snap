@@ -1,0 +1,339 @@
+---
+source: apollo-federation/src/sources/connect/expand/tests/mod.rs
+expression: connectors.by_service_name
+input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/simple.graphql
+---
+{
+    "connectors_Query_users_0": Connector {
+        id: ConnectId {
+            label: "connectors.example http: GET ",
+            subgraph_name: "connectors",
+            source_name: Some(
+                "example",
+            ),
+            directive: ObjectOrInterfaceFieldDirectivePosition {
+                field: Object(Query.users),
+                directive_name: "connect",
+                directive_index: 0,
+            },
+        },
+        transport: HttpJsonTransport {
+            source_url: Some(
+                Url {
+                    scheme: "http",
+                    cannot_be_a_base: false,
+                    username: "",
+                    password: None,
+                    host: Some(
+                        Domain(
+                            "example",
+                        ),
+                    ),
+                    port: None,
+                    path: "/",
+                    query: None,
+                    fragment: None,
+                },
+            ),
+            connect_template: URLTemplate {
+                base: None,
+                path: [],
+                query: {},
+            },
+            method: Get,
+            headers: {},
+            body: None,
+        },
+        selection: Named(
+            SubSelection {
+                selections: [
+                    Field(
+                        None,
+                        WithRange {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                0..2,
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        WithRange {
+                            node: Field(
+                                "a",
+                            ),
+                            range: Some(
+                                3..4,
+                            ),
+                        },
+                        None,
+                    ),
+                ],
+                star: None,
+                range: Some(
+                    0..4,
+                ),
+            },
+        ),
+        config: None,
+        max_requests: None,
+        entity_resolver: None,
+    },
+    "connectors_Query_user_0": Connector {
+        id: ConnectId {
+            label: "connectors.example http: GET /{$args.id}",
+            subgraph_name: "connectors",
+            source_name: Some(
+                "example",
+            ),
+            directive: ObjectOrInterfaceFieldDirectivePosition {
+                field: Object(Query.user),
+                directive_name: "connect",
+                directive_index: 0,
+            },
+        },
+        transport: HttpJsonTransport {
+            source_url: Some(
+                Url {
+                    scheme: "http",
+                    cannot_be_a_base: false,
+                    username: "",
+                    password: None,
+                    host: Some(
+                        Domain(
+                            "example",
+                        ),
+                    ),
+                    port: None,
+                    path: "/",
+                    query: None,
+                    fragment: None,
+                },
+            ),
+            connect_template: URLTemplate {
+                base: None,
+                path: [
+                    Component {
+                        parts: [
+                            Var(
+                                Variable {
+                                    var_type: Args,
+                                    path: "id",
+                                    location: 2..10,
+                                },
+                            ),
+                        ],
+                    },
+                ],
+                query: {},
+            },
+            method: Get,
+            headers: {},
+            body: None,
+        },
+        selection: Named(
+            SubSelection {
+                selections: [
+                    Field(
+                        None,
+                        WithRange {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                0..2,
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        WithRange {
+                            node: Field(
+                                "a",
+                            ),
+                            range: Some(
+                                3..4,
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        WithRange {
+                            node: Field(
+                                "b",
+                            ),
+                            range: Some(
+                                5..6,
+                            ),
+                        },
+                        None,
+                    ),
+                ],
+                star: None,
+                range: Some(
+                    0..6,
+                ),
+            },
+        ),
+        config: None,
+        max_requests: None,
+        entity_resolver: Some(
+            Explicit,
+        ),
+    },
+    "connectors_User_d_1": Connector {
+        id: ConnectId {
+            label: "connectors.example http: GET /{$this.c}/d",
+            subgraph_name: "connectors",
+            source_name: Some(
+                "example",
+            ),
+            directive: ObjectOrInterfaceFieldDirectivePosition {
+                field: Object(User.d),
+                directive_name: "connect",
+                directive_index: 1,
+            },
+        },
+        transport: HttpJsonTransport {
+            source_url: Some(
+                Url {
+                    scheme: "http",
+                    cannot_be_a_base: false,
+                    username: "",
+                    password: None,
+                    host: Some(
+                        Domain(
+                            "example",
+                        ),
+                    ),
+                    port: None,
+                    path: "/",
+                    query: None,
+                    fragment: None,
+                },
+            ),
+            connect_template: URLTemplate {
+                base: None,
+                path: [
+                    Component {
+                        parts: [
+                            Var(
+                                Variable {
+                                    var_type: This,
+                                    path: "c",
+                                    location: 2..9,
+                                },
+                            ),
+                        ],
+                    },
+                    Component {
+                        parts: [
+                            Text(
+                                "d",
+                            ),
+                        ],
+                    },
+                ],
+                query: {},
+            },
+            method: Get,
+            headers: {},
+            body: Some(
+                Named(
+                    SubSelection {
+                        selections: [
+                            Path(
+                                Alias {
+                                    name: WithRange {
+                                        node: Field(
+                                            "with_b",
+                                        ),
+                                        range: Some(
+                                            0..6,
+                                        ),
+                                    },
+                                    range: Some(
+                                        0..7,
+                                    ),
+                                },
+                                PathSelection {
+                                    path: WithRange {
+                                        node: Var(
+                                            WithRange {
+                                                node: $this,
+                                                range: Some(
+                                                    8..13,
+                                                ),
+                                            },
+                                            WithRange {
+                                                node: Key(
+                                                    WithRange {
+                                                        node: Field(
+                                                            "b",
+                                                        ),
+                                                        range: Some(
+                                                            14..15,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Empty,
+                                                        range: Some(
+                                                            15..15,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    13..15,
+                                                ),
+                                            },
+                                        ),
+                                        range: Some(
+                                            8..15,
+                                        ),
+                                    },
+                                },
+                            ),
+                        ],
+                        star: None,
+                        range: Some(
+                            0..15,
+                        ),
+                    },
+                ),
+            ),
+        },
+        selection: Path(
+            PathSelection {
+                path: WithRange {
+                    node: Var(
+                        WithRange {
+                            node: $,
+                            range: Some(
+                                0..1,
+                            ),
+                        },
+                        WithRange {
+                            node: Empty,
+                            range: Some(
+                                1..1,
+                            ),
+                        },
+                    ),
+                    range: Some(
+                        0..1,
+                    ),
+                },
+            },
+        ),
+        config: None,
+        max_requests: None,
+        entity_resolver: Some(
+            Implicit,
+        ),
+    },
+}

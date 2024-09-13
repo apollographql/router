@@ -1,6 +1,27 @@
 ---
 source: apollo-federation/src/sources/connect/validation/mod.rs
-expression: "format!(\"{:?}\", errors)"
-input_file: apollo-federation/src/sources/connect/validation/test_data/validation/multiple_http_methods_on_connect.graphql
+expression: "format!(\"{:#?}\", errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/multiple_http_methods_on_connect.graphql
 ---
-[Message { code: MultipleHttpMethods, message: "`@connect(http:)` on `Query.resources` cannot specify more than one HTTP method.", locations: [LineColumn { line: 12, column: 15 }..LineColumn { line: 12, column: 32 }, LineColumn { line: 12, column: 34 }..LineColumn { line: 12, column: 53 }] }]
+[
+    Message {
+        code: MultipleHttpMethods,
+        message: "`@connect(http:)` on `Query.resources` cannot specify more than one HTTP method.",
+        locations: [
+            LineColumn {
+                line: 12,
+                column: 15,
+            }..LineColumn {
+                line: 12,
+                column: 32,
+            },
+            LineColumn {
+                line: 12,
+                column: 34,
+            }..LineColumn {
+                line: 12,
+                column: 53,
+            },
+        ],
+    },
+]

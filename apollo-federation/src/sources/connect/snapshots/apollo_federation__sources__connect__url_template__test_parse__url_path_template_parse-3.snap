@@ -1,0 +1,45 @@
+---
+source: apollo-federation/src/sources/connect/url_template.rs
+expression: "URLTemplate::from_str(\"/users/{$this.id}?a={$config.b}#junk\")"
+---
+Ok(
+    URLTemplate {
+        base: None,
+        path: [
+            Component {
+                parts: [
+                    Text(
+                        "users",
+                    ),
+                ],
+            },
+            Component {
+                parts: [
+                    Var(
+                        Variable {
+                            var_type: This,
+                            path: "id",
+                            location: 8..16,
+                        },
+                    ),
+                ],
+            },
+        ],
+        query: {
+            "a": Component {
+                parts: [
+                    Var(
+                        Variable {
+                            var_type: Config,
+                            path: "b",
+                            location: 21..30,
+                        },
+                    ),
+                    Text(
+                        "#junk",
+                    ),
+                ],
+            },
+        },
+    },
+)
