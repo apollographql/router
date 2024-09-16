@@ -901,6 +901,7 @@ mod tests {
         );
     }
 
+    #[tokio::test]
     async fn external_plugin_subgraph_response_with_condition() {
         let subgraph_stage = SubgraphStage {
             request: Default::default(),
