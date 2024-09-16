@@ -66,6 +66,8 @@ mod files;
 pub mod graphql;
 mod http_ext;
 mod http_server_factory;
+#[cfg(any(feature = "snapshot", test))]
+mod http_snapshot;
 mod introspection;
 pub mod layers;
 pub(crate) mod logging;
@@ -91,6 +93,10 @@ pub use crate::context::extensions::Extensions;
 pub use crate::context::Context;
 pub use crate::executable::main;
 pub use crate::executable::Executable;
+#[cfg(feature = "snapshot")]
+pub use crate::http_snapshot::standalone::main as snapshot_server;
+#[cfg(feature = "snapshot")]
+pub use crate::http_snapshot::SnapshotServer;
 pub use crate::notification::Notify;
 pub use crate::router::ApolloRouterError;
 pub use crate::router::ConfigurationSource;

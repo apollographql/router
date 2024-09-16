@@ -59,6 +59,9 @@ hyper_header_limits = []
 # is set when ci builds take place. It allows us to disable some tests when CI is running on certain platforms.
 ci = []
 
+# Exposes a snapshot server for testing
+snapshot = []
+
 [package.metadata.docs.rs]
 features = ["docs_rs"]
 
@@ -383,6 +386,13 @@ path = "tests/integration_tests.rs"
 name = "samples"
 path = "tests/samples_tests.rs"
 harness = false
+required-features = ["snapshot"]
+
+[[bin]]
+name = "snapshot"
+path = "src/snapshot_main.rs"
+test = false
+required-features = ["snapshot"]
 
 [[bench]]
 name = "huge_requests"
