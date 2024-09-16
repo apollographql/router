@@ -17,7 +17,10 @@ pub(crate) struct StaticEstimated {
 impl StrategyImpl for StaticEstimated {
     fn on_execution_request(&self, request: &execution::Request) -> Result<(), DemandControlError> {
         self.cost_calculator
-            .planned(&request.query_plan)
+            .planned(
+                &request.query_plan,
+                &request.supergraph_request.body().variables,
+            )
             .and_then(|cost| {
                 request
                     .context
@@ -59,7 +62,14 @@ impl StrategyImpl for StaticEstimated {
         response: &graphql::Response,
     ) -> Result<(), DemandControlError> {
         if response.data.is_some() {
-            let cost = self.cost_calculator.actual(request, response)?;
+            let cost = self.cost_calculator.actual(
+                request,
+                response,
+                &context
+                    .extensions()
+                    .with_lock(|lock| lock.get().cloned())
+                    .unwrap_or_default(),
+            )?;
             context.insert_actual_cost(cost)?;
         }
         Ok(())

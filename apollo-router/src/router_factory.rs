@@ -497,8 +497,7 @@ pub async fn create_test_service_factory_from_yaml(schema: &str, configuration: 
         .await;
     assert_eq!(
         service.map(|_| ()).unwrap_err().to_string().as_str(),
-        r#"couldn't build Query Planner Service: couldn't instantiate query planner; invalid schema: schema validation errors: Error extracting subgraphs from the supergraph: this might be due to errors in subgraphs that were mistakenly ignored by federation 0.x versions but are rejected by federation 2.
-Please try composing your subgraphs with federation 2: this should help precisely pinpoint the problems and, once fixed, generate a correct federation 2 supergraph.
+        r#"couldn't build Query Planner Service: couldn't instantiate query planner; invalid schema: schema validation errors: Unexpected error extracting subgraphs from the supergraph: this is either a bug, or the supergraph has been corrupted.
 
 Details:
 Error: Cannot find type "Review" in subgraph "products"
