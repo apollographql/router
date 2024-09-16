@@ -143,6 +143,7 @@ supergraph:
         #tls:
         required_to_start: false # Optional, defaults to false
         reset_ttl: true # Optional, defaults to true
+        pool_size: 4 # Optional, defaults to 1
 ```
 
 #### Timeout
@@ -169,3 +170,7 @@ When active, the `required_to_start` option will prevent the router from startin
 ### Reset TTL
 
 When this option is active, accessing a cache entry in Redis will reset its expiration.
+
+### Pool size
+
+The `pool_size` option defines the number of connections to Redis that the router will open. By default, the router will open a single connection to Redis. If there is a lot of traffic between router and Redis and/or there is some latency in thos requests, it is recommended to increase the pool size to reduce that latency.

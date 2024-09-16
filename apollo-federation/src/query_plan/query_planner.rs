@@ -24,6 +24,7 @@ use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphNodeType;
 use crate::query_plan::fetch_dependency_graph::compute_nodes_for_tree;
 use crate::query_plan::fetch_dependency_graph::FetchDependencyGraph;
+use crate::query_plan::fetch_dependency_graph::FetchDependencyGraphNodePath;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToCostProcessor;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToQueryPlanProcessor;
@@ -95,6 +96,14 @@ pub struct QueryPlannerConfig {
     /// in this sub-set are provided without guarantees of stability (they may be dangerous) or
     /// continued support (they may be removed without warning).
     pub debug: QueryPlannerDebugConfig,
+
+    /// Enables type conditioned fetching.
+    /// This flag is a workaround, which may yield significant
+    /// performance degradation when computing query plans,
+    /// and increase query plan size.
+    ///
+    /// If you aren't aware of this flag, you probably don't need it.
+    pub type_conditioned_fetching: bool,
 }
 
 impl Default for QueryPlannerConfig {
@@ -105,6 +114,7 @@ impl Default for QueryPlannerConfig {
             generate_query_fragments: false,
             incremental_delivery: Default::default(),
             debug: Default::default(),
+            type_conditioned_fetching: Default::default(),
         }
     }
 }
@@ -682,6 +692,7 @@ fn compute_root_serial_dependency_graph(
                 operation.root_kind,
                 &mut fetch_dependency_graph,
                 &prev_path,
+                parameters.config.type_conditioned_fetching,
             )?;
         } else {
             // PORT_NOTE: It is unclear if they correct thing to do here is get the next ID, use
@@ -719,6 +730,7 @@ pub(crate) fn compute_root_fetch_groups(
     root_kind: SchemaRootDefinitionKind,
     dependency_graph: &mut FetchDependencyGraph,
     path: &OpPathTree,
+    type_conditioned_fetching_enabled: bool,
 ) -> Result<(), FederationError> {
     // The root of the pathTree is one of the "fake" root of the subgraphs graph,
     // which belongs to no subgraph but points to each ones.
@@ -731,7 +743,7 @@ pub(crate) fn compute_root_fetch_groups(
         let (_source_node, target_node) = path.graph.edge_endpoints(edge)?;
         let target_node = path.graph.node_weight(target_node)?;
         let subgraph_name = &target_node.source;
-        let root_type = match &target_node.type_ {
+        let root_type: CompositeTypeDefinitionPosition = match &target_node.type_ {
             QueryGraphNodeType::SchemaType(OutputTypeDefinitionPosition::Object(object)) => {
                 object.clone().into()
             }
@@ -741,14 +753,21 @@ pub(crate) fn compute_root_fetch_groups(
                 )))
             }
         };
-        let fetch_dependency_node =
-            dependency_graph.get_or_create_root_node(subgraph_name, root_kind, root_type)?;
+        let fetch_dependency_node = dependency_graph.get_or_create_root_node(
+            subgraph_name,
+            root_kind,
+            root_type.clone(),
+        )?;
         snapshot!(dependency_graph, "tree_with_root_node");
         compute_nodes_for_tree(
             dependency_graph,
             &child.tree,
             fetch_dependency_node,
-            Default::default(),
+            FetchDependencyGraphNodePath::new(
+                dependency_graph.supergraph_schema.clone(),
+                type_conditioned_fetching_enabled,
+                root_type,
+            )?,
             Default::default(),
             &Default::default(),
         )?;

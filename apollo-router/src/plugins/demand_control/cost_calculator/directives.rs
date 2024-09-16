@@ -17,7 +17,9 @@ use apollo_federation::link::spec::APOLLO_SPEC_DOMAIN;
 use apollo_federation::link::Link;
 use tower::BoxError;
 
-use super::DemandControlError;
+use crate::json_ext::Object;
+use crate::json_ext::ValueExt;
+use crate::plugins::demand_control::DemandControlError;
 
 const COST_DIRECTIVE_NAME: Name = name!("cost");
 const COST_DIRECTIVE_DEFAULT_NAME: Name = name!("federation__cost");
@@ -203,9 +205,10 @@ impl DefinitionListSizeDirective {
         }
     }
 
-    pub(in crate::plugins::demand_control) fn with_field(
+    pub(in crate::plugins::demand_control) fn with_field_and_variables(
         &self,
         field: &Field,
+        variables: &Object,
     ) -> Result<ListSizeDirective, DemandControlError> {
         let mut slicing_arguments: HashMap<&str, i32> = HashMap::new();
         if let Some(slicing_argument_names) = self.slicing_argument_names.as_ref() {
@@ -223,6 +226,13 @@ impl DefinitionListSizeDirective {
             for argument in &field.arguments {
                 if slicing_argument_names.contains(argument.name.as_str()) {
                     if let Some(numeric_value) = argument.value.to_i32() {
+                        slicing_arguments.insert(&argument.name, numeric_value);
+                    } else if let Some(numeric_value) = argument
+                        .value
+                        .as_variable()
+                        .and_then(|variable_name| variables.get(variable_name.as_str()))
+                        .and_then(|variable| variable.as_i32())
+                    {
                         slicing_arguments.insert(&argument.name, numeric_value);
                     }
                 }

@@ -1,3 +1,4 @@
+# Composed from subgraphs with hash: d5699e8f9c56867b4a27e8b7b2e942a65af9c97b
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
@@ -19,10 +20,27 @@ directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
+type Bar
+  @join__type(graph: SUBGRAPH1, key: "id")
+  @join__type(graph: SUBGRAPH2, key: "id")
+{
+  id: ID
+  a: Int @join__field(graph: SUBGRAPH2)
+}
+
+type Foo
+  @join__type(graph: SUBGRAPH1, key: "id")
+{
+  id: ID
+  foo: Foo
+  bar: Bar
+}
+
 scalar join__FieldSet
 
 enum join__Graph {
-  SUBGRAPH_A @join__graph(name: "subgraph-a", url: "http://graphql.subgraph-a.svc.cluster.local:4000")
+  SUBGRAPH1 @join__graph(name: "Subgraph1", url: "none")
+  SUBGRAPH2 @join__graph(name: "Subgraph2", url: "none")
 }
 
 scalar link__Import
@@ -39,6 +57,9 @@ enum link__Purpose {
   EXECUTION
 }
 
-type Query @join__type(graph: SUBGRAPH_A) {
-  me: String @join__field(graph: SUBGRAPH_A)
+type Query
+  @join__type(graph: SUBGRAPH1)
+  @join__type(graph: SUBGRAPH2)
+{
+  foo: Foo @join__field(graph: SUBGRAPH1)
 }

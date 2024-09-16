@@ -15,7 +15,6 @@ use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
-use tower::BoxError;
 use tracing::level_filters::LevelFilter;
 
 use self::change::QueryHashVisitor;
@@ -327,12 +326,13 @@ impl Query {
         }))
     }
 
+    #[cfg(test)]
     pub(crate) fn parse(
         query: impl Into<String>,
         operation_name: Option<&str>,
         schema: &Schema,
         configuration: &Configuration,
-    ) -> Result<Self, BoxError> {
+    ) -> Result<Self, tower::BoxError> {
         let query = query.into();
 
         let doc = Self::parse_document(&query, operation_name, schema, configuration)?;
@@ -1089,10 +1089,6 @@ impl Query {
         }
     }
 
-    pub(crate) fn contains_introspection(&self) -> bool {
-        self.operations.iter().any(Operation::is_introspection)
-    }
-
     pub(crate) fn variable_value<'a>(
         &'a self,
         operation_name: Option<&str>,
@@ -1270,43 +1266,6 @@ impl Operation {
             type_name,
             variables,
             kind,
-        })
-    }
-
-    /// Checks to see if this is a query or mutation containing only
-    /// `__typename` at the root level (possibly more than one time, possibly
-    /// with aliases). If so, returns Some with a Vec of the output keys
-    /// corresponding.
-    pub(crate) fn is_only_typenames_with_output_keys(&self) -> Option<Vec<ByteString>> {
-        if self.selection_set.is_empty() {
-            None
-        } else {
-            let output_keys: Vec<ByteString> = self
-                .selection_set
-                .iter()
-                .filter_map(|s| s.output_key_if_typename_field())
-                .collect();
-            if output_keys.len() == self.selection_set.len() {
-                Some(output_keys)
-            } else {
-                None
-            }
-        }
-    }
-
-    fn is_introspection(&self) -> bool {
-        // If the only field is `__typename` it's considered as an introspection query
-        if self.is_only_typenames_with_output_keys().is_some() {
-            return true;
-        }
-        self.selection_set.iter().all(|sel| match sel {
-            Selection::Field { name, .. } => {
-                let name = name.as_str();
-                // `__typename` can only be resolved in runtime,
-                // so this query cannot be seen as an introspection query
-                name == "__schema" || name == "__type"
-            }
-            _ => false,
         })
     }
 

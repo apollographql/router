@@ -1,0 +1,17 @@
+# This coprocessor url will be updated to a test-scoped mock server
+coprocessor:
+  url: "<replace>"
+  execution:
+    request:
+      context: true
+  supergraph:
+    response:
+      context: true
+
+demand_control:
+  enabled: true
+  mode: measure
+  strategy:
+    static_estimated:
+      list_size: 10
+      max: 1000
