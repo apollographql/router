@@ -65,7 +65,7 @@ use crate::spec::SpecError;
 use crate::Configuration;
 
 pub(crate) const RUST_QP_MODE: &str = "rust";
-const JS_QP_MODE: &str = "js";
+pub(crate) const JS_QP_MODE: &str = "js";
 const UNSUPPORTED_CONTEXT: &str = "context";
 const UNSUPPORTED_OVERRIDES: &str = "overrides";
 const UNSUPPORTED_FED1: &str = "fed1";
@@ -188,6 +188,7 @@ impl PlannerMode {
                 apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig {
                     enable_defer: configuration.supergraph.defer_support,
                 },
+            type_conditioned_fetching: configuration.experimental_type_conditioned_fetching,
             debug: Default::default(),
         };
         let result = QueryPlanner::new(schema.federation_supergraph(), config);
@@ -272,7 +273,8 @@ impl PlannerMode {
 
                 let result = js.plan(filtered_query, operation, plan_options).await;
 
-                metric_query_planning_plan_duration(JS_QP_MODE, start);
+                let elapsed = start.elapsed().as_secs_f64();
+                metric_query_planning_plan_duration(JS_QP_MODE, elapsed);
 
                 let mut success = result
                     .map_err(QueryPlannerError::RouterBridgeError)?
@@ -296,7 +298,8 @@ impl PlannerMode {
                     .and_then(|operation| rust.build_query_plan(&doc.executable, operation))
                     .map_err(|e| QueryPlannerError::FederationError(e.to_string()));
 
-                metric_query_planning_plan_duration(RUST_QP_MODE, start);
+                let elapsed = start.elapsed().as_secs_f64();
+                metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
 
                 let plan = result?;
 
@@ -333,7 +336,8 @@ impl PlannerMode {
                     .plan(filtered_query, operation.clone(), plan_options)
                     .await;
 
-                metric_query_planning_plan_duration(JS_QP_MODE, start);
+                let elapsed = start.elapsed().as_secs_f64();
+                metric_query_planning_plan_duration(JS_QP_MODE, elapsed);
 
                 let mut js_result = result
                     .map_err(QueryPlannerError::RouterBridgeError)?
@@ -350,6 +354,7 @@ impl PlannerMode {
 
                 BothModeComparisonJob {
                     rust_planner: rust.clone(),
+                    js_duration: elapsed,
                     document: doc.executable.clone(),
                     operation_name: operation,
                     // Exclude usage reporting from the Result sent for comparison
@@ -580,12 +585,6 @@ impl BridgeQueryPlanner {
     ) -> Result<graphql::Response, QueryPlannerError> {
         let schema = self.schema.api_schema();
         let operation = doc.get_operation(key.operation_name.as_deref())?;
-        apollo_compiler::execution::check_introspection_max_depth(&doc.executable, operation)
-            .map_err(|_e| {
-                QueryPlannerError::Introspection(IntrospectionError {
-                    message: Some("Maximum introspection depth exceeded".to_owned()),
-                })
-            })?;
         let variable_values = Default::default();
         let variable_values =
             apollo_compiler::execution::coerce_variable_values(schema, operation, &variable_values)
@@ -964,6 +963,97 @@ impl BridgeQueryPlanner {
         mut key: QueryKey,
         mut doc: ParsedDocument,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
+        let mut query_metrics = Default::default();
+        let mut selections = self
+            .parse_selections(
+                key.original_query.clone(),
+                key.operation_name.as_deref(),
+                &doc,
+                &mut query_metrics,
+            )
+            .await?;
+
+        if selections
+            .operation(key.operation_name.as_deref())
+            .is_some_and(|op| op.selection_set.is_empty())
+        {
+            // All selections have @skip(true) or @include(false)
+            // Return an empty response now to avoid dealing with an empty query plan later
+            return Ok(QueryPlannerContent::Response {
+                response: Box::new(
+                    graphql::Response::builder()
+                        .data(Value::Object(Default::default()))
+                        .build(),
+                ),
+            });
+        }
+
+        {
+            let operation = doc
+                .executable
+                .operations
+                .get(key.operation_name.as_deref())
+                .ok();
+            let mut has_root_typename = false;
+            let mut has_schema_introspection = false;
+            let mut has_other_root_fields = false;
+            if let Some(operation) = operation {
+                for field in operation.root_fields(&doc.executable) {
+                    match field.name.as_str() {
+                        "__typename" => has_root_typename = true,
+                        "__schema" | "__type" if operation.is_query() => {
+                            has_schema_introspection = true
+                        }
+                        _ => has_other_root_fields = true,
+                    }
+                }
+                if has_root_typename && !has_schema_introspection && !has_other_root_fields {
+                    // Fast path for __typename alone
+                    if operation
+                        .selection_set
+                        .selections
+                        .iter()
+                        .all(|sel| sel.as_field().is_some_and(|f| f.name == "__typename"))
+                    {
+                        let root_type_name: serde_json_bytes::ByteString =
+                            operation.object_type().as_str().into();
+                        let data = Value::Object(
+                            operation
+                                .root_fields(&doc.executable)
+                                .filter(|field| field.name == "__typename")
+                                .map(|field| {
+                                    (
+                                        field.response_key().as_str().into(),
+                                        Value::String(root_type_name.clone()),
+                                    )
+                                })
+                                .collect(),
+                        );
+                        return Ok(QueryPlannerContent::Response {
+                            response: Box::new(graphql::Response::builder().data(data).build()),
+                        });
+                    } else {
+                        // fragments might use @include or @skip
+                    }
+                }
+            } else {
+                // Should be unreachable as QueryAnalysisLayer would have returned an error
+            }
+
+            if has_schema_introspection {
+                if has_other_root_fields {
+                    let error = graphql::Error::builder()
+                    .message("Mixed queries with both schema introspection and concrete fields are not supported")
+                    .extension_code("MIXED_INTROSPECTION")
+                    .build();
+                    return Ok(QueryPlannerContent::Response {
+                        response: Box::new(graphql::Response::builder().error(error).build()),
+                    });
+                }
+                return self.introspection(key, doc).await;
+            }
+        }
+
         let filter_res = if self.enable_authorization_directives {
             match AuthorizationPlugin::filter_query(&self.configuration, &key, &self.schema) {
                 Err(QueryPlannerError::Unauthorized(unauthorized_paths)) => {
@@ -992,16 +1082,6 @@ impl BridgeQueryPlanner {
             None
         };
 
-        let mut query_metrics = Default::default();
-        let mut selections = self
-            .parse_selections(
-                key.original_query.clone(),
-                key.operation_name.as_deref(),
-                &doc,
-                &mut query_metrics,
-            )
-            .await?;
-
         if let Some((unauthorized_paths, new_doc)) = filter_res {
             key.filtered_query = new_doc.to_string();
             let executable_document = new_doc
@@ -1020,85 +1100,6 @@ impl BridgeQueryPlanner {
                 hash: Arc::new(QueryHash(hash)),
             });
             selections.unauthorized.paths = unauthorized_paths;
-        }
-
-        if selections
-            .operation(key.operation_name.as_deref())
-            .is_some_and(|op| op.selection_set.is_empty())
-        {
-            // All selections have @skip(true) or @include(false)
-            // Return an empty response now to avoid dealing with an empty query plan later
-            return Ok(QueryPlannerContent::Response {
-                response: Box::new(
-                    graphql::Response::builder()
-                        .data(Value::Object(Default::default()))
-                        .build(),
-                ),
-            });
-        }
-
-        let operation = doc
-            .executable
-            .operations
-            .get(key.operation_name.as_deref())
-            .ok();
-        let mut has_root_typename = false;
-        let mut has_schema_introspection = false;
-        let mut has_other_root_fields = false;
-        if let Some(operation) = operation {
-            for field in operation.root_fields(&doc.executable) {
-                match field.name.as_str() {
-                    "__typename" => has_root_typename = true,
-                    "__schema" | "__type" if operation.is_query() => {
-                        has_schema_introspection = true
-                    }
-                    _ => has_other_root_fields = true,
-                }
-            }
-            if has_root_typename && !has_schema_introspection && !has_other_root_fields {
-                // Fast path for __typename alone
-                if operation
-                    .selection_set
-                    .selections
-                    .iter()
-                    .all(|sel| sel.as_field().is_some_and(|f| f.name == "__typename"))
-                {
-                    let root_type_name: serde_json_bytes::ByteString =
-                        operation.object_type().as_str().into();
-                    let data = Value::Object(
-                        operation
-                            .root_fields(&doc.executable)
-                            .filter(|field| field.name == "__typename")
-                            .map(|field| {
-                                (
-                                    field.response_key().as_str().into(),
-                                    Value::String(root_type_name.clone()),
-                                )
-                            })
-                            .collect(),
-                    );
-                    return Ok(QueryPlannerContent::Response {
-                        response: Box::new(graphql::Response::builder().data(data).build()),
-                    });
-                } else {
-                    // fragments might use @include or @skip
-                }
-            }
-        } else {
-            // Should be unreachable as QueryAnalysisLayer would have returned an error
-        }
-
-        if has_schema_introspection {
-            if has_other_root_fields {
-                let error = graphql::Error::builder()
-                    .message("Mixed queries with both schema introspection and concrete fields are not supported")
-                    .extension_code("MIXED_INTROSPECTION")
-                    .build();
-                return Ok(QueryPlannerContent::Response {
-                    response: Box::new(graphql::Response::builder().error(error).build()),
-                });
-            }
-            return self.introspection(key, doc).await;
         }
 
         if key.filtered_query != key.original_query {
@@ -1179,11 +1180,11 @@ pub fn render_diff(differences: &[diff::Result<&str>]) -> String {
     output
 }
 
-pub(crate) fn metric_query_planning_plan_duration(planner: &'static str, start: Instant) {
+pub(crate) fn metric_query_planning_plan_duration(planner: &'static str, elapsed: f64) {
     f64_histogram!(
         "apollo.router.query_planning.plan.duration",
         "Duration of the query planning.",
-        start.elapsed().as_secs_f64(),
+        elapsed,
         "planner" = planner
     );
 }
@@ -1259,7 +1260,7 @@ mod tests {
     #[test(tokio::test)]
     async fn federation_versions() {
         async {
-            let sdl = include_str!("../testdata/minimal_supergraph.graphql");
+            let sdl = include_str!("../testdata/minimal_fed1_supergraph.graphql");
             let config = Arc::default();
             let schema = Schema::parse(sdl, &config).unwrap();
             let _planner = BridgeQueryPlanner::new(schema.into(), config, None, None)
@@ -1276,7 +1277,7 @@ mod tests {
         .await;
 
         async {
-            let sdl = include_str!("../testdata/minimal_fed2_supergraph.graphql");
+            let sdl = include_str!("../testdata/minimal_supergraph.graphql");
             let config = Arc::default();
             let schema = Schema::parse(sdl, &config).unwrap();
             let _planner = BridgeQueryPlanner::new(schema.into(), config, None, None)
@@ -1834,7 +1835,8 @@ mod tests {
     #[test]
     fn test_metric_query_planning_plan_duration() {
         let start = Instant::now();
-        metric_query_planning_plan_duration(RUST_QP_MODE, start);
+        let elapsed = start.elapsed().as_secs_f64();
+        metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
         assert_histogram_exists!(
             "apollo.router.query_planning.plan.duration",
             f64,
@@ -1842,7 +1844,8 @@ mod tests {
         );
 
         let start = Instant::now();
-        metric_query_planning_plan_duration(JS_QP_MODE, start);
+        let elapsed = start.elapsed().as_secs_f64();
+        metric_query_planning_plan_duration(JS_QP_MODE, elapsed);
         assert_histogram_exists!(
             "apollo.router.query_planning.plan.duration",
             f64,

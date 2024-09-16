@@ -4119,9 +4119,8 @@ expression: "&schema"
           "type": "array"
         },
         "experimental_prewarm_query_plan_cache": {
-          "default": false,
-          "description": "Experimental feature to prewarm the query plan cache with persisted queries",
-          "type": "boolean"
+          "$ref": "#/definitions/PersistedQueriesPrewarmQueryPlanCache",
+          "description": "#/definitions/PersistedQueriesPrewarmQueryPlanCache"
         },
         "log_unknown": {
           "default": false,
@@ -4131,6 +4130,23 @@ expression: "&schema"
         "safelist": {
           "$ref": "#/definitions/PersistedQueriesSafelist",
           "description": "#/definitions/PersistedQueriesSafelist"
+        }
+      },
+      "type": "object"
+    },
+    "PersistedQueriesPrewarmQueryPlanCache": {
+      "additionalProperties": false,
+      "description": "Persisted Queries (PQ) query plan cache prewarm configuration",
+      "properties": {
+        "on_reload": {
+          "default": true,
+          "description": "Enabling this field uses the persisted query list to pre-warm the query planner cache on schema and config changes (enabled by default)",
+          "type": "boolean"
+        },
+        "on_startup": {
+          "default": false,
+          "description": "Enabling this field uses the persisted query list to pre-warm the query planner cache on startup (disabled by default)",
+          "type": "boolean"
         }
       },
       "type": "object"

@@ -785,3 +785,63 @@ async fn test_router_service_adds_timestamp_header() -> Result<(), BoxError> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn it_can_access_demand_control_context() -> Result<(), BoxError> {
+    let mut mock_service = MockSupergraphService::new();
+    mock_service
+        .expect_call()
+        .times(1)
+        .returning(move |req: SupergraphRequest| {
+            Ok(SupergraphResponse::fake_builder()
+                .context(req.context)
+                .build()
+                .unwrap())
+        });
+
+    let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
+        .find(|factory| factory.name == "apollo.rhai")
+        .expect("Plugin not found")
+        .create_instance_without_schema(
+            &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"demand_control.rhai"}"#)
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let mut router_service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
+    let context = Context::new();
+    context.insert_estimated_cost(50.0).unwrap();
+    context.insert_actual_cost(35.0).unwrap();
+    context
+        .insert_cost_strategy("test_strategy".to_string())
+        .unwrap();
+    context.insert_cost_result("COST_OK".to_string()).unwrap();
+    let supergraph_req = SupergraphRequest::fake_builder().context(context).build()?;
+
+    let service_response = router_service.ready().await?.call(supergraph_req).await?;
+    assert_eq!(StatusCode::OK, service_response.response.status());
+
+    let headers = service_response.response.headers().clone();
+    let demand_control_header = headers
+        .get("demand-control-estimate")
+        .map(|h| h.to_str().unwrap());
+    assert_eq!(demand_control_header, Some("50.0"));
+
+    let demand_control_header = headers
+        .get("demand-control-actual")
+        .map(|h| h.to_str().unwrap());
+    assert_eq!(demand_control_header, Some("35.0"));
+
+    let demand_control_header = headers
+        .get("demand-control-strategy")
+        .map(|h| h.to_str().unwrap());
+    assert_eq!(demand_control_header, Some("test_strategy"));
+
+    let demand_control_header = headers
+        .get("demand-control-result")
+        .map(|h| h.to_str().unwrap());
+    assert_eq!(demand_control_header, Some("COST_OK"));
+
+    Ok(())
+}

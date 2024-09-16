@@ -3,7 +3,6 @@ use apollo_compiler::ExecutableDocument;
 use crate::graphql;
 use crate::plugins::demand_control::cost_calculator::static_cost::StaticCostCalculator;
 use crate::plugins::demand_control::strategy::StrategyImpl;
-use crate::plugins::demand_control::CostContext;
 use crate::plugins::demand_control::DemandControlError;
 use crate::services::execution;
 use crate::services::subgraph;
@@ -18,23 +17,29 @@ pub(crate) struct StaticEstimated {
 impl StrategyImpl for StaticEstimated {
     fn on_execution_request(&self, request: &execution::Request) -> Result<(), DemandControlError> {
         self.cost_calculator
-            .planned(&request.query_plan)
+            .planned(
+                &request.query_plan,
+                &request.supergraph_request.body().variables,
+            )
             .and_then(|cost| {
-                request.context.extensions().with_lock(|mut lock| {
-                    let cost_result = lock.get_or_default_mut::<CostContext>();
-                    cost_result.strategy = "static_estimated";
-                    cost_result.estimated = cost;
-                    if cost > self.max {
-                        Err(
-                            cost_result.result(DemandControlError::EstimatedCostTooExpensive {
-                                estimated_cost: cost,
-                                max_cost: self.max,
-                            }),
-                        )
-                    } else {
-                        Ok(())
-                    }
-                })
+                request
+                    .context
+                    .insert_cost_strategy("static_estimated".to_string())?;
+                request.context.insert_cost_result("COST_OK".to_string())?;
+                request.context.insert_estimated_cost(cost)?;
+
+                if cost > self.max {
+                    let error = DemandControlError::EstimatedCostTooExpensive {
+                        estimated_cost: cost,
+                        max_cost: self.max,
+                    };
+                    request
+                        .context
+                        .insert_cost_result(error.code().to_string())?;
+                    Err(error)
+                } else {
+                    Ok(())
+                }
             })
     }
 
@@ -57,10 +62,15 @@ impl StrategyImpl for StaticEstimated {
         response: &graphql::Response,
     ) -> Result<(), DemandControlError> {
         if response.data.is_some() {
-            let cost = self.cost_calculator.actual(request, response)?;
-            context
-                .extensions()
-                .with_lock(|mut lock| lock.get_or_default_mut::<CostContext>().actual = cost);
+            let cost = self.cost_calculator.actual(
+                request,
+                response,
+                &context
+                    .extensions()
+                    .with_lock(|lock| lock.get().cloned())
+                    .unwrap_or_default(),
+            )?;
+            context.insert_actual_cost(cost)?;
         }
         Ok(())
     }
