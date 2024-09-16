@@ -194,15 +194,6 @@ impl Selection {
         matches!(self, Selection::Field {name, ..} if name.as_str() == TYPENAME)
     }
 
-    pub(crate) fn output_key_if_typename_field(&self) -> Option<ByteString> {
-        match self {
-            Selection::Field { name, alias, .. } if name.as_str() == TYPENAME => {
-                alias.as_ref().or(Some(name)).cloned()
-            }
-            _ => None,
-        }
-    }
-
     pub(crate) fn contains_error_path(&self, path: &[PathElement], fragments: &Fragments) -> bool {
         match (path.first(), self) {
             (None, _) => true,

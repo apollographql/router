@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::iter;
 use std::ops::Deref;
@@ -14,7 +12,6 @@ use apollo_compiler::ast::Type;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
-use apollo_compiler::executable::DirectiveList;
 use apollo_compiler::executable::VariableDefinition;
 use apollo_compiler::name;
 use apollo_compiler::schema;
@@ -29,25 +26,25 @@ use petgraph::visit::EdgeRef;
 use petgraph::visit::IntoNodeReferences;
 use serde::Serialize;
 
+use super::query_planner::SubgraphOperationCompression;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::graphql_definition::DeferDirectiveArguments;
+use crate::operation::ArgumentList;
 use crate::operation::ContainmentOptions;
+use crate::operation::DirectiveList;
 use crate::operation::Field;
 use crate::operation::FieldData;
 use crate::operation::InlineFragment;
 use crate::operation::InlineFragmentData;
 use crate::operation::InlineFragmentSelection;
 use crate::operation::Operation;
-use crate::operation::RebasedFragments;
 use crate::operation::Selection;
 use crate::operation::SelectionId;
 use crate::operation::SelectionMap;
 use crate::operation::SelectionSet;
 use crate::operation::VariableCollector;
 use crate::operation::TYPENAME_FIELD;
-use crate::query_graph::extract_subgraphs_from_supergraph::FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME;
-use crate::query_graph::extract_subgraphs_from_supergraph::FEDERATION_REPRESENTATIONS_VAR_NAME;
 use crate::query_graph::graph_path::concat_op_paths;
 use crate::query_graph::graph_path::concat_paths_in_parents;
 use crate::query_graph::graph_path::OpGraphPathContext;
@@ -71,11 +68,14 @@ use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::OutputTypeDefinitionPosition;
+use crate::schema::position::PositionLookupError;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
 use crate::subgraph::spec::ANY_SCALAR_NAME;
 use crate::subgraph::spec::ENTITIES_QUERY;
+use crate::supergraph::FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME;
+use crate::supergraph::FEDERATION_REPRESENTATIONS_VAR_NAME;
 use crate::utils::logging::snapshot;
 
 /// Represents the value of a `@defer(label:)` argument.
@@ -204,7 +204,7 @@ type FetchDependencyGraphPetgraph =
 pub(crate) struct FetchDependencyGraph {
     /// The supergraph schema that generated the federated query graph.
     #[serde(skip)]
-    supergraph_schema: ValidFederationSchema,
+    pub(crate) supergraph_schema: ValidFederationSchema,
     /// The federated query graph that generated the fetches. (This also contains the subgraph
     /// schemas.)
     #[serde(skip)]
@@ -252,11 +252,15 @@ pub(crate) struct DeferredInfo {
 }
 
 // TODO: Write docstrings
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(crate) struct FetchDependencyGraphNodePath {
+    schema: ValidFederationSchema,
     pub(crate) full_path: Arc<OpPath>,
     path_in_node: Arc<OpPath>,
     response_path: Vec<FetchDataPathElement>,
+    type_conditioned_fetching_enabled: bool,
+    possible_types: IndexSet<Name>,
+    possible_types_after_last_field: IndexSet<Name>,
 }
 
 #[derive(Debug, Clone)]
@@ -444,11 +448,40 @@ impl ProcessingState {
 }
 
 impl FetchDependencyGraphNodePath {
+    pub(crate) fn new(
+        schema: ValidFederationSchema,
+        type_conditioned_fetching_enabled: bool,
+        root_type: CompositeTypeDefinitionPosition,
+    ) -> Result<Self, FederationError> {
+        let root_possible_types = if type_conditioned_fetching_enabled {
+            schema.possible_runtime_types(root_type)?
+        } else {
+            Default::default()
+        }
+        .into_iter()
+        .map(|pos| Ok(pos.get(schema.schema())?.name.clone()))
+        .collect::<Result<IndexSet<Name>, _>>()
+        .map_err(|e: PositionLookupError| FederationError::from(e))?;
+
+        Ok(Self {
+            schema,
+            type_conditioned_fetching_enabled,
+            full_path: Default::default(),
+            path_in_node: Default::default(),
+            response_path: Default::default(),
+            possible_types: root_possible_types.clone(),
+            possible_types_after_last_field: root_possible_types,
+        })
+    }
     fn for_new_key_fetch(&self, new_context: Arc<OpPath>) -> Self {
         Self {
+            schema: self.schema.clone(),
             full_path: self.full_path.clone(),
             path_in_node: new_context,
             response_path: self.response_path.clone(),
+            type_conditioned_fetching_enabled: self.type_conditioned_fetching_enabled,
+            possible_types: self.possible_types.clone(),
+            possible_types_after_last_field: self.possible_types_after_last_field.clone(),
         }
     }
 
@@ -456,11 +489,89 @@ impl FetchDependencyGraphNodePath {
         &self,
         element: Arc<OpPathElement>,
     ) -> Result<FetchDependencyGraphNodePath, FederationError> {
+        let response_path = self.updated_response_path(&element)?;
+        let new_possible_types = self.new_possible_types(&element)?;
+        let possible_types_after_last_field = if let &OpPathElement::Field(_) = element.as_ref() {
+            new_possible_types.clone()
+        } else {
+            self.possible_types_after_last_field.clone()
+        };
+
         Ok(Self {
-            response_path: self.updated_response_path(&element)?,
+            schema: self.schema.clone(),
+            response_path,
             full_path: Arc::new(self.full_path.with_pushed(element.clone())),
             path_in_node: Arc::new(self.path_in_node.with_pushed(element)),
+            type_conditioned_fetching_enabled: self.type_conditioned_fetching_enabled,
+            possible_types: new_possible_types,
+            possible_types_after_last_field,
         })
+    }
+
+    fn new_possible_types(
+        &self,
+        element: &OpPathElement,
+    ) -> Result<IndexSet<Name>, FederationError> {
+        if !self.type_conditioned_fetching_enabled {
+            return Ok(Default::default());
+        }
+
+        let res = match element {
+            OpPathElement::InlineFragment(f) => match &f.type_condition_position {
+                None => self.possible_types.clone(),
+                Some(tcp) => {
+                    let element_possible_types = self.schema.possible_runtime_types(tcp.clone())?;
+                    element_possible_types
+                        .iter()
+                        .filter(|&possible_type| {
+                            self.possible_types.contains(&possible_type.type_name)
+                        })
+                        .map(|possible_type| possible_type.type_name.clone())
+                        .collect()
+                }
+            },
+            OpPathElement::Field(f) => self.advance_field_type(f)?,
+        };
+        Ok(res)
+    }
+
+    fn advance_field_type(&self, element: &Field) -> Result<IndexSet<Name>, FederationError> {
+        if !element
+            .data()
+            .output_base_type()
+            .map(|base_type| base_type.is_composite_type())
+            .unwrap_or_default()
+        {
+            return Ok(Default::default());
+        }
+
+        let mut res = self
+            .possible_types
+            .clone()
+            .into_iter()
+            .map(|pt| {
+                let field = CompositeTypeDefinitionPosition::try_from(self.schema.get_type(pt)?)?
+                    .field(element.name().clone())?
+                    .get(self.schema.schema())?;
+                let typ = self
+                    .schema
+                    .get_type(field.ty.inner_named_type().clone())?
+                    .try_into()?;
+                Ok(self
+                    .schema
+                    .possible_runtime_types(typ)?
+                    .into_iter()
+                    .map(|ctdp| ctdp.type_name)
+                    .collect::<Vec<_>>())
+            })
+            .collect::<Result<Vec<Vec<Name>>, FederationError>>()?
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+
+        res.sort();
+
+        Ok(res.into_iter().collect())
     }
 
     fn updated_response_path(
@@ -468,21 +579,56 @@ impl FetchDependencyGraphNodePath {
         element: &OpPathElement,
     ) -> Result<Vec<FetchDataPathElement>, FederationError> {
         let mut new_path = self.response_path.clone();
-        if let OpPathElement::Field(field) = element {
-            new_path.push(FetchDataPathElement::Key(field.response_name()));
-            // TODO: is there a simpler we to find a field’s type from `&Field`?
-            let mut type_ = &field.field_position.get(field.schema.schema())?.ty;
-            loop {
-                match type_ {
-                    schema::Type::Named(_) | schema::Type::NonNullNamed(_) => break,
-                    schema::Type::List(inner) | schema::Type::NonNullList(inner) => {
-                        new_path.push(FetchDataPathElement::AnyIndex);
-                        type_ = inner
+        match element {
+            OpPathElement::InlineFragment(_) => Ok(new_path),
+            OpPathElement::Field(field) => {
+                // Type conditions on the last element of a path don't imply different subgraph fetches.
+                // They would only translate to a potentially new fragment.
+                // So instead of applying a type condition to the last element of a path
+                // We keep track of type conditions and apply them to the parent if applicable.
+                // EG:
+                // foo.bar|[baz, qux] # |[baz, qux] aren't necessary
+                // foo.bar|[baz, qux].quux # |[baz, qux] apply to the parents, they are necessary
+                if self.possible_types_after_last_field.len() != self.possible_types.len() {
+                    let conditions = &self.possible_types;
+
+                    match new_path.pop() {
+                        Some(FetchDataPathElement::AnyIndex(_)) => {
+                            new_path.push(FetchDataPathElement::AnyIndex(
+                                conditions.iter().cloned().collect(),
+                            ));
+                        }
+                        Some(FetchDataPathElement::Key(name, _)) => {
+                            new_path.push(FetchDataPathElement::Key(
+                                name,
+                                conditions.iter().cloned().collect(),
+                            ));
+                        }
+                        Some(other) => new_path.push(other),
+                        None => {}
                     }
                 }
+
+                new_path.push(FetchDataPathElement::Key(
+                    field.response_name(),
+                    Default::default(),
+                ));
+
+                // TODO: is there a simpler way to find a field’s type from `&Field`?
+                let mut type_ = &field.field_position.get(field.schema.schema())?.ty;
+                loop {
+                    match type_ {
+                        schema::Type::Named(_) | schema::Type::NonNullNamed(_) => break,
+                        schema::Type::List(inner) | schema::Type::NonNullList(inner) => {
+                            new_path.push(FetchDataPathElement::AnyIndex(Default::default()));
+                            type_ = inner
+                        }
+                    }
+                }
+
+                Ok(new_path)
             }
-        };
-        Ok(new_path)
+        }
     }
 }
 
@@ -668,7 +814,9 @@ impl FetchDependencyGraph {
         //    keeping nodes separated when they have a different path in their parent
         //    allows to keep that "path in parent" more precisely,
         //    which is important for some case of @requires).
-        for existing_id in self.children_of(parent.parent_node_id) {
+        for existing_id in
+            FetchDependencyGraph::sorted_nodes(self.children_of(parent.parent_node_id))
+        {
             let existing = self.node_weight(existing_id)?;
             // we compare the subgraph names last because on average it improves performance
             if existing.merge_at.as_deref() == Some(merge_at)
@@ -729,6 +877,7 @@ impl FetchDependencyGraph {
 
     /// Adds another node as a parent of `child`,
     /// meaning that this fetch should happen after the provided one.
+    /// Assumption: The parent node is not a descendant of the child.
     fn add_parent(&mut self, child_id: NodeIndex, parent_relation: ParentRelation) {
         let ParentRelation {
             parent_node_id,
@@ -738,8 +887,8 @@ impl FetchDependencyGraph {
             return;
         }
         assert!(
-            !self.graph.contains_edge(child_id, parent_node_id),
-            "Node {parent_node_id:?} is a child of {child_id:?}: \
+            !self.is_descendant_of(parent_node_id, child_id),
+            "Node {parent_node_id:?} is a descendant of {child_id:?}: \
              adding it as parent would create a cycle"
         );
         self.on_modification();
@@ -794,15 +943,7 @@ impl FetchDependencyGraph {
     }
 
     fn is_descendant_of(&self, node_id: NodeIndex, maybe_ancestor_id: NodeIndex) -> bool {
-        if node_id == maybe_ancestor_id {
-            return true;
-        }
-        for child_id in self.children_of(node_id) {
-            if self.is_descendant_of(child_id, maybe_ancestor_id) {
-                return true;
-            }
-        }
-        false
+        petgraph::algo::has_path_connecting(&self.graph, maybe_ancestor_id, node_id, None)
     }
 
     /// Returns whether `node_id` is both a child of `maybe_parent_id` but also if we can show that the
@@ -895,6 +1036,27 @@ impl FetchDependencyGraph {
             })
     }
 
+    /// By default, petgraph iterates over the nodes in the order of their node indices, but if
+    /// we retrieve node iterator based on the edges (e.g. children of/parents of), then resulting
+    /// iteration order is unspecified. In practice, it appears that edges are iterated in the
+    /// *reverse* iteration order.
+    ///
+    /// Since this behavior can affect the query plans, we can use this method to explicitly sort
+    /// the iterator to ensure we consistently follow the node index order.
+    ///
+    /// NOTE: In JS implementation, whenever we remove/merge nodes, we always shift left remaining
+    /// nodes so there are no gaps in the node IDs and the newly created nodes are always created
+    /// with the largest IDs. RS implementation has different behavior - whenever nodes are removed,
+    /// their IDs are later reused by petgraph so we no longer have guarantee that node with the
+    /// largest ID is the last node that was created. Due to the above, sorting by node IDs may still
+    /// result in different iteration order than the JS code, but in practice might be enough to
+    /// ensure correct plans.
+    fn sorted_nodes<'graph>(
+        nodes: impl Iterator<Item = NodeIndex> + 'graph,
+    ) -> impl Iterator<Item = NodeIndex> + 'graph {
+        nodes.sorted_by_key(|n| n.index())
+    }
+
     fn type_for_fetch_inputs(
         &self,
         type_name: &Name,
@@ -905,8 +1067,14 @@ impl FetchDependencyGraph {
             .try_into()?)
     }
 
-    /// Find redundant edges coming out of a node. See `remove_redundant_edges`.
-    fn collect_redundant_edges(&self, node_index: NodeIndex, acc: &mut HashSet<EdgeIndex>) {
+    /// Find redundant edges coming out of a node. See `remove_redundant_edges`. This method assumes
+    /// that the underlying graph does not have any cycles between nodes.
+    ///
+    /// PORT NOTE: JS implementation performs in-place removal of edges when finding the redundant
+    /// edges. In RS implementation we first collect the edges and then remove them. This has a side
+    /// effect that if we ever end up with a cycle in a graph (which is an invalid state), this method
+    /// may result in infinite loop.
+    fn collect_redundant_edges(&self, node_index: NodeIndex, acc: &mut IndexSet<EdgeIndex>) {
         let mut stack = vec![];
         for start_index in self.children_of(node_index) {
             stack.extend(self.children_of(start_index));
@@ -914,7 +1082,6 @@ impl FetchDependencyGraph {
                 for edge in self.graph.edges_connecting(node_index, v) {
                     acc.insert(edge.id());
                 }
-
                 stack.extend(self.children_of(v));
             }
         }
@@ -925,9 +1092,12 @@ impl FetchDependencyGraph {
     /// If any deeply nested child of this node has an edge to any direct child of this node, the
     /// direct child is removed, as we know it is also reachable through the deeply nested route.
     fn remove_redundant_edges(&mut self, node_index: NodeIndex) {
-        let mut redundant_edges = HashSet::new();
+        let mut redundant_edges = IndexSet::default();
         self.collect_redundant_edges(node_index, &mut redundant_edges);
 
+        if !redundant_edges.is_empty() {
+            self.on_modification();
+        }
         for edge in redundant_edges {
             self.graph.remove_edge(edge);
         }
@@ -981,14 +1151,16 @@ impl FetchDependencyGraph {
 
         // Two phases for mutability reasons: first all redundant edges coming out of all nodes are
         // collected and then they are all removed.
-        let mut redundant_edges = HashSet::new();
+        let mut redundant_edges = IndexSet::default();
         for node_index in self.graph.node_indices() {
             self.collect_redundant_edges(node_index, &mut redundant_edges);
         }
 
-        for edge in redundant_edges {
-            // PORT_NOTE: JS version calls `FetchGroup.removeChild`, which calls onModification.
+        // PORT_NOTE: JS version calls `FetchGroup.removeChild`, which calls onModification.
+        if !redundant_edges.is_empty() {
             self.on_modification();
+        }
+        for edge in redundant_edges {
             self.graph.remove_edge(edge);
         }
 
@@ -1037,7 +1209,7 @@ impl FetchDependencyGraph {
             node.selection_set.selection_set.selections.is_empty()
                 && !self.is_root_node(node_index, node)
         };
-        let to_remove: HashSet<NodeIndex> = self
+        let to_remove: IndexSet<NodeIndex> = self
             .graph
             .node_references()
             .filter_map(|(node_index, node)| is_removable(node_index, node).then_some(node_index))
@@ -1046,16 +1218,18 @@ impl FetchDependencyGraph {
         if to_remove.is_empty() {
             return; // unchanged
         }
+        // Note: We remove empty nodes without relocating their children. The invariant is that
+        // the children of empty nodes (if any) must be accessible from the root via another path.
+        // Otherwise, they would've become inaccessible orphan nodes.
         self.retain_nodes(|node_index| !to_remove.contains(node_index));
     }
 
     /// - Calls `on_modification` if necessary.
     fn remove_useless_nodes(&mut self) -> Result<(), FederationError> {
         let root_nodes: Vec<_> = self.root_node_by_subgraph_iter().map(|(_, i)| *i).collect();
-        for node_index in root_nodes {
-            self.remove_useless_nodes_bottom_up(node_index)?;
-        }
-        Ok(())
+        root_nodes
+            .into_iter()
+            .try_for_each(|node_index| self.remove_useless_nodes_bottom_up(node_index))
     }
 
     /// Recursively collect removable useless nodes from the bottom up.
@@ -1273,7 +1447,7 @@ impl FetchDependencyGraph {
                         .any(|input| input.contains(selection)));
                 };
 
-                let impl_type_names: HashSet<_> = self
+                let impl_type_names: IndexSet<_> = self
                     .supergraph_schema
                     .possible_runtime_types(condition_in_supergraph.clone().into())?
                     .iter()
@@ -1334,10 +1508,9 @@ impl FetchDependencyGraph {
     /// - Calls `on_modification` if necessary.
     fn merge_child_fetches_for_same_subgraph_and_path(&mut self) -> Result<(), FederationError> {
         let root_nodes: Vec<_> = self.root_node_by_subgraph_iter().map(|(_, i)| *i).collect();
-        for node_index in root_nodes {
-            self.recursive_merge_child_fetches_for_same_subgraph_and_path(node_index)?;
-        }
-        Ok(()) // done
+        root_nodes.into_iter().try_for_each(|node_index| {
+            self.recursive_merge_child_fetches_for_same_subgraph_and_path(node_index)
+        })
     }
 
     /// Recursively merge child fetches top-down
@@ -1402,11 +1575,9 @@ impl FetchDependencyGraph {
         // Note: `children_nodes` above may contain invalid nodes at this point.
         //       So, we need to re-collect the children nodes after the merge.
         let children_nodes_after_merge: Vec<_> = self.children_of(node_index).collect();
-        for c in children_nodes_after_merge {
-            self.recursive_merge_child_fetches_for_same_subgraph_and_path(c)?;
-        }
-
-        Ok(())
+        children_nodes_after_merge
+            .into_iter()
+            .try_for_each(|c| self.recursive_merge_child_fetches_for_same_subgraph_and_path(c))
     }
 
     fn merge_fetches_to_same_subgraph_and_same_inputs(&mut self) -> Result<(), FederationError> {
@@ -1424,8 +1595,17 @@ impl FetchDependencyGraph {
         // generate a simple string key from each node subgraph name and mergeAt. We do "sanitize"
         // subgraph name, but have no worries for `mergeAt` since it contains either number of
         // field names, and the later is restricted by graphQL so as to not be an issue.
+        // PORT_NOTE: The JS version iterates over the nodes in their index order, which is also
+        // the insertion order. The Rust version uses a topological sort to ensure that we never
+        // merge an ancestor node into a descendant node. JS version's insertion order is almost
+        // topologically sorted, thanks to the way the graph is constructed from the root. However,
+        // it's not exactly topologically sorted. So, it's unclear whether that is 100% safe.
+        // Note: MultiMap preserves insertion order for values of the same key. Thus, the values
+        // of the same key in `by_subgraphs` will be topologically sorted as well.
         let mut by_subgraphs = MultiMap::new();
-        for node_index in self.graph.node_indices() {
+        let sorted_nodes = petgraph::algo::toposort(&self.graph, None)
+            .map_err(|_| FederationError::internal("Failed to sort nodes due to cycle(s)"))?;
+        for node_index in sorted_nodes {
             let node = self.node_weight(node_index)?;
             // We exclude nodes without inputs because that's what we look for. In practice, this
             // mostly just exclude root nodes, which we don't really want to bother with anyway.
@@ -1442,7 +1622,7 @@ impl FetchDependencyGraph {
             }
 
             // Create disjoint sets of the nodes.
-            // buckets: an array where each entry is a "bucket" of groups that can all be merge together.
+            // buckets: an array where each entry is a "bucket" of nodes that can all be merge together.
             let mut buckets: Vec<(NodeIndex, Vec<NodeIndex>)> = Vec::new();
             let has_equal_inputs = |a: NodeIndex, b: NodeIndex| {
                 let a_node = self.node_weight(a)?;
@@ -1475,9 +1655,12 @@ impl FetchDependencyGraph {
                     continue;
                 };
 
-                // We pick the head for the group and merge all others into it. Note that which
-                // group we choose shouldn't matter since the merging preserves all the
+                // We pick the head for the nodes and merge all others into it. Note that which
+                // node we choose shouldn't matter since the merging preserves all the
                 // dependencies of each group (both parents and children).
+                // However, we must not merge an ancestor node into a descendant node. Thus,
+                // we choose the head as the first node in the bucket that is also the earliest
+                // in the topo-sorted order.
                 for node in rest {
                     self.merge_in_with_all_dependencies(*head, *node)?;
                 }
@@ -1728,7 +1911,7 @@ impl FetchDependencyGraph {
         let handled_defers_in_current = defers_in_current
             .iter()
             .map(|info| info.label.clone())
-            .collect::<HashSet<_>>();
+            .collect::<IndexSet<_>>();
         let unhandled_defer_nodes = all_deferred_nodes
             .keys()
             .filter(|label| !handled_defers_in_current.contains(*label))
@@ -1989,6 +2172,7 @@ impl FetchDependencyGraph {
         Ok(())
     }
 
+    /// Assumption: merged_id is not an ancestor of node_id in the graph.
     fn merge_in_internal(
         &mut self,
         node_id: NodeIndex,
@@ -2010,7 +2194,7 @@ impl FetchDependencyGraph {
 
         if path.is_empty() {
             mutable_node
-                .selection_set
+                .selection_set_mut()
                 .add_selections(&merged.selection_set.selection_set)?;
         } else {
             // The merged nodes might have some @include/@skip at top-level that are already part of the path. If so,
@@ -2020,7 +2204,7 @@ impl FetchDependencyGraph {
                 &path.conditional_directives(),
             )?;
             mutable_node
-                .selection_set
+                .selection_set_mut()
                 .add_at_path(path, Some(&Arc::new(merged_selection_set)))?;
         }
 
@@ -2043,6 +2227,7 @@ impl FetchDependencyGraph {
     // - node_id's defer_ref == merged_id's defer_ref
     // - node_id's subgraph_name == merged_id's subgraph_name
     // - node_id's merge_at == merged_id's merge_at
+    // - merged_id is not an ancestor of node_id in the graph.
     fn merge_in_with_all_dependencies(
         &mut self,
         node_id: NodeIndex,
@@ -2063,7 +2248,7 @@ impl FetchDependencyGraph {
         merged_id: NodeIndex,
         path_in_this: &OpPath,
     ) {
-        let mut new_parent_relations = HashMap::new();
+        let mut new_parent_relations = IndexMap::default();
         for child_id in self.children_of(merged_id) {
             // This could already be a child of `this`. Typically, we can have case where we have:
             //     1
@@ -2130,18 +2315,17 @@ impl FetchDependencyGraph {
         let node = self.node_weight(node_id)?;
         let parent = self.node_weight(parent_relation.parent_node_id)?;
         let Some(parent_op_path) = &parent_relation.path_in_parent else {
-            return Err(FederationError::internal("Parent operation path is empty"));
+            return Ok(false);
         };
         let type_at_path = self.type_at_path(
             &parent.selection_set.selection_set.type_position,
             &parent.selection_set.selection_set.schema,
             parent_op_path,
         )?;
-        let new_node_is_unneeded = parent_relation.path_in_parent.is_some()
-            && node
-                .selection_set
-                .selection_set
-                .can_rebase_on(&type_at_path, &parent.selection_set.selection_set.schema)?;
+        let new_node_is_unneeded = node
+            .selection_set
+            .selection_set
+            .can_rebase_on(&type_at_path, &parent.selection_set.selection_set.schema)?;
         Ok(new_node_is_unneeded)
     }
 
@@ -2243,6 +2427,46 @@ impl std::fmt::Display for FetchDependencyGraph {
     }
 }
 
+// Necessary for `petgraph::dot::Dot::with_attr_getters` calls to compile, but not executed.
+impl std::fmt::Display for FetchDependencyGraphNode {
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Err(std::fmt::Error)
+    }
+}
+
+// Necessary for `petgraph::dot::Dot::with_attr_getters` calls to compile, but not executed.
+impl std::fmt::Display for FetchDependencyGraphEdge {
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Err(std::fmt::Error)
+    }
+}
+
+impl FetchDependencyGraph {
+    // GraphViz output for FetchDependencyGraph
+    pub fn to_dot(&self) -> String {
+        fn label_node(node_id: NodeIndex, node: &FetchDependencyGraphNode) -> String {
+            let label_str = node.multiline_display(node_id).to_string();
+            format!("label=\"{}\"", label_str.replace('"', "\\\""))
+        }
+
+        fn label_edge(edge_id: EdgeIndex) -> String {
+            format!("label=\"{}\"", edge_id.index())
+        }
+
+        let config = [
+            petgraph::dot::Config::NodeNoLabel,
+            petgraph::dot::Config::EdgeNoLabel,
+        ];
+        petgraph::dot::Dot::with_attr_getters(
+            &self.graph,
+            &config,
+            &(|_, er| label_edge(er.id())),
+            &(|_, (node_id, node)| label_node(node_id, node)),
+        )
+        .to_string()
+    }
+}
+
 impl FetchDependencyGraphNode {
     pub(crate) fn selection_set_mut(&mut self) -> &mut FetchSelectionSet {
         self.cached_cost = None;
@@ -2280,9 +2504,9 @@ impl FetchDependencyGraphNode {
     }
 
     fn remove_inputs_from_selection(&mut self) -> Result<(), FederationError> {
-        let fetch_selection_set = &mut self.selection_set;
         if let Some(inputs) = &mut self.inputs {
             self.cached_cost = None;
+            let fetch_selection_set = &mut self.selection_set;
             for (_, selection) in &inputs.selection_sets_per_parent_type {
                 fetch_selection_set.selection_set =
                     Arc::new(fetch_selection_set.selection_set.minus(selection)?);
@@ -2327,8 +2551,8 @@ impl FetchDependencyGraphNode {
         query_graph: &QueryGraph,
         handled_conditions: &Conditions,
         variable_definitions: &[Node<VariableDefinition>],
-        operation_directives: &Arc<DirectiveList>,
-        fragments: Option<&mut RebasedFragments>,
+        operation_directives: &DirectiveList,
+        operation_compression: &mut SubgraphOperationCompression,
         operation_name: Option<Name>,
     ) -> Result<Option<super::PlanNode>, FederationError> {
         if self.selection_set.selection_set.selections.is_empty() {
@@ -2371,7 +2595,7 @@ impl FetchDependencyGraphNode {
             list
         };
 
-        let mut operation = if self.is_entity_fetch {
+        let operation = if self.is_entity_fetch {
             operation_for_entities_fetch(
                 subgraph_schema,
                 selection,
@@ -2389,14 +2613,50 @@ impl FetchDependencyGraphNode {
                 &operation_name,
             )?
         };
-        if let Some(fragments) = fragments
-            .map(|rebased| rebased.for_subgraph(self.subgraph_name.clone(), subgraph_schema))
-        {
-            operation.reuse_fragments(fragments)?;
+        let operation =
+            operation_compression.compress(&self.subgraph_name, subgraph_schema, operation)?;
+        let operation_document = operation.try_into().map_err(|err| match err {
+            FederationError::SingleFederationError {
+                inner: SingleFederationError::InvalidGraphQL { diagnostics },
+                ..
+            } => FederationError::internal(format!(
+                "Query planning produced an invalid subgraph operation.\n{diagnostics}"
+            )),
+            _ => err,
+        })?;
+
+        // this function removes unnecessary pieces of the query plan requires selection set.
+        // PORT NOTE: this function was called trimSelectioNodes in the JS implementation
+        fn trim_requires_selection_set(
+            selection_set: &executable::SelectionSet,
+        ) -> Vec<executable::Selection> {
+            selection_set
+                .selections
+                .iter()
+                .filter_map(|s| match s {
+                    executable::Selection::Field(field) => Some(executable::Selection::from(
+                        executable::Field::new(field.name.clone(), field.definition.clone())
+                            .with_selections(trim_requires_selection_set(&field.selection_set)),
+                    )),
+                    executable::Selection::InlineFragment(inline_fragment) => {
+                        let new_fragment = inline_fragment
+                            .type_condition
+                            .clone()
+                            .map(executable::InlineFragment::with_type_condition)
+                            .unwrap_or_else(|| {
+                                executable::InlineFragment::without_type_condition(
+                                    inline_fragment.selection_set.ty.clone(),
+                                )
+                            })
+                            .with_selections(trim_requires_selection_set(
+                                &inline_fragment.selection_set,
+                            ));
+                        Some(executable::Selection::from(new_fragment))
+                    }
+                    executable::Selection::FragmentSpread(_) => None,
+                })
+                .collect()
         }
-
-        let operation_document = operation.try_into()?;
-
         let node = super::PlanNode::Fetch(Box::new(super::FetchNode {
             subgraph_name: self.subgraph_name.clone(),
             id: self.id.get().copied(),
@@ -2405,7 +2665,7 @@ impl FetchDependencyGraphNode {
                 .as_ref()
                 .map(executable::SelectionSet::try_from)
                 .transpose()?
-                .map(|selection_set| selection_set.selections),
+                .map(|selection_set| trim_requires_selection_set(&selection_set)),
             operation_document,
             operation_name,
             operation_kind: self.root_kind.into(),
@@ -2532,6 +2792,81 @@ impl FetchDependencyGraphNode {
         FetchDependencyNodeDisplay { node: self, index }
     }
 
+    // A variation of `fn display` with multiline output, which is more suitable for
+    // GraphViz output.
+    pub fn multiline_display(&self, index: NodeIndex) -> impl std::fmt::Display + '_ {
+        use std::fmt;
+        use std::fmt::Display;
+        use std::fmt::Formatter;
+
+        struct DisplayList<'a, T: Display>(&'a [T]);
+        impl<T: Display> Display for DisplayList<'_, T> {
+            fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+                let mut iter = self.0.iter();
+                if let Some(x) = iter.next() {
+                    write!(f, "{x}")?;
+                }
+                for x in iter {
+                    write!(f, "::{x}")?;
+                }
+                Ok(())
+            }
+        }
+
+        struct FetchDependencyNodeDisplay<'a> {
+            node: &'a FetchDependencyGraphNode,
+            index: NodeIndex,
+        }
+
+        impl Display for FetchDependencyNodeDisplay<'_> {
+            fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+                write!(f, "[{}]", self.index.index())?;
+                if self.node.defer_ref.is_some() {
+                    write!(f, "(deferred)")?;
+                }
+                if let Some(&id) = self.node.id.get() {
+                    write!(f, "{{id: {id}}}")?;
+                }
+
+                write!(f, " {}", self.node.subgraph_name)?;
+
+                match (self.node.merge_at.as_deref(), self.node.inputs.as_deref()) {
+                    (Some(merge_at), Some(inputs)) => {
+                        write!(
+                            f,
+                            // @(path::to::*::field)[{input1,input2} => { id }]
+                            "\n@({})\n{}\n=>\n{}\n",
+                            DisplayList(merge_at),
+                            inputs,
+                            self.node.selection_set.selection_set
+                        )?;
+                    }
+                    (Some(merge_at), None) => {
+                        write!(
+                            f,
+                            // @(path::to::*::field)[{} => { id }]
+                            "\n@({})\n{{}}\n=>\n{}\n",
+                            DisplayList(merge_at),
+                            self.node.selection_set.selection_set
+                        )?;
+                    }
+                    (None, _) => {
+                        // [(type){ id }]
+                        write!(
+                            f,
+                            "\n({})\n{}",
+                            self.node.parent_type, self.node.selection_set.selection_set
+                        )?;
+                    }
+                }
+
+                Ok(())
+            }
+        }
+
+        FetchDependencyNodeDisplay { node: self, index }
+    }
+
     // PORT_NOTE: In JS version, this value is memoized on the node struct.
     fn subgraph_and_merge_at_key(&self) -> Option<String> {
         // PORT_NOTE: In JS version, this hash value is defined as below.
@@ -2557,7 +2892,7 @@ fn operation_for_entities_fetch(
     subgraph_schema: &ValidFederationSchema,
     selection_set: SelectionSet,
     mut variable_definitions: Vec<Node<VariableDefinition>>,
-    operation_directives: &Arc<DirectiveList>,
+    operation_directives: &DirectiveList,
     operation_name: &Option<Name>,
 ) -> Result<Operation, FederationError> {
     variable_definitions.insert(0, representations_variable_definition(subgraph_schema)?);
@@ -2595,15 +2930,15 @@ fn operation_for_entities_fetch(
             schema: subgraph_schema.clone(),
             field_position: entities,
             alias: None,
-            arguments: Arc::new(vec![executable::Argument {
-                name: FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME,
-                value: executable::Value::Variable(FEDERATION_REPRESENTATIONS_VAR_NAME).into(),
-            }
-            .into()]),
+            arguments: ArgumentList::one((
+                FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME,
+                executable::Value::Variable(FEDERATION_REPRESENTATIONS_VAR_NAME),
+            )),
             directives: Default::default(),
             sibling_typename: None,
         })),
         Some(selection_set),
+        None,
     )?;
 
     let type_position: CompositeTypeDefinitionPosition = subgraph_schema
@@ -2624,7 +2959,7 @@ fn operation_for_entities_fetch(
         root_kind: SchemaRootDefinitionKind::Query,
         name: operation_name.clone(),
         variables: Arc::new(variable_definitions),
-        directives: Arc::clone(operation_directives),
+        directives: operation_directives.clone(),
         selection_set,
         named_fragments: Default::default(),
     })
@@ -2635,7 +2970,7 @@ fn operation_for_query_fetch(
     root_kind: SchemaRootDefinitionKind,
     selection_set: SelectionSet,
     variable_definitions: Vec<Node<VariableDefinition>>,
-    operation_directives: &Arc<DirectiveList>,
+    operation_directives: &DirectiveList,
     operation_name: &Option<Name>,
 ) -> Result<Operation, FederationError> {
     Ok(Operation {
@@ -2643,7 +2978,7 @@ fn operation_for_query_fetch(
         root_kind,
         name: operation_name.clone(),
         variables: Arc::new(variable_definitions),
-        directives: Arc::clone(operation_directives),
+        directives: operation_directives.clone(),
         selection_set,
         named_fragments: Default::default(),
     })
@@ -2715,7 +3050,8 @@ impl FetchSelectionSet {
         path_in_node: &OpPath,
         selection_set: Option<&Arc<SelectionSet>>,
     ) -> Result<(), FederationError> {
-        Arc::make_mut(&mut self.selection_set).add_at_path(path_in_node, selection_set)?;
+        let target = Arc::make_mut(&mut self.selection_set);
+        target.add_at_path(path_in_node, selection_set)?;
         // TODO: when calling this multiple times, maybe only re-compute conditions at the end?
         // Or make it lazily-initialized and computed on demand?
         self.conditions = self.selection_set.conditions()?;
@@ -2724,6 +3060,9 @@ impl FetchSelectionSet {
 
     fn add_selections(&mut self, selection_set: &Arc<SelectionSet>) -> Result<(), FederationError> {
         Arc::make_mut(&mut self.selection_set).add_selection_set(selection_set)?;
+        // TODO: when calling this multiple times, maybe only re-compute conditions at the end?
+        // Or make it lazily-initialized and computed on demand?
+        self.conditions = self.selection_set.conditions()?;
         Ok(())
     }
 }
@@ -2755,10 +3094,10 @@ impl FetchInputs {
     }
 
     fn add_all(&mut self, other: &Self) -> Result<(), FederationError> {
-        for selections in other.selection_sets_per_parent_type.values() {
-            self.add(selections)?;
-        }
-        Ok(())
+        other
+            .selection_sets_per_parent_type
+            .values()
+            .try_for_each(|selections| self.add(selections))
     }
 
     fn contains(&self, other: &Self) -> bool {
@@ -3564,7 +3903,7 @@ fn wrap_selection_with_type_and_conditions<T>(
                 schema: supergraph_schema.clone(),
                 parent_type_position: wrapping_type.clone(),
                 type_condition_position: Some(type_condition.clone()),
-                directives: Arc::new([directive].into_iter().collect()),
+                directives: [directive].into_iter().collect(),
                 selection_id: SelectionId::new(),
             }),
             acc,
@@ -3641,7 +3980,7 @@ fn compute_input_rewrites_on_key_fetch(
     {
         // rewrite path: [ ... on <input_type_name>, __typename ]
         let type_cond = FetchDataPathElement::TypenameEquals(input_type_name.clone());
-        let typename_field_elem = FetchDataPathElement::Key(TYPENAME_FIELD);
+        let typename_field_elem = FetchDataPathElement::Key(TYPENAME_FIELD, Default::default());
         let rewrite = FetchDataRewrite::ValueSetter(FetchDataValueSetter {
             path: vec![type_cond, typename_field_elem],
             set_value_to: dest_type.type_name().to_string().into(),
@@ -4258,8 +4597,225 @@ fn path_for_parent(
     let filtered_path = path.path_in_node.filter_on_schema(parent_schema);
     let final_path = concat_op_paths(parent_path.deref(), &filtered_path);
     Ok(FetchDependencyGraphNodePath {
+        schema: dependency_graph.supergraph_schema.clone(),
         full_path: path.full_path.clone(),
         path_in_node: Arc::new(final_path),
         response_path: path.response_path.clone(),
+        possible_types: path.possible_types.clone(),
+        possible_types_after_last_field: path.possible_types_after_last_field.clone(),
+        type_conditioned_fetching_enabled: path.type_conditioned_fetching_enabled,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::schema::position::InterfaceTypeDefinitionPosition;
+
+    #[test]
+    fn type_condition_fetching_disabled() {
+        let schema = apollo_compiler::Schema::parse_and_validate(
+            r#"
+                type Query {
+                    foo: Foo
+                }
+                interface Foo {
+                    bar: Bar
+                }
+                interface Bar {
+                    baz: String
+                }
+                type Foo_1 implements Foo {
+                    bar: Bar_1
+                    a: Int
+                }
+                type Foo_2 implements Foo {
+                    bar: Bar_2
+                    b: Int
+                }
+                type Bar_1 implements Bar {
+                    baz: String
+                    a: Int
+                }
+                type Bar_2 implements Bar {
+                    baz: String
+                    b: Int
+                }
+                type Bar_3 implements Bar {
+                    baz: String
+                }
+            "#,
+            "schema.graphql",
+        )
+        .unwrap();
+
+        let valid_schema = ValidFederationSchema::new(schema.clone()).unwrap();
+
+        let foo = object_field_element(&valid_schema, name!("Query"), name!("foo"));
+        let frag = inline_fragment_element(&valid_schema, name!("Foo"), Some(name!("Foo_1")));
+        let bar = object_field_element(&valid_schema, name!("Foo_1"), name!("bar"));
+        let frag2 = inline_fragment_element(&valid_schema, name!("Bar"), Some(name!("Bar_1")));
+        let baz = object_field_element(&valid_schema, name!("Bar_1"), name!("baz"));
+
+        let query_root = valid_schema
+            .get_type(name!("Query"))
+            .unwrap()
+            .try_into()
+            .unwrap();
+
+        let path = FetchDependencyGraphNodePath::new(valid_schema, false, query_root).unwrap();
+
+        let path = path.add(Arc::new(foo)).unwrap();
+        let path = path.add(Arc::new(frag)).unwrap();
+        let path = path.add(Arc::new(bar)).unwrap();
+        let path = path.add(Arc::new(frag2)).unwrap();
+        let path = path.add(Arc::new(baz)).unwrap();
+
+        assert_eq!(".foo.bar.baz", &to_string(&path.response_path));
+    }
+
+    #[test]
+    fn type_condition_fetching_enabled() {
+        let schema = apollo_compiler::Schema::parse_and_validate(
+            r#"
+                type Query {
+                    foo: Foo
+                }
+                interface Foo {
+                    bar: Bar
+                }
+                interface Bar {
+                    baz: String
+                }
+                type Foo_1 implements Foo {
+                    bar: Bar_1
+                    a: Int
+                }
+                type Foo_2 implements Foo {
+                    bar: Bar_2
+                    b: Int
+                }
+                type Bar_1 implements Bar {
+                    baz: String
+                    a: Int
+                }
+                type Bar_2 implements Bar {
+                    baz: String
+                    b: Int
+                }
+                type Bar_3 implements Bar {
+                    baz: String
+                }
+            "#,
+            "schema.graphql",
+        )
+        .unwrap();
+
+        let valid_schema = ValidFederationSchema::new(schema.clone()).unwrap();
+
+        let foo = object_field_element(&valid_schema, name!("Query"), name!("foo"));
+        let frag = inline_fragment_element(&valid_schema, name!("Foo"), Some(name!("Foo_1")));
+        let bar = object_field_element(&valid_schema, name!("Foo_1"), name!("bar"));
+        let frag2 = inline_fragment_element(&valid_schema, name!("Bar"), Some(name!("Bar_1")));
+        let baz = object_field_element(&valid_schema, name!("Bar_1"), name!("baz"));
+
+        let query_root = valid_schema
+            .get_type(name!("Query"))
+            .unwrap()
+            .try_into()
+            .unwrap();
+
+        let path = FetchDependencyGraphNodePath::new(valid_schema, true, query_root).unwrap();
+
+        let path = path.add(Arc::new(foo)).unwrap();
+        let path = path.add(Arc::new(frag)).unwrap();
+        let path = path.add(Arc::new(bar)).unwrap();
+        let path = path.add(Arc::new(frag2)).unwrap();
+        let path = path.add(Arc::new(baz)).unwrap();
+
+        assert_eq!(".|[Foo_1]foo.bar.baz", &to_string(&path.response_path));
+    }
+
+    fn object_field_element(
+        schema: &ValidFederationSchema,
+        object: apollo_compiler::Name,
+        field: apollo_compiler::Name,
+    ) -> OpPathElement {
+        OpPathElement::Field(super::Field::new(super::FieldData {
+            schema: schema.clone(),
+            field_position: ObjectTypeDefinitionPosition::new(object)
+                .field(field)
+                .into(),
+            alias: None,
+            arguments: Default::default(),
+            directives: Default::default(),
+            sibling_typename: None,
+        }))
+    }
+
+    fn interface_field_element(
+        schema: &ValidFederationSchema,
+        interface: apollo_compiler::Name,
+        field: apollo_compiler::Name,
+    ) -> OpPathElement {
+        OpPathElement::Field(super::Field::new(super::FieldData {
+            schema: schema.clone(),
+            field_position: InterfaceTypeDefinitionPosition::new(interface)
+                .field(field)
+                .into(),
+            alias: None,
+            arguments: Default::default(),
+            directives: Default::default(),
+            sibling_typename: None,
+        }))
+    }
+
+    fn inline_fragment_element(
+        schema: &ValidFederationSchema,
+        parent_type_name: apollo_compiler::Name,
+        type_condition_name: Option<apollo_compiler::Name>,
+    ) -> OpPathElement {
+        let parent_type = schema
+            .get_type(parent_type_name)
+            .unwrap()
+            .try_into()
+            .unwrap();
+        let type_condition =
+            type_condition_name.map(|n| schema.get_type(n).unwrap().try_into().unwrap());
+        OpPathElement::InlineFragment(super::InlineFragment::new(InlineFragmentData {
+            schema: schema.clone(),
+            parent_type_position: parent_type,
+            type_condition_position: type_condition,
+            directives: Default::default(),
+            selection_id: SelectionId::new(),
+        }))
+    }
+
+    fn to_string(response_path: &[FetchDataPathElement]) -> String {
+        format!(
+            ".{}",
+            response_path
+                .iter()
+                .map(|element| match element {
+                    FetchDataPathElement::Key(name, conditions) => {
+                        format!("{}{}", cond_to_string(conditions), name)
+                    }
+                    FetchDataPathElement::AnyIndex(conditions) => {
+                        format!("{}{}", cond_to_string(conditions), "@")
+                    }
+                    FetchDataPathElement::TypenameEquals(_) => {
+                        unimplemented!()
+                    }
+                })
+                .join(".")
+        )
+    }
+
+    fn cond_to_string(conditions: &[Name]) -> String {
+        if conditions.is_empty() {
+            return Default::default();
+        }
+
+        format!("|[{}]", conditions.iter().map(|n| n.to_string()).join(","))
+    }
 }

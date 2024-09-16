@@ -1,4 +1,5 @@
 use std::any::TypeId;
+use std::future::Future;
 use std::ops::Deref;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -13,6 +14,7 @@ use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::query_planner::BridgeQueryPlanner;
+use crate::query_planner::PlannerMode;
 use crate::services::execution;
 use crate::services::http;
 use crate::services::router;
@@ -92,9 +94,11 @@ impl<T: Plugin> PluginTestHarness<T> {
             let schema = Schema::parse(schema, &config).unwrap();
             let sdl = schema.raw_sdl.clone();
             let supergraph = schema.supergraph_schema().clone();
-            let planner = BridgeQueryPlanner::new(schema.into(), Arc::new(config), None)
-                .await
-                .unwrap();
+            let rust_planner = PlannerMode::maybe_rust(&schema, &config).unwrap();
+            let planner =
+                BridgeQueryPlanner::new(schema.into(), Arc::new(config), None, rust_planner)
+                    .await
+                    .unwrap();
             (sdl, supergraph, planner.subgraph_schemas())
         } else {
             (
@@ -124,14 +128,17 @@ impl<T: Plugin> PluginTestHarness<T> {
     }
 
     #[allow(dead_code)]
-    pub(crate) async fn call_router(
+    pub(crate) async fn call_router<F>(
         &self,
         request: router::Request,
-        response_fn: fn(router::Request) -> router::Response,
-    ) -> Result<router::Response, BoxError> {
+        response_fn: fn(router::Request) -> F,
+    ) -> Result<router::Response, BoxError>
+    where
+        F: Future<Output = Result<router::Response, BoxError>> + Send + 'static,
+    {
         let service: router::BoxService = router::BoxService::new(
             ServiceBuilder::new()
-                .service_fn(move |req: router::Request| async move { Ok((response_fn)(req)) }),
+                .service_fn(move |req: router::Request| async move { (response_fn)(req).await }),
         );
 
         self.plugin.router_service(service).call(request).await

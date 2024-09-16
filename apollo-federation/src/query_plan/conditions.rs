@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use apollo_compiler::ast::Directive;
 use apollo_compiler::collections::IndexMap;
-use apollo_compiler::executable::DirectiveList;
 use apollo_compiler::executable::Value;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
@@ -10,6 +9,7 @@ use indexmap::map::Entry;
 use serde::Serialize;
 
 use crate::error::FederationError;
+use crate::operation::DirectiveList;
 use crate::operation::Selection;
 use crate::operation::SelectionMap;
 use crate::operation::SelectionSet;
@@ -93,7 +93,7 @@ impl Conditions {
 
     pub(crate) fn from_directives(directives: &DirectiveList) -> Result<Self, FederationError> {
         let mut variables = IndexMap::default();
-        for directive in directives {
+        for directive in directives.iter_sorted() {
             let negated = match directive.name.as_str() {
                 "include" => false,
                 "skip" => true,
@@ -223,12 +223,12 @@ pub(crate) fn remove_conditions_from_selection_set(
                             selection.with_updated_selection_set(Some(updated_selection_set))?
                         }
                     } else {
-                        Selection::from_element(updated_element, Some(updated_selection_set))?
+                        Selection::from_element(updated_element, Some(updated_selection_set), None)?
                     }
                 } else if updated_element == element {
                     selection.clone()
                 } else {
-                    Selection::from_element(updated_element, None)?
+                    Selection::from_element(updated_element, None, None)?
                 };
                 selection_map.insert(new_selection);
             }
@@ -262,14 +262,12 @@ pub(crate) fn remove_unneeded_top_level_fragment_directives(
                     // if there is no type condition we should preserve the directive info
                     selection_map.insert(selection.clone());
                 } else {
-                    let mut needed_directives: Vec<Node<Directive>> = Vec::new();
-                    if fragment.directives.len() > 0 {
-                        for directive in fragment.directives.iter() {
-                            if !unneded_directives.contains(directive) {
-                                needed_directives.push(directive.clone());
-                            }
-                        }
-                    }
+                    let needed_directives: Vec<Node<Directive>> = fragment
+                        .directives
+                        .iter()
+                        .filter(|directive| !unneded_directives.contains(directive))
+                        .cloned()
+                        .collect();
 
                     // We recurse, knowing that we'll stop as soon as we hit field selections, so this only cover the fragments
                     // at the "top-level" of the set.
@@ -282,12 +280,15 @@ pub(crate) fn remove_unneeded_top_level_fragment_directives(
                         let final_selection =
                             inline_fragment.with_updated_selection_set(updated_selections);
                         selection_map.insert(Selection::InlineFragment(Arc::new(final_selection)));
+                    } else {
+                        // We can skip some of the fragment directives directive.
+                        let final_selection = inline_fragment
+                            .with_updated_directives_and_selection_set(
+                                DirectiveList::from_iter(needed_directives),
+                                updated_selections,
+                            );
+                        selection_map.insert(Selection::InlineFragment(Arc::new(final_selection)));
                     }
-
-                    // We can skip some of the fragment directives directive.
-                    let final_selection =
-                        inline_fragment.with_updated_directives(DirectiveList(needed_directives));
-                    selection_map.insert(Selection::InlineFragment(Arc::new(final_selection)));
                 }
             }
             _ => {
@@ -308,19 +309,17 @@ fn remove_conditions_of_element(
     element: OpPathElement,
     conditions: &VariableConditions,
 ) -> OpPathElement {
-    let updated_directives: DirectiveList = DirectiveList(
-        element
-            .directives()
-            .iter()
-            .filter(|d| {
-                !matches_condition_for_kind(d, conditions, ConditionKind::Include)
-                    && !matches_condition_for_kind(d, conditions, ConditionKind::Skip)
-            })
-            .cloned()
-            .collect(),
-    );
+    let updated_directives: DirectiveList = element
+        .directives()
+        .iter()
+        .filter(|d| {
+            !matches_condition_for_kind(d, conditions, ConditionKind::Include)
+                && !matches_condition_for_kind(d, conditions, ConditionKind::Skip)
+        })
+        .cloned()
+        .collect();
 
-    if updated_directives.0.len() == element.directives().len() {
+    if updated_directives.len() == element.directives().len() {
         element
     } else {
         element.with_updated_directives(updated_directives)

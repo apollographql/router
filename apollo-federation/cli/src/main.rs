@@ -1,5 +1,6 @@
 use std::fs;
 use std::io;
+use std::num::NonZeroU32;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -17,6 +18,32 @@ use clap::Parser;
 mod bench;
 use bench::run_bench;
 
+#[derive(Parser)]
+struct QueryPlannerArgs {
+    /// Enable @defer support.
+    #[arg(long, default_value_t = false)]
+    enable_defer: bool,
+    /// Reuse fragments to compress subgraph queries.
+    #[arg(long, default_value_t = false)]
+    reuse_fragments: bool,
+    /// Generate fragments to compress subgraph queries.
+    #[arg(long, default_value_t = false)]
+    generate_fragments: bool,
+    /// Run GraphQL validation check on generated subgraph queries. (default: true)
+    #[arg(long, default_missing_value = "true", require_equals = true, num_args = 0..=1)]
+    subgraph_validation: Option<bool>,
+    /// Set the `debug.max_evaluated_plans` option.
+    #[arg(long)]
+    max_evaluated_plans: Option<NonZeroU32>,
+    /// Set the `debug.paths_limit` option.
+    #[arg(long)]
+    paths_limit: Option<u32>,
+    /// If the supergraph only represents a single subgraph, pass through queries directly without
+    /// planning.
+    #[arg(long, default_value_t = false)]
+    single_subgraph_passthrough: bool,
+}
+
 /// CLI arguments. See <https://docs.rs/clap/latest/clap/_derive/index.html>
 #[derive(Parser)]
 struct Args {
@@ -30,6 +57,9 @@ enum Command {
     Api {
         /// Path(s) to one supergraph schema file, `-` for stdin or multiple subgraph schemas.
         schemas: Vec<PathBuf>,
+        /// Enable @defer support.
+        #[arg(long, default_value_t = false)]
+        enable_defer: bool,
     },
     /// Outputs the query graph from a supergraph schema or subgraph schemas
     QueryGraph {
@@ -46,6 +76,8 @@ enum Command {
         query: PathBuf,
         /// Path(s) to one supergraph schema file, `-` for stdin or multiple subgraph schemas.
         schemas: Vec<PathBuf>,
+        #[command(flatten)]
+        planner: QueryPlannerArgs,
     },
     /// Validate one supergraph schema file or multiple subgraph schemas
     Validate {
@@ -69,16 +101,48 @@ enum Command {
         supergraph_schema: PathBuf,
         /// The path to the directory that contains all operations to run against
         operations_dir: PathBuf,
+        #[command(flatten)]
+        planner: QueryPlannerArgs,
     },
+}
+
+impl QueryPlannerArgs {
+    fn apply(&self, config: &mut QueryPlannerConfig) {
+        config.incremental_delivery.enable_defer = self.enable_defer;
+        // --generate-fragments trumps --reuse-fragments
+        config.reuse_query_fragments = self.reuse_fragments && !self.generate_fragments;
+        config.generate_query_fragments = self.generate_fragments;
+        config.subgraph_graphql_validation = self.subgraph_validation.unwrap_or(true);
+        if let Some(max_evaluated_plans) = self.max_evaluated_plans {
+            config.debug.max_evaluated_plans = max_evaluated_plans;
+        }
+        config.debug.paths_limit = self.paths_limit;
+        config.debug.bypass_planner_for_single_subgraph = self.single_subgraph_passthrough;
+    }
+}
+
+impl From<QueryPlannerArgs> for QueryPlannerConfig {
+    fn from(value: QueryPlannerArgs) -> Self {
+        let mut config = QueryPlannerConfig::default();
+        value.apply(&mut config);
+        config
+    }
 }
 
 fn main() -> ExitCode {
     let args = Args::parse();
     let result = match args.command {
-        Command::Api { schemas } => to_api_schema(&schemas),
-        Command::QueryGraph { schemas } => dot_query_graph(&schemas),
-        Command::FederatedGraph { schemas } => dot_federated_graph(&schemas),
-        Command::Plan { query, schemas } => plan(&query, &schemas),
+        Command::Api {
+            schemas,
+            enable_defer,
+        } => cmd_api_schema(&schemas, enable_defer),
+        Command::QueryGraph { schemas } => cmd_query_graph(&schemas),
+        Command::FederatedGraph { schemas } => cmd_federated_graph(&schemas),
+        Command::Plan {
+            query,
+            schemas,
+            planner,
+        } => cmd_plan(&query, &schemas, planner),
         Command::Validate { schemas } => cmd_validate(&schemas),
         Command::Compose { schemas } => cmd_compose(&schemas),
         Command::Extract {
@@ -88,7 +152,8 @@ fn main() -> ExitCode {
         Command::Bench {
             supergraph_schema,
             operations_dir,
-        } => cmd_bench(&supergraph_schema, &operations_dir),
+            planner,
+        } => cmd_bench(&supergraph_schema, &operations_dir, planner),
     };
     match result {
         Err(error) => {
@@ -108,10 +173,10 @@ fn read_input(input_path: &Path) -> String {
     }
 }
 
-fn to_api_schema(file_paths: &[PathBuf]) -> Result<(), FederationError> {
+fn cmd_api_schema(file_paths: &[PathBuf], enable_defer: bool) -> Result<(), FederationError> {
     let supergraph = load_supergraph(file_paths)?;
     let api_schema = supergraph.to_api_schema(apollo_federation::ApiSchemaOptions {
-        include_defer: true,
+        include_defer: enable_defer,
         include_stream: false,
     })?;
     println!("{}", api_schema.schema());
@@ -154,7 +219,7 @@ fn load_supergraph(
     }
 }
 
-fn dot_query_graph(file_paths: &[PathBuf]) -> Result<(), FederationError> {
+fn cmd_query_graph(file_paths: &[PathBuf]) -> Result<(), FederationError> {
     let supergraph = load_supergraph(file_paths)?;
     let name: &str = if file_paths.len() == 1 {
         file_paths[0].file_stem().unwrap().to_str().unwrap()
@@ -167,7 +232,7 @@ fn dot_query_graph(file_paths: &[PathBuf]) -> Result<(), FederationError> {
     Ok(())
 }
 
-fn dot_federated_graph(file_paths: &[PathBuf]) -> Result<(), FederationError> {
+fn cmd_federated_graph(file_paths: &[PathBuf]) -> Result<(), FederationError> {
     let supergraph = load_supergraph(file_paths)?;
     let api_schema = supergraph.to_api_schema(Default::default())?;
     let query_graph =
@@ -176,14 +241,19 @@ fn dot_federated_graph(file_paths: &[PathBuf]) -> Result<(), FederationError> {
     Ok(())
 }
 
-fn plan(query_path: &Path, schema_paths: &[PathBuf]) -> Result<(), FederationError> {
+fn cmd_plan(
+    query_path: &Path,
+    schema_paths: &[PathBuf],
+    planner: QueryPlannerArgs,
+) -> Result<(), FederationError> {
     let query = read_input(query_path);
     let supergraph = load_supergraph(schema_paths)?;
-    let query_doc =
-        ExecutableDocument::parse_and_validate(supergraph.schema.schema(), query, query_path)?;
-    // TODO: add CLI parameters for config as needed
-    let config = QueryPlannerConfig::default();
+
+    let config = QueryPlannerConfig::from(planner);
     let planner = QueryPlanner::new(&supergraph, config)?;
+
+    let query_doc =
+        ExecutableDocument::parse_and_validate(planner.api_schema().schema(), query, query_path)?;
     print!("{}", planner.build_query_plan(&query_doc, None)?);
     Ok(())
 }
@@ -228,13 +298,18 @@ fn cmd_extract(file_path: &Path, dest: Option<&PathBuf>) -> Result<(), Federatio
 fn _cmd_bench(
     file_path: &Path,
     operations_dir: &PathBuf,
+    config: QueryPlannerConfig,
 ) -> Result<Vec<BenchOutput>, FederationError> {
     let supergraph = load_supergraph_file(file_path)?;
-    run_bench(supergraph, operations_dir)
+    run_bench(supergraph, operations_dir, config)
 }
 
-fn cmd_bench(file_path: &Path, operations_dir: &PathBuf) -> Result<(), FederationError> {
-    let results = _cmd_bench(file_path, operations_dir)?;
+fn cmd_bench(
+    file_path: &Path,
+    operations_dir: &PathBuf,
+    planner: QueryPlannerArgs,
+) -> Result<(), FederationError> {
+    let results = _cmd_bench(file_path, operations_dir, planner.into())?;
     println!("| operation_name | time (ms) | evaluated_plans (max 10000) | error |");
     println!("|----------------|----------------|-----------|-----------------------------|");
     for r in results {
@@ -245,5 +320,12 @@ fn cmd_bench(file_path: &Path, operations_dir: &PathBuf) -> Result<(), Federatio
 
 #[test]
 fn test_bench() {
-    insta::assert_json_snapshot!(_cmd_bench(Path::new("./fixtures/starstuff.graphql"), &PathBuf::from("./fixtures/queries")).unwrap(), { "[].timing" => 1.234 });
+    insta::assert_json_snapshot!(
+        _cmd_bench(
+            Path::new("./fixtures/starstuff.graphql"),
+            &PathBuf::from("./fixtures/queries"),
+            Default::default(),
+        ).unwrap(),
+        { "[].timing" => 1.234 },
+    );
 }

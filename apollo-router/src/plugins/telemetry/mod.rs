@@ -95,7 +95,6 @@ use crate::metrics::filter::FilterMeterProvider;
 use crate::metrics::meter_provider;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-use crate::plugins::demand_control;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::node::Id::ResponseName;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
@@ -290,6 +289,9 @@ impl Plugin for Telemetry {
         config.instrumentation.spans.update_defaults();
         config.instrumentation.instruments.update_defaults();
         config.exporters.logging.validate()?;
+        if let Err(err) = config.instrumentation.validate() {
+            ::tracing::warn!("Potential configuration error for 'instrumentation': {err}, please check the documentation on https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/events");
+        }
 
         let field_level_instrumentation_ratio =
             config.calculate_field_level_instrumentation_ratio()?;
@@ -516,6 +518,8 @@ impl Plugin for Telemetry {
                                     .map(|u| {
                                         u.stats_report_key == "## GraphQLValidationFailure\n"
                                             || u.stats_report_key == "## GraphQLParseFailure\n"
+                                            || u.stats_report_key
+                                                == "## GraphQLUnknownOperationName\n"
                                     })
                                     .unwrap_or(false)
                             }) {
@@ -939,6 +943,7 @@ impl Telemetry {
         if let Some(from_request_header) = &propagation.request.header_name {
             propagators.push(Box::new(CustomTraceIdPropagator::new(
                 from_request_header.to_string(),
+                propagation.request.format.clone(),
             )));
         }
 
@@ -1405,7 +1410,13 @@ impl Telemetry {
                                     config.apollo.experimental_local_field_metrics,
                                     ctx.unsupported_executable_document(),
                                 ) {
-                                    local_stat_recorder.visit(&query, &response);
+                                    local_stat_recorder.visit(
+                                        &query,
+                                        &response,
+                                        &ctx.get_demand_control_context()
+                                            .map(|c| c.variables)
+                                            .unwrap_or_default(),
+                                    );
                                 }
 
                                 if operation_kind == OperationKind::Subscription {
@@ -1508,14 +1519,13 @@ impl Telemetry {
                 let traces = Self::subgraph_ftv1_traces(context);
                 let per_type_stat = Self::per_type_stat(&traces, field_level_instrumentation_ratio);
                 let root_error_stats = Self::per_path_error_stats(&traces);
+                let strategy = context.get_demand_control_context().map(|c| c.strategy);
                 let limits_stats = context.extensions().with_lock(|guard| {
-                    let strategy = guard.get::<demand_control::strategy::Strategy>();
-                    let cost_ctx = guard.get::<demand_control::CostContext>();
                     let query_limits = guard.get::<OperationLimits<u32>>();
                     SingleLimitsStats {
                         strategy: strategy.and_then(|s| serde_json::to_string(&s.mode).ok()),
-                        cost_estimated: cost_ctx.map(|ctx| ctx.estimated),
-                        cost_actual: cost_ctx.map(|ctx| ctx.actual),
+                        cost_estimated: context.get_estimated_cost().ok().flatten(),
+                        cost_actual: context.get_actual_cost().ok().flatten(),
 
                         // These limits are related to the Traffic Shaping feature, unrelated to the Demand Control plugin
                         depth: query_limits.map_or(0, |ql| ql.depth as u64),
@@ -2020,13 +2030,15 @@ fn store_ftv1(subgraph_name: &ByteString, resp: SubgraphResponse) -> SubgraphRes
 struct CustomTraceIdPropagator {
     header_name: String,
     fields: [String; 1],
+    format: TraceIdFormat,
 }
 
 impl CustomTraceIdPropagator {
-    fn new(header_name: String) -> Self {
+    fn new(header_name: String, format: TraceIdFormat) -> Self {
         Self {
             fields: [header_name.clone()],
             header_name,
+            format,
         }
     }
 
@@ -2058,9 +2070,9 @@ impl TextMapPropagator for CustomTraceIdPropagator {
     fn inject_context(&self, cx: &opentelemetry::Context, injector: &mut dyn Injector) {
         let span = cx.span();
         let span_context = span.span_context();
-        if span_context.is_valid() {
-            let header_value = format!("{}", span_context.trace_id());
-            injector.set(&self.header_name, header_value);
+        if span_context.trace_id() != TraceId::INVALID {
+            let formatted_trace_id = self.format.format(span_context.trace_id());
+            injector.set(&self.header_name, formatted_trace_id);
         }
     }
 
@@ -2130,6 +2142,14 @@ mod tests {
     use http::StatusCode;
     use insta::assert_snapshot;
     use itertools::Itertools;
+    use opentelemetry_api::propagation::Injector;
+    use opentelemetry_api::propagation::TextMapPropagator;
+    use opentelemetry_api::trace::SpanContext;
+    use opentelemetry_api::trace::SpanId;
+    use opentelemetry_api::trace::TraceContextExt;
+    use opentelemetry_api::trace::TraceFlags;
+    use opentelemetry_api::trace::TraceId;
+    use opentelemetry_api::trace::TraceState;
     use serde_json::Value;
     use serde_json_bytes::json;
     use serde_json_bytes::ByteString;
@@ -2151,6 +2171,7 @@ mod tests {
     use crate::error::FetchError;
     use crate::graphql;
     use crate::graphql::Error;
+    use crate::graphql::IntoGraphQLErrors;
     use crate::graphql::Request;
     use crate::http_ext;
     use crate::json_ext::Object;
@@ -2159,6 +2180,12 @@ mod tests {
     use crate::plugin::test::MockSubgraphService;
     use crate::plugin::test::MockSupergraphService;
     use crate::plugin::DynPlugin;
+    use crate::plugins::demand_control::DemandControlError;
+    use crate::plugins::demand_control::COST_ACTUAL_KEY;
+    use crate::plugins::demand_control::COST_ESTIMATED_KEY;
+    use crate::plugins::demand_control::COST_RESULT_KEY;
+    use crate::plugins::demand_control::COST_STRATEGY_KEY;
+    use crate::plugins::telemetry::config::TraceIdFormat;
     use crate::plugins::telemetry::handle_error_internal;
     use crate::services::router::body::get_body_bytes;
     use crate::services::RouterRequest;
@@ -3195,11 +3222,184 @@ mod tests {
         let trace_id = String::from("04f9e396-465c-4840-bc2b-f493b8b1a7fc");
         let expected_trace_id = String::from("04f9e396465c4840bc2bf493b8b1a7fc");
 
-        let propagator = CustomTraceIdPropagator::new(header.clone());
+        let propagator = CustomTraceIdPropagator::new(header.clone(), TraceIdFormat::Uuid);
         let mut headers: HashMap<String, String> = HashMap::new();
         headers.insert(header, trace_id);
         let span = propagator.extract_span_context(&headers);
         assert!(span.is_some());
         assert_eq!(span.unwrap().trace_id().to_string(), expected_trace_id);
+    }
+
+    #[test]
+    fn test_header_propagation_format() {
+        struct Injected(HashMap<String, String>);
+        impl Injector for Injected {
+            fn set(&mut self, key: &str, value: String) {
+                self.0.insert(key.to_string(), value);
+            }
+        }
+        let mut injected = Injected(HashMap::new());
+        let _ctx = opentelemetry::Context::new()
+            .with_remote_span_context(SpanContext::new(
+                TraceId::from_u128(0x04f9e396465c4840bc2bf493b8b1a7fc),
+                SpanId::INVALID,
+                TraceFlags::default(),
+                false,
+                TraceState::default(),
+            ))
+            .attach();
+        let propagator = CustomTraceIdPropagator::new("my_header".to_string(), TraceIdFormat::Uuid);
+        propagator.inject_context(&opentelemetry::Context::current(), &mut injected);
+        assert_eq!(
+            injected.0.get("my_header").unwrap(),
+            "04f9e396-465c-4840-bc2b-f493b8b1a7fc"
+        );
+    }
+
+    #[derive(Clone)]
+    struct CostContext {
+        pub(crate) estimated: f64,
+        pub(crate) actual: f64,
+        pub(crate) result: &'static str,
+        pub(crate) strategy: &'static str,
+    }
+
+    async fn make_failed_demand_control_request(plugin: &dyn DynPlugin, cost_details: CostContext) {
+        let mut mock_service = MockSupergraphService::new();
+        mock_service
+            .expect_call()
+            .times(1)
+            .returning(move |req: SupergraphRequest| {
+                req.context.extensions().with_lock(|mut lock| {
+                    lock.insert(cost_details.clone());
+                });
+                req.context
+                    .insert(COST_ESTIMATED_KEY, cost_details.estimated)
+                    .unwrap();
+                req.context
+                    .insert(COST_ACTUAL_KEY, cost_details.actual)
+                    .unwrap();
+                req.context
+                    .insert(COST_RESULT_KEY, cost_details.result.to_string())
+                    .unwrap();
+                req.context
+                    .insert(COST_STRATEGY_KEY, cost_details.strategy.to_string())
+                    .unwrap();
+
+                let errors = if cost_details.result == "COST_ESTIMATED_TOO_EXPENSIVE" {
+                    DemandControlError::EstimatedCostTooExpensive {
+                        estimated_cost: cost_details.estimated,
+                        max_cost: (cost_details.estimated - 5.0).max(0.0),
+                    }
+                    .into_graphql_errors()
+                    .unwrap()
+                } else if cost_details.result == "COST_ACTUAL_TOO_EXPENSIVE" {
+                    DemandControlError::ActualCostTooExpensive {
+                        actual_cost: cost_details.actual,
+                        max_cost: (cost_details.actual - 5.0).max(0.0),
+                    }
+                    .into_graphql_errors()
+                    .unwrap()
+                } else {
+                    Vec::new()
+                };
+
+                SupergraphResponse::fake_builder()
+                    .context(req.context)
+                    .data(
+                        serde_json::to_value(graphql::Response::builder().errors(errors).build())
+                            .unwrap(),
+                    )
+                    .build()
+            });
+
+        let mut service = plugin.supergraph_service(BoxService::new(mock_service));
+        let router_req = SupergraphRequest::fake_builder().build().unwrap();
+        let _router_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(router_req)
+            .await
+            .unwrap()
+            .next_response()
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_demand_control_delta_filter() {
+        async {
+            let plugin = create_plugin_with_config(include_str!(
+                "testdata/demand_control_delta_filter.router.yaml"
+            ))
+            .await;
+            make_failed_demand_control_request(
+                plugin.as_ref(),
+                CostContext {
+                    estimated: 10.0,
+                    actual: 8.0,
+                    result: "COST_ACTUAL_TOO_EXPENSIVE",
+                    strategy: "static_estimated",
+                },
+            )
+            .await;
+
+            assert_histogram_sum!("cost.rejected.operations", 8.0);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_demand_control_result_filter() {
+        async {
+            let plugin = create_plugin_with_config(include_str!(
+                "testdata/demand_control_result_filter.router.yaml"
+            ))
+            .await;
+            make_failed_demand_control_request(
+                plugin.as_ref(),
+                CostContext {
+                    estimated: 10.0,
+                    actual: 0.0,
+                    result: "COST_ESTIMATED_TOO_EXPENSIVE",
+                    strategy: "static_estimated",
+                },
+            )
+            .await;
+
+            assert_histogram_sum!("cost.rejected.operations", 10.0);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_demand_control_result_attributes() {
+        async {
+            let plugin = create_plugin_with_config(include_str!(
+                "testdata/demand_control_result_attribute.router.yaml"
+            ))
+            .await;
+            make_failed_demand_control_request(
+                plugin.as_ref(),
+                CostContext {
+                    estimated: 10.0,
+                    actual: 0.0,
+                    result: "COST_ESTIMATED_TOO_EXPENSIVE",
+                    strategy: "static_estimated",
+                },
+            )
+            .await;
+
+            assert_histogram_sum!(
+                "cost.estimated",
+                10.0,
+                "cost.result" = "COST_ESTIMATED_TOO_EXPENSIVE"
+            );
+        }
+        .with_metrics()
+        .await;
     }
 }

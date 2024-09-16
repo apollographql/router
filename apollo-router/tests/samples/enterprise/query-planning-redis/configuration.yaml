@@ -8,3 +8,9 @@ supergraph:
     cache:
       redis:
         urls: ["redis://localhost:6379",]
+
+telemetry:
+  exporters:
+    logging:
+      stdout:
+        format: text

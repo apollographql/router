@@ -4,6 +4,12 @@ subtitle: Configure router caching for query plans and automatic persisted queri
 description: Configure in-memory caching for improved performance in Apollo GraphOS Router or Apollo Router Core. Configure query plans and automatic persisted queries caching.
 ---
 
+<SummitCallout
+  topic="graph performance"
+  workshopName="Better, faster, stronger: Advanced configurations to boost your router performance"
+  URL="https://reg.summit.graphql.com/flow/apollo/summit24/AttendeePortal/page/catalog/session/1712947098784001VPCx"
+/>
+
 Both GraphOS Router and Apollo Router Core use an in-memory LRU cache to store the following data:
 
 - [Generated query plans](#caching-query-plans)
@@ -38,25 +44,11 @@ supergraph:
         limit: 512 # This is the default value.
 ```
 
-On schema reloads, the cache will be reset, and queries will need to go through query planning again. To avoid latencies right after the reload, you can configure the router to pregenerate query plans for the most used queries before switching to the new schema:
-
-```yaml title="router.yaml"
-supergraph:
-  query_planning:
-    # Pre-plan the 100 most used operations when the supergraph changes.  (Default is "0", disabled.)
-    warmed_up_queries: 100
-    cache:
-      in_memory:
-        limit: 512
-```
-
 ### Cache warm-up
 
 When loading a new schema, a query plan might change for some queries, so cached query plans cannot be reused. 
 
-To prevent increased latency upon query plan cache invalidation, the router precomputes query plans for:
-* The most used queries from the cache.
-* The entire list of persisted queries.
+To prevent increased latency upon query plan cache invalidation, the router precomputes query plans for the most used queries from the cache when a new schema is loaded.
 
 Precomputed plans will be cached before the router switches traffic over to the new schema.
 
@@ -69,18 +61,23 @@ supergraph:
     warmed_up_queries: 100
 ```
 
+(In addition, the router can use the contents of the [persisted query list](./persisted-queries) to prewarm the cache. By default, it does this when loading a new schema but not on startup; you can [configure](./persisted-queries#persisted-queries#experimental_prewarm_query_plan_cache) it to change either of these defaults.)
+
 To get more information on the planning and warm-up process use the following metrics (where `<storage>` can be `redis` for distributed cache or `memory`):
 
 * counters:
-  * `apollo_router_cache_size{kind="query planner", storage="<storage>}`: current size of the cache (only for in-memory cache)
-  * `apollo_router_cache_hit_count{kind="query planner", storage="<storage>}`
-  * `apollo_router_cache_miss_count{kind="query planner", storage="<storage>}`
+  * `apollo_router_cache_hit_count{kind="query planner", storage="<storage>"}`
+  * `apollo_router_cache_miss_count{kind="query planner", storage="<storage>"}`
 
 * histograms:
   * `apollo.router.query_planning.plan.duration`: time spent planning queries
   * `apollo_router_schema_loading_time`: time spent loading a schema
-  * `apollo_router_cache_hit_time{kind="query planner", storage="<storage>}`: time to get a value from the cache
-  * `apollo_router_cache_miss_time{kind="query planner", storage="<storage>}`
+  * `apollo_router_cache_hit_time{kind="query planner", storage="<storage>"}`: time to get a value from the cache
+  * `apollo_router_cache_miss_time{kind="query planner", storage="<storage>"}`
+
+* gauges
+  * `apollo_router_cache_size{kind="query planner", storage="memory"}`: current size of the cache (only for in-memory cache)
+  * `apollo.router.cache.storage.estimated_size{kind="query planner", storage="memory"}`: estimated storage size of the cache (only for in-memory query planner cache)
 
 Typically, we would look at `apollo_router_cache_size` and the cache hit rate to define the right size of the in memory cache,
 then look at `apollo_router_schema_loading_time` and `apollo.router.query_planning.plan.duration` to decide how much time we want to spend warming up queries.

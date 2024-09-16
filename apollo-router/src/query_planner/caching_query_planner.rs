@@ -24,8 +24,11 @@ use tower_service::Service;
 use tracing::Instrument;
 
 use super::fetch::QueryHash;
+use crate::cache::estimate_size;
 use crate::cache::storage::InMemoryCache;
+use crate::cache::storage::ValueType;
 use crate::cache::DeduplicatingCache;
+use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
 use crate::plugins::authorization::AuthorizationPlugin;
@@ -60,6 +63,7 @@ pub(crate) enum ConfigMode {
     // for now use the JS config as it expected to be identical to the Rust one
     Rust(Arc<QueryPlannerConfig>),
     Both(Arc<QueryPlannerConfig>),
+    BothBestEffort(Arc<QueryPlannerConfig>),
     Js(Arc<QueryPlannerConfig>),
 }
 
@@ -133,6 +137,9 @@ where
             crate::configuration::QueryPlannerMode::Both => {
                 ConfigMode::Both(Arc::new(configuration.js_query_planner_config()))
             }
+            crate::configuration::QueryPlannerMode::BothBestEffort => {
+                ConfigMode::BothBestEffort(Arc::new(configuration.js_query_planner_config()))
+            }
         };
         Ok(Self {
             cache,
@@ -161,7 +168,7 @@ where
         previous_cache: Option<InMemoryCachePlanner>,
         count: Option<usize>,
         experimental_reuse_query_plans: bool,
-        experimental_pql_prewarm: bool,
+        experimental_pql_prewarm: &PersistedQueriesPrewarmQueryPlanCache,
     ) {
         let _timer = Timer::new(|duration| {
             ::tracing::info!(
@@ -201,7 +208,7 @@ where
                             _,
                         )| WarmUpCachingQueryKey {
                             query: query.clone(),
-                            operation: operation.clone(),
+                            operation_name: operation.clone(),
                             hash: Some(hash.clone()),
                             metadata: metadata.clone(),
                             plan_options: plan_options.clone(),
@@ -217,8 +224,9 @@ where
 
         cache_keys.shuffle(&mut thread_rng());
 
-        let should_warm_with_pqs =
-            (experimental_pql_prewarm && previous_cache.is_none()) || previous_cache.is_some();
+        let should_warm_with_pqs = (experimental_pql_prewarm.on_startup
+            && previous_cache.is_none())
+            || (experimental_pql_prewarm.on_reload && previous_cache.is_some());
         let persisted_queries_operations = persisted_query_layer.all_operations();
 
         let capacity = if should_warm_with_pqs {
@@ -246,7 +254,7 @@ where
                 for query in queries {
                     all_cache_keys.push(WarmUpCachingQueryKey {
                         query,
-                        operation: None,
+                        operation_name: None,
                         hash: None,
                         metadata: CacheKeyMetadata::default(),
                         plan_options: PlanOptions::default(),
@@ -263,7 +271,7 @@ where
         let mut reused = 0usize;
         for WarmUpCachingQueryKey {
             mut query,
-            operation,
+            operation_name,
             hash,
             metadata,
             plan_options,
@@ -272,8 +280,8 @@ where
         } in all_cache_keys
         {
             let context = Context::new();
-            let doc = match query_analysis
-                .parse_document(&query, operation.as_deref())
+            let (doc, _operation_def) = match query_analysis
+                .parse_document(&query, operation_name.as_deref())
                 .await
             {
                 Ok(doc) => doc,
@@ -282,7 +290,7 @@ where
 
             let caching_key = CachingQueryKey {
                 query: query.clone(),
-                operation: operation.clone(),
+                operation: operation_name.clone(),
                 hash: doc.hash.clone(),
                 schema_id: Arc::clone(&self.schema.schema_id),
                 metadata,
@@ -316,8 +324,8 @@ where
                 })
                 .await;
             if entry.is_first() {
-                let doc = match query_analysis
-                    .parse_document(&query, operation.as_deref())
+                let (doc, _operation_def) = match query_analysis
+                    .parse_document(&query, operation_name.as_deref())
                     .await
                 {
                     Ok(doc) => doc,
@@ -342,7 +350,7 @@ where
 
                 let request = QueryPlannerRequest {
                     query,
-                    operation_name: operation,
+                    operation_name,
                     context: context.clone(),
                 };
 
@@ -376,14 +384,19 @@ where
 }
 
 impl CachingQueryPlanner<BridgeQueryPlannerPool> {
-    pub(crate) fn planners(&self) -> Vec<Arc<Planner<QueryPlanResult>>> {
-        self.delegate.planners()
+    pub(crate) fn js_planners(&self) -> Vec<Arc<Planner<QueryPlanResult>>> {
+        self.delegate.js_planners()
     }
 
     pub(crate) fn subgraph_schemas(
         &self,
     ) -> Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>> {
         self.delegate.subgraph_schemas()
+    }
+
+    pub(crate) fn activate(&self) {
+        self.cache.activate();
+        self.delegate.activate();
     }
 }
 
@@ -540,7 +553,7 @@ where
                                 }
                             }
 
-                            // This will be overridden when running in ApolloMetricsGenerationMode::New mode
+                            // This will be overridden by the Rust usage reporting implementation
                             if let Some(QueryPlannerContent::Plan { plan, .. }) = &content {
                                 context.extensions().with_lock(|mut lock| {
                                     lock.insert::<Arc<UsageReporting>>(plan.usage_reporting.clone())
@@ -679,12 +692,23 @@ impl Hash for CachingQueryKey {
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub(crate) struct WarmUpCachingQueryKey {
     pub(crate) query: String,
-    pub(crate) operation: Option<String>,
+    pub(crate) operation_name: Option<String>,
     pub(crate) hash: Option<Arc<QueryHash>>,
     pub(crate) metadata: CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
     pub(crate) config_mode: ConfigMode,
     pub(crate) introspection: bool,
+}
+
+impl ValueType for Result<QueryPlannerContent, Arc<QueryPlannerError>> {
+    fn estimated_size(&self) -> Option<usize> {
+        match self {
+            Ok(QueryPlannerContent::Plan { plan }) => Some(plan.estimated_size()),
+            Ok(QueryPlannerContent::Response { response }) => Some(estimate_size(response)),
+            Ok(QueryPlannerContent::IntrospectionDisabled) => None,
+            Err(e) => Some(estimate_size(e)),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -838,6 +862,7 @@ mod tests {
                     .into(),
                     query: Arc::new(Query::empty()),
                     query_metrics: Default::default(),
+                    estimated_size: Default::default(),
                 };
                 let qp_content = QueryPlannerContent::Plan {
                     plan: Arc::new(query_plan),

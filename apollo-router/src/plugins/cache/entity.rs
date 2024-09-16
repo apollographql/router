@@ -36,6 +36,7 @@ use crate::batching::BatchQuery;
 use crate::cache::redis::RedisCacheStorage;
 use crate::cache::redis::RedisKey;
 use crate::cache::redis::RedisValue;
+use crate::cache::storage::ValueType;
 use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::configuration::RedisCache;
 use crate::error::FetchError;
@@ -77,8 +78,8 @@ pub(crate) struct EntityCache {
 }
 
 pub(crate) struct Storage {
-    all: Option<RedisCacheStorage>,
-    subgraphs: HashMap<String, RedisCacheStorage>,
+    pub(crate) all: Option<RedisCacheStorage>,
+    pub(crate) subgraphs: HashMap<String, RedisCacheStorage>,
 }
 
 impl Storage {
@@ -277,7 +278,20 @@ impl Plugin for EntityCache {
             subgraphs: subgraph_storages,
         });
 
-        let invalidation = Invalidation::new(storage.clone()).await?;
+        let invalidation = Invalidation::new(
+            storage.clone(),
+            init.config
+                .invalidation
+                .as_ref()
+                .map(|i| i.scan_count)
+                .unwrap_or(1000),
+            init.config
+                .invalidation
+                .as_ref()
+                .map(|i| i.concurrent_requests)
+                .unwrap_or(10),
+        )
+        .await?;
 
         Ok(Self {
             storage,
@@ -447,7 +461,7 @@ impl EntityCache {
             all: Some(storage),
             subgraphs: HashMap::new(),
         });
-        let invalidation = Invalidation::new(storage.clone()).await?;
+        let invalidation = Invalidation::new(storage.clone(), 1000, 10).await?;
 
         Ok(Self {
             storage,
@@ -465,6 +479,8 @@ impl EntityCache {
                     IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
                     4000,
                 )),
+                scan_count: 1000,
+                concurrent_requests: 10,
             })),
             invalidation,
         })
@@ -590,11 +606,13 @@ impl InnerCacheService {
                             // we did not know in advance that this was a query with a private scope, so we update the cache key
                             if !is_known_private {
                                 self.private_queries.write().await.insert(query.to_string());
+
+                                if let Some(s) = private_id.as_ref() {
+                                    root_cache_key = format!("{root_cache_key}:{s}");
+                                }
                             }
 
-                            if let Some(s) = private_id.as_ref() {
-                                root_cache_key = format!("{root_cache_key}:{s}");
-                            } else {
+                            if private_id.is_none() {
                                 // the response has a private scope but we don't have a way to differentiate users, so we do not store the response in cache
                                 return Ok(response);
                             }
@@ -656,8 +674,48 @@ impl InnerCacheService {
             .await?
             {
                 ControlFlow::Break(response) => Ok(response),
-                ControlFlow::Continue((request, cache_result)) => {
-                    let mut response = self.service.call(request).await?;
+                ControlFlow::Continue((request, mut cache_result)) => {
+                    let context = request.context.clone();
+                    let mut response = match self.service.call(request).await {
+                        Ok(response) => response,
+                        Err(e) => {
+                            let e = match e.downcast::<FetchError>() {
+                                Ok(inner) => match *inner {
+                                    FetchError::SubrequestHttpError { .. } => *inner,
+                                    _ => FetchError::SubrequestHttpError {
+                                        status_code: None,
+                                        service: self.name.to_string(),
+                                        reason: inner.to_string(),
+                                    },
+                                },
+                                Err(e) => FetchError::SubrequestHttpError {
+                                    status_code: None,
+                                    service: self.name.to_string(),
+                                    reason: e.to_string(),
+                                },
+                            };
+
+                            let graphql_error = e.to_graphql_error(None);
+
+                            let (new_entities, new_errors) = assemble_response_from_errors(
+                                &[graphql_error],
+                                &mut cache_result.0,
+                            );
+
+                            let mut data = Object::default();
+                            data.insert(ENTITIES, new_entities.into());
+
+                            let mut response = subgraph::Response::builder()
+                                .context(context)
+                                .data(Value::Object(data))
+                                .errors(new_errors)
+                                .extensions(Object::new())
+                                .build();
+                            CacheControl::no_store().to_headers(response.response.headers_mut())?;
+
+                            return Ok(response);
+                        }
+                    };
 
                     let mut cache_control =
                         if response.response.headers().contains_key(CACHE_CONTROL) {
@@ -884,6 +942,12 @@ struct CacheEntry {
     data: Value,
 }
 
+impl ValueType for CacheEntry {
+    fn estimated_size(&self) -> Option<usize> {
+        None
+    }
+}
+
 async fn cache_store_root_from_response(
     cache: RedisCacheStorage,
     subgraph_ttl: Option<Duration>,
@@ -964,6 +1028,15 @@ async fn cache_store_entities_from_response(
             .and_then(|v| v.as_object_mut())
             .map(|o| o.insert(ENTITIES, new_entities.into()));
         response.response.body_mut().data = data;
+        response.response.body_mut().errors = new_errors;
+    } else {
+        let (new_entities, new_errors) =
+            assemble_response_from_errors(&response.response.body().errors, &mut result_from_cache);
+
+        let mut data = Object::default();
+        data.insert(ENTITIES, new_entities.into());
+
+        response.response.body_mut().data = Some(Value::Object(data));
         response.response.body_mut().errors = new_errors;
     }
 
@@ -1317,4 +1390,32 @@ async fn insert_entities_in_result(
     }
 
     Ok((new_entities, new_errors))
+}
+
+fn assemble_response_from_errors(
+    graphql_errors: &[Error],
+    result: &mut Vec<IntermediateResult>,
+) -> (Vec<Value>, Vec<Error>) {
+    let mut new_entities = Vec::new();
+    let mut new_errors = Vec::new();
+
+    for (new_entity_idx, IntermediateResult { cache_entry, .. }) in result.drain(..).enumerate() {
+        match cache_entry {
+            Some(v) => {
+                new_entities.push(v.data);
+            }
+            None => {
+                new_entities.push(Value::Null);
+
+                for mut error in graphql_errors.iter().cloned() {
+                    error.path = Some(Path(vec![
+                        PathElement::Key(ENTITIES.to_string(), None),
+                        PathElement::Index(new_entity_idx),
+                    ]));
+                    new_errors.push(error);
+                }
+            }
+        }
+    }
+    (new_entities, new_errors)
 }

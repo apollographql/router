@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
+use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
@@ -15,7 +16,7 @@ use crate::error::SingleFederationError;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::operation::normalize_operation;
 use crate::operation::NamedFragments;
-use crate::operation::RebasedFragments;
+use crate::operation::Operation;
 use crate::operation::SelectionSet;
 use crate::query_graph::build_federated_query_graph;
 use crate::query_graph::path_tree::OpPathTree;
@@ -23,6 +24,7 @@ use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphNodeType;
 use crate::query_plan::fetch_dependency_graph::compute_nodes_for_tree;
 use crate::query_plan::fetch_dependency_graph::FetchDependencyGraph;
+use crate::query_plan::fetch_dependency_graph::FetchDependencyGraphNodePath;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToCostProcessor;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToQueryPlanProcessor;
@@ -45,6 +47,10 @@ use crate::schema::ValidFederationSchema;
 use crate::utils::logging::snapshot;
 use crate::ApiSchemaOptions;
 use crate::Supergraph;
+
+pub(crate) const OVERRIDE_LABEL_ARG_NAME: &str = "overrideLabel";
+pub(crate) const CONTEXT_DIRECTIVE: &str = "context";
+pub(crate) const JOIN_FIELD: &str = "join__field";
 
 #[derive(Debug, Clone, Hash)]
 pub struct QueryPlannerConfig {
@@ -90,6 +96,14 @@ pub struct QueryPlannerConfig {
     /// in this sub-set are provided without guarantees of stability (they may be dangerous) or
     /// continued support (they may be removed without warning).
     pub debug: QueryPlannerDebugConfig,
+
+    /// Enables type conditioned fetching.
+    /// This flag is a workaround, which may yield significant
+    /// performance degradation when computing query plans,
+    /// and increase query plan size.
+    ///
+    /// If you aren't aware of this flag, you probably don't need it.
+    pub type_conditioned_fetching: bool,
 }
 
 impl Default for QueryPlannerConfig {
@@ -100,6 +114,7 @@ impl Default for QueryPlannerConfig {
             generate_query_fragments: false,
             incremental_delivery: Default::default(),
             debug: Default::default(),
+            type_conditioned_fetching: Default::default(),
         }
     }
 }
@@ -208,6 +223,7 @@ impl QueryPlanner {
         config: QueryPlannerConfig,
     ) -> Result<Self, FederationError> {
         config.assert_valid();
+        Self::check_unsupported_features(supergraph)?;
 
         let supergraph_schema = supergraph.schema.clone();
         let api_schema = supergraph.to_api_schema(ApiSchemaOptions {
@@ -326,13 +342,11 @@ impl QueryPlanner {
     ) -> Result<QueryPlan, FederationError> {
         let operation = document
             .operations
-            .get(operation_name.as_ref().map(|name| name.as_str()))
-            // TODO(@goto-bus-stop) this is not an internal error, but a user error
-            .map_err(|_| FederationError::internal("requested operation does not exist"))?;
+            .get(operation_name.as_ref().map(|name| name.as_str()))?;
 
-        if operation.selection_set.selections.is_empty() {
+        if operation.selection_set.is_empty() {
             // This should never happen because `operation` comes from a known-valid document.
-            // TODO(@goto-bus-stop) it's probably fair to panic here :)
+            // We could panic here but we are returning a `Result` already anyways, so shrug!
             return Err(FederationError::internal(
                 "Invalid operation: empty selection set",
             ));
@@ -368,7 +382,6 @@ impl QueryPlanner {
             }
         }
 
-        let reuse_query_fragments = self.config.reuse_query_fragments;
         let normalized_operation = normalize_operation(
             operation,
             NamedFragments::new(&document.fragments, &self.api_schema),
@@ -408,7 +421,7 @@ impl QueryPlanner {
         };
         */
 
-        if normalized_operation.selection_set.selections.is_empty() {
+        if normalized_operation.selection_set.is_empty() {
             return Ok(QueryPlan::default());
         }
 
@@ -433,23 +446,25 @@ impl QueryPlanner {
             );
         };
 
-        let rebased_fragments = if reuse_query_fragments {
+        let operation_compression = if self.config.generate_query_fragments {
+            SubgraphOperationCompression::GenerateFragments
+        } else if self.config.reuse_query_fragments {
             // For all subgraph fetches we query `__typename` on every abstract types (see
             // `FetchDependencyGraphNode::to_plan_node`) so if we want to have a chance to reuse
             // fragments, we should make sure those fragments also query `__typename` for every
             // abstract type.
-            Some(RebasedFragments::new(
+            SubgraphOperationCompression::ReuseFragments(RebasedFragments::new(
                 normalized_operation
                     .named_fragments
                     .add_typename_field_for_abstract_types_in_named_fragments()?,
             ))
         } else {
-            None
+            SubgraphOperationCompression::Disabled
         };
         let mut processor = FetchDependencyGraphToQueryPlanProcessor::new(
             normalized_operation.variables.clone(),
             normalized_operation.directives.clone(),
-            rebased_fragments,
+            operation_compression,
             operation.name.clone(),
             assigned_defer_labels,
         );
@@ -532,6 +547,89 @@ impl QueryPlanner {
     pub fn api_schema(&self) -> &ValidFederationSchema {
         &self.api_schema
     }
+
+    fn check_unsupported_features(supergraph: &Supergraph) -> Result<(), FederationError> {
+        // We have a *progressive* override when `join__field` has a
+        // non-null value for `overrideLabel` field.
+        //
+        // This looks at object types' fields and their directive
+        // applications, looking specifically for `@join__field`
+        // arguments list.
+        let has_progressive_overrides = supergraph
+            .schema
+            .schema()
+            .types
+            .values()
+            .filter_map(|extended_type| {
+                // The override label args can be only on ObjectTypes
+                if let ExtendedType::Object(object_type) = extended_type {
+                    Some(object_type)
+                } else {
+                    None
+                }
+            })
+            .flat_map(|object_type| &object_type.fields)
+            .flat_map(|(_, field)| {
+                field
+                    .directives
+                    .iter()
+                    .filter(|d| d.name.as_str() == JOIN_FIELD)
+            })
+            .any(|join_directive| {
+                if let Some(override_label_arg) =
+                    join_directive.argument_by_name(OVERRIDE_LABEL_ARG_NAME)
+                {
+                    // Any argument value for `overrideLabel` that's not
+                    // null can be considered as progressive override usage
+                    if !override_label_arg.is_null() {
+                        return true;
+                    }
+                    return false;
+                }
+                false
+            });
+        if has_progressive_overrides {
+            let message = "\
+                `experimental_query_planner_mode: new` or `both` cannot yet \
+                be used with progressive overrides. \
+                Remove uses of progressive overrides to try the experimental query planner, \
+                otherwise switch back to `legacy` or `both_best_effort`.\
+            ";
+            return Err(SingleFederationError::UnsupportedFeature {
+                message: message.to_owned(),
+                kind: crate::error::UnsupportedFeatureKind::ProgressiveOverrides,
+            }
+            .into());
+        }
+
+        // We will only check for `@context` direcive, since
+        // `@fromContext` can only be used if `@context` is already
+        // applied, and we assume a correctly composed supergraph.
+        //
+        // `@context` can only be applied on Object Types, Interface
+        // Types and Unions. For simplicity of this function, we just
+        // check all 'extended_type` directives.
+        let has_set_context = supergraph
+            .schema
+            .schema()
+            .types
+            .values()
+            .any(|extended_type| extended_type.directives().has(CONTEXT_DIRECTIVE));
+        if has_set_context {
+            let message = "\
+                `experimental_query_planner_mode: new` or `both` cannot yet \
+                be used with `@context`. \
+                Remove uses of `@context` to try the experimental query planner, \
+                otherwise switch back to `legacy` or `both_best_effort`.\
+            ";
+            return Err(SingleFederationError::UnsupportedFeature {
+                message: message.to_owned(),
+                kind: crate::error::UnsupportedFeatureKind::Context,
+            }
+            .into());
+        }
+        Ok(())
+    }
 }
 
 fn compute_root_serial_dependency_graph(
@@ -594,6 +692,7 @@ fn compute_root_serial_dependency_graph(
                 operation.root_kind,
                 &mut fetch_dependency_graph,
                 &prev_path,
+                parameters.config.type_conditioned_fetching,
             )?;
         } else {
             // PORT_NOTE: It is unclear if they correct thing to do here is get the next ID, use
@@ -631,6 +730,7 @@ pub(crate) fn compute_root_fetch_groups(
     root_kind: SchemaRootDefinitionKind,
     dependency_graph: &mut FetchDependencyGraph,
     path: &OpPathTree,
+    type_conditioned_fetching_enabled: bool,
 ) -> Result<(), FederationError> {
     // The root of the pathTree is one of the "fake" root of the subgraphs graph,
     // which belongs to no subgraph but points to each ones.
@@ -643,7 +743,7 @@ pub(crate) fn compute_root_fetch_groups(
         let (_source_node, target_node) = path.graph.edge_endpoints(edge)?;
         let target_node = path.graph.node_weight(target_node)?;
         let subgraph_name = &target_node.source;
-        let root_type = match &target_node.type_ {
+        let root_type: CompositeTypeDefinitionPosition = match &target_node.type_ {
             QueryGraphNodeType::SchemaType(OutputTypeDefinitionPosition::Object(object)) => {
                 object.clone().into()
             }
@@ -653,14 +753,21 @@ pub(crate) fn compute_root_fetch_groups(
                 )))
             }
         };
-        let fetch_dependency_node =
-            dependency_graph.get_or_create_root_node(subgraph_name, root_kind, root_type)?;
+        let fetch_dependency_node = dependency_graph.get_or_create_root_node(
+            subgraph_name,
+            root_kind,
+            root_type.clone(),
+        )?;
         snapshot!(dependency_graph, "tree_with_root_node");
         compute_nodes_for_tree(
             dependency_graph,
             &child.tree,
             fetch_dependency_node,
-            Default::default(),
+            FetchDependencyGraphNodePath::new(
+                dependency_graph.supergraph_schema.clone(),
+                type_conditioned_fetching_enabled,
+                root_type,
+            )?,
             Default::default(),
             &Default::default(),
         )?;
@@ -766,10 +873,72 @@ fn compute_plan_for_defer_conditionals(
     _parameters: &mut QueryPlanningParameters,
     _defer_conditions: IndexMap<String, IndexSet<String>>,
 ) -> Result<Option<PlanNode>, FederationError> {
-    Err(SingleFederationError::Internal {
+    Err(SingleFederationError::UnsupportedFeature {
         message: String::from("@defer is currently not supported"),
+        kind: crate::error::UnsupportedFeatureKind::Defer,
     }
     .into())
+}
+
+/// Tracks fragments from the original operation, along with versions rebased on other subgraphs.
+pub(crate) struct RebasedFragments {
+    original_fragments: NamedFragments,
+    /// Map key: subgraph name
+    rebased_fragments: IndexMap<Arc<str>, NamedFragments>,
+}
+
+impl RebasedFragments {
+    fn new(fragments: NamedFragments) -> Self {
+        Self {
+            original_fragments: fragments,
+            rebased_fragments: Default::default(),
+        }
+    }
+
+    fn for_subgraph(
+        &mut self,
+        subgraph_name: impl Into<Arc<str>>,
+        subgraph_schema: &ValidFederationSchema,
+    ) -> &NamedFragments {
+        self.rebased_fragments
+            .entry(subgraph_name.into())
+            .or_insert_with(|| {
+                self.original_fragments
+                    .rebase_on(subgraph_schema)
+                    .unwrap_or_default()
+            })
+    }
+}
+
+pub(crate) enum SubgraphOperationCompression {
+    ReuseFragments(RebasedFragments),
+    GenerateFragments,
+    Disabled,
+}
+
+impl SubgraphOperationCompression {
+    /// Compress a subgraph operation.
+    pub(crate) fn compress(
+        &mut self,
+        subgraph_name: &Arc<str>,
+        subgraph_schema: &ValidFederationSchema,
+        operation: Operation,
+    ) -> Result<Operation, FederationError> {
+        match self {
+            Self::ReuseFragments(fragments) => {
+                let rebased = fragments.for_subgraph(Arc::clone(subgraph_name), subgraph_schema);
+                let mut operation = operation;
+                operation.reuse_fragments(rebased)?;
+                Ok(operation)
+            }
+            Self::GenerateFragments => {
+                let mut operation = operation;
+                operation.generate_fragments()?;
+                Ok(operation)
+            }
+            Self::Disabled => Ok(operation),
+        }
+    }
 }
 
 #[cfg(test)]

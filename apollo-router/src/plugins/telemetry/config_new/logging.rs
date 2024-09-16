@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::collections::HashSet;
 use std::io::IsTerminal;
 use std::time::Duration;
 
@@ -339,6 +340,8 @@ pub(crate) struct JsonFormat {
     pub(crate) display_trace_id: DisplayTraceIdFormat,
     /// Include the span id (if any) with the log event. (default: true)
     pub(crate) display_span_id: bool,
+    /// List of span attributes to attach to the json log object
+    pub(crate) span_attributes: HashSet<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -389,6 +392,7 @@ impl Default for JsonFormat {
             display_resource: true,
             display_trace_id: DisplayTraceIdFormat::Bool(true),
             display_span_id: true,
+            span_attributes: HashSet::new(),
         }
     }
 }

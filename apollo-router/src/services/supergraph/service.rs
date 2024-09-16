@@ -28,6 +28,7 @@ use tracing_futures::Instrument;
 
 use crate::batching::BatchQuery;
 use crate::configuration::Batching;
+use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
 use crate::context::OPERATION_NAME;
 use crate::error::CacheResolverError;
 use crate::graphql;
@@ -454,6 +455,7 @@ async fn subscription_task(
                 formatted_query_plan: query_plan.formatted_query_plan.clone(),
                 query: query_plan.query.clone(),
                 query_metrics: query_plan.query_metrics,
+                estimated_size: Default::default(),
             })
         }),
         _ => {
@@ -796,6 +798,7 @@ impl PluggableSupergraphServiceBuilder {
 
         let schema = self.planner.schema();
         let subgraph_schemas = self.planner.subgraph_schemas();
+
         let query_planner_service = CachingQueryPlanner::new(
             self.planner,
             schema.clone(),
@@ -813,13 +816,9 @@ impl PluggableSupergraphServiceBuilder {
             }
         }
 
-        /*for (_, service) in self.subgraph_services.iter_mut() {
-            if let Some(subgraph) =
-                (service as &mut dyn std::any::Any).downcast_mut::<SubgraphService>()
-            {
-                subgraph.client_factory.plugins = plugins.clone();
-            }
-        }*/
+        // We need a non-fallible hook so that once we know we are going live with a pipeline we do final initialization.
+        // For now just shoe-horn something in, but if we ever reintroduce the query planner hook in plugins and activate then this can be made clean.
+        query_planner_service.activate();
 
         let subgraph_service_factory = Arc::new(SubgraphServiceFactory::new(
             self.subgraph_services
@@ -933,8 +932,8 @@ impl SupergraphCreator {
         self.query_planner_service.previous_cache()
     }
 
-    pub(crate) fn planners(&self) -> Vec<Arc<Planner<QueryPlanResult>>> {
-        self.query_planner_service.planners()
+    pub(crate) fn js_planners(&self) -> Vec<Arc<Planner<QueryPlanResult>>> {
+        self.query_planner_service.js_planners()
     }
 
     pub(crate) async fn warm_up_query_planner(
@@ -944,7 +943,7 @@ impl SupergraphCreator {
         previous_cache: Option<InMemoryCachePlanner>,
         count: Option<usize>,
         experimental_reuse_query_plans: bool,
-        experimental_pql_prewarm: bool,
+        experimental_pql_prewarm: &PersistedQueriesPrewarmQueryPlanCache,
     ) {
         self.query_planner_service
             .warm_up(

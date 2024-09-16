@@ -87,6 +87,7 @@ pub struct IntegrationTest {
     _subgraph_overrides: HashMap<String, String>,
     bind_address: Arc<Mutex<Option<SocketAddr>>>,
     redis_namespace: String,
+    log: String,
 }
 
 impl IntegrationTest {
@@ -278,6 +279,7 @@ impl IntegrationTest {
         collect_stdio: Option<tokio::sync::oneshot::Sender<String>>,
         supergraph: Option<PathBuf>,
         mut subgraph_overrides: HashMap<String, String>,
+        log: Option<String>,
     ) -> Self {
         let redis_namespace = Uuid::new_v4().to_string();
         let telemetry = telemetry.unwrap_or_default();
@@ -346,6 +348,7 @@ impl IntegrationTest {
             _tracer_provider_subgraph: tracer_provider_subgraph,
             telemetry,
             redis_namespace,
+            log: log.unwrap_or_else(|| "error,apollo_router=info".to_owned()),
         }
     }
 
@@ -380,15 +383,15 @@ impl IntegrationTest {
         }
 
         router
-            .args([
+            .args(dbg!([
                 "--hr",
                 "--config",
                 &self.test_config_location.to_string_lossy(),
                 "--supergraph",
                 &self.test_schema_location.to_string_lossy(),
                 "--log",
-                "error,apollo_router=info",
-            ])
+                &self.log,
+            ]))
             .stdout(Stdio::piped());
 
         let mut router = router.spawn().expect("router should start");
@@ -491,6 +494,7 @@ impl IntegrationTest {
         self.execute_query_internal(
             &json!({"query":"query {topProducts{name}}","variables":{}}),
             None,
+            None,
         )
     }
 
@@ -499,34 +503,44 @@ impl IntegrationTest {
         &self,
         query: &Value,
     ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
-        self.execute_query_internal(query, None)
+        self.execute_query_internal(query, None, None)
     }
 
     #[allow(dead_code)]
     pub fn execute_bad_query(
         &self,
     ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
-        self.execute_query_internal(&json!({"garbage":{}}), None)
+        self.execute_query_internal(&json!({"garbage":{}}), None, None)
     }
 
     #[allow(dead_code)]
     pub fn execute_huge_query(
         &self,
     ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
-        self.execute_query_internal(&json!({"query":"query {topProducts{name, name, name, name, name, name, name, name, name, name}}","variables":{}}), None)
+        self.execute_query_internal(&json!({"query":"query {topProducts{name, name, name, name, name, name, name, name, name, name}}","variables":{}}), None, None)
     }
 
     #[allow(dead_code)]
     pub fn execute_bad_content_type(
         &self,
     ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
-        self.execute_query_internal(&json!({"garbage":{}}), Some("garbage"))
+        self.execute_query_internal(&json!({"garbage":{}}), Some("garbage"), None)
+    }
+
+    #[allow(dead_code)]
+    pub fn execute_query_with_headers(
+        &self,
+        query: &Value,
+        headers: HashMap<String, String>,
+    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
+        self.execute_query_internal(query, None, Some(headers))
     }
 
     fn execute_query_internal(
         &self,
         query: &Value,
         content_type: Option<&'static str>,
+        headers: Option<HashMap<String, String>>,
     ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
         assert!(
             self.router.is_some(),
@@ -540,11 +554,10 @@ impl IntegrationTest {
         async move {
             let span = info_span!("client_request");
             let span_id = span.context().span().span_context().trace_id();
-            dbg!(&span_id);
             async move {
                 let client = reqwest::Client::new();
 
-                let mut request = client
+                let mut builder = client
                     .post(url)
                     .header(
                         CONTENT_TYPE,
@@ -553,12 +566,16 @@ impl IntegrationTest {
                     .header("apollographql-client-name", "custom_name")
                     .header("apollographql-client-version", "1.0")
                     .header("x-my-header", "test")
-                    .header("head", "test")
-                    .json(&query)
-                    .build()
-                    .unwrap();
+                    .header("head", "test");
+
+                if let Some(headers) = headers {
+                    for (name, value) in headers {
+                        builder = builder.header(name, value);
+                    }
+                }
+
+                let mut request = builder.json(&query).build().unwrap();
                 telemetry.inject_context(&mut request);
-                dbg!(&request.headers());
                 request.headers_mut().remove(ACCEPT);
                 match client.execute(request).await {
                     Ok(response) => (span_id, response),

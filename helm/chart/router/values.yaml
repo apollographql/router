@@ -221,6 +221,13 @@ autoscaling:
   #     type: cpu
   #     targetUtilizationPercentage: 75
 
+# -- Sets the [rolling update strategy parameters](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#rolling-update-deployment).  Can take absolute values or % values.
+rollingUpdate:
+  {}
+# Defaults if not set are:
+#  maxUnavailable: 25%
+#  maxSurge: 25%
+
 nodeSelector: {}
 
 tolerations: []
@@ -246,3 +253,6 @@ probes:
 
 # -- Sets the [topology spread constraints](https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/) for Deployment pods
 topologySpreadConstraints: []
+
+# -- Sets the restart policy of pods
+restartPolicy: Always
