@@ -1205,6 +1205,7 @@ fn reformat_response_expected_int_got_string() {
                 e: E
                 u: U
                 id: ID
+                l: [Int]
             }
             
             enum E {
@@ -1235,6 +1236,7 @@ fn reformat_response_expected_int_got_string() {
                     }
                   }
                 }
+                l
             }
         }"#,
         )
@@ -1249,6 +1251,7 @@ fn reformat_response_expected_int_got_string() {
                 // "id": {
                 //     "test": "test"
                 // }
+                "l": "A"
             },
         }})
         .expected(json! {{
@@ -1260,6 +1263,7 @@ fn reformat_response_expected_int_got_string() {
                 "e": null,
                 "u": null,
                 //"id": null
+                "l": null
             },
         }})
         .expected_errors(json! ([
@@ -1286,6 +1290,10 @@ fn reformat_response_expected_int_got_string() {
             {
                 "message": "Invalid non-object value of type number for composite type U",
                 "path": ["get", "u"]
+            },
+            {
+                "message": "Invalid non-list value of type string for list type [Int]",
+                "path": ["get", "l"]
             }
         ]))
         .test();
