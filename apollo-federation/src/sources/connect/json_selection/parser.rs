@@ -395,10 +395,32 @@ impl PathList {
         // Consume leading spaces_or_comments for all cases below.
         let (input, _spaces) = spaces_or_comments(input)?;
 
-        // Variable references (including @ references) and key references
-        // without a leading . are accepted only at depth 0, or at the beginning
-        // of the PathSelection.
+        // Variable references (including @ references), $(...) literals, and
+        // key references without a leading . are accepted only at depth 0, or
+        // at the beginning of the PathSelection.
         if depth == 0 {
+            // The $(...) syntax allows embedding LitExpr values within
+            // JSONSelection syntax (when not already parsing a LitExpr). This
+            // case needs to come before the $ (and $var) case, because $( looks
+            // like the $ variable followed by a parse error in the variable
+            // case, unless we add some complicated lookahead logic there.
+            if let Ok((suffix, (_, dollar_open_paren, expr, close_paren, _))) = tuple((
+                spaces_or_comments,
+                ranged_span("$("),
+                LitExpr::parse,
+                spaces_or_comments,
+                ranged_span(")"),
+            ))(input)
+            {
+                let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
+                let expr_range = merge_ranges(dollar_open_paren.range(), close_paren.range());
+                let full_range = merge_ranges(expr_range, rest.range());
+                return Ok((
+                    remainder,
+                    WithRange::new(Self::Expr(expr, rest), full_range),
+                ));
+            }
+
             if let Ok((suffix, (dollar, opt_var))) =
                 tuple((ranged_span("$"), opt(parse_identifier_no_space)))(input)
             {
@@ -441,23 +463,6 @@ impl PathList {
                         Self::Var(WithRange::new(KnownVariable::AtSign, at.range()), rest),
                         full_range,
                     ),
-                ));
-            }
-
-            if let Ok((suffix, (_, open_paren, expr, close_paren, _))) = tuple((
-                spaces_or_comments,
-                ranged_span("("),
-                LitExpr::parse,
-                spaces_or_comments,
-                ranged_span(")"),
-            ))(input)
-            {
-                let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
-                let expr_range = merge_ranges(open_paren.range(), close_paren.range());
-                let full_range = merge_ranges(expr_range, rest.range());
-                return Ok((
-                    remainder,
-                    WithRange::new(Self::Expr(expr, rest), full_range),
                 ));
             }
 
@@ -2105,35 +2110,35 @@ mod tests {
             );
         }
 
-        check_simple_lit_expr("(null)", LitExpr::Null);
+        check_simple_lit_expr("$(null)", LitExpr::Null);
 
-        check_simple_lit_expr("(true)", LitExpr::Bool(true));
-        check_simple_lit_expr("(false)", LitExpr::Bool(false));
+        check_simple_lit_expr("$(true)", LitExpr::Bool(true));
+        check_simple_lit_expr("$(false)", LitExpr::Bool(false));
 
         check_simple_lit_expr(
-            "(1234)",
+            "$(1234)",
             LitExpr::Number("1234".parse().expect("serde_json::Number parse error")),
         );
         check_simple_lit_expr(
-            "(1234.5678)",
+            "$(1234.5678)",
             LitExpr::Number("1234.5678".parse().expect("serde_json::Number parse error")),
         );
 
         check_simple_lit_expr(
-            "('hello world')",
+            "$('hello world')",
             LitExpr::String("hello world".to_string()),
         );
         check_simple_lit_expr(
-            "(\"hello world\")",
+            "$(\"hello world\")",
             LitExpr::String("hello world".to_string()),
         );
         check_simple_lit_expr(
-            "(\"hello \\\"world\\\"\")",
+            "$(\"hello \\\"world\\\"\")",
             LitExpr::String("hello \"world\"".to_string()),
         );
 
         check_simple_lit_expr(
-            "([1, 2, 3])",
+            "$([1, 2, 3])",
             LitExpr::Array(
                 vec!["1".parse(), "2".parse(), "3".parse()]
                     .into_iter()
@@ -2145,9 +2150,9 @@ mod tests {
             ),
         );
 
-        check_simple_lit_expr("({})", LitExpr::Object(IndexMap::default()));
+        check_simple_lit_expr("$({})", LitExpr::Object(IndexMap::default()));
         check_simple_lit_expr(
-            "({ a: 1, b: 2, c: 3 })",
+            "$({ a: 1, b: 2, c: 3 })",
             LitExpr::Object({
                 let mut map = IndexMap::default();
                 for (key, value) in &[("a", "1"), ("b", "2"), ("c", "3")] {
@@ -2164,7 +2169,7 @@ mod tests {
         assert_debug_snapshot!(
             // Using extra spaces here to make sure the ranges don't
             // accidentally include leading/trailing spaces.
-            selection!(" suffix : results -> slice ( ( - 1 ) -> mul ( $args . suffixLength ) ) ")
+            selection!(" suffix : results -> slice ( $( - 1 ) -> mul ( $args . suffixLength ) ) ")
         );
     }
 

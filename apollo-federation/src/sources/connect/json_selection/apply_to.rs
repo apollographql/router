@@ -1391,7 +1391,7 @@ mod tests {
     #[test]
     fn test_literal_expressions_in_parentheses() {
         assert_eq!(
-            selection!("__typename: ('Product')").apply_to(&json!({})),
+            selection!("__typename: $('Product')").apply_to(&json!({})),
             (Some(json!({"__typename": "Product"})), vec![]),
         );
 
@@ -1410,16 +1410,16 @@ mod tests {
         assert_eq!(
             selection!(
                 r#"
-                one: (1)
-                two: (2)
-                negativeThree: (-  3)
-                true: (true  )
-                false: (  false)
-                null: (null)
-                string: ("string")
-                array: ( [ 1 , 2 , 3 ] )
-                object: ( { "key" : "value" } )
-                path: (nested.path)
+                one: $(1)
+                two: $(2)
+                negativeThree: $(-  3)
+                true: $(true  )
+                false: $(  false)
+                null: $(null)
+                string: $("string")
+                array: $( [ 1 , 2 , 3 ] )
+                object: $( { "key" : "value" } )
+                path: $(nested.path)
             "#
             )
             .apply_to(&json!({
@@ -1447,16 +1447,16 @@ mod tests {
         assert_eq!(
             selection!(
                 r#"
-                one: (1)->typeof
-                two: (2)->typeof
-                negativeThree: (-3)->typeof
-                true: (true)->typeof
-                false: (false)->typeof
-                null: (null)->typeof
-                string: ("string")->typeof
-                array: ([1, 2, 3])->typeof
-                object: ({ "key": "value" })->typeof
-                path: (nested.path)->typeof
+                one: $(1)->typeof
+                two: $(2)->typeof
+                negativeThree: $(-3)->typeof
+                true: $(true)->typeof
+                false: $(false)->typeof
+                null: $(null)->typeof
+                string: $("string")->typeof
+                array: $([1, 2, 3])->typeof
+                object: $({ "key": "value" })->typeof
+                path: $(nested.path)->typeof
             "#
             )
             .apply_to(&json!({
@@ -1484,7 +1484,7 @@ mod tests {
         assert_eq!(
             selection!(
                 r#"
-                items: ([
+                items: $([
                     1,
                     -2.0,
                     true,
@@ -1523,7 +1523,7 @@ mod tests {
         assert_eq!(
             selection!(
                 r#"
-                ({
+                $({
                     one: 1,
                     two: 2,
                     negativeThree: -3,
@@ -1562,12 +1562,12 @@ mod tests {
         assert_eq!(
             selection!(
                 r#"
-                ({
-                    string: ("string")->slice(1, 4),
-                    array: ([1, 2, 3])->map(@->add(10)),
-                    object: ({ "key": "value" })->get("key"),
-                    path: nested.path->slice(("nested ")->size),
-                    needlessParens: ("oyez"),
+                $({
+                    string: $("string")->slice(1, 4),
+                    array: $([1, 2, 3])->map(@->add(10)),
+                    object: $({ "key": "value" })->get("key"),
+                    path: nested.path->slice($("nested ")->size),
+                    needlessParens: $("oyez"),
                     withoutParens: "oyez",
                 })
             "#
@@ -1593,10 +1593,10 @@ mod tests {
         assert_eq!(
             selection!(
                 r#"
-                string: ("string")->slice(1, 4)
-                array: ([1, 2, 3])->map(@->add(10))
-                object: ({ "key": "value" })->get("key")
-                path: nested.path->slice(("nested ")->size)
+                string: $("string")->slice(1, 4)
+                array: $([1, 2, 3])->map(@->add(10))
+                object: $({ "key": "value" })->get("key")
+                path: nested.path->slice($("nested ")->size)
             "#
             )
             .apply_to(&json!({
