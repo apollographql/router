@@ -14,6 +14,9 @@ use std::process::ExitCode;
 use libtest_mimic::Arguments;
 use libtest_mimic::Failed;
 use libtest_mimic::Trial;
+use mediatype::MediaTypeList;
+use mediatype::ReadParams;
+use multer::Multipart;
 use serde::Deserialize;
 use serde_json::Value;
 use tokio::runtime::Runtime;
@@ -437,24 +440,95 @@ impl TestExecution {
         }
 
         writeln!(out, "query: {}\n", serde_json::to_string(&request).unwrap()).unwrap();
+        writeln!(out, "header: {:?}\n", headers).unwrap();
+
         let (_, response) = router
             .execute_query_with_headers(&request, headers.clone())
             .await;
-        let body = response.bytes().await.map_err(|e| {
-            writeln!(out, "could not get graphql response data: {e}").unwrap();
-            let f: Failed = out.clone().into();
-            f
-        })?;
-        let graphql_response: Value = serde_json::from_slice(&body).map_err(|e| {
-            writeln!(
-                out,
-                "could not deserialize graphql response data: {e}\nfrom:\n{}",
-                std::str::from_utf8(&body).unwrap()
-            )
+        writeln!(out, "response headers: {:?}", response.headers()).unwrap();
+
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .unwrap()
+            .to_str()
             .unwrap();
-            let f: Failed = out.clone().into();
-            f
-        })?;
+        let mut is_multipart = false;
+        let mut boundary = None;
+        for result in MediaTypeList::new(content_type) {
+            if let Ok(mime) = result {
+                if mime.ty == mediatype::names::MULTIPART && mime.subty == mediatype::names::MIXED {
+                    is_multipart = true;
+                    boundary = mime
+                        .get_param(mediatype::names::BOUNDARY)
+                        .map(|v| v.as_str().to_string());
+                }
+            }
+        }
+
+        let graphql_response: Value = if !is_multipart {
+            let body = response.bytes().await.map_err(|e| {
+                writeln!(out, "could not get graphql response data: {e}").unwrap();
+                let f: Failed = out.clone().into();
+                f
+            })?;
+            serde_json::from_slice(&body).map_err(|e| {
+                writeln!(
+                    out,
+                    "could not deserialize graphql response data: {e}\nfrom:\n{}",
+                    std::str::from_utf8(&body).unwrap()
+                )
+                .unwrap();
+                let f: Failed = out.clone().into();
+                f
+            })?
+        } else {
+            writeln!(out, "is_multipart, boundary={boundary:?}").unwrap();
+            /*writeln!(
+                out,
+                "entire response:\n{}",
+                std::str::from_utf8(&response.bytes().await.unwrap()).unwrap()
+            )
+            .unwrap();*/
+
+            let mut chunks = Vec::new();
+
+            let mut multipart = Multipart::new(response.bytes_stream(), boundary.unwrap());
+
+            // Iterate over the fields, use `next_field()` to get the next field.
+            while let Some(mut field) = multipart.next_field().await.map_err(|e| {
+                writeln!(out, "could not get next field from multipart body: {e}",).unwrap();
+                let f: Failed = out.clone().into();
+                f
+            })? {
+                writeln!(out, "multipart field: {:?}\n", field).unwrap();
+
+                let name = field.name();
+                // Get the field's filename if provided in "Content-Disposition" header.
+                let file_name = field.file_name();
+
+                while let Some(chunk) = field.chunk().await.map_err(|e| {
+                    writeln!(out, "could not get next chunk from multipart body: {e}",).unwrap();
+                    let f: Failed = out.clone().into();
+                    f
+                })? {
+                    writeln!(out, "multipart chunk: {:?}\n", std::str::from_utf8(&chunk)).unwrap();
+
+                    let parsed: Value = serde_json::from_slice(&chunk).map_err(|e| {
+                        writeln!(
+                            out,
+                            "could not deserialize graphql response data: {e}\nfrom:\n{}",
+                            std::str::from_utf8(&chunk).unwrap()
+                        )
+                        .unwrap();
+                        let f: Failed = out.clone().into();
+                        f
+                    })?;
+                    chunks.push(parsed);
+                }
+            }
+            Value::Array(chunks)
+        };
 
         if expected_response != &graphql_response {
             if let Some(requests) = self
