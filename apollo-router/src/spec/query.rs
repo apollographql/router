@@ -596,7 +596,8 @@ impl Query {
                                 } else {
                                     parameters.validation_errors.push(Error {
                                         message: format!(
-                                            "Expected a valid enum value for type {enum_type}"
+                                            "Expected a valid enum value for type {}",
+                                            enum_type.name
                                         ),
                                         path: Some(Path::from_response_slice(path)),
                                         ..Error::default()
@@ -608,7 +609,8 @@ impl Query {
                             None => {
                                 parameters.validation_errors.push(Error {
                                     message: format!(
-                                        "Expected a valid enum value for type {enum_type}"
+                                        "Expected a valid enum value for type {}",
+                                        enum_type.name
                                     ),
                                     path: Some(Path::from_response_slice(path)),
                                     ..Error::default()

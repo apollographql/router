@@ -1280,7 +1280,7 @@ fn reformat_response_expected_int_got_string() {
                 "path": ["get", "b"]
             },
             {
-                "message": "Expected a valid enum value for type enum E",
+                "message": "Expected a valid enum value for type E",
                 "path": ["get", "e"]
             },
             {
