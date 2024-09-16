@@ -10,7 +10,6 @@ use futures::future::BoxFuture;
 use futures::stream;
 use futures::stream::once;
 use futures::stream::StreamExt;
-use futures::TryFutureExt;
 use http::header::CONTENT_TYPE;
 use http::header::VARY;
 use http::request::Parts;
