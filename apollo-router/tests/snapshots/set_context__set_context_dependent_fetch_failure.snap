@@ -4,6 +4,21 @@ expression: response
 ---
 {
   "data": null,
+  "errors": [
+    {
+      "message": "Some error",
+      "locations": [
+        {
+          "line": 3,
+          "column": 5
+        }
+      ],
+      "path": [
+        "t",
+        "u"
+      ]
+    }
+  ],
   "extensions": {
     "apolloQueryPlan": {
       "object": {
