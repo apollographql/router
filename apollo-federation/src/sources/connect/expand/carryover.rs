@@ -10,6 +10,7 @@ use crate::link::inaccessible_spec_definition::INACCESSIBLE_DIRECTIVE_NAME_IN_SP
 use crate::link::spec::Identity;
 use crate::link::spec::APOLLO_SPEC_DOMAIN;
 use crate::link::Link;
+use crate::link::DEFAULT_LINK_NAME;
 use crate::schema::position::DirectiveArgumentDefinitionPosition;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::EnumTypeDefinitionPosition;
@@ -184,8 +185,22 @@ pub(super) fn carryover_directives(
                 .get_directive(&directive_name)
                 .and_then(|referencers| {
                     if referencers.len() > 0 {
-                        SchemaDefinitionPosition
-                            .insert_directive(to, link.to_directive_application().into())?;
+                        if !SchemaDefinitionPosition
+                            .get(to.schema())
+                            .directives
+                            .iter()
+                            .any(|d| {
+                                d.name == DEFAULT_LINK_NAME
+                                    && d.argument_by_name("url")
+                                        .and_then(|url| url.as_str())
+                                        .map(|url| link.url.to_string() == *url)
+                                        .unwrap_or_default()
+                            })
+                        {
+                            SchemaDefinitionPosition
+                                .insert_directive(to, link.to_directive_application().into())?;
+                        }
+
                         copy_directive_definition(from, to, directive_name.clone())?;
                     }
                     referencers.copy_directives(from, to, &directive_name)
