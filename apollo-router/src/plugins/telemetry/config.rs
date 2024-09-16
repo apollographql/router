@@ -3,6 +3,8 @@ use std::collections::BTreeMap;
 use std::collections::HashSet;
 
 use axum::headers::HeaderName;
+use derivative::Derivative;
+use num_traits::ToPrimitive;
 use opentelemetry::sdk::metrics::new_view;
 use opentelemetry::sdk::metrics::Aggregation;
 use opentelemetry::sdk::metrics::Instrument;
@@ -22,6 +24,7 @@ use super::*;
 use crate::plugin::serde::deserialize_option_header_name;
 use crate::plugins::telemetry::metrics;
 use crate::plugins::telemetry::resource::ConfigResource;
+use crate::Configuration;
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum Error {
@@ -91,6 +94,14 @@ pub(crate) struct Instrumentation {
     pub(crate) instruments: config_new::instruments::InstrumentsConfig,
 }
 
+impl Instrumentation {
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        self.events.validate()?;
+        self.instruments.validate()?;
+        self.spans.validate()
+    }
+}
+
 /// Metrics configuration
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
@@ -158,14 +169,13 @@ impl TryInto<Box<dyn View>> for MetricView {
     type Error = MetricsError;
 
     fn try_into(self) -> Result<Box<dyn View>, Self::Error> {
-        let aggregation = self
-            .aggregation
-            .map(
-                |MetricAggregation::Histogram { buckets }| Aggregation::ExplicitBucketHistogram {
-                    boundaries: buckets,
-                    record_min_max: true,
-                },
-            );
+        let aggregation = self.aggregation.map(|aggregation| match aggregation {
+            MetricAggregation::Histogram { buckets } => Aggregation::ExplicitBucketHistogram {
+                boundaries: buckets,
+                record_min_max: true,
+            },
+            MetricAggregation::Drop => Aggregation::Drop,
+        });
         let instrument = Instrument::new().name(self.name);
         let mut mask = Stream::new();
         if let Some(desc) = self.description {
@@ -191,6 +201,8 @@ pub(crate) enum MetricAggregation {
     /// An aggregation that summarizes a set of measurements as an histogram with
     /// explicitly defined buckets.
     Histogram { buckets: Vec<f64> },
+    /// Simply drop the metrics matching this view
+    Drop,
 }
 
 /// Tracing configuration
@@ -229,18 +241,66 @@ pub(crate) struct ExposeTraceId {
     pub(crate) format: TraceIdFormat,
 }
 
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "lowercase")]
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum TraceIdFormat {
     /// Format the Trace ID as a hexadecimal number
     ///
     /// (e.g. Trace ID 16 -> 00000000000000000000000000000010)
     #[default]
     Hexadecimal,
+    /// Format the Trace ID as a hexadecimal number
+    ///
+    /// (e.g. Trace ID 16 -> 00000000000000000000000000000010)
+    OpenTelemetry,
     /// Format the Trace ID as a decimal number
     ///
     /// (e.g. Trace ID 16 -> 16)
     Decimal,
+
+    /// Datadog
+    Datadog,
+
+    /// UUID format with dashes
+    /// (eg. 67e55044-10b1-426f-9247-bb680e5fe0c8)
+    Uuid,
+}
+
+impl TraceIdFormat {
+    pub(crate) fn format(&self, trace_id: TraceId) -> String {
+        match self {
+            TraceIdFormat::Hexadecimal | TraceIdFormat::OpenTelemetry => {
+                format!("{:032x}", trace_id)
+            }
+            TraceIdFormat::Decimal => format!("{}", u128::from_be_bytes(trace_id.to_bytes())),
+            TraceIdFormat::Datadog => trace_id.to_datadog(),
+            TraceIdFormat::Uuid => Uuid::from_bytes(trace_id.to_bytes()).to_string(),
+        }
+    }
+}
+
+/// Apollo usage report signature normalization algorithm
+#[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
+#[derivative(Debug)]
+#[serde(deny_unknown_fields, rename_all = "lowercase")]
+pub(crate) enum ApolloSignatureNormalizationAlgorithm {
+    /// Use the algorithm that matches the JavaScript-based implementation.
+    #[default]
+    Legacy,
+    /// Use a new algorithm that includes input object forms, normalized aliases and variable names, and removes some
+    /// edge cases from the JS implementation that affected normalization.
+    Enhanced,
+}
+
+/// Apollo usage report reference generation modes.
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema, Copy)]
+#[serde(deny_unknown_fields, rename_all = "lowercase")]
+pub(crate) enum ApolloMetricsReferenceMode {
+    /// Use the extended mode to report input object fields and enum value references as well as object fields.
+    Extended,
+    /// Use the standard mode that only reports referenced object fields.
+    #[default]
+    Standard,
 }
 
 /// Configure propagation of traces. In general you won't have to do this as these are automatically configured
@@ -271,6 +331,10 @@ pub(crate) struct RequestPropagation {
     #[schemars(with = "String")]
     #[serde(deserialize_with = "deserialize_option_header_name")]
     pub(crate) header_name: Option<HeaderName>,
+
+    /// The trace ID format that will be used when propagating to subgraph services.
+    #[serde(default)]
+    pub(crate) format: TraceIdFormat,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -379,9 +443,39 @@ pub(crate) enum AttributeValue {
     Array(AttributeArray),
 }
 
+impl AttributeValue {
+    pub(crate) fn as_f64(&self) -> Option<f64> {
+        match self {
+            AttributeValue::Bool(_) => None,
+            AttributeValue::I64(v) => Some(*v as f64),
+            AttributeValue::F64(v) => Some(*v),
+            AttributeValue::String(v) => v.parse::<f64>().ok(),
+            AttributeValue::Array(_) => None,
+        }
+    }
+}
+
+impl From<String> for AttributeValue {
+    fn from(value: String) -> Self {
+        AttributeValue::String(value)
+    }
+}
+
 impl From<&'static str> for AttributeValue {
     fn from(value: &'static str) -> Self {
         AttributeValue::String(value.to_string())
+    }
+}
+
+impl From<bool> for AttributeValue {
+    fn from(value: bool) -> Self {
+        AttributeValue::Bool(value)
+    }
+}
+
+impl From<f64> for AttributeValue {
+    fn from(value: f64) -> Self {
+        AttributeValue::F64(value)
     }
 }
 
@@ -399,6 +493,24 @@ impl std::fmt::Display for AttributeValue {
             AttributeValue::F64(val) => write!(f, "{val}"),
             AttributeValue::String(val) => write!(f, "{val}"),
             AttributeValue::Array(val) => write!(f, "{val}"),
+        }
+    }
+}
+
+impl PartialOrd for AttributeValue {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        match (self, other) {
+            (AttributeValue::Bool(b1), AttributeValue::Bool(b2)) => b1.partial_cmp(b2),
+            (AttributeValue::F64(f1), AttributeValue::F64(f2)) => f1.partial_cmp(f2),
+            (AttributeValue::I64(i1), AttributeValue::I64(i2)) => i1.partial_cmp(i2),
+            (AttributeValue::String(s1), AttributeValue::String(s2)) => s1.partial_cmp(s2),
+            // Mismatched numerics are comparable
+            (AttributeValue::F64(f1), AttributeValue::I64(i)) => {
+                i.to_f64().as_ref().and_then(|f2| f1.partial_cmp(f2))
+            }
+            (AttributeValue::I64(i), AttributeValue::F64(f)) => i.to_f64()?.partial_cmp(f),
+            // Arrays and other mismatched types are incomparable
+            _ => None,
         }
     }
 }
@@ -625,6 +737,34 @@ impl Conf {
                 (_, _) => 0.0,
             },
         )
+    }
+
+    pub(crate) fn metrics_reference_mode(
+        configuration: &Configuration,
+    ) -> ApolloMetricsReferenceMode {
+        match configuration.apollo_plugins.plugins.get("telemetry") {
+            Some(telemetry_config) => {
+                match serde_json::from_value::<Conf>(telemetry_config.clone()) {
+                    Ok(conf) => conf.apollo.metrics_reference_mode,
+                    _ => ApolloMetricsReferenceMode::default(),
+                }
+            }
+            _ => ApolloMetricsReferenceMode::default(),
+        }
+    }
+
+    pub(crate) fn signature_normalization_algorithm(
+        configuration: &Configuration,
+    ) -> ApolloSignatureNormalizationAlgorithm {
+        match configuration.apollo_plugins.plugins.get("telemetry") {
+            Some(telemetry_config) => {
+                match serde_json::from_value::<Conf>(telemetry_config.clone()) {
+                    Ok(conf) => conf.apollo.signature_normalization_algorithm,
+                    _ => ApolloSignatureNormalizationAlgorithm::default(),
+                }
+            }
+            _ => ApolloSignatureNormalizationAlgorithm::default(),
+        }
     }
 }
 

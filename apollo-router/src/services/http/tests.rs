@@ -44,6 +44,7 @@ use crate::plugin::PluginPrivate;
 use crate::plugins::traffic_shaping::Http2Config;
 use crate::services::http::HttpClientService;
 use crate::services::http::HttpRequest;
+use crate::services::router::body::get_body_bytes;
 use crate::services::supergraph;
 use crate::Configuration;
 use crate::Context;
@@ -134,7 +135,7 @@ async fn tls_self_signed() {
 
     assert_eq!(
         std::str::from_utf8(
-            &hyper::body::to_bytes(response.http_response.into_parts().1)
+            &get_body_bytes(response.http_response.into_parts().1)
                 .await
                 .unwrap()
         )
@@ -190,7 +191,7 @@ async fn tls_custom_root() {
         .unwrap();
     assert_eq!(
         std::str::from_utf8(
-            &hyper::body::to_bytes(response.http_response.into_parts().1)
+            &get_body_bytes(response.http_response.into_parts().1)
                 .await
                 .unwrap()
         )
@@ -300,7 +301,7 @@ async fn tls_client_auth() {
         .unwrap();
     assert_eq!(
         std::str::from_utf8(
-            &hyper::body::to_bytes(response.http_response.into_parts().1)
+            &get_body_bytes(response.http_response.into_parts().1)
                 .await
                 .unwrap()
         )
@@ -364,7 +365,7 @@ async fn test_subgraph_h2c() {
         .unwrap();
     assert_eq!(
         std::str::from_utf8(
-            &hyper::body::to_bytes(response.http_response.into_parts().1)
+            &get_body_bytes(response.http_response.into_parts().1)
                 .await
                 .unwrap()
         )
@@ -376,10 +377,7 @@ async fn test_subgraph_h2c() {
 // starts a local server emulating a subgraph returning compressed response
 async fn emulate_subgraph_compressed_response(listener: TcpListener) {
     async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
-        let body = hyper::body::to_bytes(request.into_body())
-            .await
-            .unwrap()
-            .to_vec();
+        let body = get_body_bytes(request.into_body()).await.unwrap().to_vec();
         let mut decoder = GzipDecoder::new(Vec::new());
         decoder.write_all(&body).await.unwrap();
         decoder.shutdown().await.unwrap();
@@ -445,7 +443,7 @@ async fn test_compressed_request_response_body() {
 
     assert_eq!(
         std::str::from_utf8(
-            &hyper::body::to_bytes(response.http_response.into_parts().1)
+            &get_body_bytes(response.http_response.into_parts().1)
                 .await
                 .unwrap()
         )
@@ -454,51 +452,7 @@ async fn test_compressed_request_response_body() {
     );
 }
 
-const SCHEMA: &str = r#"schema
-        @core(feature: "https://specs.apollo.dev/core/v0.1")
-        @core(feature: "https://specs.apollo.dev/join/v0.1")
-        @core(feature: "https://specs.apollo.dev/inaccessible/v0.1")
-         {
-        query: Query
-        subscription: Subscription
-   }
-   directive @core(feature: String!) repeatable on SCHEMA
-   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet) on FIELD_DEFINITION
-   directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
-   directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
-   directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-   directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
-   scalar join__FieldSet
-   enum join__Graph {
-       USER @join__graph(name: "user", url: "http://localhost:4001/graphql")
-       ORGA @join__graph(name: "orga", url: "http://localhost:4002/graphql")
-   }
-   type Query {
-       currentUser: User @join__field(graph: USER)
-   }
-
-   type Subscription @join__type(graph: USER) {
-        userWasCreated: User
-   }
-
-   type User
-   @join__owner(graph: USER)
-   @join__type(graph: ORGA, key: "id")
-   @join__type(graph: USER, key: "id"){
-       id: ID!
-       name: String
-       activeOrganization: Organization
-   }
-   type Organization
-   @join__owner(graph: ORGA)
-   @join__type(graph: ORGA, key: "id")
-   @join__type(graph: USER, key: "id") {
-       id: ID
-       creatorUser: User
-       name: String
-       nonNullId: ID!
-       suborga: [Organization]
-   }"#;
+const SCHEMA: &str = include_str!("../../testdata/orga_supergraph.graphql");
 
 struct TestPlugin {
     started: Arc<AtomicBool>,
@@ -555,29 +509,48 @@ async fn test_http_plugin_is_loaded() {
 
 fn make_schema(path: &str) -> String {
     r#"schema
-        @core(feature: "https://specs.apollo.dev/core/v0.1")
-        @core(feature: "https://specs.apollo.dev/join/v0.1")
-        @core(feature: "https://specs.apollo.dev/inaccessible/v0.1")
+      @link(url: "https://specs.apollo.dev/link/v1.0")
+      @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+      @link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY)
          {
         query: Query
    }
-   directive @core(feature: String!) repeatable on SCHEMA
-   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet) on FIELD_DEFINITION
-   directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
-   directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
+   directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+   directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
    directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+   directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+   directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+   directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
    directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
+
+   scalar link__Import
+
+   enum link__Purpose {
+    """
+    `SECURITY` features provide metadata necessary to securely resolve fields.
+    """
+    SECURITY
+  
+    """
+    `EXECUTION` features provide metadata necessary for operation execution.
+    """
+    EXECUTION
+  }
+  
    scalar join__FieldSet
    enum join__Graph {
        USER @join__graph(name: "user", url: "unix://"#.to_string()+path+r#"")
        ORGA @join__graph(name: "orga", url: "http://localhost:4002/graphql")
    }
-   type Query {
+   type Query 
+   @join__type(graph: ORGA)
+   @join__type(graph: USER)
+   {
        currentUser: User @join__field(graph: USER)
    }
 
    type User
-   @join__owner(graph: USER)
    @join__type(graph: ORGA, key: "id")
    @join__type(graph: USER, key: "id"){
        id: ID!
@@ -594,7 +567,7 @@ async fn test_unix_socket() {
 
     let make_service = make_service_fn(|_| async {
         Ok::<_, hyper::Error>(service_fn(|mut req: http::Request<Body>| async move {
-            let data = hyper::body::to_bytes(req.body_mut()).await.unwrap();
+            let data = get_body_bytes(req.body_mut()).await.unwrap();
             let body = std::str::from_utf8(&data).unwrap();
             println!("{:?}", body);
             let response = http::Response::builder()

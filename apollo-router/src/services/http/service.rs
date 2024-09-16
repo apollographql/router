@@ -14,7 +14,6 @@ use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use http::Request;
 use hyper::client::HttpConnector;
-use hyper::Body;
 use hyper_rustls::HttpsConnector;
 #[cfg(unix)]
 use hyperlocal::UnixConnector;
@@ -38,20 +37,22 @@ use crate::axum_factory::compression::Compressor;
 use crate::configuration::TlsClientAuth;
 use crate::error::FetchError;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
+use crate::plugins::telemetry::consts::HTTP_REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::reload::prepare_context;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
 use crate::plugins::traffic_shaping::Http2Config;
+use crate::services::router::body::RouterBody;
 use crate::services::trust_dns_connector::new_async_http_connector;
 use crate::services::trust_dns_connector::AsyncHyperResolver;
 use crate::Configuration;
 use crate::Context;
 
 type HTTPClient =
-    Decompression<hyper::Client<HttpsConnector<HttpConnector<AsyncHyperResolver>>, Body>>;
+    Decompression<hyper::Client<HttpsConnector<HttpConnector<AsyncHyperResolver>>, RouterBody>>;
 #[cfg(unix)]
-type UnixHTTPClient = Decompression<hyper::Client<UnixConnector, Body>>;
+type UnixHTTPClient = Decompression<hyper::Client<UnixConnector, RouterBody>>;
 #[cfg(unix)]
 type MixedClient = Either<HTTPClient, UnixHTTPClient>;
 #[cfg(not(unix))]
@@ -257,7 +258,7 @@ impl tower::Service<HttpRequest> for HttpClientService {
 
         let path = schema_uri.path();
 
-        let http_req_span = tracing::info_span!("http_request",
+        let http_req_span = tracing::info_span!(HTTP_REQUEST_SPAN_NAME,
             "otel.kind" = "CLIENT",
             "net.peer.name" = %host,
             "net.peer.port" = %port,
@@ -284,7 +285,7 @@ impl tower::Service<HttpRequest> for HttpClientService {
 
         let body = match opt_compressor {
             None => body,
-            Some(compressor) => Body::wrap_stream(compressor.process(body)),
+            Some(compressor) => RouterBody::wrap_stream(compressor.process(body)),
         };
         let mut http_request = http::Request::from_parts(parts, body);
 
@@ -294,9 +295,7 @@ impl tower::Service<HttpRequest> for HttpClientService {
 
         let signing_params = context
             .extensions()
-            .lock()
-            .get::<SigningParamsConfig>()
-            .cloned();
+            .with_lock(|lock| lock.get::<Arc<SigningParamsConfig>>().cloned());
 
         Box::pin(async move {
             let http_request = if let Some(signing_params) = signing_params {
@@ -337,8 +336,8 @@ async fn do_fetch(
     mut client: MixedClient,
     context: &Context,
     service_name: &str,
-    request: Request<Body>,
-) -> Result<http::Response<Body>, FetchError> {
+    request: Request<RouterBody>,
+) -> Result<http::Response<RouterBody>, FetchError> {
     let _active_request_guard = context.enter_active_request();
     let (parts, body) = client
         .call(request)
@@ -354,7 +353,7 @@ async fn do_fetch(
         .into_parts();
     Ok(http::Response::from_parts(
         parts,
-        Body::wrap_stream(BodyStream { inner: body }),
+        RouterBody::wrap_stream(BodyStream { inner: body }),
     ))
 }
 

@@ -1,19 +1,22 @@
 ---
-title: Apollo Router customizations
-description: Extend your router with custom functionality
+title: Router Customizations
+subtitle: Extend your router with custom functionality
+description: Extend the GraphOS Router or Apollo Router Core with custom functionality. Understand the request lifecycle and how customizations intervene at specific points.
 ---
 
-You can create **customizations** for the Apollo Router to add functionality that isn't available via built-in [configuration options](../configuration/overview/). For example, you can make an external call to fetch authentication data for each incoming request.
+You can create **customizations** for the GraphOS Router or Apollo Router Core to add functionality that isn't available via built-in [configuration options](../configuration/overview/). For example, you can make an external call to fetch authentication data for each incoming request.
 
 ## Customization types
 
-The Apollo Router supports the following customization types:
+The GraphOS Router supports the following customization types:
 
 - [**Rhai scripts**](./rhai/)
     - The [Rhai scripting language](https://rhai.rs/book/) lets you add functionality directly to your stock router binary by hooking into different phases of the router's request lifecycle.
 - [**External co-processing**](./coprocessor/) ([Enterprise feature](../enterprise-features/))
     - If your organization has a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/), you can write custom request-handling code in any language. This code can run in the same container as your router or separately.
     - The router calls your custom code via HTTP, passing it the details of each incoming client request.
+
+The Apollo Router Core supports customization only through [Rhai scripts](./rhai/).
 
 Because [Rhai scripts](./rhai/) are easier to deploy, we recommend using them if they support your use case. Use external co-processing if your customization needs to do any of the following (which Rhai scripts _don't_ support):
 
@@ -30,7 +33,7 @@ flowchart RL
     subgraph client["Client"]
     end
 
-    subgraph router["Apollo Router"]
+    subgraph router["Router"]
         direction LR
         routerService("Router <br/> Service")
         supergraphService("Supergraph <br/> Service")
@@ -83,7 +86,7 @@ NextService["Next service"] -->|response| coreService
 Each request and response object contains a `Context` object, which is carried throughout the entire process. Each request's `Context` object is unique. You can use it to store plugin-specific information between the request and response or to communicate between different hook points. (A plugin can be called at multiple steps of the request lifecycle.)
 
 The following flowcharts diagram the entire request lifecycle.
-The first details the path of a request from a client, through the parts of the Apollo Router, all the way to your subgraphs.
+The first details the path of a request from a client, through the parts of the router, all the way to your subgraphs.
 The second details the path of a response from your subgraphs back to the client.
 
 ### Request path
@@ -91,7 +94,7 @@ The second details the path of a response from your subgraphs back to the client
 ```mermaid
 flowchart TB;
     client(Client);
-    subgraph router["Apollo Router"]
+    subgraph router["Router"]
         direction LR
         httpServer("HTTP server")
         subgraph routerService["Router Service"]

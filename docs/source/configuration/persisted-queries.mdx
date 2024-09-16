@@ -1,8 +1,15 @@
 ---
-title: Safelisting with persisted queries
-description: Secure your graph while minimizing request latency
+title: Safelisting with Persisted Queries
+subtitle: Secure your graph while minimizing request latency
+description: Secure your federated GraphQL API by creating an allowlist of trusted operations. Minimize request latency and enhance performance.
 minVersion: 1.25.0
 ---
+
+<SummitCallout
+  topic="graph security"
+  workshopName="Securing your graph: A defense-in-depth strategy"
+  URL="https://reg.summit.graphql.com/flow/apollo/summit24/AttendeePortal/page/catalog/session/1712945157460001NjSZ"
+/>
 
 <EnterpriseFeature linkWithAnchor="https://www.apollographql.com/pricing#graphos-router" />
 
@@ -10,7 +17,7 @@ minVersion: 1.25.0
 
 ## Differences from automatic persisted queries
 
-The Apollo Router also supports a related feature called [automatic persisted queries](./in-memory-caching#caching-automatic-persisted-queries-apq) (APQ). With APQ, clients can execute a GraphQL operation by sending the SHA256 hash of its operation string instead of the entire string. **APQ doesn't support safelisting** because the router updates its APQ cache over time with _any_ operations it receives.
+The Apollo Router Core also supports a related feature called [automatic persisted queries](./in-memory-caching#caching-automatic-persisted-queries-apq) (APQ). With APQ, clients can execute a GraphQL operation by sending the SHA256 hash of its operation string instead of the entire string. **APQ doesn't support safelisting** because the router updates its APQ cache over time with _any_ operations it receives.
 
 For more details on differences between APQ and this feature, see the [GraphOS persisted queries documentation](/graphos/operations/persisted-queries#differences-from-automatic-persisted-queries).
 
@@ -65,6 +72,35 @@ persisted_queries:
 
 If used with the [`safelist`](#safelist) option, the router logs unregistered and rejected operations. With [`safelist.required_id`](#require_id) off, the only rejected operations are unregistered ones. If [`safelist.required_id`](#require_id) is turned on, operations can be rejected even when registered because they use operation IDs rather than operation strings.
 
+#### `experimental_prewarm_query_plan_cache`
+
+<ExperimentalFeature />
+
+By default, the router [prewarms the query plan cache](./in-memory-caching#cache-warm-up) using all operations on the PQL when a new schema is loaded, but not at startup. Using the `experimental_prewarm_query_plan_cache` option, you can tell the router to prewarm the cache using the PQL on startup as well, or tell it not to prewarm the cache when reloading the schema. (This does not affect whether the router prewarms the query plan cache with recently-used operations from its in-memory cache.) Prewarming the cache means can reduce request latency by ensuring that operations are pre-planned when requests are received, but can make startup or schema reloads slower.
+
+```yaml title="router.yaml"
+persisted_queries:
+  enabled: true
+  experimental_prewarm_query_plan_cache:
+    on_startup: true   # default: false
+    on_reload: false   # default: true
+```
+
+#### `experimental_local_manifests`
+
+<ExperimentalFeature />
+
+Adding `experimental_local_manifests` to your `persisted-queries` configuration lets you use local persisted query manifests instead of the hosted Uplink version. This is helpful when you're using an offline Enterprise license and can't use Uplink. With the  `experimental_local_manifests`, the router doesn't reload the manifest from the file system, so you need to restart the router to apply changes.
+
+```yaml title="router.yaml"
+persisted_queries:
+  enabled: true
+  experimental_local_manifests: 
+    - ./path/to/persisted-query-manifest.json
+```
+
+You can download a version of your manifest to use locally from [GraphOS Studio](https://studio.apollographql.com/?referrer=docs-content). Open the PQL page for a graph by clicking the **Go to persisted query lists** to the left of the graph's name. Then, click the ••• menu under the **Actions** column to download a PQL's manifest as a JSON file. Save this file locally and update your `experimental_local_manifests` configuration with the path the file.
+
 #### `safelist`
 
 Adding `safelist: true` to `persisted_queries` causes the router to reject any operations that haven't been registered to your PQL.
@@ -110,4 +146,4 @@ To enable safelisting, you _must_ turn off [automatic persisted queries](./in-me
 
 ## Limitations
 
-* **Unsupported with offline license**. An Apollo Router using an [offline Enterprise license](../enterprise-features/#offline-enterprise-license) cannot use safelisting with persisted queries. The feature relies on Apollo Uplink to fetch persisted query manifests, so it doesn't work as designed when the router is disconnected from Uplink.
+* **Unsupported with offline license**. An GraphOS Router using an [offline Enterprise license](../enterprise-features/#offline-enterprise-license) cannot use safelisting with persisted queries. The feature relies on Apollo Uplink to fetch persisted query manifests, so it doesn't work as designed when the router is disconnected from Uplink.

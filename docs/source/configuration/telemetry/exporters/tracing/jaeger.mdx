@@ -1,13 +1,13 @@
 ---
 title: Jaeger exporter (via OTLP)
 subtitle: Configure the Jaeger exporter for tracing
-description: Configure the Jaeger exporter for tracing via OpenTelemetry Protocol (OTLP) in the Apollo Router
+description: Configure the Jaeger exporter for tracing via OpenTelemetry Protocol (OTLP) in the Apollo GraphOS Router or Apollo Router Core.
 ---
 
 import BatchProcessorPreamble from '../../../../../shared/batch-processor-preamble.mdx';
 import BatchProcessorRef from '../../../../../shared/batch-processor-ref.mdx';
 
-Enable and configure the [Jaeger exporter](https://www.jaegertracing.io/) for tracing in the Apollo Router.
+Enable and configure the [Jaeger exporter](https://www.jaegertracing.io/) for tracing in the GraphOS Router or Apollo Router Core.
 
 For general tracing configuration, refer to [Router Tracing Configuration](./overview).
 
@@ -44,11 +44,11 @@ See [OTLP configuration](./otlp#configuration) for more details on settings.
 
 <Caution>
 
-[Native Jaegar tracing is deprecated](https://opentelemetry.io/blog/2022/jaeger-native-otlp/) and will be removed in a future release of the Apollo Router. Use [Jaeger via OTLP](#jaeger-otlp-configuration) instead.
+[Native Jaegar tracing is deprecated](https://opentelemetry.io/blog/2022/jaeger-native-otlp/) and will be removed in a future release of the router. Use [Jaeger via OTLP](#jaeger-otlp-configuration) instead.
 
 </Caution>
 
-The Apollo Router can be configured to export tracing data to Jaeger either via an agent or HTTP collector.
+The router can be configured to export tracing data to Jaeger either via an agent or HTTP collector.
 
 Unless explicitly configured to use a collector, the router will use Jaeger agent by default.
 

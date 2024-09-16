@@ -1,5 +1,5 @@
-use apollo_compiler::ast::Name;
 use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::Name;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
@@ -23,6 +23,17 @@ pub(crate) enum Selection {
     InlineFragment(InlineFragment),
 }
 
+impl Selection {
+    pub(crate) fn selection_set(&self) -> Option<&[Selection]> {
+        match self {
+            Selection::Field(Field { selections, .. }) => selections.as_deref(),
+            Selection::InlineFragment(InlineFragment { selections, .. }) => {
+                Some(selections.as_slice())
+            }
+        }
+    }
+}
+
 /// The field that is used
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,6 +48,13 @@ pub(crate) struct Field {
     /// The selections for the field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) selections: Option<Vec<Selection>>,
+}
+
+impl Field {
+    // Mirroring `apollo_compiler::Field::response_name`
+    pub(crate) fn response_name(&self) -> &Name {
+        self.alias.as_ref().unwrap_or(&self.name)
+    }
 }
 
 /// An inline fragment.
@@ -285,7 +303,7 @@ mod tests {
 
     macro_rules! select {
         ($schema:expr, $content:expr $(,)?) => {{
-            let schema = Schema::parse_test(&$schema, &Default::default()).unwrap();
+            let schema = Schema::parse(&$schema, &Default::default()).unwrap();
             let response = Response::builder()
                 .data($content)
                 .build();
@@ -349,7 +367,7 @@ mod tests {
         assert_eq!(
             select!(
                 with_supergraph_boilerplate(
-                    "type Query { me: String } type Author { name: String } type Reviewer { name: String } \
+                    "type Query @join__type(graph: TEST) { me: String @join__field(graph: TEST) } type Author { name: String } type Reviewer { name: String } \
                     union User = Author | Reviewer"
                 ),
                 bjson!({"__typename": "Author", "id":2, "name":"Bob", "job":{"name":"astronaut"}}),
@@ -382,11 +400,11 @@ mod tests {
     #[test]
     fn test_array() {
         let schema = with_supergraph_boilerplate(
-            "type Query { me: String }
+            "type Query @join__type(graph: TEST){ me: String @join__field(graph: TEST) }
             type MainObject { mainObjectList: [SubObject] }
             type SubObject { key: String name: String }",
         );
-        let schema = Schema::parse_test(&schema, &Default::default()).unwrap();
+        let schema = Schema::parse(&schema, &Default::default()).unwrap();
 
         let response = bjson!({
             "__typename": "MainObject",
@@ -453,7 +471,7 @@ mod tests {
     #[test]
     fn test_execute_selection_set_abstract_types() {
         let schema = with_supergraph_boilerplate(
-            "type Query { hello: String }
+            "type Query @join__type(graph: TEST){ hello: String @join__field(graph: TEST)}
             type Entity {
               id: Int!
               nestedUnion: NestedUnion
@@ -483,7 +501,7 @@ mod tests {
               id: Int!
             }",
         );
-        let schema = Schema::parse_test(&schema, &Default::default()).unwrap();
+        let schema = Schema::parse(&schema, &Default::default()).unwrap();
 
         let response = bjson!({
           "__typename": "Entity",
@@ -725,16 +743,62 @@ mod tests {
             "{}\n{}",
             r#"
         schema
-            @core(feature: "https://specs.apollo.dev/core/v0.1")
-            @core(feature: "https://specs.apollo.dev/join/v0.1") {
-            query: Query
+          @link(url: "https://specs.apollo.dev/link/v1.0")
+          @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
+          query: Query
         }
-        directive @core(feature: String!) repeatable on SCHEMA
+        
+        directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+        
+        directive @join__field(
+          graph: join__Graph
+          requires: join__FieldSet
+          provides: join__FieldSet
+          type: String
+          external: Boolean
+          override: String
+          usedOverridden: Boolean
+        ) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+        
         directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+        
+        directive @join__implements(
+          graph: join__Graph!
+          interface: String!
+        ) repeatable on OBJECT | INTERFACE
+        
+        directive @join__type(
+          graph: join__Graph!
+          key: join__FieldSet
+          extension: Boolean! = false
+          resolvable: Boolean! = true
+          isInterfaceObject: Boolean! = false
+        ) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+        
+        directive @join__unionMember(
+          graph: join__Graph!
+          member: String!
+        ) repeatable on UNION
+        
+        directive @link(
+          url: String
+          as: String
+          for: link__Purpose
+          import: [link__Import]
+        ) repeatable on SCHEMA
+        
+        scalar join__FieldSet
+        
         enum join__Graph {
             TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
         }
-
+        
+        scalar link__Import
+        
+        enum link__Purpose {
+          SECURITY
+          EXECUTION
+        }
         "#,
             content
         )

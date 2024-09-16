@@ -34,6 +34,7 @@ use super::*;
 use crate::assert_snapshot_subscriber;
 use crate::plugin::test;
 use crate::plugins::authentication::jwks::parse_jwks;
+use crate::services::router::body::get_body_bytes;
 use crate::services::supergraph;
 
 fn create_an_url(filename: &str) -> String {
@@ -47,13 +48,14 @@ fn create_an_url(filename: &str) -> String {
 }
 
 async fn build_a_default_test_harness() -> router::BoxCloneService {
-    build_a_test_harness(None, None, false).await
+    build_a_test_harness(None, None, false, false).await
 }
 
 async fn build_a_test_harness(
     header_name: Option<String>,
     header_value_prefix: Option<String>,
     multiple_jwks: bool,
+    ignore_other_prefixes: bool,
 ) -> router::BoxCloneService {
     // create a mock service we will use to test our plugin
     let mut mock_service = test::MockSupergraphService::new();
@@ -121,6 +123,9 @@ async fn build_a_test_harness(
             serde_json::Value::String(hp);
     }
 
+    config["authentication"]["router"]["jwt"]["ignore_other_prefixes"] =
+        serde_json::Value::Bool(ignore_other_prefixes);
+
     crate::TestHarness::builder()
         .configuration_json(config)
         .unwrap()
@@ -172,10 +177,7 @@ async fn it_rejects_when_there_is_no_auth_header() {
         .unwrap();
 
     // Let's create a request with our operation name
-    let request_with_appropriate_name = supergraph::Request::canned_builder()
-        .operation_name("me".to_string())
-        .build()
-        .unwrap();
+    let request_with_appropriate_name = supergraph::Request::canned_builder().build().unwrap();
 
     // ...And call our service stack with it
     let mut service_response = test_harness
@@ -209,7 +211,6 @@ async fn it_rejects_when_auth_prefix_is_missing() {
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
-        .operation_name("me".to_string())
         .header(http::header::AUTHORIZATION, "invalid")
         .build()
         .unwrap();
@@ -246,7 +247,6 @@ async fn it_rejects_when_auth_prefix_has_no_jwt() {
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
-        .operation_name("me".to_string())
         .header(http::header::AUTHORIZATION, "Bearer")
         .build()
         .unwrap();
@@ -283,7 +283,6 @@ async fn it_rejects_when_auth_prefix_has_invalid_format_jwt() {
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
-        .operation_name("me".to_string())
         .header(http::header::AUTHORIZATION, "Bearer header.payload")
         .build()
         .unwrap();
@@ -322,7 +321,6 @@ async fn it_rejects_when_auth_prefix_has_correct_format_but_invalid_jwt() {
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
-        .operation_name("me".to_string())
         .header(
             http::header::AUTHORIZATION,
             "Bearer header.payload.signature",
@@ -362,7 +360,6 @@ async fn it_rejects_when_auth_prefix_has_correct_format_and_invalid_jwt() {
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
-            .operation_name("me".to_string())
             .header(
                 http::header::AUTHORIZATION,
                 "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImtleTEifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.4GrmfxuUST96cs0YUC0DfLAG218m7vn8fO_ENfXnu5B",
@@ -402,7 +399,6 @@ async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt() {
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
-            .operation_name("me".to_string())
             .header(
                 http::header::AUTHORIZATION,
                 "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImtleTEifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.4GrmfxuUST96cs0YUC0DfLAG218m7vn8fO_ENfXnu5A",
@@ -436,12 +432,45 @@ async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt() {
 }
 
 #[tokio::test]
+async fn it_accepts_when_auth_prefix_does_not_match_config_and_is_ignored() {
+    let test_harness = build_a_test_harness(None, None, false, true).await;
+    // Let's create a request with our operation name
+    let request_with_appropriate_name = supergraph::Request::canned_builder()
+        .header(http::header::AUTHORIZATION, "Basic dXNlcjpwYXNzd29yZA==")
+        .build()
+        .unwrap();
+
+    // ...And call our service stack with it
+    let mut service_response = test_harness
+        .oneshot(request_with_appropriate_name.try_into().unwrap())
+        .await
+        .unwrap();
+    let response: graphql::Response = serde_json::from_slice(
+        service_response
+            .next_response()
+            .await
+            .unwrap()
+            .unwrap()
+            .to_vec()
+            .as_slice(),
+    )
+    .unwrap();
+
+    assert_eq!(response.errors, vec![]);
+
+    assert_eq!(StatusCode::OK, service_response.response.status());
+
+    let expected_mock_response_data = "response created within the mock";
+    // with the expected message
+    assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+}
+
+#[tokio::test]
 async fn it_accepts_when_auth_prefix_has_correct_format_multiple_jwks_and_valid_jwt() {
-    let test_harness = build_a_test_harness(None, None, true).await;
+    let test_harness = build_a_test_harness(None, None, true, false).await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
-            .operation_name("me".to_string())
             .header(
                 http::header::AUTHORIZATION,
                 "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImtleTEifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.4GrmfxuUST96cs0YUC0DfLAG218m7vn8fO_ENfXnu5A",
@@ -476,11 +505,11 @@ async fn it_accepts_when_auth_prefix_has_correct_format_multiple_jwks_and_valid_
 
 #[tokio::test]
 async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_auth() {
-    let test_harness = build_a_test_harness(Some("SOMETHING".to_string()), None, false).await;
+    let test_harness =
+        build_a_test_harness(Some("SOMETHING".to_string()), None, false, false).await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
-            .operation_name("me".to_string())
             .header(
                 "SOMETHING",
                 "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImtleTEifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.4GrmfxuUST96cs0YUC0DfLAG218m7vn8fO_ENfXnu5A",
@@ -515,11 +544,11 @@ async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_aut
 
 #[tokio::test]
 async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_prefix() {
-    let test_harness = build_a_test_harness(None, Some("SOMETHING".to_string()), false).await;
+    let test_harness =
+        build_a_test_harness(None, Some("SOMETHING".to_string()), false, false).await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
-            .operation_name("me".to_string())
             .header(
                 http::header::AUTHORIZATION,
                 "SOMETHING eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImtleTEifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.4GrmfxuUST96cs0YUC0DfLAG218m7vn8fO_ENfXnu5A",
@@ -554,11 +583,10 @@ async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_pre
 
 #[tokio::test]
 async fn it_accepts_when_no_auth_prefix_and_valid_jwt_custom_prefix() {
-    let test_harness = build_a_test_harness(None, Some("".to_string()), false).await;
+    let test_harness = build_a_test_harness(None, Some("".to_string()), false, false).await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
-            .operation_name("me".to_string())
             .header(
                 http::header::AUTHORIZATION,
                 "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImtleTEifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.4GrmfxuUST96cs0YUC0DfLAG218m7vn8fO_ENfXnu5A",
@@ -594,13 +622,15 @@ async fn it_accepts_when_no_auth_prefix_and_valid_jwt_custom_prefix() {
 #[tokio::test]
 #[should_panic]
 async fn it_panics_when_auth_prefix_has_correct_format_but_contains_whitespace() {
-    let _test_harness = build_a_test_harness(None, Some("SOMET HING".to_string()), false).await;
+    let _test_harness =
+        build_a_test_harness(None, Some("SOMET HING".to_string()), false, false).await;
 }
 
 #[tokio::test]
 #[should_panic]
 async fn it_panics_when_auth_prefix_has_correct_format_but_contains_trailing_whitespace() {
-    let _test_harness = build_a_test_harness(None, Some("SOMETHING ".to_string()), false).await;
+    let _test_harness =
+        build_a_test_harness(None, Some("SOMETHING ".to_string()), false, false).await;
 }
 
 #[tokio::test]
@@ -658,7 +688,6 @@ async fn it_extracts_the_token_from_cookies() {
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
-        .operation_name("me".to_string())
         .header(
             http::header::COOKIE,
             format!("a= b; c = d HttpOnly; authz = {token}; e = f"),
@@ -755,7 +784,6 @@ async fn it_supports_multiple_sources() {
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
-        .operation_name("me".to_string())
         .header("Authz2", format!("Bear {token}"))
         .build()
         .unwrap();
@@ -957,7 +985,6 @@ async fn issuer_check() {
     .unwrap();
 
     let request = supergraph::Request::canned_builder()
-        .operation_name("me".to_string())
         .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
         .build()
         .unwrap();
@@ -995,19 +1022,15 @@ async fn issuer_check() {
     .unwrap();
 
     let request = supergraph::Request::canned_builder()
-        .operation_name("me".to_string())
         .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
         .build()
         .unwrap();
 
     match authenticate(&config, &manager, request.try_into().unwrap()) {
         ControlFlow::Break(res) => {
-            let response: graphql::Response = serde_json::from_slice(
-                &hyper::body::to_bytes(res.response.into_body())
-                    .await
-                    .unwrap(),
-            )
-            .unwrap();
+            let response: graphql::Response =
+                serde_json::from_slice(&get_body_bytes(res.response.into_body()).await.unwrap())
+                    .unwrap();
             assert_eq!(response, graphql::Response::builder()
         .errors(vec![graphql::Error::builder().extension_code("AUTH_ERROR").message("Invalid issuer: the token's `iss` was 'hallo', but signed with a key from 'hello'").build()]).build());
         }
@@ -1035,19 +1058,15 @@ async fn issuer_check() {
     .unwrap();
 
     let request = supergraph::Request::canned_builder()
-        .operation_name("me".to_string())
         .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
         .build()
         .unwrap();
 
     match authenticate(&config, &manager, request.try_into().unwrap()) {
         ControlFlow::Break(res) => {
-            let response: graphql::Response = serde_json::from_slice(
-                &hyper::body::to_bytes(res.response.into_body())
-                    .await
-                    .unwrap(),
-            )
-            .unwrap();
+            let response: graphql::Response =
+                serde_json::from_slice(&get_body_bytes(res.response.into_body()).await.unwrap())
+                    .unwrap();
             assert_eq!(response, graphql::Response::builder()
             .errors(vec![graphql::Error::builder().extension_code("AUTH_ERROR").message("Invalid issuer: the token's `iss` was 'AAAA', but signed with a key from 'hello'").build()]).build());
         }
@@ -1070,19 +1089,15 @@ async fn issuer_check() {
     .unwrap();
 
     let request = supergraph::Request::canned_builder()
-        .operation_name("me".to_string())
         .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
         .build()
         .unwrap();
 
     match authenticate(&config, &manager, request.try_into().unwrap()) {
         ControlFlow::Break(res) => {
-            let response: graphql::Response = serde_json::from_slice(
-                &hyper::body::to_bytes(res.response.into_body())
-                    .await
-                    .unwrap(),
-            )
-            .unwrap();
+            let response: graphql::Response =
+                serde_json::from_slice(&get_body_bytes(res.response.into_body()).await.unwrap())
+                    .unwrap();
             assert_eq!(response, graphql::Response::builder()
         .errors(vec![graphql::Error::builder().extension_code("AUTH_ERROR").message("Invalid issuer: the token's `iss` was 'AAAA', but signed with a key from 'hello'").build()]).build());
         }
@@ -1298,7 +1313,9 @@ async fn jwks_send_headers() {
                             .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                             .status(StatusCode::OK)
                             .version(http::Version::HTTP_11)
-                            .body::<hyper::Body>(include_str!("testdata/jwks.json").into())
+                            .body::<crate::services::router::body::RouterBody>(
+                                include_str!("testdata/jwks.json").into(),
+                            )
                             .unwrap(),
                     )
                 }

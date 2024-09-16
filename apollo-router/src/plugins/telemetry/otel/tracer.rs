@@ -16,6 +16,7 @@ use opentelemetry_sdk::trace::Tracer as SdkTracer;
 use opentelemetry_sdk::trace::TracerProvider as SdkTracerProvider;
 
 use super::OtelData;
+use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
 
 /// An interface for authors of OpenTelemetry SDKs to build pre-sampled tracers.
 ///
@@ -34,13 +35,11 @@ use super::OtelData;
 /// authors of alternate OpenTelemetry SDK implementations if they wish to have
 /// `tracing` compatibility.
 ///
-/// See the [`OpenTelemetrySpanExt::set_parent`] and
-/// [`OpenTelemetrySpanExt::context`] methods for example usage.
+/// See the [`OpenTelemetrySpanExt::context`] method for example usage.
 ///
 /// [`Tracer`]: opentelemetry::trace::Tracer
 /// [`SpanBuilder`]: opentelemetry::trace::SpanBuilder
 /// [`PreSampledTracer::sampled_span_context`]: crate::PreSampledTracer::sampled_span_context
-/// [`OpenTelemetrySpanExt::set_parent`]: crate::OpenTelemetrySpanExt::set_parent
 /// [`OpenTelemetrySpanExt::context`]: crate::OpenTelemetrySpanExt::context
 /// [`Context`]: opentelemetry::Context
 pub(crate) trait PreSampledTracer {
@@ -160,7 +159,12 @@ fn process_sampling_result(
             decision: SamplingDecision::RecordAndSample,
             trace_state,
             ..
-        } => Some((trace_flags | TraceFlags::SAMPLED, trace_state.clone())),
+        } => Some((
+            trace_flags | TraceFlags::SAMPLED,
+            trace_state
+                .with_priority_sampling(true)
+                .with_measuring(true),
+        )),
     }
 }
 
@@ -187,6 +191,8 @@ mod tests {
             builder,
             parent_cx,
             event_attributes: None,
+            forced_status: None,
+            forced_span_name: None,
         });
         let span = cx.span();
         let span_context = span.span_context();
@@ -230,6 +236,8 @@ mod tests {
                 builder,
                 parent_cx,
                 event_attributes: None,
+                forced_status: None,
+                forced_span_name: None,
             });
 
             assert_eq!(

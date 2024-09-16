@@ -53,12 +53,23 @@ plugins:
     enabled: true
 
 preview_entity_cache:
-  redis:
-    urls:
-      - https://example.com
   enabled: true
+  invalidation:
+    listen: 127.0.0.1:4000
+    path: /invalidation
+  subgraph:
+    all:
+      redis:
+        urls:
+          - https://example.com
+      enabled: false
+    subgraphs:
+      product:
+        enabled: false
 
 telemetry:
+  apollo:
+    metrics_reference_mode: extended
   instrumentation:
     spans:
       router:
@@ -70,6 +81,9 @@ telemetry:
       subgraph:
         attributes:
           subgraph.graphql.document: true
+    instruments:
+      graphql:
+        list.length: true
 
 preview_file_uploads:
   enabled: true
@@ -78,9 +92,10 @@ preview_file_uploads:
       enabled: true
       mode: stream
 
-experimental_demand_control:
+demand_control:
   enabled: true
   mode: measure
   strategy:
     static_estimated:
+      list_size: 30
       max: 256

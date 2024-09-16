@@ -17,7 +17,7 @@ const DEFAULT_INTROSPECTION_CACHE_CAPACITY: NonZeroUsize =
 /// A cache containing our well known introspection queries.
 pub(crate) struct Introspection {
     cache: CacheStorage<String, Response>,
-    planner: Arc<Planner<QueryPlanResult>>,
+    pub(crate) planner: Arc<Planner<QueryPlanResult>>,
 }
 
 impl Introspection {
@@ -50,7 +50,7 @@ impl Introspection {
 
     /// Execute an introspection and cache the response.
     pub(crate) async fn execute(&self, query: String) -> Result<Response, IntrospectionError> {
-        if let Some(response) = self.cache.get(&query).await {
+        if let Some(response) = self.cache.get(&query, |_| Ok(())).await {
             return Ok(response);
         }
 
@@ -114,6 +114,7 @@ mod introspection_tests {
                     reuse_query_fragments: Some(false),
                     generate_query_fragments: None,
                     debug: None,
+                    type_conditioned_fetching: false,
                 },
             )
             .await

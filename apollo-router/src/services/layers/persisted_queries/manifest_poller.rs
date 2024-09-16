@@ -10,6 +10,7 @@ use futures::prelude::*;
 use reqwest::Client;
 use serde::Deserialize;
 use serde::Serialize;
+use tokio::fs::read_to_string;
 use tokio::sync::mpsc;
 use tower::BoxError;
 
@@ -207,7 +208,89 @@ impl PersistedQueryManifestPoller {
     /// Starts polling immediately and this function only returns after all chunks have been fetched
     /// and the [`PersistedQueryManifest`] has been fully populated.
     pub(crate) async fn new(config: Configuration) -> Result<Self, BoxError> {
-        if let Some(uplink_config) = config.uplink.as_ref() {
+        if let Some(manifest_files) = config.persisted_queries.experimental_local_manifests {
+            if manifest_files.is_empty() {
+                return Err("no local persisted query list files specified".into());
+            }
+            let mut manifest: HashMap<String, String> = PersistedQueryManifest::new();
+
+            for local_pq_list in manifest_files {
+                tracing::info!(
+                    "Loading persisted query list from local file: {}",
+                    local_pq_list
+                );
+
+                let local_manifest: String =
+                    read_to_string(local_pq_list.clone())
+                        .await
+                        .map_err(|e| -> BoxError {
+                            format!(
+                                "could not read local persisted query list file {}: {}",
+                                local_pq_list, e
+                            )
+                            .into()
+                        })?;
+
+                let manifest_file: SignedUrlChunk =
+                    serde_json::from_str(&local_manifest).map_err(|e| -> BoxError {
+                        format!(
+                            "could not parse local persisted query list file {}: {}",
+                            local_pq_list.clone(),
+                            e
+                        )
+                        .into()
+                    })?;
+
+                if manifest_file.format != "apollo-persisted-query-manifest" {
+                    return Err("chunk format is not 'apollo-persisted-query-manifest'".into());
+                }
+
+                if manifest_file.version != 1 {
+                    return Err("persisted query manifest chunk version is not 1".into());
+                }
+
+                for operation in manifest_file.operations {
+                    manifest.insert(operation.id, operation.body);
+                }
+            }
+
+            let freeform_graphql_behavior = if config.persisted_queries.safelist.enabled {
+                if config.persisted_queries.safelist.require_id {
+                    FreeformGraphQLBehavior::DenyAll {
+                        log_unknown: config.persisted_queries.log_unknown,
+                    }
+                } else {
+                    FreeformGraphQLBehavior::AllowIfInSafelist {
+                        safelist: FreeformGraphQLSafelist::new(&manifest),
+                        log_unknown: config.persisted_queries.log_unknown,
+                    }
+                }
+            } else if config.persisted_queries.log_unknown {
+                FreeformGraphQLBehavior::LogUnlessInSafelist {
+                    safelist: FreeformGraphQLSafelist::new(&manifest),
+                    apq_enabled: config.apq.enabled,
+                }
+            } else {
+                FreeformGraphQLBehavior::AllowAll {
+                    apq_enabled: config.apq.enabled,
+                }
+            };
+
+            let state = Arc::new(RwLock::new(PersistedQueryManifestPollerState {
+                persisted_query_manifest: manifest.clone(),
+                freeform_graphql_behavior,
+            }));
+
+            tracing::info!(
+                "Loaded {} persisted queries from local file.",
+                manifest.len()
+            );
+
+            Ok(Self {
+                state,
+                _drop_signal: mpsc::channel::<()>(1).0,
+            })
+        } else if let Some(uplink_config) = config.uplink.as_ref() {
             // Note that the contents of this Arc<RwLock> will be overwritten by poll_uplink before
             // we return from this `new` method, so the particular choice of freeform_graphql_behavior
             // here does not matter. (Can we improve this? We could use an Option but then we'd just
@@ -601,6 +684,8 @@ mod tests {
     use url::Url;
 
     use super::*;
+    use crate::configuration::Apq;
+    use crate::configuration::PersistedQueries;
     use crate::test_harness::mocks::persisted_queries::*;
     use crate::uplink::Endpoints;
 
@@ -687,5 +772,29 @@ mod tests {
 
         // ... unless they precisely match a safelisted document that also has invalid syntax.
         assert!(is_allowed("}}}"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn uses_local_manifest() {
+        let (_, body, _) = fake_manifest();
+        let id = "5678".to_string();
+
+        let manifest_manager = PersistedQueryManifestPoller::new(
+            Configuration::fake_builder()
+                .apq(Apq::fake_new(Some(false)))
+                .persisted_query(
+                    PersistedQueries::builder()
+                        .enabled(true)
+                        .experimental_local_manifests(vec![
+                            "tests/fixtures/persisted-queries-manifest.json".to_string(),
+                        ])
+                        .build(),
+                )
+                .build()
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(manifest_manager.get_operation_body(&id), Some(body))
     }
 }

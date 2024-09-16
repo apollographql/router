@@ -1,0 +1,15 @@
+query NestedInputTypeVarsQuery(
+  $nonNullEnumInput: SomeEnum!, 
+  $enumInputObject: EnumInputType,
+  $enumInputObjectList: [EnumInputType],
+  $enumInputObjectListOfLists: [[EnumInputType]],
+) {
+  enumUsageQuery(
+    nonNullEnumInput: $nonNullEnumInput, 
+    enumInputObject: $enumInputObject,
+    enumInputObjectList: $enumInputObjectList,
+    enumInputObjectListOfLists: $enumInputObjectListOfLists,
+  ) {
+    id
+  }
+}

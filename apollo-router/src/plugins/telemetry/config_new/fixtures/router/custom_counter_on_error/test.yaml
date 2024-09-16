@@ -1,0 +1,17 @@
+description: Custom counter should be incremented on timeout error with operation_name attribute
+events:
+  - - context:
+        map:
+          operation_name: TestQuery
+    - router_request:
+        uri: "/hello"
+        method: POST
+        body: |
+          hello
+    - router_error:
+        error: request timed out
+  - - router_request:
+        uri: "/hello"
+        method: POST
+        body: |
+          hello

@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use serde_json::json;
 
+use crate::integration::common::graph_os_enabled;
 use crate::integration::IntegrationTest;
 
 const PROMETHEUS_CONFIG: &str = include_str!("fixtures/prometheus.router.yaml");
@@ -40,31 +41,52 @@ async fn test_metrics_reloading() {
         router.assert_reloaded().await;
     }
 
-    router.assert_metrics_contains(r#"apollo_router_cache_hit_count_total{kind="query planner",storage="memory",otel_scope_name="apollo/router"} 4"#, None).await;
-    router.assert_metrics_contains(r#"apollo_router_cache_miss_count_total{kind="query planner",storage="memory",otel_scope_name="apollo/router"} 2"#, None).await;
-    router.assert_metrics_contains(r#"apollo_router_http_request_duration_seconds_bucket{status="200",otel_scope_name="apollo/router",le="100"}"#, None).await;
-    router
-        .assert_metrics_contains(r#"apollo_router_cache_hit_time"#, None)
-        .await;
-    router
-        .assert_metrics_contains(r#"apollo_router_cache_miss_time"#, None)
-        .await;
-    router
-        .assert_metrics_contains(r#"apollo_router_session_count_total"#, None)
-        .await;
-    router
-        .assert_metrics_contains(r#"custom_header="test_custom""#, None)
-        .await;
+    let metrics = router
+        .get_metrics_response()
+        .await
+        .expect("failed to fetch metrics")
+        .text()
+        .await
+        .unwrap();
+
+    check_metrics_contains(
+        &metrics,
+        r#"apollo_router_cache_hit_count_total{kind="query planner",storage="memory",otel_scope_name="apollo/router"} 4"#,
+    );
+    check_metrics_contains(
+        &metrics,
+        r#"apollo_router_cache_miss_count_total{kind="query planner",storage="memory",otel_scope_name="apollo/router"} 2"#,
+    );
+    check_metrics_contains(
+        &metrics,
+        r#"apollo_router_http_request_duration_seconds_bucket{status="200",otel_scope_name="apollo/router",le="100"}"#,
+    );
+    check_metrics_contains(&metrics, r#"apollo_router_cache_hit_time"#);
+    check_metrics_contains(&metrics, r#"apollo_router_cache_miss_time"#);
+    check_metrics_contains(&metrics, r#"apollo_router_session_count_total"#);
+    check_metrics_contains(&metrics, r#"custom_header="test_custom""#);
+
     router
         .assert_metrics_does_not_contain(r#"_total_total{"#)
         .await;
 
-    if std::env::var("APOLLO_KEY").is_ok() && std::env::var("APOLLO_GRAPH_REF").is_ok() {
-        router.assert_metrics_contains(r#"apollo_router_telemetry_studio_reports_total{type="metrics",otel_scope_name="apollo/router"} 2"#, Some(Duration::from_secs(10))).await;
-        router.assert_metrics_contains(r#"apollo_router_telemetry_studio_reports_total{type="traces",otel_scope_name="apollo/router"} 2"#, Some(Duration::from_secs(10))).await;
-        router.assert_metrics_contains(r#"apollo_router_uplink_fetch_duration_seconds_count{kind="unchanged",query="License",url="https://uplink.api.apollographql.com/",otel_scope_name="apollo/router"}"#, Some(Duration::from_secs(120))).await;
-        router.assert_metrics_contains(r#"apollo_router_uplink_fetch_count_total{query="License",status="success",otel_scope_name="apollo/router"}"#, Some(Duration::from_secs(1))).await;
+    if std::env::var("TEST_APOLLO_KEY").is_ok() && std::env::var("TEST_APOLLO_GRAPH_REF").is_ok() {
+        router.assert_metrics_contains_multiple(vec![
+                r#"apollo_router_telemetry_studio_reports_total{report_type="metrics",otel_scope_name="apollo/router"} 2"#,
+                r#"apollo_router_telemetry_studio_reports_total{report_type="traces",otel_scope_name="apollo/router"} 2"#,
+                r#"apollo_router_uplink_fetch_duration_seconds_count{kind="unchanged",query="License",url="https://uplink.api.apollographql.com/",otel_scope_name="apollo/router"}"#,
+                r#"apollo_router_uplink_fetch_count_total{query="License",status="success",otel_scope_name="apollo/router"}"#
+            ], Some(Duration::from_secs(10)))
+            .await;
     }
+}
+
+#[track_caller]
+fn check_metrics_contains(metrics: &str, text: &str) {
+    assert!(
+        metrics.contains(text),
+        "'{text}' not detected in metrics\n{metrics}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -155,13 +177,82 @@ async fn test_bad_queries() {
     router.execute_huge_query().await;
     router
         .assert_metrics_contains(
-            r#"apollo_router_http_requests_total{error="payload too large for the `http_max_request_bytes` configuration",status="413",otel_scope_name="apollo/router"} 1"#,
+            r#"apollo_router_http_requests_total{error="Request body payload too large",status="413",otel_scope_name="apollo/router"} 1"#,
             None,
         )
         .await;
     router
         .assert_log_not_contains(
             "OpenTelemetry metric error occurred: Metrics error: Instrument description conflict",
+        )
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_graphql_metrics() {
+    if !graph_os_enabled() {
+        return;
+    }
+    let mut router = IntegrationTest::builder()
+        .config(include_str!("fixtures/graphql.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    router.execute_default_query().await;
+    router
+            .assert_metrics_contains(r#"graphql_field_list_length_sum{graphql_field_name="topProducts",graphql_field_type="Product",graphql_type_name="Query",otel_scope_name="apollo/router"} 3"#, None)
+            .await;
+    router
+            .assert_metrics_contains(r#"graphql_field_list_length_bucket{graphql_field_name="topProducts",graphql_field_type="Product",graphql_type_name="Query",otel_scope_name="apollo/router",le="5"} 1"#, None)
+            .await;
+    router
+            .assert_metrics_contains(r#"graphql_field_execution_total{graphql_field_name="name",graphql_field_type="String",graphql_type_name="Product",otel_scope_name="apollo/router"} 3"#, None)
+            .await;
+    router
+            .assert_metrics_contains(r#"graphql_field_execution_total{graphql_field_name="topProducts",graphql_field_type="Product",graphql_type_name="Query",otel_scope_name="apollo/router"} 1"#, None)
+            .await;
+    router
+            .assert_metrics_contains(r#"custom_counter_total{graphql_field_name="name",graphql_field_type="String",graphql_type_name="Product",otel_scope_name="apollo/router"} 3"#, None)
+            .await;
+    router
+            .assert_metrics_contains(r#"custom_histogram_sum{graphql_field_name="topProducts",graphql_field_type="Product",graphql_type_name="Query",otel_scope_name="apollo/router"} 3"#, None)
+            .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_gauges_on_reload() {
+    let mut router = IntegrationTest::builder()
+        .config(include_str!("fixtures/no-telemetry.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    router.execute_default_query().await;
+    router.update_config(PROMETHEUS_CONFIG).await;
+    router.assert_reloaded().await;
+    router.execute_default_query().await;
+    router
+        .assert_metrics_contains(r#"apollo_router_cache_storage_estimated_size{kind="query planner",type="memory",otel_scope_name="apollo/router"} "#, None)
+        .await;
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_query_planning_queued{otel_scope_name="apollo/router"} "#,
+            None,
+        )
+        .await;
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_v8_heap_total_bytes{otel_scope_name="apollo/router"} "#,
+            None,
+        )
+        .await;
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_v8_heap_total_bytes{otel_scope_name="apollo/router"} "#,
+            None,
         )
         .await;
 }

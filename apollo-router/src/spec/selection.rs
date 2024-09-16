@@ -194,20 +194,11 @@ impl Selection {
         matches!(self, Selection::Field {name, ..} if name.as_str() == TYPENAME)
     }
 
-    pub(crate) fn output_key_if_typename_field(&self) -> Option<ByteString> {
-        match self {
-            Selection::Field { name, alias, .. } if name.as_str() == TYPENAME => {
-                alias.as_ref().or(Some(name)).cloned()
-            }
-            _ => None,
-        }
-    }
-
     pub(crate) fn contains_error_path(&self, path: &[PathElement], fragments: &Fragments) -> bool {
         match (path.first(), self) {
             (None, _) => true,
             (
-                Some(PathElement::Key(key)),
+                Some(PathElement::Key(key, _)),
                 Selection::Field {
                     name,
                     alias,
@@ -265,10 +256,10 @@ impl Selection {
                     false
                 }
             }
-            (Some(PathElement::Index(_)), _) | (Some(PathElement::Flatten), _) => {
+            (Some(PathElement::Index(_)), _) | (Some(PathElement::Flatten(_)), _) => {
                 self.contains_error_path(&path[1..], fragments)
             }
-            (Some(PathElement::Key(_)), Selection::InlineFragment { selection_set, .. }) => {
+            (Some(PathElement::Key(_, _)), Selection::InlineFragment { selection_set, .. }) => {
                 selection_set
                     .iter()
                     .any(|selection| selection.contains_error_path(path, fragments))

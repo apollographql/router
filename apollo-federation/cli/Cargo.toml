@@ -1,0 +1,16 @@
+[package]
+name = "apollo-federation-cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+apollo-compiler.workspace = true
+apollo-federation = { path = ".." }
+clap = { version = "4.5.1", features = ["derive"] }
+
+[dev-dependencies]
+insta = { version = "1.38.0", features = ["json", "redactions"] }
+serde = { version = "1.0.197", features = ["derive"] }
+serde_json = { version = "1.0.114", features = [
+    "preserve_order",
+] }

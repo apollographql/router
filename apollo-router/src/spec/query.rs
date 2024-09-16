@@ -15,7 +15,6 @@ use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
-use tower::BoxError;
 use tracing::level_filters::LevelFilter;
 
 use self::change::QueryHashVisitor;
@@ -107,7 +106,7 @@ impl Query {
             defer_stats: DeferStats {
                 has_defer: false,
                 has_unconditional_defer: false,
-                conditional_defer_variable_names: IndexSet::new(),
+                conditional_defer_variable_names: IndexSet::default(),
             },
             is_original: true,
             schema_aware_hash: vec![],
@@ -275,7 +274,7 @@ impl Query {
         schema: &Schema,
         configuration: &Configuration,
     ) -> Result<ParsedDocument, SpecError> {
-        let parser = &mut apollo_compiler::Parser::new()
+        let parser = &mut apollo_compiler::parser::Parser::new()
             .recursion_limit(configuration.limits.parser_max_recursion)
             .token_limit(configuration.limits.parser_max_tokens);
         let ast = match parser.parse_ast(query, "query.graphql") {
@@ -284,8 +283,9 @@ impl Query {
                 return Err(SpecError::ParseError(errors.into()));
             }
         };
-        let schema = schema.api_schema();
-        let executable_document = match ast.to_executable_validate(schema) {
+
+        let api_schema = schema.api_schema();
+        let executable_document = match ast.to_executable_validate(api_schema) {
             Ok(doc) => doc,
             Err(errors) => {
                 return Err(SpecError::ValidationError(errors.into()));
@@ -296,8 +296,14 @@ impl Query {
         let recursion_limit = parser.recursion_reached();
         tracing::trace!(?recursion_limit, "recursion limit data");
 
-        let hash = QueryHashVisitor::hash_query(schema, &executable_document, operation_name)
-            .map_err(|e| SpecError::QueryHashing(e.to_string()))?;
+        let hash = QueryHashVisitor::hash_query(
+            schema.supergraph_schema(),
+            &schema.raw_sdl,
+            &executable_document,
+            operation_name,
+        )
+        .map_err(|e| SpecError::QueryHashing(e.to_string()))?;
+
         Ok(Arc::new(ParsedDocumentInner {
             ast,
             executable: Arc::new(executable_document),
@@ -305,12 +311,13 @@ impl Query {
         }))
     }
 
+    #[cfg(test)]
     pub(crate) fn parse(
         query: impl Into<String>,
         operation_name: Option<&str>,
         schema: &Schema,
         configuration: &Configuration,
-    ) -> Result<Self, BoxError> {
+    ) -> Result<Self, tower::BoxError> {
         let query = query.into();
 
         let doc = Self::parse_document(&query, operation_name, schema, configuration)?;
@@ -339,15 +346,17 @@ impl Query {
         let mut defer_stats = DeferStats {
             has_defer: false,
             has_unconditional_defer: false,
-            conditional_defer_variable_names: IndexSet::new(),
+            conditional_defer_variable_names: IndexSet::default(),
         };
         let fragments = Fragments::from_hir(document, schema, &mut defer_stats)?;
         let operations = document
-            .all_operations()
+            .operations
+            .iter()
             .map(|operation| Operation::from_hir(operation, schema, &mut defer_stats, &fragments))
             .collect::<Result<Vec<_>, SpecError>>()?;
 
-        let mut visitor = QueryHashVisitor::new(schema.supergraph_schema(), document);
+        let mut visitor =
+            QueryHashVisitor::new(schema.supergraph_schema(), &schema.raw_sdl, document);
         traverse::document(&mut visitor, document, operation_name).map_err(|e| {
             SpecError::QueryHashing(format!("could not calculate the query hash: {e}"))
         })?;
@@ -559,14 +568,8 @@ impl Query {
                         let typename = input_object
                             .get(TYPENAME)
                             .and_then(|val| val.as_str())
-                            .and_then(|s| {
-                                Some(apollo_compiler::ast::Type::Named(
-                                    apollo_compiler::ast::NamedType::new(
-                                        apollo_compiler::NodeStr::new(s),
-                                    )
-                                    .ok()?,
-                                ))
-                            });
+                            .and_then(|s| apollo_compiler::ast::NamedType::new(s).ok())
+                            .map(apollo_compiler::ast::Type::Named);
 
                         let current_type = if parameters
                             .schema
@@ -992,10 +995,6 @@ impl Query {
         }
     }
 
-    pub(crate) fn contains_introspection(&self) -> bool {
-        self.operations.iter().any(Operation::is_introspection)
-    }
-
     pub(crate) fn variable_value<'a>(
         &'a self,
         operation_name: Option<&str>,
@@ -1152,43 +1151,6 @@ impl Operation {
             type_name,
             variables,
             kind,
-        })
-    }
-
-    /// Checks to see if this is a query or mutation containing only
-    /// `__typename` at the root level (possibly more than one time, possibly
-    /// with aliases). If so, returns Some with a Vec of the output keys
-    /// corresponding.
-    pub(crate) fn is_only_typenames_with_output_keys(&self) -> Option<Vec<ByteString>> {
-        if self.selection_set.is_empty() {
-            None
-        } else {
-            let output_keys: Vec<ByteString> = self
-                .selection_set
-                .iter()
-                .filter_map(|s| s.output_key_if_typename_field())
-                .collect();
-            if output_keys.len() == self.selection_set.len() {
-                Some(output_keys)
-            } else {
-                None
-            }
-        }
-    }
-
-    fn is_introspection(&self) -> bool {
-        // If the only field is `__typename` it's considered as an introspection query
-        if self.is_only_typenames_with_output_keys().is_some() {
-            return true;
-        }
-        self.selection_set.iter().all(|sel| match sel {
-            Selection::Field { name, .. } => {
-                let name = name.as_str();
-                // `__typename` can only be resolved in runtime,
-                // so this query cannot be seen as an introspection query
-                name == "__schema" || name == "__type"
-            }
-            _ => false,
         })
     }
 

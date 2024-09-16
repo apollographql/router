@@ -17,10 +17,26 @@ pub(crate) struct StaticEstimated {
 impl StrategyImpl for StaticEstimated {
     fn on_execution_request(&self, request: &execution::Request) -> Result<(), DemandControlError> {
         self.cost_calculator
-            .planned(&request.query_plan)
+            .planned(
+                &request.query_plan,
+                &request.supergraph_request.body().variables,
+            )
             .and_then(|cost| {
+                request
+                    .context
+                    .insert_cost_strategy("static_estimated".to_string())?;
+                request.context.insert_cost_result("COST_OK".to_string())?;
+                request.context.insert_estimated_cost(cost)?;
+
                 if cost > self.max {
-                    Err(DemandControlError::EstimatedCostTooExpensive)
+                    let error = DemandControlError::EstimatedCostTooExpensive {
+                        estimated_cost: cost,
+                        max_cost: self.max,
+                    };
+                    request
+                        .context
+                        .insert_cost_result(error.code().to_string())?;
+                    Err(error)
                 } else {
                     Ok(())
                 }
@@ -41,12 +57,20 @@ impl StrategyImpl for StaticEstimated {
 
     fn on_execution_response(
         &self,
+        context: &crate::Context,
         request: &ExecutableDocument,
         response: &graphql::Response,
     ) -> Result<(), DemandControlError> {
         if response.data.is_some() {
-            let _cost = self.cost_calculator.actual(request, response)?;
-            // Todo metrics
+            let cost = self.cost_calculator.actual(
+                request,
+                response,
+                &context
+                    .extensions()
+                    .with_lock(|lock| lock.get().cloned())
+                    .unwrap_or_default(),
+            )?;
+            context.insert_actual_cost(cost)?;
         }
         Ok(())
     }

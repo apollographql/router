@@ -1,0 +1,14 @@
+---
+source: apollo-federation/tests/composition_tests.rs
+expression: "print_sdl(supergraph.to_api_schema(Default::default()).unwrap().schema())"
+---
+scalar Import
+
+type Product {
+  sku: String!
+  name: String!
+}
+
+type Query {
+  products: [Product!]
+}

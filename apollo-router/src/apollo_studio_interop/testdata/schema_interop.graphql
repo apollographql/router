@@ -63,7 +63,9 @@ input EnumInputType
   @join__type(graph: MAIN)
 {
   enumInput: SomeEnum!
+  nullableEnumInput: SomeEnum
   enumListInput: [SomeEnum!]!
+  enumListOfListInput: [[SomeEnum]]
   nestedEnumType: [NestedEnumInputType]
 }
 
@@ -146,12 +148,19 @@ type Mutation
   @join__type(graph: MAIN)
 {
   noInputMutation: EverythingResponse!
+  graph(id: ID!): TestGraphResponse!
+  mutation2(id: ID!): TestGraphResponse2!
+  mutation3(id: ID!): TestGraphResponse3!
+  mutation4(id1: ID!, id2: ID!): ID!
 }
 
 input NestedEnumInputType
   @join__type(graph: MAIN)
 {
-  someEnum: SomeEnum
+  someEnum: SomeEnum!
+  someNullableEnum: SomeEnum
+  someEnumList: [SomeEnum]
+  someEnumListOfList: [[SomeEnum]]
 }
 
 input NestedInputType
@@ -169,6 +178,23 @@ type ObjectTypeResponse
   nullableField: String
 }
 
+type NestedEnumResponse
+  @join__type(graph: MAIN)
+{
+  singleValue: SomeEnum
+  list: [SomeEnum]
+  listOfLists: [[SomeEnum]]
+}
+
+type EnumResponse 
+  @join__type(graph: MAIN)
+{
+  singleValue: SomeEnum
+  list: [SomeEnum]
+  listOfLists: [[SomeEnum]]
+  nestedObject: NestedEnumResponse
+}
+
 type Query
   @join__type(graph: MAIN)
 {
@@ -183,6 +209,19 @@ type Query
   defaultArgQuery(stringInput: String! = "default", inputType: AnotherInputType = {anotherInput: "inputDefault"}): BasicResponse!
   inputTypeDefaultQuery(input: InputTypeWithDefault): BasicResponse!
   sortQuery(listInput: [String!]!, stringInput: String!, nullableStringInput: String, INTInput: Int!, floatInput: Float!, boolInput: Boolean!, enumInput: SomeEnum, idInput: ID!): SortResponse!
+  manyArgsQuery(arg1: String, arg2: String, arg3: String, arg4: String, arg5: String, arg6: String, arg7: String): EverythingResponse!
+  underscoreQuery(arg_: String, _arg2: String, _arg3_: String): UnderscoreResponse
+  enumUsageQuery(
+    nonNullEnumInput: SomeEnum!,
+    nullableEnumInput: SomeEnum,
+    enumInputList: [SomeEnum],
+    enumInputListOfLists: [[SomeEnum]],
+    enumInputObject: EnumInputType,
+    enumInputObjectList: [EnumInputType],
+    enumInputObjectListOfLists: [[EnumInputType]],
+    anotherEnumList: [AnotherEnum],
+  ): BasicResponse
+  enumResponseQuery: EnumResponse,
 }
 
 enum SomeEnum
@@ -191,6 +230,45 @@ enum SomeEnum
   SOME_VALUE_1 @join__enumValue(graph: MAIN)
   SOME_VALUE_2 @join__enumValue(graph: MAIN)
   SOME_VALUE_3 @join__enumValue(graph: MAIN)
+  SOME_VALUE_4 @join__enumValue(graph: MAIN)
+  SOME_VALUE_5 @join__enumValue(graph: MAIN)
+  SOME_VALUE_6 @join__enumValue(graph: MAIN)
+  SOME_VALUE_7 @join__enumValue(graph: MAIN)
+  SOME_VALUE_8 @join__enumValue(graph: MAIN)
+  SOME_VALUE_9 @join__enumValue(graph: MAIN)
+  SOME_VALUE_10 @join__enumValue(graph: MAIN)
+  SOME_VALUE_11 @join__enumValue(graph: MAIN)
+  SOME_VALUE_12 @join__enumValue(graph: MAIN)
+  SOME_VALUE_13 @join__enumValue(graph: MAIN)
+  SOME_VALUE_14 @join__enumValue(graph: MAIN)
+  SOME_VALUE_15 @join__enumValue(graph: MAIN)
+  SOME_VALUE_16 @join__enumValue(graph: MAIN)
+  SOME_VALUE_17 @join__enumValue(graph: MAIN)
+  SOME_VALUE_18 @join__enumValue(graph: MAIN)
+  SOME_VALUE_19 @join__enumValue(graph: MAIN)
+  SOME_VALUE_20 @join__enumValue(graph: MAIN)
+  SOME_VALUE_21 @join__enumValue(graph: MAIN)
+  SOME_VALUE_22 @join__enumValue(graph: MAIN)
+  SOME_VALUE_23 @join__enumValue(graph: MAIN)
+  SOME_VALUE_24 @join__enumValue(graph: MAIN)
+  SOME_VALUE_25 @join__enumValue(graph: MAIN)
+  SOME_VALUE_26 @join__enumValue(graph: MAIN)
+  SOME_VALUE_27 @join__enumValue(graph: MAIN)
+  SOME_VALUE_28 @join__enumValue(graph: MAIN)
+  SOME_VALUE_29 @join__enumValue(graph: MAIN)
+  SOME_VALUE_30 @join__enumValue(graph: MAIN)
+  SOME_VALUE_31 @join__enumValue(graph: MAIN)
+  SOME_VALUE_32 @join__enumValue(graph: MAIN)
+  SOME_VALUE_33 @join__enumValue(graph: MAIN)
+  SOME_VALUE_34 @join__enumValue(graph: MAIN)
+}
+
+enum AnotherEnum
+  @join__type(graph: MAIN)
+{
+  ANOTHER_VALUE_1 @join__enumValue(graph: MAIN)
+  ANOTHER_VALUE_2 @join__enumValue(graph: MAIN)
+  ANOTHER_VALUE_3 @join__enumValue(graph: MAIN)
 }
 
 type SortResponse
@@ -201,6 +279,33 @@ type SortResponse
   zzz: Int
   aaa: Int
   CCC: Int
+}
+
+type TestGraphResponse
+  @join__type(graph: MAIN)
+{
+  updateCheckConfiguration(downgradeDefaultValueChange: Boolean, downgradeStaticChecks: Boolean): Int!
+}
+
+type TestGraphResponse2
+  @join__type(graph: MAIN)
+{
+  updateCheckConfiguration(arg1: Boolean, arg2: Boolean): Int!
+}
+
+type TestGraphResponse3
+  @join__type(graph: MAIN)
+{
+  updateCheckConfiguration(arg1: String, arg2: String, arg3: String): Int!
+}
+
+type UnderscoreResponse
+  @join__type(graph: MAIN)
+{
+  _: String
+  _name: String
+  _name_: String
+  name_: String
 }
 
 type Subscription

@@ -1,5 +1,5 @@
-use apollo_compiler::ast;
 use apollo_compiler::schema;
+use apollo_compiler::Name;
 use serde::de::Error as _;
 use serde::Deserialize;
 use serde::Serialize;
@@ -134,11 +134,10 @@ fn validate_input_value(
         // Custom scalar: accept any JSON value
         (schema::ExtendedType::Scalar(_), _) => Ok(()),
 
-        // TODO: check enum value?
-        // (schema::ExtendedType::Enum(def), Value::String(s)) => {
-        //     from_bool(def.values.contains_key(s))
-        // },
-        (schema::ExtendedType::Enum(_), _) => Ok(()),
+        (schema::ExtendedType::Enum(def), Value::String(s)) => {
+            from_bool(def.values.contains_key(s.as_str()))
+        }
+        (schema::ExtendedType::Enum(_), _) => Err(InvalidValue),
 
         (schema::ExtendedType::InputObject(def), Value::Object(obj)) => {
             // TODO: check keys in `obj` but not in `def.fields`?
@@ -161,7 +160,7 @@ fn validate_input_value(
 }
 
 impl FieldType {
-    pub(crate) fn new_named(name: ast::Name) -> Self {
+    pub(crate) fn new_named(name: Name) -> Self {
         Self(schema::Type::Named(name))
     }
 

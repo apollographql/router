@@ -28,6 +28,8 @@ pub(crate) mod extensions;
 pub(crate) const OPERATION_NAME: &str = "operation_name";
 /// The key of the resolved operation kind. This is subject to change and should not be relied on.
 pub(crate) const OPERATION_KIND: &str = "operation_kind";
+/// The key to know if the response body contains at least 1 GraphQL error
+pub(crate) const CONTAINS_GRAPHQL_ERROR: &str = "apollo::telemetry::contains_graphql_error";
 
 /// Holds [`Context`] entries.
 pub(crate) type Entries = Arc<DashMap<String, Value>>;
@@ -233,15 +235,28 @@ impl Context {
     }
 
     /// Notify the busy timer that we're waiting on a network request
-    pub(crate) fn enter_active_request(&self) -> BusyTimerGuard {
+    ///
+    /// When a plugin makes a network call that would block request handling, this
+    /// indicates to the processing time counter that it should stop measuring while
+    /// we wait for the call to finish. When the value returned by this method is
+    /// dropped, the router will start measuring again, unless we are still covered
+    /// by another active request (ex: parallel subgraph calls)
+    pub fn enter_active_request(&self) -> BusyTimerGuard {
         self.busy_timer.lock().increment_active_requests();
         BusyTimerGuard {
             busy_timer: self.busy_timer.clone(),
         }
     }
 
-    /// How much time was spent working on the request
-    pub(crate) fn busy_time(&self) -> Duration {
+    /// Time actually spent working on this request
+    ///
+    /// This is the request duration without the time spent waiting for external calls
+    /// (coprocessor and subgraph requests). This metric is an approximation of
+    /// the time spent, because in the case of parallel subgraph calls, some
+    /// router processing time could happen during a network call (and so would
+    /// not be accounted for) and make another task late.
+    /// This is reported under the `apollo_router_processing_time` metric
+    pub fn busy_time(&self) -> Duration {
         self.busy_timer.lock().current()
     }
 
@@ -256,13 +271,11 @@ impl Context {
     #[doc(hidden)]
     pub fn unsupported_executable_document(&self) -> Option<Arc<Valid<ExecutableDocument>>> {
         self.extensions()
-            .lock()
-            .get::<ParsedDocument>()
-            .map(|d| d.executable.clone())
+            .with_lock(|lock| lock.get::<ParsedDocument>().map(|d| d.executable.clone()))
     }
 }
 
-pub(crate) struct BusyTimerGuard {
+pub struct BusyTimerGuard {
     busy_timer: Arc<Mutex<BusyTimer>>,
 }
 
@@ -291,11 +304,11 @@ pub(crate) struct BusyTimer {
 }
 
 impl BusyTimer {
-    pub(crate) fn new() -> Self {
+    fn new() -> Self {
         BusyTimer::default()
     }
 
-    pub(crate) fn increment_active_requests(&mut self) {
+    fn increment_active_requests(&mut self) {
         if self.active_requests == 0 {
             if let Some(start) = self.start.take() {
                 self.busy_ns += start.elapsed();
@@ -306,7 +319,7 @@ impl BusyTimer {
         self.active_requests += 1;
     }
 
-    pub(crate) fn decrement_active_requests(&mut self) {
+    fn decrement_active_requests(&mut self) {
         self.active_requests -= 1;
 
         if self.active_requests == 0 {
@@ -314,7 +327,7 @@ impl BusyTimer {
         }
     }
 
-    pub(crate) fn current(&mut self) -> Duration {
+    fn current(&mut self) -> Duration {
         if let Some(start) = self.start {
             self.busy_ns + start.elapsed()
         } else {
@@ -406,41 +419,22 @@ mod test {
     fn context_extensions() {
         // This is mostly tested in the extensions module.
         let c = Context::new();
-        let mut extensions = c.extensions().lock();
-        extensions.insert(1usize);
-        let v = extensions.get::<usize>();
-        assert_eq!(v, Some(&1usize));
+        c.extensions().with_lock(|mut lock| lock.insert(1usize));
+        let v = c
+            .extensions()
+            .with_lock(|lock| lock.get::<usize>().cloned());
+        assert_eq!(v, Some(1usize));
     }
 
     #[test]
     fn test_executable_document_access() {
         let c = Context::new();
-        let schema = r#"
-        schema
-          @core(feature: "https://specs.apollo.dev/core/v0.1"),
-          @core(feature: "https://specs.apollo.dev/join/v0.1")
-        {
-          query: Query
-        }
-        type Query {
-          me: String
-        }
-        directive @core(feature: String!) repeatable on SCHEMA
-        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-
-        enum join__Graph {
-            ACCOUNTS @join__graph(name:"accounts" url: "http://localhost:4001/graphql")
-            INVENTORY
-              @join__graph(name: "inventory", url: "http://localhost:4004/graphql")
-            PRODUCTS
-            @join__graph(name: "products" url: "http://localhost:4003/graphql")
-            REVIEWS @join__graph(name: "reviews" url: "http://localhost:4002/graphql")
-        }"#;
-        let schema = Schema::parse_test(schema, &Default::default()).unwrap();
+        let schema = include_str!("../testdata/minimal_supergraph.graphql");
+        let schema = Schema::parse(schema, &Default::default()).unwrap();
         let document =
             Query::parse_document("{ me }", None, &schema, &Configuration::default()).unwrap();
         assert!(c.unsupported_executable_document().is_none());
-        c.extensions().lock().insert(document);
+        c.extensions().with_lock(|mut lock| lock.insert(document));
         assert!(c.unsupported_executable_document().is_some());
     }
 }

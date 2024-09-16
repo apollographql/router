@@ -1,17 +1,18 @@
 ---
-title: HTTP callback protocol for GraphQL subscriptions
-description: For federated subgraphs communicating with the Apollo Router
+title: HTTP Callback Protocol for GraphQL Subscriptions
+subtitle: Enable clients to receive real-time updates via HTTP callback
+description: Understand the HTTP Callback Protocol for GraphQL Subscriptions with the GraphOS Router. Learn initialization, main loop, message types, and error handling.
 ---
 
-This reference describes a protocol for GraphQL servers (or **subgraphs**) to send subscription data to a subscribing **graph router** (such as the Apollo Router) via HTTP callbacks. Use this reference if you're adding support for this protocol to a GraphQL server library or other system.
+This reference describes a protocol for GraphQL servers (or **subgraphs**) to send subscription data to a subscribing **graph router** (such as the GraphOS Router) via HTTP callbacks. Use this reference if you're adding support for this protocol to a GraphQL server library or other system.
 
 For routers with many simultaneous open subscriptions, this protocol scales better than WebSocket-based protocols, which require long-lasting open connections.
 
-The Apollo Router provides [support for this protocol](./subscription-support/#http-callback-setup) as part of its support for federated subscriptions:
+The GraphOS Router provides [support for this protocol](./subscription-support/#http-callback-setup) as part of its support for federated subscriptions:
 
 ```mermaid
 sequenceDiagram
-    participant Router as Apollo Router<br/>(subscriber)
+    participant Router as GraphOS Router<br/>(subscriber)
     participant Subgraph as Subgraph
     Router->>Subgraph: Registers subscription and<br/> callback URL over HTTP
     Note over Subgraph: New data available
@@ -232,12 +233,30 @@ The `next` message includes a `payload` field, which contains the subscription d
   //highlight-start
   "payload": {
     "data": {
-      "numberIncremented": 5
+      "getLivePriceUpdates": {
+        "__typename": "Stock",
+        "price": 5
+      }
     }
   }
   //highlight-end
 }
 ```
+
+> As this is a recent feature, if you are using a library that does not yet
+  support subscription callbacks (or you are rolling your own implementation),
+  you will need to make the payload look exactly how the response to a regular
+  query would.
+
+  * The root level key needs to be the name of the subscription operation.
+  * The initial subscription query will contain the exact fields that the router
+    expects to be included. Specifically, if there are requests for
+    `__typename`, those need to be respected, otherwise the subscription may
+    not behave as intended.
+
+  Both bullets above are things that are typically handled by server libraries
+  automatically, so they may not be obvious when implementing the protocol
+  manually.
 
 ### `complete`
 

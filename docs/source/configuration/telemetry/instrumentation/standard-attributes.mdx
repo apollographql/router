@@ -1,12 +1,12 @@
 ---
 title: OpenTelemetry standard attributes
 subtitle: Attach standard attributes to router telemetry
-description: Attach OpenTelemetry standard attributes to Apollo Router telemetry
+description: Attach OpenTelemetry (OTel) standard attributes to Apollo GraphOS Router or Apollo Router Core telemetry.
 ---
 
 import RouterServices from '../../../../shared/router-lifecycle-services.mdx';
 
-[OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/) define a set of **standard attributes** that can be attached to [spans](./spans)<!--, [instruments](./instruments) and [events](./events)-->. These attributes are used to filter and group data in your application performance monitor (APM).
+[OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/) define a set of **standard attributes** that can be attached to [spans](./spans), [instruments](./instruments) and [events](./events). These attributes are used to filter and group data in your application performance monitor (APM).
 
 The attributes available depend on the service of the router pipeline.
 
@@ -20,6 +20,21 @@ telemetry:
         attributes:
           # Standard attributes
           http.response.status_code: true
+```
+
+### Alias
+
+If you don't want to use the standard name you can still create an alias and use that alias for the name, for example:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    spans:
+      router:
+        attributes:
+          # Standard attributes
+          http.response.status_code:
+            alias: status_code # It will be named status_code instead of http.response.status_code
 ```
 
 ### Attribute configuration reference 
@@ -37,7 +52,6 @@ Standard attributes of the `router` service:
 | `error.type`                   |        | Describes a class of error the operation ended with                                                                                           |
 | `http.request.body.size`       |        | The size of the request payload body in bytes                                                                                                 |
 | `http.request.method`          |        | HTTP request method                                                                                                                   |
-| `http.request.method.original` |        | Original HTTP method sent by the client in the request line                                                                                       |
 | `http.response.body.size`      |        | The size of the response payload body in bytes                                                                                                    |
 | `http.response.status_code`    |        | HTTP response status code                                                                                                                       |
 | `network.protocol.name`        |        | OSI application layer or non-OSI equivalent                                                                                                      |
@@ -45,8 +59,6 @@ Standard attributes of the `router` service:
 | `network.transport`            |        | OSI transport layer                                                                                                                        |
 | `network.type`                 |        | OSI network layer or non-OSI equivalent                                                                                                      |
 | `user_agent.original`          |        | Value of the HTTP User-Agent header sent by the client                                                                                        |
-| `client.address`               |        | Client address - domain name if available without reverse DNS lookup, otherwise IP address or Unix domain socket name                       |
-| `client.port`                  |        | The port of the original client behind all proxies, if known (e.g. from Forwarded or a similar header). Otherwise, the immediate client peer port |
 | `http.route`                   |        | The matched route (path template in the format used by the respective server framework)                                                          |
 | `network.local.address`        |        | Local socket address. Useful in case of a multi-IP host                                                                                        |
 | `network.local.port`           |        | Local socket port. Useful in case of a multi-port host                                                                                          |
@@ -81,9 +93,9 @@ Standard attributes of the `supergraph` service:
 
 | Attribute                   | Values                              | Description                                 |
 |-----------------------------|-------------------------------------|---------------------------------------------|
-| `graphql.operation.name`    |                                     | The operation name from the graphql query   |
+| `graphql.operation.name`    |                                     | The operation name from the graphql query (need `spec_compliant` [mode](./spans/#mode) to disable it)   |
 | `graphql.operation.type`    | `query`\|`mutation`\|`subscription` | The operation kind from the subgraph query  |
-| `graphql.document`          |                                     | The GraphQL query to the subgraph           |
+| `graphql.document`          |                                     | The GraphQL query to the subgraph (need `spec_compliant` [mode](./spans/#mode) to disable it)          |
 
 
 #### Subgraph
@@ -92,7 +104,7 @@ Standard attributes of the `subgraph` service:
 
 | Attribute                          | Values                              | Description                                    |
 |------------------------------------|-------------------------------------|------------------------------------------------|
-| `subgraph.name`                    |                                     | The name of the subgraph                       |
-| `subgraph.graphql.operation.name`  |                                     | The operation name from the subgraph query     |
+| `subgraph.name`                    |                                     | The name of the subgraph (need `spec_compliant` [mode](./spans/#mode) to disable it)                       |
+| `subgraph.graphql.operation.name`  |                                     | The operation name from the subgraph query  (need `spec_compliant` [mode](./spans/#mode) to disable it)    |
 | `subgraph.graphql.operation.type`  | `query`\|`mutation`\|`subscription` | The operation kind from the subgraph query     |
-| `subgraph.graphql.document`        |                                     | The GraphQL query to the subgraph              |
+| `subgraph.graphql.document`        |                                     | The GraphQL query to the subgraph  (need `spec_compliant` [mode](./spans/#mode) to disable it)             |

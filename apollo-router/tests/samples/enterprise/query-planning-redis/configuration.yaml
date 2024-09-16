@@ -1,0 +1,16 @@
+override_subgraph_url:
+  products: http://localhost:4005
+include_subgraph_errors:
+  all: true
+
+supergraph:
+  query_planning:
+    cache:
+      redis:
+        urls: ["redis://localhost:6379",]
+
+telemetry:
+  exporters:
+    logging:
+      stdout:
+        format: text

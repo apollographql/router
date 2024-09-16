@@ -1,0 +1,28 @@
+description: on_graphql_error attribute
+events:
+  - - router_request:
+        uri: "/hello"
+        method: GET
+        body: |
+          hello
+    - supergraph_request:
+        uri: "/hello"
+        method: GET
+        query: "query Test { hello }"
+    - context:
+        map:
+          "operation_name": "Test"
+    - context:
+        map:
+          "apollo::telemetry::contains_graphql_error": true
+    - graphql_response:
+        data:
+          hello: "world"
+    - supergraph_response:
+        status: 200
+        data:
+          hello: "world"
+    - router_response:
+        body: |
+          hello
+        status: 200

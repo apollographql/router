@@ -10,16 +10,18 @@ pub(crate) use plan::*;
 
 pub use self::fetch::OperationKind;
 
-mod bridge_query_planner;
+pub(crate) mod bridge_query_planner;
 mod bridge_query_planner_pool;
 mod caching_query_planner;
 mod convert;
+pub(crate) mod dual_query_planner;
 mod execution;
 pub(crate) mod fetch;
 mod labeler;
 mod plan;
 pub(crate) mod rewrites;
 mod selection;
+mod subgraph_context;
 pub(crate) mod subscription;
 
 pub(crate) const FETCH_SPAN_NAME: &str = "fetch";

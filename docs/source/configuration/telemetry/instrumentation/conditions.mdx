@@ -1,12 +1,10 @@
 ---
 title: Conditions
 subtitle: Set conditions for when events or instruments are triggered
-description: Set conditions for when events or instruments are triggered in the Apollo Router
+description: Set conditions for when events or instruments are triggered in the Apollo GraphOS Router.
 ---
 
-<PremiumFeature linkWithAnchor="https://www.apollographql.com/pricing#observability"/>
-
-You can set conditions for when an [instrument](./instruments) should be mutated <!--or an [event](./events) -->should be triggered.
+You can set conditions for when an [instrument](./instruments) should be mutated or an [event](./events) should be triggered.
 
 
 ## Condition configuration
@@ -43,7 +41,7 @@ For example, the following condition checks the value of `x-req-header` exists:
 
 ```yaml
 exists:
-  - request_header: x-req-header
+  request_header: x-req-header
 ```
 
 #### `eq`
@@ -64,6 +62,34 @@ You can use selectors on both sides of the equality test:
 eq:
   - request_header: x-req-header1
   - request_header: x-req-header2
+```
+
+Values may be of types `string`, `number` or `boolean`.
+
+#### `gt`
+
+The `gt` condition checks that one value is greater than another.
+
+For example, the following condition checks the response status code is greater than 299:
+
+```yaml
+gt:
+  - response_status: code
+  - 299
+```
+
+Values may be of types `string`, `number` or `boolean`.
+
+#### `lt`
+
+The `lt` condition checks that one value is less than another.
+
+For example, the following condition checks the response status code is less than 500:
+
+```yaml
+lt:
+  - response_status: code
+  - 500
 ```
 
 Values may be of types `string`, `number` or `boolean`.
@@ -120,7 +146,9 @@ The available basic conditions:
 | Condition | Description                                             |
 |----------|----------------------------------------------------------|
 | `eq`     | An equality test between selectors or values             |
-| `exist`  | A check to see if the selectors value exists             |
+| `gt`     | An inequality test between selectors or values           |
+| `lt`     | An inequality test between selectors or values           |
+| `exists`  | A check to see if the selectors value exists             |
 | `not`    | A negated equality test between selectors or values      |
 | `all`    | A list of conditions that must all be true               |
 | `any`    | A list of conditions of which at least one must be true  |

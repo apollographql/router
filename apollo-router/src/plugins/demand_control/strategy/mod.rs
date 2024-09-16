@@ -1,11 +1,10 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
-use apollo_compiler::validation::Valid;
+use ahash::HashMap;
 use apollo_compiler::ExecutableDocument;
-use apollo_compiler::Schema;
 
 use crate::graphql;
+use crate::plugins::demand_control::cost_calculator::schema::DemandControlledSchema;
 use crate::plugins::demand_control::cost_calculator::static_cost::StaticCostCalculator;
 use crate::plugins::demand_control::strategy::static_estimated::StaticEstimated;
 use crate::plugins::demand_control::DemandControlConfig;
@@ -14,6 +13,7 @@ use crate::plugins::demand_control::Mode;
 use crate::plugins::demand_control::StrategyConfig;
 use crate::services::execution;
 use crate::services::subgraph;
+use crate::Context;
 
 mod static_estimated;
 #[cfg(test)]
@@ -25,8 +25,9 @@ mod test;
 #[derive(Clone)]
 pub(crate) struct Strategy {
     inner: Arc<dyn StrategyImpl>,
-    mode: Mode,
+    pub(crate) mode: Mode,
 }
+
 impl Strategy {
     pub(crate) fn on_execution_request(
         &self,
@@ -59,10 +60,11 @@ impl Strategy {
     }
     pub(crate) fn on_execution_response(
         &self,
+        context: &Context,
         request: &ExecutableDocument,
         response: &graphql::Response,
     ) -> Result<(), DemandControlError> {
-        match self.inner.on_execution_response(request, response) {
+        match self.inner.on_execution_response(context, request, response) {
             Err(e) if self.mode == Mode::Enforce => Err(e),
             _ => Ok(()),
         }
@@ -72,15 +74,15 @@ impl Strategy {
 pub(crate) struct StrategyFactory {
     config: DemandControlConfig,
     #[allow(dead_code)]
-    supergraph_schema: Arc<Valid<Schema>>,
-    subgraph_schemas: Arc<HashMap<String, Arc<Valid<Schema>>>>,
+    supergraph_schema: Arc<DemandControlledSchema>,
+    subgraph_schemas: Arc<HashMap<String, DemandControlledSchema>>,
 }
 
 impl StrategyFactory {
     pub(crate) fn new(
         config: DemandControlConfig,
-        supergraph_schema: Arc<Valid<Schema>>,
-        subgraph_schemas: Arc<HashMap<String, Arc<Valid<Schema>>>>,
+        supergraph_schema: Arc<DemandControlledSchema>,
+        subgraph_schemas: Arc<HashMap<String, DemandControlledSchema>>,
     ) -> Self {
         Self {
             config,
@@ -91,9 +93,13 @@ impl StrategyFactory {
 
     pub(crate) fn create(&self) -> Strategy {
         let strategy: Arc<dyn StrategyImpl> = match &self.config.strategy {
-            StrategyConfig::StaticEstimated { max } => Arc::new(StaticEstimated {
+            StrategyConfig::StaticEstimated { list_size, max } => Arc::new(StaticEstimated {
                 max: *max,
-                cost_calculator: StaticCostCalculator::new(self.subgraph_schemas.clone()),
+                cost_calculator: StaticCostCalculator::new(
+                    self.supergraph_schema.clone(),
+                    self.subgraph_schemas.clone(),
+                    *list_size,
+                ),
             }),
             #[cfg(test)]
             StrategyConfig::Test { stage, error } => Arc::new(test::Test {
@@ -119,6 +125,7 @@ pub(crate) trait StrategyImpl: Send + Sync {
     ) -> Result<(), DemandControlError>;
     fn on_execution_response(
         &self,
+        context: &Context,
         request: &ExecutableDocument,
         response: &graphql::Response,
     ) -> Result<(), DemandControlError>;

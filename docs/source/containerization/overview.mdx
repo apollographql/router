@@ -1,19 +1,20 @@
 ---
-title: Containerizing the Apollo Router
-description: Run Apollo Router images in containers
+title: Containerizing the GraphOS Router
+subtitle: Run router images in containers
+description: Containerize the Apollo GraphOS Router for portability and scalability. Choose from default or debug images. Deploy in Kubernetes or run in Docker.
 ---
 
 import ElasticNotice from '../../shared/elastic-notice.mdx';
 
-Apollo provides container images of the Apollo Router. By containerizing the router, you can run it in a cluster and leverage the portability, scalability, and high availability benefits of containerization. Containers can also simplify and speed up local development.
+Apollo provides container images of the Apollo Router Core that you can self-host and run with GraphOS as GraphOS Routers. By containerizing the router, you can run it in a cluster and leverage the portability, scalability, and high availability benefits of containerization. Containers can also simplify and speed up local development.
 
 <ElasticNotice />
 
-## About the Apollo Router container image
+## About router container images
 
-Apollo provides container images of the Apollo Router [on GitHub](https://github.com/apollographql/router/pkgs/container/router) in its container repository. The router images are based on [debian:bullseye-slim](https://hub.docker.com/_/debian/), which is designed to provide constrained, secure, and small images.
+Apollo provides container images of the router [on GitHub](https://github.com/apollographql/router/pkgs/container/router) in its container repository. The router images are based on [debian:bullseye-slim](https://hub.docker.com/_/debian/), which is designed to provide constrained, secure, and small images.
 
-Each release of the Apollo Router includes both default (production) and debug images. While each image for a release contains the same build, the debug images have helpful debugging utilities installed and run the router under the control of [heaptrack](https://github.com/KDE/heaptrack).
+Each release of the router includes both default (production) and debug images. While each image for a release contains the same build, the debug images have helpful debugging utilities installed and run the router under the control of [heaptrack](https://github.com/KDE/heaptrack).
 
 A router image has the following layout:
 

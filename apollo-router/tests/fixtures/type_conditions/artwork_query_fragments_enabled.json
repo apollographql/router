@@ -1,0 +1,98 @@
+{
+    "mocks": [
+        {
+            "request": {
+                "query":"query Search__artworkSubgraph__1($representations:[_Any!]!$movieResultParam:String){_entities(representations:$representations){..._generated_onEntityCollectionSection2_0 ...on GallerySection{artwork(params:$movieResultParam)}}}fragment _generated_onEntityCollectionSection2_0 on EntityCollectionSection{title artwork(params:$movieResultParam)}",
+                "operationName":"Search__artworkSubgraph__1",
+                "variables":{
+                    "movieResultParam":"movieResultEnabled",
+                    "representations":[
+                        {
+                            "__typename":"EntityCollectionSection",
+                            "id":"d9077ad2-d79a-45b5-b5ee-25ded226f03c"
+                        },
+                        {
+                            "__typename":"EntityCollectionSection",
+                            "id":"9f1f1ebb-21d3-4afe-bb7d-6de706f78f02"
+                        },
+                        {
+                            "__typename":"EntityCollectionSection",
+                            "id":"24cea0de-2ac8-4cbe-85b6-8b1b80647c12"
+                        },
+                        {
+                            "__typename":"GallerySection",
+                            "id":"2f772201-42ca-4376-9871-2252cc052262"
+                        }
+                    ]
+                }
+            },
+            "response": {
+                "data":{
+                    "_entities":[
+                        {
+                            "title": "d9077ad2-d79a-45b5-b5ee-25ded226f03c title",
+                            "artwork":"movieResultEnabled artwork"
+                        },
+                        {
+                            "title": "9f1f1ebb-21d3-4afe-bb7d-6de706f78f02 title",
+                            "artwork":"movieResultEnabled artwork"
+                        },
+                        {
+                            "title": "24cea0de-2ac8-4cbe-85b6-8b1b80647c12 title",
+                            "artwork":"movieResultEnabled artwork"
+                        },
+                        {
+                            "artwork":"movieResultEnabled artwork"
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "request": {
+                "query": "query Search__artworkSubgraph__2($representations:[_Any!]!$articleResultParam:String){_entities(representations:$representations){...on GallerySection{artwork(params:$articleResultParam)}..._generated_onEntityCollectionSection2_0}}fragment _generated_onEntityCollectionSection2_0 on EntityCollectionSection{artwork(params:$articleResultParam)title}",
+                "operationName": "Search__artworkSubgraph__2",
+                "variables":{
+                    "articleResultParam":"articleResultEnabled",
+                    "representations":[
+                        {
+                            "__typename":"EntityCollectionSection",
+                            "id":"d0182b8a-a671-4244-ba1c-905274b0d198"
+                        },
+                        {
+                            "__typename":"EntityCollectionSection",
+                            "id":"e6eec2fc-05ce-40a2-956b-f1335e615204"
+                        },
+                        {
+                            "__typename":"EntityCollectionSection",
+                            "id":"f44f584e-5d3d-4466-96f5-9afc3f5d5a54"
+                        },
+                        {
+                            "__typename":"GallerySection",
+                            "id":"e065e2b1-8454-4db9-89c8-48e66ec838c4"
+                        }
+                    ]
+                }
+            },
+            "response": {
+                "data":{
+                    "_entities":[
+                        {
+                            "artwork":"articleResultEnabled artwork",
+                            "title": "d0182b8a-a671-4244-ba1c-905274b0d198 title"
+                        },
+                        {
+                            "artwork":"articleResultEnabled artwork",
+                            "title": "e6eec2fc-05ce-40a2-956b-f1335e615204 title"
+                        },
+                        {
+                            "artwork":"articleResultEnabled artwork",
+                            "title": "f44f584e-5d3d-4466-96f5-9afc3f5d5a54 title"
+                        },
+                        {"artwork":"articleResultEnabled artwork"}
+                    ]
+                }
+            }
+        }
+    ]
+}

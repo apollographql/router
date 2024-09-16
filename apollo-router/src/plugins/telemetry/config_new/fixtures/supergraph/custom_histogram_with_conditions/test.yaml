@@ -1,0 +1,41 @@
+description: Custom counter with conditions
+events:
+  - - router_request:
+        uri: "/hello"
+        method: GET
+        body: |
+          hello
+    - supergraph_request:
+        uri: "/hello"
+        method: GET
+        headers:
+          custom_header: allowed
+        query: "query { hello }"
+    - supergraph_response:
+        status: 200
+        data:
+          hello: "world"
+    - router_response:
+        body: |
+          hello
+        status: 200
+
+  - - router_request:
+        uri: "/hello"
+        method: GET
+        body: |
+          hello
+    - supergraph_request:
+        uri: "/hello"
+        method: GET
+        headers:
+          custom_header: not_allowed
+        query: "query { hello }"
+    - supergraph_response:
+        status: 200
+        data:
+          hello: "world"
+    - router_response:
+        body: |
+          hello
+        status: 200

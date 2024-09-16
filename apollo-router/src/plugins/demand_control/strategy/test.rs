@@ -15,25 +15,37 @@ pub(crate) struct Test {
 }
 
 impl StrategyImpl for Test {
-    fn on_execution_request(&self, _request: &Request) -> Result<(), DemandControlError> {
+    fn on_execution_request(&self, request: &Request) -> Result<(), DemandControlError> {
         match self {
             Test {
                 stage: TestStage::ExecutionRequest,
                 error,
-            } => Err(error.into()),
+            } => {
+                let error: DemandControlError = error.into();
+                request
+                    .context
+                    .insert_cost_result(error.code().to_string())?;
+                Err(error)
+            }
             _ => Ok(()),
         }
     }
 
     fn on_subgraph_request(
         &self,
-        _request: &crate::services::subgraph::Request,
+        request: &crate::services::subgraph::Request,
     ) -> Result<(), DemandControlError> {
         match self {
             Test {
                 stage: TestStage::SubgraphRequest,
                 error,
-            } => Err(error.into()),
+            } => {
+                let error: DemandControlError = error.into();
+                request
+                    .context
+                    .insert_cost_result(error.code().to_string())?;
+                Err(error)
+            }
             _ => Ok(()),
         }
     }
@@ -41,19 +53,26 @@ impl StrategyImpl for Test {
     fn on_subgraph_response(
         &self,
         _request: &ExecutableDocument,
-        _response: &Response,
+        response: &Response,
     ) -> Result<(), DemandControlError> {
         match self {
             Test {
                 stage: TestStage::SubgraphResponse,
                 error,
-            } => Err(error.into()),
+            } => {
+                let error: DemandControlError = error.into();
+                response
+                    .context
+                    .insert_cost_result(error.code().to_string())?;
+                Err(error)
+            }
             _ => Ok(()),
         }
     }
 
     fn on_execution_response(
         &self,
+        context: &crate::Context,
         _request: &ExecutableDocument,
         _response: &crate::graphql::Response,
     ) -> Result<(), DemandControlError> {
@@ -61,7 +80,11 @@ impl StrategyImpl for Test {
             Test {
                 stage: TestStage::ExecutionResponse,
                 error,
-            } => Err(error.into()),
+            } => {
+                let error: DemandControlError = error.into();
+                context.insert_cost_result(error.code().to_string())?;
+                Err(error)
+            }
             _ => Ok(()),
         }
     }
