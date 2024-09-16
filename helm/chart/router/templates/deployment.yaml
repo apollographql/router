@@ -48,6 +48,9 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "router.serviceAccountName" . }}
+      {{- if .Values.restartPolicy }}
+      restartPolicy: {{.Values.restartPolicy}}
+      {{- end }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:

@@ -4,6 +4,526 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.54.0] - 2024-09-10
+
+## 🚀 Features
+
+### Add configurability of span attributes in logs ([Issue #5540](https://github.com/apollographql/router/issues/5540))
+
+The router supports a new  `telemetry.exporters.logging.stdout.format.json.span_attributes` option that enables you to choose a subset of all span attributes to display in your logs.
+
+When `span_attributes` is specified, the router searches for the first attribute in its input list of span attributes from the root span to the current span and attaches it to the outermost JSON object for the log event. If you set the same attribute name for different spans at different levels, the router chooses the attributes of child spans before the attributes of parent spans.
+
+
+For example, if you have spans that contains `span_attr_1` attribute and you only want to display this span attribute:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+     logging:
+       stdout:
+         enabled: true
+         format: 
+           json:
+             display_span_list: false
+             span_attributes:
+               - span_attr_1
+```
+
+Example output with a list of spans:
+
+```json
+{
+  "timestamp": "2023-10-30T14:09:34.771388Z",
+  "level": "INFO",
+  "fields": {
+    "event_attr_1": "event_attr_1",
+    "event_attr_2": "event_attr_2"
+  },
+  "target": "event_target",
+  "span_attr_1": "span_attr_1"
+}
+```
+
+To learn more, go to [`span_attributes`](https://www.apollographql.com/docs/router/configuration/telemetry/exporters/logging/stdout#span_attributes) docs.
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5867
+
+### Add a histogram metric tracking evaluated query plans ([PR #5875](https://github.com/apollographql/router/pull/5875))
+
+The router supports the new `apollo.router.query_planning.plan.evaluated_plans` histogram metric to track the number of evaluated query plans. 
+
+You can use it to help set an optimal `supergraph.query_planning.experimental_plans_limit` option that limits the number of query plans evaluated for a query and reduces the time spent planning.
+
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/5875
+
+## 🐛 Fixes
+
+### Fix Datadog sampling ([PR #5788](https://github.com/apollographql/router/pull/5788))
+
+The router's Datadog exporter has been fixed so that traces are sampled as intended.
+
+Previously, the Datadog exporter's context may not have been set correctly, causing traces to be undersampled.
+
+By [@BrynCooke](https://github.com/BrynCooke) & [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5788
+
+## 📃 Configuration
+
+###  General availability of Apollo usage report generation ([#5807](https://github.com/apollographql/router/pull/5807))
+
+The router's Apollo usage report generation feature that was previously [experimental](https://www.apollographql.com/docs/resources/product-launch-stages/#experimental-features) is now [generally available](https://www.apollographql.com/docs/resources/product-launch-stages/#general-availability).
+
+If you used its experimental configuration, you should migrate to the new configuration options:
+
+* `telemetry.apollo.experimental_apollo_metrics_reference_mode` is now `telemetry.apollo.metrics_reference_mode`
+* `telemetry.apollo.experimental_apollo_signature_normalization_algorithm` is now `telemetry.apollo.signature_normalization_algorithm`
+* `experimental_apollo_metrics_generation_mode` has been removed because the Rust implementation (the default since router v1.49.0) is generating reports identical to the previous router-bridge implementation
+
+The experimental configuration options are now deprecated. They are functional but will log warnings.
+
+By [@bonnici](https://github.com/bonnici) in https://github.com/apollographql/router/pull/5807
+
+### Helm: Enable easier Kubernetes debugging with heaptrack ([Issue #5789](https://github.com/apollographql/router/issues/5789))
+
+The router's Helm chart has been updated to help make debugging with heaptrack easier.
+
+Previously, when debugging multiple Pods with heaptrack, all Pods wrote to the same file, so they'd overwrite each others' results. This issue has been fixed by adding a `hostname` to each output data file from heaptrack.
+
+Also, the Helm chart now supports a `restartPolicy` that enables you to configure a Pod's [restart policy](https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#container-restarts). The default value of `restartPolicy` is `Always` (the same as the Kubernetes default).
+
+
+By [@cyberhck](https://github.com/cyberhck) in https://github.com/apollographql/router/pull/5850
+
+## 📚 Documentation
+
+### Document OpenTelemetry information for operation limits ([PR #5884](https://github.com/apollographql/router/pull/5884))
+
+The router's docs for operation limits now describe [using telemetry to set operation limits](https://www.apollographql.com/docs/router/configuration/operation-limits#using-telemetry-to-set-operation-limits) and [logging values](https://www.apollographql.com/docs/router/configuration/operation-limits#logging-values).
+
+By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/apollographql/router/pull/5884
+
+
+
+# [1.53.0] - 2024-08-28
+
+> [!IMPORTANT]
+> If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), this release changes the hashing algorithm used for the cache keys.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new hashing algorithm comes into service.
+
+## 🚀 Features
+
+### Support demand control directives ([PR #5777](https://github.com/apollographql/router/pull/5777))
+
+> ⚠️ This is a [GraphOS Router feature](https://www.apollographql.com/graphos-router).
+
+The router supports two new demand control directives, `@cost` and `@listSize`, that you can use to provide more accurate estimates of GraphQL operation costs to the router's demand control plugin.
+
+Use the `@cost` directive to customize the weights of operation cost calculations, particularly for expensive resolvers.
+
+```graphql
+type Product {
+  id: ID!
+  name: String
+  expensiveField: Int @cost(weight: 20)
+}
+```
+
+Use the `@listSize` directive to provide a more accurate estimate for the size of a specific list field, particularly for those that differ greatly from the global list size estimate.
+
+```graphql
+type Magazine {
+  # This is assumed to always return 5 items
+  headlines: [Article] @listSize(assumedSize: 5)
+
+  # This is estimated to return as many items as are requested by the parameter named "first"
+  getPage(first: Int!, after: ID!): [Article]
+    @listSize(slicingArguments: ["first"])
+}
+```
+
+To learn more, go to [Demand Control](https://www.apollographql.com/docs/router/executing-operations/demand-control/) docs.
+
+By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/5777
+
+### General Availability (GA) of Demand Control ([PR #5868](https://github.com/apollographql/router/pull/5868))
+
+Demand control in the router is now a generally available (GA) feature.
+
+**GA compatibility update**: if you used demand control during its preview, to use it in GA you must update your configuration from `preview_demand_control` to `demand_control`.
+
+To learn more, go to [Demand Control](https://www.apollographql.com/docs/router/executing-operations/demand-control/) docs.
+
+By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/5868
+
+### Enable native query planner to run in the background ([PR #5790](https://github.com/apollographql/router/pull/5790), [PR #5811](https://github.com/apollographql/router/pull/5811), [PR #5771](https://github.com/apollographql/router/pull/5771), [PR #5860](https://github.com/apollographql/router/pull/5860))
+
+The router now schedules background jobs to run the native (Rust) query planner to compare its results to the legacy implementation. This helps ascertain its correctness before making a decision to switch entirely to it from the legacy query planner.
+
+To learn more, go to [Experimental Query Planner Mode](https://www.apollographql.com/docs/router/configuration/experimental_query_planner_mode) docs.
+
+The router continues to use the legacy query planner to plan and execute operations, so there is no effect on the hot path.
+
+To disable running background comparisons with the native query planner, you can configure the router to enable only the `legacy` query planner:
+
+```yaml
+experimental_query_planner_mode: legacy
+```
+
+By [SimonSapin](https://github.com/SimonSapin) in ([PR #5790](https://github.com/apollographql/router/pull/5790), [PR #5811](https://github.com/apollographql/router/pull/5811), [PR #5771](https://github.com/apollographql/router/pull/5771) [PR #5860](https://github.com/apollographql/router/pull/5860))
+
+### Add warnings for invalid configuration of custom telemetry ([PR #5759](https://github.com/apollographql/router/issues/5759))
+
+The router now logs warnings when running with telemetry that may have invalid custom configurations.
+
+For example, you may customize telemetry using invalid conditions or inaccessible statuses:
+
+```yaml
+telemetry:
+  instrumentation:
+    events:
+      subgraph:
+        my.event:
+          message: "Auditing Router Event"
+          level: info
+          on: request
+          attributes:
+            subgraph.response.status: code
+              # Warning: should use selector for subgraph_name: true instead of comparing strings of subgraph_name and product
+          condition:
+            eq:
+            - subgraph_name
+            - product
+```
+
+Although the configuration is syntactically correct, its customization is invalid, and the router now outputs warnings for such invalid configurations.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5759
+
+### Add V8 heap usage metrics ([PR #5781](https://github.com/apollographql/router/pull/5781))
+
+The router supports new gauge metrics for tracking heap memory usage of the V8 Javascript engine:
+- `apollo.router.v8.heap.used`: heap memory used by V8, in bytes
+- `apollo.router.v8.heap.total`: total heap allocated by V8, in bytes
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/5781
+
+### Update Federation to v2.9.0 ([PR #5902](https://github.com/apollographql/router/pull/5902))
+
+This updates the router to Federation v2.9.0.
+
+By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/5902
+
+### Helm: Support `maxSurge` and `maxUnavailable` for rolling updates ([Issue #5664](https://github.com/apollographql/router/issues/5664))
+
+The router Helm chart now supports the configuration of `maxSurge` and `maxUnavailable` for the `RollingUpdate` deployment strategy.
+
+By [Jon Christiansen](https://github.com/theJC) in https://github.com/apollographql/router/pull/5665
+
+### Support new telemetry trace ID format ([PR #5735](https://github.com/apollographql/router/pull/5735))
+
+The router supports a new UUID format for telemetry trace IDs.
+
+The following formats are supported in router configuration for trace IDs:
+
+* `open_telemetry`
+* `hexadecimal`  (same as `opentelemetry`)
+* `decimal`
+* `datadog`
+* `uuid` (may contain dashes)
+
+You can configure router logging to display the formatted trace ID with `display_trace_id`:
+
+```yaml
+ telemetry:
+  exporters:
+    logging:
+      stdout:
+        format:
+          json:
+            display_trace_id: (true|false|open_telemetry|hexadecimal|decimal|datadog|uuid)
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5735
+
+### Add `format` for trace ID propagation. ([PR #5803](https://github.com/apollographql/router/pull/5803))
+
+The router now supports specifying the format of trace IDs that are propagated to subgraphs via headers.
+
+You can configure the format with the `format` option:
+
+```yaml
+telemetry:
+  exporters:
+    tracing:
+      propagation:
+        request:
+          header_name: "my_header"
+          # Must be in UUID form, with or without dashes
+          format: uuid
+```
+
+Note that incoming requests must be some form of UUID, either with or without dashes.
+
+To learn about supported formats, go to [`request` configuration reference](https://apollographql.com/docs/router/configuration/telemetry/exporters/tracing/overview#request-configuration-reference) docs.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/5803
+
+### New `apollo.router.cache.storage.estimated_size` gauge ([PR #5770](https://github.com/apollographql/router/pull/5770))
+
+The router supports the new metric `apollo.router.cache.storage.estimated_size` that helps users understand and monitor the amount of memory that query planner cache entries consume.
+
+The `apollo.router.cache.storage.estimated_size` metric gives an estimated size in bytes of a cache entry. It has the following attributes:
+- `kind`: `query planner`.
+- `storage`: `memory`.
+
+Before using the estimate to decide whether to update the cache, users should validate that the estimate correlates with their pod's memory usage.
+
+To learn how to troubleshoot with this metric, see the [Pods terminating due to memory pressure](https://www.apollographql.com/docs/router/containerization/kubernetes#pods-terminating-due-to-memory-pressure) guide in docs.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/5770
+
+## 🐛 Fixes
+
+### Fix GraphQL query directives validation bug ([PR #5753](https://github.com/apollographql/router/pull/5753))
+
+The router now supports GraphQL queries where a variable is used in a directive on the same operation where the variable is declared.
+
+For example, the following query both declares and uses `$var`:
+
+```graphql
+query GetSomething(: Int!) @someDirective(argument: $var) {
+  something
+}
+```
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/5753
+
+### Evaluate selectors in response stage when possible ([PR #5725](https://github.com/apollographql/router/pull/5725))
+
+The router now supports having various supergraph selectors on response events.
+
+Because `events` are triggered at a specific event (`request`|`response`|`error`), you usually have only one condition for a related event. You can however have selectors that can be applied to several events, like `subgraph_name` to get the subgraph name).
+
+Example of an event to log the raw subgraph response only on a subgraph named `products`, this was not working before.
+
+```yaml
+telemetry:
+  instrumentation:
+    events:
+      subgraph:
+        response:
+          level: info
+          condition:
+            eq:
+            - subgraph_name: true
+            - "products"
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5725
+
+### Fix trace propagation via header ([PR #5802](https://github.com/apollographql/router/pull/5802))
+
+The router now correctly propagates trace IDs when using the `propagation.request.header_name` configuration option.
+
+```yaml
+telemetry:
+  exporters:
+    tracing:
+      propagation:
+        request:
+          header_name: "id_from_header"
+```
+
+Previously, trace IDs weren't transferred to the root span of the request, causing spans to be incorrectly attributed to new traces.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/5802
+
+### Add argument cost to type cost in demand control scoring algorithm ([PR #5740](https://github.com/apollographql/router/pull/5740))
+
+The router's operation scoring algorithm for demand control now includes field arguments in the type cost.
+
+By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/5740
+
+### Support `gt`/`lt` conditions for parsing string selectors to numbers ([PR #5758](https://github.com/apollographql/router/pull/5758))
+
+The router now supports greater than (`gt`) and less than (`lt`) conditions for header selectors.
+
+The following example applies an attribute on a span if the `content-length` header is greater than 100:
+
+```yaml
+telemetry:
+  instrumentation:
+    spans:
+      mode: spec_compliant
+      router:
+        attributes:
+          trace_id: true
+          payload_is_to_big: # Set this attribute to true if the value of content-length header is > than 100
+            static: true
+            condition:
+              gt:
+              - request_header: "content-length"
+              - 100
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5758
+
+### Set subgraph error path if not present ([PR #5773](https://github.com/apollographql/router/pull/5773))
+
+The router now sets the error path in all cases during subgraph response conversion. Previously the router's subgraph service didn't set the error path for some network-level errors.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/5773
+
+### Fix cost result filtering for custom metrics ([PR #5838](https://github.com/apollographql/router/pull/5838))
+
+The router can now filter for custom metrics that use demand control cost information in their conditions. This allows a telemetry config such as the following:
+
+```yaml
+telemetry:
+  instrumentation:
+    instruments:
+      supergraph:
+        cost.rejected.operations:
+          type: histogram
+          value:
+            cost: estimated
+          description: "Estimated cost per rejected operation."
+          unit: delta
+          condition:
+            eq:
+              - cost: result
+              - "COST_ESTIMATED_TOO_EXPENSIVE"
+```
+
+This also fixes an issue where attribute comparisons would fail silently when comparing integers to float values. Users can now write integer values in conditions that compare against selectors that select floats:
+
+```yaml
+telemetry:
+  instrumentation:
+    instruments:
+      supergraph:
+        cost.rejected.operations:
+          type: histogram
+          value:
+            cost: actual
+          description: "Estimated cost per rejected operation."
+          unit: delta
+          condition:
+            gt:
+              - cost: delta
+              - 1
+```
+
+By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/5838
+
+### Fix missing `apollo_router_cache_size` metric ([PR #5770](https://github.com/apollographql/router/pull/5770))
+
+Previously, if the in-memory cache wasn't mutated, the `apollo_router_cache_size` metric wouldn't be available. This has been fixed in this release.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/5770
+
+### Interrupted subgraph connections trigger error responses and subgraph service hook points ([PR #5859](https://github.com/apollographql/router/pull/5859))
+
+The router now returns a proper subgraph response, with an error if necessary, when a subgraph connection is closed or returns an error.
+
+Previously, this issue prevented the subgraph response service from being triggered in coprocessors or Rhai scripts.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5859
+
+### Fix `exists` condition for custom telemetry events ([Issue #5702](https://github.com/apollographql/router/issues/5702))
+
+The router now properly handles the `exists` condition for events. The following configuration now works as intended:
+
+```yaml
+telemetry:
+  instrumentation:
+    events:
+      supergraph:
+        my.event:
+          message: "Auditing Router Event"
+          level: info
+          on: request
+          attributes:
+            graphql.operation.name: true
+          condition:
+            exists:
+              operation_name: string
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5759
+
+### Fix Datadog underreporting APM metrics ([PR #5780](https://github.com/apollographql/router/pull/5780))
+
+The previous [PR #5703](https://github.com/apollographql/router/pull/5703) has been reverted in this release because it caused Datadog to underreport APM span metrics.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/5780
+
+### Fix inconsistent `type` attribute in `apollo.router.uplink.fetch.duration` metric ([PR #5816](https://github.com/apollographql/router/pull/5816))
+
+The router now always reports a short name in the `type` attribute for the `apollo.router.fetch.duration` metric, instead of sometimes using a fully-qualified Rust path and sometimes using a short name.
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/5816
+
+### Enable progressive override with Federation 2.7 and above ([PR #5754](https://github.com/apollographql/router/pull/5754))
+
+The progressive override feature is now available when using Federation v2.7 and above.
+
+By [@o0ignition0o](https://github.com/o0ignition0o) in https://github.com/apollographql/router/pull/5754
+
+### Support supergraph query selector for events ([PR #5764](https://github.com/apollographql/router/pull/5764))
+
+The router now supports the `query: root_fields` selector for `event_response`. Previously the selector worked for `response` stage events but didn't work for `event_response`.
+
+The following configuration for a `query: root_fields` on an `event_response` now works:
+
+```yaml
+telemetry:
+  instrumentation:
+    events:
+      supergraph:
+        OPERATION_LIMIT_INFO:
+          message: operation limit info
+          on: event_response
+          level: info
+          attributes:
+            graphql.operation.name: true
+            query.root_fields:
+              query: root_fields
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5764
+
+### Fix session counting and the reporting of file handle shortage ([PR #5834](https://github.com/apollographql/router/pull/5834))
+
+The router previously gave incorrect warnings about file handle shortages due to session counting incorrectly including connections to health-check connections or other non-GraphQL connections. This is now corrected so that only connections to the main GraphQL port are counted, and file handle shortages are now handled correctly as a global resource.
+
+Also, the router's port listening logic had its own custom rate-limiting of log notifications. This has been removed and replaced by the [standard router log rate limiting configuration](https://www.apollographql.com/docs/router/configuration/telemetry/exporters/logging/stdout/#rate_limit)
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/5834
+
+## 📃 Configuration
+
+### Increase default Redis timeout ([PR #5795](https://github.com/apollographql/router/pull/5795))
+
+The default Redis command timeout was increased from 2ms to 500ms to accommodate common production use cases.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/5795
+
+## 🛠 Maintenance
+
+### Improve performance by optimizing telemetry meter and instrument creation ([PR #5629](https://github.com/apollographql/router/pull/5629))
+
+The router's performance has been improved by removing telemetry creation out of the critical path, from being created in every service to being created when starting the telemetry plugin.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5629
+
+## 📚 Documentation
+
+### Add sections on using `@cost` and `@listSize` to demand control docs ([PR #5839](https://github.com/apollographql/router/pull/5839))
+
+Updates the demand control documentation to include details on `@cost` and `@listSize` for more accurate cost estimation.
+
+By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/5839
+
 # [1.52.1] - 2024-08-27
 
 > [!IMPORTANT]

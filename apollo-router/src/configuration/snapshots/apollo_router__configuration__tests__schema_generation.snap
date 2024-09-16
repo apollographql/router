@@ -113,32 +113,6 @@ expression: "&schema"
       ],
       "type": "string"
     },
-    "ApolloMetricsGenerationMode": {
-      "description": "Apollo usage report signature and referenced field generation modes.",
-      "oneOf": [
-        {
-          "description": "Use the new Rust-based implementation.",
-          "enum": [
-            "new"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Use the old JavaScript-based implementation.",
-          "enum": [
-            "legacy"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Use Rust-based and Javascript-based implementations side by side, logging warnings if the implementations disagree.",
-          "enum": [
-            "both"
-          ],
-          "type": "string"
-        }
-      ]
-    },
     "ApolloMetricsReferenceMode": {
       "description": "Apollo usage report reference generation modes.",
       "oneOf": [
@@ -496,11 +470,10 @@ expression: "&schema"
     "CacheAttributes": {
       "additionalProperties": false,
       "properties": {
-        "entity.type": {
-          "default": null,
-          "description": "Entity type",
-          "nullable": true,
-          "type": "boolean"
+        "graphql.type.name": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         }
       },
       "type": "object"
@@ -1766,14 +1739,6 @@ expression: "&schema"
           "$ref": "#/definitions/ErrorsConfiguration",
           "description": "#/definitions/ErrorsConfiguration"
         },
-        "experimental_apollo_metrics_reference_mode": {
-          "$ref": "#/definitions/ApolloMetricsReferenceMode",
-          "description": "#/definitions/ApolloMetricsReferenceMode"
-        },
-        "experimental_apollo_signature_normalization_algorithm": {
-          "$ref": "#/definitions/ApolloSignatureNormalizationAlgorithm",
-          "description": "#/definitions/ApolloSignatureNormalizationAlgorithm"
-        },
         "experimental_local_field_metrics": {
           "default": false,
           "description": "Enable field metrics that are generated without FTV1 to be sent to Apollo Studio.",
@@ -1796,6 +1761,10 @@ expression: "&schema"
           "$ref": "#/definitions/SamplerOption",
           "description": "#/definitions/SamplerOption"
         },
+        "metrics_reference_mode": {
+          "$ref": "#/definitions/ApolloMetricsReferenceMode",
+          "description": "#/definitions/ApolloMetricsReferenceMode"
+        },
         "send_headers": {
           "$ref": "#/definitions/ForwardHeaders",
           "description": "#/definitions/ForwardHeaders"
@@ -1803,6 +1772,10 @@ expression: "&schema"
         "send_variable_values": {
           "$ref": "#/definitions/ForwardValues",
           "description": "#/definitions/ForwardValues"
+        },
+        "signature_normalization_algorithm": {
+          "$ref": "#/definitions/ApolloSignatureNormalizationAlgorithm",
+          "description": "#/definitions/ApolloSignatureNormalizationAlgorithm"
         }
       },
       "type": "object"
@@ -2813,34 +2786,29 @@ expression: "&schema"
       "additionalProperties": false,
       "properties": {
         "graphql.field.name": {
-          "default": null,
-          "description": "The GraphQL field name",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "graphql.field.type": {
-          "default": null,
-          "description": "The GraphQL field type",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "graphql.list.length": {
-          "default": null,
-          "description": "If the field is a list, the length of the list",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "graphql.operation.name": {
-          "default": null,
-          "description": "The GraphQL operation name",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "graphql.type.name": {
-          "default": null,
-          "description": "The GraphQL type name",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         }
       },
       "type": "object"
@@ -3594,9 +3562,42 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "IntrospectionMode": {
+      "description": "Which implementation of GraphQL schema introspection to use, if enabled",
+      "oneOf": [
+        {
+          "description": "Use the new Rust-based implementation.",
+          "enum": [
+            "new"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Use the old JavaScript-based implementation.",
+          "enum": [
+            "legacy"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Use Rust-based and Javascript-based implementations side by side, logging warnings if the implementations disagree.",
+          "enum": [
+            "both"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "InvalidationEndpointConfig": {
       "additionalProperties": false,
       "properties": {
+        "concurrent_requests": {
+          "default": 10,
+          "description": "Number of concurrent invalidation requests",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "listen": {
           "$ref": "#/definitions/ListenAddr",
           "description": "#/definitions/ListenAddr"
@@ -3604,6 +3605,13 @@ expression: "&schema"
         "path": {
           "description": "Specify on which path you want to listen for invalidation endpoint.",
           "type": "string"
+        },
+        "scan_count": {
+          "default": 1000,
+          "description": "Number of keys to return at once from a redis SCAN command",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
         }
       },
       "required": [
@@ -4111,9 +4119,8 @@ expression: "&schema"
           "type": "array"
         },
         "experimental_prewarm_query_plan_cache": {
-          "default": false,
-          "description": "Experimental feature to prewarm the query plan cache with persisted queries",
-          "type": "boolean"
+          "$ref": "#/definitions/PersistedQueriesPrewarmQueryPlanCache",
+          "description": "#/definitions/PersistedQueriesPrewarmQueryPlanCache"
         },
         "log_unknown": {
           "default": false,
@@ -4123,6 +4130,23 @@ expression: "&schema"
         "safelist": {
           "$ref": "#/definitions/PersistedQueriesSafelist",
           "description": "#/definitions/PersistedQueriesSafelist"
+        }
+      },
+      "type": "object"
+    },
+    "PersistedQueriesPrewarmQueryPlanCache": {
+      "additionalProperties": false,
+      "description": "Persisted Queries (PQ) query plan cache prewarm configuration",
+      "properties": {
+        "on_reload": {
+          "default": true,
+          "description": "Enabling this field uses the persisted query list to pre-warm the query planner cache on schema and config changes (enabled by default)",
+          "type": "boolean"
+        },
+        "on_startup": {
+          "default": false,
+          "description": "Enabling this field uses the persisted query list to pre-warm the query planner cache on startup (disabled by default)",
+          "type": "boolean"
         }
       },
       "type": "object"
@@ -4332,6 +4356,13 @@ expression: "&schema"
           "description": "Redis password if not provided in the URLs. This field takes precedence over the password in the URL",
           "nullable": true,
           "type": "string"
+        },
+        "pool_size": {
+          "default": 1,
+          "description": "The size of the Redis connection pool",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
         },
         "required_to_start": {
           "default": false,
@@ -4543,6 +4574,13 @@ expression: "&schema"
           "nullable": true,
           "type": "string"
         },
+        "pool_size": {
+          "default": 1,
+          "description": "The size of the Redis connection pool",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "required_to_start": {
           "default": false,
           "description": "Prevents the router from starting if it cannot connect to Redis",
@@ -4709,136 +4747,114 @@ expression: "&schema"
           "type": "boolean"
         },
         "dd.trace_id": {
-          "default": null,
-          "description": "The datadog trace ID. This can be output in logs and used to correlate traces in Datadog.",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "error.type": {
-          "default": null,
-          "description": "Describes a class of error the operation ended with. Examples:\n\n* timeout * name_resolution_error * 500\n\nRequirement level: Conditionally Required: If request has ended with an error.",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "http.request.body.size": {
-          "default": null,
-          "description": "The size of the request payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the Content-Length header. For requests using transport encoding, this should be the compressed size. Examples:\n\n* 3495\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "http.request.method": {
-          "default": null,
-          "description": "HTTP request method. Examples:\n\n* GET * POST * HEAD\n\nRequirement level: Required",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "http.response.body.size": {
-          "default": null,
-          "description": "The size of the response payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the Content-Length header. For requests using transport encoding, this should be the compressed size. Examples:\n\n* 3495\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "http.response.status_code": {
-          "default": null,
-          "description": "HTTP response status code. Examples:\n\n* 200\n\nRequirement level: Conditionally Required: If and only if one was received/sent.",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "http.route": {
-          "default": null,
-          "description": "The matched route (path template in the format used by the respective server framework). Examples:\n\n* /graphql\n\nRequirement level: Conditionally Required: If and only if it’s available",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "network.local.address": {
-          "default": null,
-          "description": "Local socket address. Useful in case of a multi-IP host. Examples:\n\n* 10.1.2.80 * /tmp/my.sock\n\nRequirement level: Opt-In",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "network.local.port": {
-          "default": null,
-          "description": "Local socket port. Useful in case of a multi-port host. Examples:\n\n* 65123\n\nRequirement level: Opt-In",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "network.peer.address": {
-          "default": null,
-          "description": "Peer address of the network connection - IP address or Unix domain socket name. Examples:\n\n* 10.1.2.80 * /tmp/my.sock\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "network.peer.port": {
-          "default": null,
-          "description": "Peer port number of the network connection. Examples:\n\n* 65123\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "network.protocol.name": {
-          "default": null,
-          "description": "OSI application layer or non-OSI equivalent. Examples:\n\n* http * spdy\n\nRequirement level: Recommended: if not default (http).",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "network.protocol.version": {
-          "default": null,
-          "description": "Version of the protocol specified in network.protocol.name. Examples:\n\n* 1.0 * 1.1 * 2 * 3\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "network.transport": {
-          "default": null,
-          "description": "OSI transport layer. Examples:\n\n* tcp * udp\n\nRequirement level: Conditionally Required",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "network.type": {
-          "default": null,
-          "description": "OSI network layer or non-OSI equivalent. Examples:\n\n* ipv4 * ipv6\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "server.address": {
-          "default": null,
-          "description": "Name of the local HTTP server that received the request. Examples:\n\n* example.com * 10.1.2.80 * /tmp/my.sock\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "server.port": {
-          "default": null,
-          "description": "Port of the local HTTP server that received the request. Examples:\n\n* 80 * 8080 * 443\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "trace_id": {
-          "default": null,
-          "description": "The OpenTelemetry trace ID. This can be output in logs.",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "url.path": {
-          "default": null,
-          "description": "The URI path component Examples:\n\n* /search\n\nRequirement level: Required",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "url.query": {
-          "default": null,
-          "description": "The URI query component Examples:\n\n* q=OpenTelemetry\n\nRequirement level: Conditionally Required: If and only if one was received/sent.",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "url.scheme": {
-          "default": null,
-          "description": "The URI scheme component identifying the used protocol. Examples:\n\n* http * https\n\nRequirement level: Required",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "user_agent.original": {
-          "default": null,
-          "description": "Value of the HTTP User-Agent header sent by the client. Examples:\n\n* CERN-LineMode/2.15 * libwww/2.17b3\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         }
       },
       "type": "object"
@@ -5438,6 +5454,25 @@ expression: "&schema"
       ],
       "type": "string"
     },
+    "StandardAttribute": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "alias": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "alias"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "StandardEventConfig_for_RouterSelector": {
       "anyOf": [
         {
@@ -5655,28 +5690,24 @@ expression: "&schema"
       "additionalProperties": false,
       "properties": {
         "subgraph.graphql.document": {
-          "default": null,
-          "description": "The GraphQL document being executed. Examples:\n\n* `query findBookById { bookById(id: ?) { name } }`\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "subgraph.graphql.operation.name": {
-          "default": null,
-          "description": "The name of the operation being executed. Examples:\n\n* findBookById\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "subgraph.graphql.operation.type": {
-          "default": null,
-          "description": "The type of the operation being executed. Examples:\n\n* query * subscription * mutation\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "subgraph.name": {
-          "default": null,
-          "description": "The name of the subgraph Examples:\n\n* products\n\nRequirement level: Required",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         }
       },
       "type": "object"
@@ -6556,46 +6587,39 @@ expression: "&schema"
       "description": "Attributes for Cost",
       "properties": {
         "cost.actual": {
-          "default": null,
-          "description": "The actual cost of the operation using the currently configured cost model",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "cost.delta": {
-          "default": null,
-          "description": "The delta (estimated - actual) cost of the operation using the currently configured cost model",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "cost.estimated": {
-          "default": null,
-          "description": "The estimated cost of the operation using the currently configured cost model",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "cost.result": {
-          "default": null,
-          "description": "The cost result, this is an error code returned by the cost calculation or COST_OK",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "graphql.document": {
-          "default": null,
-          "description": "The GraphQL document being executed. Examples:\n\n* `query findBookById { bookById(id: ?) { name } }`\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "graphql.operation.name": {
-          "default": null,
-          "description": "The name of the operation being executed. Examples:\n\n* findBookById\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "graphql.operation.type": {
-          "default": null,
-          "description": "The type of the operation being executed. Examples:\n\n* query * subscription * mutation\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         }
       },
       "type": "object"
@@ -7418,136 +7442,114 @@ expression: "&schema"
           "type": "boolean"
         },
         "dd.trace_id": {
-          "default": null,
-          "description": "The datadog trace ID. This can be output in logs and used to correlate traces in Datadog.",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "error.type": {
-          "default": null,
-          "description": "Describes a class of error the operation ended with. Examples:\n\n* timeout * name_resolution_error * 500\n\nRequirement level: Conditionally Required: If request has ended with an error.",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "http.request.body.size": {
-          "default": null,
-          "description": "The size of the request payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the Content-Length header. For requests using transport encoding, this should be the compressed size. Examples:\n\n* 3495\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "http.request.method": {
-          "default": null,
-          "description": "HTTP request method. Examples:\n\n* GET * POST * HEAD\n\nRequirement level: Required",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "http.response.body.size": {
-          "default": null,
-          "description": "The size of the response payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the Content-Length header. For requests using transport encoding, this should be the compressed size. Examples:\n\n* 3495\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "http.response.status_code": {
-          "default": null,
-          "description": "HTTP response status code. Examples:\n\n* 200\n\nRequirement level: Conditionally Required: If and only if one was received/sent.",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "http.route": {
-          "default": null,
-          "description": "The matched route (path template in the format used by the respective server framework). Examples:\n\n* /graphql\n\nRequirement level: Conditionally Required: If and only if it’s available",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "network.local.address": {
-          "default": null,
-          "description": "Local socket address. Useful in case of a multi-IP host. Examples:\n\n* 10.1.2.80 * /tmp/my.sock\n\nRequirement level: Opt-In",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "network.local.port": {
-          "default": null,
-          "description": "Local socket port. Useful in case of a multi-port host. Examples:\n\n* 65123\n\nRequirement level: Opt-In",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "network.peer.address": {
-          "default": null,
-          "description": "Peer address of the network connection - IP address or Unix domain socket name. Examples:\n\n* 10.1.2.80 * /tmp/my.sock\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "network.peer.port": {
-          "default": null,
-          "description": "Peer port number of the network connection. Examples:\n\n* 65123\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "network.protocol.name": {
-          "default": null,
-          "description": "OSI application layer or non-OSI equivalent. Examples:\n\n* http * spdy\n\nRequirement level: Recommended: if not default (http).",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "network.protocol.version": {
-          "default": null,
-          "description": "Version of the protocol specified in network.protocol.name. Examples:\n\n* 1.0 * 1.1 * 2 * 3\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "network.transport": {
-          "default": null,
-          "description": "OSI transport layer. Examples:\n\n* tcp * udp\n\nRequirement level: Conditionally Required",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "network.type": {
-          "default": null,
-          "description": "OSI network layer or non-OSI equivalent. Examples:\n\n* ipv4 * ipv6\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "server.address": {
-          "default": null,
-          "description": "Name of the local HTTP server that received the request. Examples:\n\n* example.com * 10.1.2.80 * /tmp/my.sock\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "server.port": {
-          "default": null,
-          "description": "Port of the local HTTP server that received the request. Examples:\n\n* 80 * 8080 * 443\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "trace_id": {
-          "default": null,
-          "description": "The OpenTelemetry trace ID. This can be output in logs.",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "url.path": {
-          "default": null,
-          "description": "The URI path component Examples:\n\n* /search\n\nRequirement level: Required",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "url.query": {
-          "default": null,
-          "description": "The URI query component Examples:\n\n* q=OpenTelemetry\n\nRequirement level: Conditionally Required: If and only if one was received/sent.",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "url.scheme": {
-          "default": null,
-          "description": "The URI scheme component identifying the used protocol. Examples:\n\n* http * https\n\nRequirement level: Required",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "user_agent.original": {
-          "default": null,
-          "description": "Value of the HTTP User-Agent header sent by the client. Examples:\n\n* CERN-LineMode/2.15 * libwww/2.17b3\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         }
       },
       "type": "object"
@@ -7566,136 +7568,114 @@ expression: "&schema"
           "type": "boolean"
         },
         "dd.trace_id": {
-          "default": null,
-          "description": "The datadog trace ID. This can be output in logs and used to correlate traces in Datadog.",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "error.type": {
-          "default": null,
-          "description": "Describes a class of error the operation ended with. Examples:\n\n* timeout * name_resolution_error * 500\n\nRequirement level: Conditionally Required: If request has ended with an error.",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "http.request.body.size": {
-          "default": null,
-          "description": "The size of the request payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the Content-Length header. For requests using transport encoding, this should be the compressed size. Examples:\n\n* 3495\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "http.request.method": {
-          "default": null,
-          "description": "HTTP request method. Examples:\n\n* GET * POST * HEAD\n\nRequirement level: Required",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "http.response.body.size": {
-          "default": null,
-          "description": "The size of the response payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the Content-Length header. For requests using transport encoding, this should be the compressed size. Examples:\n\n* 3495\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "http.response.status_code": {
-          "default": null,
-          "description": "HTTP response status code. Examples:\n\n* 200\n\nRequirement level: Conditionally Required: If and only if one was received/sent.",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "http.route": {
-          "default": null,
-          "description": "The matched route (path template in the format used by the respective server framework). Examples:\n\n* /graphql\n\nRequirement level: Conditionally Required: If and only if it’s available",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "network.local.address": {
-          "default": null,
-          "description": "Local socket address. Useful in case of a multi-IP host. Examples:\n\n* 10.1.2.80 * /tmp/my.sock\n\nRequirement level: Opt-In",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "network.local.port": {
-          "default": null,
-          "description": "Local socket port. Useful in case of a multi-port host. Examples:\n\n* 65123\n\nRequirement level: Opt-In",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "network.peer.address": {
-          "default": null,
-          "description": "Peer address of the network connection - IP address or Unix domain socket name. Examples:\n\n* 10.1.2.80 * /tmp/my.sock\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "network.peer.port": {
-          "default": null,
-          "description": "Peer port number of the network connection. Examples:\n\n* 65123\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "network.protocol.name": {
-          "default": null,
-          "description": "OSI application layer or non-OSI equivalent. Examples:\n\n* http * spdy\n\nRequirement level: Recommended: if not default (http).",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "network.protocol.version": {
-          "default": null,
-          "description": "Version of the protocol specified in network.protocol.name. Examples:\n\n* 1.0 * 1.1 * 2 * 3\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "network.transport": {
-          "default": null,
-          "description": "OSI transport layer. Examples:\n\n* tcp * udp\n\nRequirement level: Conditionally Required",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "network.type": {
-          "default": null,
-          "description": "OSI network layer or non-OSI equivalent. Examples:\n\n* ipv4 * ipv6\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "server.address": {
-          "default": null,
-          "description": "Name of the local HTTP server that received the request. Examples:\n\n* example.com * 10.1.2.80 * /tmp/my.sock\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "server.port": {
-          "default": null,
-          "description": "Port of the local HTTP server that received the request. Examples:\n\n* 80 * 8080 * 443\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "trace_id": {
-          "default": null,
-          "description": "The OpenTelemetry trace ID. This can be output in logs.",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "url.path": {
-          "default": null,
-          "description": "The URI path component Examples:\n\n* /search\n\nRequirement level: Required",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "url.query": {
-          "default": null,
-          "description": "The URI query component Examples:\n\n* q=OpenTelemetry\n\nRequirement level: Conditionally Required: If and only if one was received/sent.",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "url.scheme": {
-          "default": null,
-          "description": "The URI scheme component identifying the used protocol. Examples:\n\n* http * https\n\nRequirement level: Required",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "user_agent.original": {
-          "default": null,
-          "description": "Value of the HTTP User-Agent header sent by the client. Examples:\n\n* CERN-LineMode/2.15 * libwww/2.17b3\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         }
       },
       "type": "object"
@@ -7707,28 +7687,24 @@ expression: "&schema"
       },
       "properties": {
         "subgraph.graphql.document": {
-          "default": null,
-          "description": "The GraphQL document being executed. Examples:\n\n* `query findBookById { bookById(id: ?) { name } }`\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "subgraph.graphql.operation.name": {
-          "default": null,
-          "description": "The name of the operation being executed. Examples:\n\n* findBookById\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "subgraph.graphql.operation.type": {
-          "default": null,
-          "description": "The type of the operation being executed. Examples:\n\n* query * subscription * mutation\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "subgraph.name": {
-          "default": null,
-          "description": "The name of the subgraph Examples:\n\n* products\n\nRequirement level: Required",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         }
       },
       "type": "object"
@@ -7740,28 +7716,24 @@ expression: "&schema"
       },
       "properties": {
         "subgraph.graphql.document": {
-          "default": null,
-          "description": "The GraphQL document being executed. Examples:\n\n* `query findBookById { bookById(id: ?) { name } }`\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "subgraph.graphql.operation.name": {
-          "default": null,
-          "description": "The name of the operation being executed. Examples:\n\n* findBookById\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "subgraph.graphql.operation.type": {
-          "default": null,
-          "description": "The type of the operation being executed. Examples:\n\n* query * subscription * mutation\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "subgraph.name": {
-          "default": null,
-          "description": "The name of the subgraph Examples:\n\n* products\n\nRequirement level: Required",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         }
       },
       "type": "object"
@@ -7774,46 +7746,39 @@ expression: "&schema"
       "description": "Attributes for Cost",
       "properties": {
         "cost.actual": {
-          "default": null,
-          "description": "The actual cost of the operation using the currently configured cost model",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "cost.delta": {
-          "default": null,
-          "description": "The delta (estimated - actual) cost of the operation using the currently configured cost model",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "cost.estimated": {
-          "default": null,
-          "description": "The estimated cost of the operation using the currently configured cost model",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "cost.result": {
-          "default": null,
-          "description": "The cost result, this is an error code returned by the cost calculation or COST_OK",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "graphql.document": {
-          "default": null,
-          "description": "The GraphQL document being executed. Examples:\n\n* `query findBookById { bookById(id: ?) { name } }`\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "graphql.operation.name": {
-          "default": null,
-          "description": "The name of the operation being executed. Examples:\n\n* findBookById\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "graphql.operation.type": {
-          "default": null,
-          "description": "The type of the operation being executed. Examples:\n\n* query * subscription * mutation\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         }
       },
       "type": "object"
@@ -7826,46 +7791,39 @@ expression: "&schema"
       "description": "Attributes for Cost",
       "properties": {
         "cost.actual": {
-          "default": null,
-          "description": "The actual cost of the operation using the currently configured cost model",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "cost.delta": {
-          "default": null,
-          "description": "The delta (estimated - actual) cost of the operation using the currently configured cost model",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "cost.estimated": {
-          "default": null,
-          "description": "The estimated cost of the operation using the currently configured cost model",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "cost.result": {
-          "default": null,
-          "description": "The cost result, this is an error code returned by the cost calculation or COST_OK",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "graphql.document": {
-          "default": null,
-          "description": "The GraphQL document being executed. Examples:\n\n* `query findBookById { bookById(id: ?) { name } }`\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "graphql.operation.name": {
-          "default": null,
-          "description": "The name of the operation being executed. Examples:\n\n* findBookById\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "graphql.operation.type": {
-          "default": null,
-          "description": "The type of the operation being executed. Examples:\n\n* query * subscription * mutation\n\nRequirement level: Recommended",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         }
       },
       "type": "object"
@@ -7889,11 +7847,10 @@ expression: "&schema"
         "description": "#/definitions/SubgraphSelector"
       },
       "properties": {
-        "entity.type": {
-          "default": null,
-          "description": "Entity type",
-          "nullable": true,
-          "type": "boolean"
+        "graphql.type.name": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         }
       },
       "type": "object"
@@ -7985,34 +7942,29 @@ expression: "&schema"
       },
       "properties": {
         "graphql.field.name": {
-          "default": null,
-          "description": "The GraphQL field name",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "graphql.field.type": {
-          "default": null,
-          "description": "The GraphQL field type",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "graphql.list.length": {
-          "default": null,
-          "description": "If the field is a list, the length of the list",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "graphql.operation.name": {
-          "default": null,
-          "description": "The GraphQL operation name",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
         "graphql.type.name": {
-          "default": null,
-          "description": "The GraphQL type name",
-          "nullable": true,
-          "type": "boolean"
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         }
       },
       "type": "object"
@@ -8311,13 +8263,13 @@ expression: "&schema"
       "$ref": "#/definitions/DemandControlConfig",
       "description": "#/definitions/DemandControlConfig"
     },
-    "experimental_apollo_metrics_generation_mode": {
-      "$ref": "#/definitions/ApolloMetricsGenerationMode",
-      "description": "#/definitions/ApolloMetricsGenerationMode"
-    },
     "experimental_chaos": {
       "$ref": "#/definitions/Chaos",
       "description": "#/definitions/Chaos"
+    },
+    "experimental_introspection_mode": {
+      "$ref": "#/definitions/IntrospectionMode",
+      "description": "#/definitions/IntrospectionMode"
     },
     "experimental_query_planner_mode": {
       "$ref": "#/definitions/QueryPlannerMode",

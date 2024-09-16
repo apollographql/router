@@ -253,7 +253,7 @@ impl YamlRouterFactory {
                         .supergraph
                         .query_planning
                         .experimental_reuse_query_plans,
-                    configuration
+                    &configuration
                         .persisted_queries
                         .experimental_prewarm_query_plan_cache,
                 )
@@ -269,7 +269,7 @@ impl YamlRouterFactory {
                         .supergraph
                         .query_planning
                         .experimental_reuse_query_plans,
-                    configuration
+                    &configuration
                         .persisted_queries
                         .experimental_prewarm_query_plan_cache,
                 )
@@ -294,34 +294,20 @@ impl YamlRouterFactory {
     ) -> Result<SupergraphCreator, BoxError> {
         let query_planner_span = tracing::info_span!("query_planner_creation");
         // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-        let bridge_query_planner =
-            match previous_supergraph.as_ref().map(|router| router.planners()) {
-                None => {
-                    BridgeQueryPlannerPool::new(
-                        schema.clone(),
-                        configuration.clone(),
-                        configuration
-                            .supergraph
-                            .query_planning
-                            .experimental_query_planner_parallelism()?,
-                    )
-                    .instrument(query_planner_span)
-                    .await?
-                }
-                Some(planners) => {
-                    BridgeQueryPlannerPool::new_from_planners(
-                        planners,
-                        schema.clone(),
-                        configuration.clone(),
-                        configuration
-                            .supergraph
-                            .query_planning
-                            .experimental_query_planner_parallelism()?,
-                    )
-                    .instrument(query_planner_span)
-                    .await?
-                }
-            };
+        let bridge_query_planner = BridgeQueryPlannerPool::new(
+            previous_supergraph
+                .as_ref()
+                .map(|router| router.js_planners())
+                .unwrap_or_default(),
+            schema.clone(),
+            configuration.clone(),
+            configuration
+                .supergraph
+                .query_planning
+                .experimental_query_planner_parallelism()?,
+        )
+        .instrument(query_planner_span)
+        .await?;
 
         let schema_changed = previous_supergraph
             .map(|supergraph_creator| supergraph_creator.schema().raw_sdl == schema.raw_sdl)
@@ -511,8 +497,7 @@ pub async fn create_test_service_factory_from_yaml(schema: &str, configuration: 
         .await;
     assert_eq!(
         service.map(|_| ()).unwrap_err().to_string().as_str(),
-        r#"couldn't build Query Planner Service: couldn't instantiate query planner; invalid schema: schema validation errors: Error extracting subgraphs from the supergraph: this might be due to errors in subgraphs that were mistakenly ignored by federation 0.x versions but are rejected by federation 2.
-Please try composing your subgraphs with federation 2: this should help precisely pinpoint the problems and, once fixed, generate a correct federation 2 supergraph.
+        r#"couldn't build Query Planner Service: couldn't instantiate query planner; invalid schema: schema validation errors: Unexpected error extracting subgraphs from the supergraph: this is either a bug, or the supergraph has been corrupted.
 
 Details:
 Error: Cannot find type "Review" in subgraph "products"
@@ -696,11 +681,11 @@ pub(crate) async fn create_plugins(
     add_optional_apollo_plugin!("preview_file_uploads");
     add_optional_apollo_plugin!("preview_entity_cache");
     add_mandatory_apollo_plugin!("progressive_override");
+    add_optional_apollo_plugin!("demand_control");
 
     // This relative ordering is documented in `docs/source/customizations/native.mdx`:
     add_optional_apollo_plugin!("rhai");
     add_optional_apollo_plugin!("coprocessor");
-    add_optional_apollo_plugin!("demand_control");
     add_user_plugins!();
 
     // Macros above remove from `apollo_plugin_factories`, so anything left at the end
