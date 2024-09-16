@@ -571,6 +571,7 @@ mod test {
         let config = Arc::new(config);
         let schema = Arc::new(Schema::parse(schema, &config).unwrap());
         let planner = BridgeQueryPlannerPool::new(
+            Vec::new(),
             schema.clone(),
             config.clone(),
             NonZeroUsize::new(1).unwrap(),

@@ -41,7 +41,8 @@ fn check_absence_of_aliases(selection_set: &SelectionSet) -> Result<(), Federati
                         errors.push(SingleFederationError::UnsupportedFeature {
                             // PORT_NOTE: The JS version also quotes the directive name in the error message.
                             //            For example, "aliases are not currently supported in @requires".
-                            message: format!(r#"Cannot use alias "{alias}" in "{}": aliases are not currently supported in the used directive"#, field.field)
+                            message: format!(r#"Cannot use alias "{alias}" in "{}": aliases are not currently supported in the used directive"#, field.field),
+                            kind: crate::error::UnsupportedFeatureKind::Alias
                         }.into());
                     }
                     if let Some(selection_set) = &field.selection_set {

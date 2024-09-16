@@ -1,9 +1,11 @@
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
 use std::io;
 
 use opentelemetry::sdk::Resource;
 use opentelemetry::Array;
+use opentelemetry::Key;
 use opentelemetry::OrderMap;
 use opentelemetry::Value;
 use serde::ser::SerializeMap;
@@ -283,6 +285,14 @@ where
                 }
             }
 
+            if !self.config.span_attributes.is_empty() {
+                for (key, value) in
+                    extract_span_attributes(ctx.lookup_current(), &self.config.span_attributes)
+                {
+                    serializer.serialize_entry(key.as_str(), &AttributeValue::from(value))?;
+                }
+            }
+
             let mut visitor = tracing_serde::SerdeMapVisitor::new(serializer);
             event.record(&mut visitor);
 
@@ -318,7 +328,6 @@ where
                     serializer.serialize_entry("dd.trace_id", &dd_trace_id)?;
                 }
             }
-
             if self.config.display_span_list && current_span.is_some() {
                 serializer.serialize_entry(
                     "spans",
@@ -368,6 +377,66 @@ fn extract_dd_trace_id<'a, 'b, T: LookupSpan<'a>>(span: &SpanRef<'a, T>) -> Opti
         }
     }
     dd_trace_id
+}
+
+fn extract_span_attributes<'a, 'b, Span>(
+    current: Option<SpanRef<'a, Span>>,
+    include_attributes: &HashSet<String>,
+) -> HashMap<Key, Value>
+where
+    Span: for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>,
+{
+    let mut attributes = HashMap::new();
+    if let Some(leaf_span) = &current {
+        for span in leaf_span.scope().from_root() {
+            let ext = span.extensions();
+
+            // Get otel attributes
+            {
+                let otel_attributes = ext
+                    .get::<OtelData>()
+                    .and_then(|otel_data| otel_data.builder.attributes.as_ref());
+                if let Some(otel_attributes) = otel_attributes {
+                    attributes.extend(
+                        otel_attributes
+                            .iter()
+                            .filter(|(key, _)| {
+                                let key_name = key.as_str();
+                                !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
+                                    && include_attributes.contains(key_name)
+                            })
+                            .map(|(key, val)| (key.clone(), val.clone())),
+                    );
+                }
+            }
+            // Get custom dynamic attributes
+            {
+                let custom_attributes = ext.get::<LogAttributes>().map(|attrs| attrs.attributes());
+                if let Some(custom_attributes) = custom_attributes {
+                    #[cfg(test)]
+                    let custom_attributes: Vec<&opentelemetry::KeyValue> = {
+                        let mut my_custom_attributes: Vec<&opentelemetry::KeyValue> =
+                            custom_attributes.iter().collect();
+                        my_custom_attributes.sort_by_key(|kv| &kv.key);
+                        my_custom_attributes
+                    };
+                    #[allow(clippy::into_iter_on_ref)]
+                    attributes.extend(
+                        custom_attributes
+                            .into_iter()
+                            .filter(|kv| {
+                                let key_name = kv.key.as_str();
+                                !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
+                                    && include_attributes.contains(key_name)
+                            })
+                            .map(|kv| (kv.key.clone(), kv.value.clone())),
+                    );
+                }
+            }
+        }
+    }
+
+    attributes
 }
 
 struct WriteAdaptor<'a> {

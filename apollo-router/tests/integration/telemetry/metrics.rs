@@ -177,7 +177,7 @@ async fn test_bad_queries() {
     router.execute_huge_query().await;
     router
         .assert_metrics_contains(
-            r#"apollo_router_http_requests_total{error="payload too large for the `http_max_request_bytes` configuration",status="413",otel_scope_name="apollo/router"} 1"#,
+            r#"apollo_router_http_requests_total{error="Request body payload too large",status="413",otel_scope_name="apollo/router"} 1"#,
             None,
         )
         .await;
@@ -219,4 +219,40 @@ async fn test_graphql_metrics() {
     router
             .assert_metrics_contains(r#"custom_histogram_sum{graphql_field_name="topProducts",graphql_field_type="Product",graphql_type_name="Query",otel_scope_name="apollo/router"} 3"#, None)
             .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_gauges_on_reload() {
+    let mut router = IntegrationTest::builder()
+        .config(include_str!("fixtures/no-telemetry.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    router.execute_default_query().await;
+    router.update_config(PROMETHEUS_CONFIG).await;
+    router.assert_reloaded().await;
+    router.execute_default_query().await;
+    router
+        .assert_metrics_contains(r#"apollo_router_cache_storage_estimated_size{kind="query planner",type="memory",otel_scope_name="apollo/router"} "#, None)
+        .await;
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_query_planning_queued{otel_scope_name="apollo/router"} "#,
+            None,
+        )
+        .await;
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_v8_heap_total_bytes{otel_scope_name="apollo/router"} "#,
+            None,
+        )
+        .await;
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_v8_heap_total_bytes{otel_scope_name="apollo/router"} "#,
+            None,
+        )
+        .await;
 }

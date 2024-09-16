@@ -1,0 +1,12 @@
+description: Experimental persisted query prewarm query plan cache can now be configured separately for `on_startup` and `on_reload`; the previous value now means `on_startup`
+actions:
+  - type: change
+    path: persisted_queries.experimental_prewarm_query_plan_cache
+    from: true
+    to:
+      on_startup: true
+  - type: change
+    path: persisted_queries.experimental_prewarm_query_plan_cache
+    from: false
+    to:
+      on_startup: false

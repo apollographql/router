@@ -10,7 +10,8 @@ info:
         cache:
           apollo.router.operations.entity.cache:
             attributes:
-              entity.type: true
+              entity.type:
+                alias: entity_type
               subgraph.name:
                 subgraph_name: true
               supergraph.operation.name:
@@ -63,25 +64,25 @@ info:
       - value: 0
         attributes:
           cache.hit: false
-          entity.type: Product
+          entity_type: Product
           subgraph.name: products
           supergraph.operation.name: Test
       - value: 0
         attributes:
           cache.hit: false
-          entity.type: Review
+          entity_type: Review
           subgraph.name: products
           supergraph.operation.name: Test
       - value: 3
         attributes:
           cache.hit: true
-          entity.type: Product
+          entity_type: Product
           subgraph.name: products
           supergraph.operation.name: Test
       - value: 5
         attributes:
           cache.hit: true
-          entity.type: Review
+          entity_type: Review
           subgraph.name: products
           supergraph.operation.name: Test
 - name: only_cache_hit_on_subgraph_products

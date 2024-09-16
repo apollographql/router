@@ -29,6 +29,7 @@ pub mod query_graph;
 pub mod query_plan;
 pub mod schema;
 pub mod subgraph;
+pub(crate) mod supergraph;
 pub(crate) mod utils;
 
 use apollo_compiler::ast::NamedType;
@@ -46,10 +47,10 @@ use crate::link::spec::Identity;
 use crate::link::spec_definition::SpecDefinitions;
 use crate::merge::merge_subgraphs;
 use crate::merge::MergeFailure;
-pub use crate::query_graph::extract_subgraphs_from_supergraph::ValidFederationSubgraph;
-pub use crate::query_graph::extract_subgraphs_from_supergraph::ValidFederationSubgraphs;
 use crate::schema::ValidFederationSchema;
 use crate::subgraph::ValidSubgraph;
+pub use crate::supergraph::ValidFederationSubgraph;
+pub use crate::supergraph::ValidFederationSubgraphs;
 
 pub(crate) type SupergraphSpecs = (&'static LinkSpecDefinition, &'static JoinSpecDefinition);
 
@@ -128,10 +129,7 @@ impl Supergraph {
     }
 
     pub fn extract_subgraphs(&self) -> Result<ValidFederationSubgraphs, FederationError> {
-        crate::query_graph::extract_subgraphs_from_supergraph::extract_subgraphs_from_supergraph(
-            &self.schema,
-            None,
-        )
+        supergraph::extract_subgraphs_from_supergraph(&self.schema, None)
     }
 }
 

@@ -1,0 +1,43 @@
+---
+source: apollo-router/src/plugins/authorization/authenticated.rs
+expression: "TestResult { query: QUERY, result: doc, paths }"
+---
+query:
+
+        query A($v: Int) {
+            ... F3
+        }
+
+        query B($id:String, $u:Int, $include:Boolean, $skip:Boolean) {
+            ... F1
+            u(u:$u) @include(if: $include)
+        }
+
+        fragment F1 on Query {
+            ... F2
+        }
+
+        fragment F2 on Query {
+            t {
+                ... F3 @skip(if: $skip)
+            }
+        }
+
+        fragment F3 on T {
+            f(id: $id)
+        }
+
+        fragment F4 on Query {
+            ...F5
+        }
+
+        fragment F5 on Query {
+            v(v: $v)
+        }
+        
+filtered:
+query B($u: Int, $include: Boolean) {
+  u(u: $u) @include(if: $include)
+}
+
+paths: ["", "/t"]

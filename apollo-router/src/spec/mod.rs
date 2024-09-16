@@ -52,6 +52,10 @@ pub(crate) enum SpecError {
     ValidationError(ValidationErrors),
     /// Unknown operation named "{0}"
     UnknownOperation(String),
+    /// Must provide operation name if query contains multiple operations.
+    MultipleOperationWithoutOperationName,
+    /// Must provide an operation.
+    NoOperation,
     /// subscription operation is not supported
     SubscriptionNotSupported,
     /// query hashing failed: {0}
@@ -84,6 +88,8 @@ impl ErrorExtension for SpecError {
             SpecError::ParseError(_) => "PARSING_ERROR",
             SpecError::ValidationError(_) => "GRAPHQL_VALIDATION_FAILED",
             SpecError::UnknownOperation(_) => "GRAPHQL_VALIDATION_FAILED",
+            SpecError::MultipleOperationWithoutOperationName => "GRAPHQL_VALIDATION_FAILED",
+            SpecError::NoOperation => "GRAPHQL_VALIDATION_FAILED",
             SpecError::SubscriptionNotSupported => "SUBSCRIPTION_NOT_SUPPORTED",
             SpecError::QueryHashing(_) => "QUERY_HASHING",
         }

@@ -7,7 +7,10 @@ use apollo_router::services::execution;
 use apollo_router::services::supergraph;
 use apollo_router::TestHarness;
 use serde_json::json;
+use tower::BoxError;
 use tower::ServiceExt;
+
+use crate::integration::IntegrationTest;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_response_errors() {
@@ -295,4 +298,34 @@ fn expect_errors(response: graphql::Response, expected_error_codes: &[&str]) {
     } else {
         assert!(response.data.is_none())
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_request_bytes_limit_with_coprocessor() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .config(include_str!(
+            "fixtures/request_bytes_limit_with_coprocessor.router.yaml"
+        ))
+        .build()
+        .await;
+    router.start().await;
+    router.assert_started().await;
+    let (_, resp) = router.execute_huge_query().await;
+    assert_eq!(resp.status(), 413);
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_request_bytes_limit() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .config(include_str!("fixtures/request_bytes_limit.router.yaml"))
+        .build()
+        .await;
+    router.start().await;
+    router.assert_started().await;
+    let (_, resp) = router.execute_huge_query().await;
+    assert_eq!(resp.status(), 413);
+    router.graceful_shutdown().await;
+    Ok(())
 }

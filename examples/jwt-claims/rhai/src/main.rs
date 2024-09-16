@@ -119,7 +119,7 @@ mod tests {
 
         // Let's create a request with our operation name
         let request_with_appropriate_name = supergraph::Request::canned_builder()
-            .operation_name("me".to_string())
+            .operation_name("TopProducts".to_string())
             .header(
                 http::header::AUTHORIZATION,
                 "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImtleTEifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.4GrmfxuUST96cs0YUC0DfLAG218m7vn8fO_ENfXnu5A",

@@ -1,66 +1,37 @@
-use std::time::Duration;
-
-use actix_web::get;
-use actix_web::post;
-use actix_web::web;
-use actix_web::web::Data;
-use actix_web::App;
-use actix_web::HttpResponse;
-use actix_web::HttpServer;
-use actix_web::Result;
-use async_graphql::http::playground_source;
-use async_graphql::http::GraphQLPlaygroundConfig;
 use async_graphql::EmptySubscription;
-use async_graphql::Schema;
-use async_graphql_actix_web::GraphQLRequest;
+use async_graphql_axum::GraphQLRequest;
+use async_graphql_axum::GraphQLResponse;
+use axum::routing::post;
+use axum::Extension;
+use axum::Router;
+use tower::ServiceBuilder;
 
 use crate::model::Mutation;
 use crate::model::Query;
 
 mod model;
 
-#[post("/")]
-async fn index(
-    schema: web::Data<Schema<Query, Mutation, EmptySubscription>>,
-    mut req: GraphQLRequest,
-) -> HttpResponse {
+type Schema = async_graphql::Schema<Query, Mutation, EmptySubscription>;
+
+async fn graphql_handler(schema: Extension<Schema>, mut req: GraphQLRequest) -> GraphQLResponse {
     //Zero out the random variable
     req.0.variables.remove(&async_graphql::Name::new("random"));
     println!("query: {}", req.0.query);
-
-    let response = schema.execute(req.into_inner()).await;
-    let response_json = serde_json::to_string(&response).unwrap();
-
-    HttpResponse::Ok()
-        .content_type("application/json")
-        .body(response_json)
-}
-
-#[get("*")]
-async fn index_playground() -> Result<HttpResponse> {
-    Ok(HttpResponse::Ok()
-        .content_type("text/html; charset=utf-8")
-        .body(playground_source(
-            GraphQLPlaygroundConfig::new("/").subscription_endpoint("/"),
-        )))
+    schema.execute(req.into_inner()).await.into()
 }
 
 #[tokio::main]
-async fn main() -> std::io::Result<()> {
+async fn main() {
     env_logger::init();
     println!("about to listen to http://localhost:4005");
 
-    HttpServer::new(move || {
-        let schema = Schema::build(Query, Mutation, EmptySubscription).finish();
-        App::new()
-            .app_data(Data::new(schema))
-            //.wrap(EnsureKeepAlive)
-            //.wrap(DelayFor::default())
-            .service(index)
-            .service(index_playground)
-    })
-    .keep_alive(Duration::from_secs(75))
-    .bind("0.0.0.0:4005")?
-    .run()
-    .await
+    let schema = Schema::build(Query, Mutation, EmptySubscription).finish();
+    let router = Router::new()
+        .route("/", post(graphql_handler))
+        .layer(ServiceBuilder::new().layer(Extension(schema)));
+
+    axum::Server::bind(&"0.0.0.0:4005".parse().expect("Fixed address is valid"))
+        .serve(router.into_make_service())
+        .await
+        .expect("Server failed to start")
 }

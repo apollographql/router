@@ -6,6 +6,12 @@ description: Distributed caching for GraphOS Router with GraphOS Enterprise. Con
 
 import RedisTLS from '../../shared/redis-tls.mdx'
 
+<SummitCallout
+  topic="graph performance"
+  workshopName="Better, faster, stronger: Advanced configurations to boost your router performance"
+  URL="https://reg.summit.graphql.com/flow/apollo/summit24/AttendeePortal/page/catalog/session/1712947098784001VPCx"
+/>
+
 <EnterpriseFeature linkWithAnchor="https://www.apollographql.com/pricing#graphos-router" />
 
 If you have multiple GraphOS Router instances, those instances can share a Redis-backed cache for their query plans and automatic persisted queries (APQ). This means that if _any_ of your router instances caches a particular value, _all_ of your instances can look up that value to significantly improve responsiveness. For more details on query plans and APQ, see the article on [in-memory caching](./in-memory-caching).
@@ -137,6 +143,7 @@ supergraph:
         #tls:
         required_to_start: false # Optional, defaults to false
         reset_ttl: true # Optional, defaults to true
+        pool_size: 4 # Optional, defaults to 1
 ```
 
 #### Timeout
@@ -163,3 +170,7 @@ When active, the `required_to_start` option will prevent the router from startin
 ### Reset TTL
 
 When this option is active, accessing a cache entry in Redis will reset its expiration.
+
+### Pool size
+
+The `pool_size` option defines the number of connections to Redis that the router will open. By default, the router will open a single connection to Redis. If there is a lot of traffic between router and Redis and/or there is some latency in thos requests, it is recommended to increase the pool size to reduce that latency.

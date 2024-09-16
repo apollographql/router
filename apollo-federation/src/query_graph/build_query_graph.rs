@@ -21,7 +21,6 @@ use crate::link::federation_spec_definition::KeyDirectiveArguments;
 use crate::operation::merge_selection_sets;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
-use crate::query_graph::extract_subgraphs_from_supergraph::extract_subgraphs_from_supergraph;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphEdge;
 use crate::query_graph::QueryGraphEdgeTransition;
@@ -41,6 +40,7 @@ use crate::schema::position::SchemaRootDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
+use crate::supergraph::extract_subgraphs_from_supergraph;
 
 /// Builds a "federated" query graph based on the provided supergraph and API schema.
 ///

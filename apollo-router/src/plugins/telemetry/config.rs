@@ -94,6 +94,14 @@ pub(crate) struct Instrumentation {
     pub(crate) instruments: config_new::instruments::InstrumentsConfig,
 }
 
+impl Instrumentation {
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        self.events.validate()?;
+        self.instruments.validate()?;
+        self.spans.validate()
+    }
+}
+
 /// Metrics configuration
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
@@ -737,7 +745,7 @@ impl Conf {
         match configuration.apollo_plugins.plugins.get("telemetry") {
             Some(telemetry_config) => {
                 match serde_json::from_value::<Conf>(telemetry_config.clone()) {
-                    Ok(conf) => conf.apollo.experimental_apollo_metrics_reference_mode,
+                    Ok(conf) => conf.apollo.metrics_reference_mode,
                     _ => ApolloMetricsReferenceMode::default(),
                 }
             }
@@ -751,10 +759,7 @@ impl Conf {
         match configuration.apollo_plugins.plugins.get("telemetry") {
             Some(telemetry_config) => {
                 match serde_json::from_value::<Conf>(telemetry_config.clone()) {
-                    Ok(conf) => {
-                        conf.apollo
-                            .experimental_apollo_signature_normalization_algorithm
-                    }
+                    Ok(conf) => conf.apollo.signature_normalization_algorithm,
                     _ => ApolloSignatureNormalizationAlgorithm::default(),
                 }
             }

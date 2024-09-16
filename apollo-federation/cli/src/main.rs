@@ -248,11 +248,12 @@ fn cmd_plan(
 ) -> Result<(), FederationError> {
     let query = read_input(query_path);
     let supergraph = load_supergraph(schema_paths)?;
-    let query_doc =
-        ExecutableDocument::parse_and_validate(supergraph.schema.schema(), query, query_path)?;
-    let config = QueryPlannerConfig::from(planner);
 
+    let config = QueryPlannerConfig::from(planner);
     let planner = QueryPlanner::new(&supergraph, config)?;
+
+    let query_doc =
+        ExecutableDocument::parse_and_validate(planner.api_schema().schema(), query, query_path)?;
     print!("{}", planner.build_query_plan(&query_doc, None)?);
     Ok(())
 }

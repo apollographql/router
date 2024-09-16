@@ -1,3 +1,4 @@
+use events::EventOn;
 use opentelemetry::baggage::BaggageExt;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceId;
@@ -51,7 +52,42 @@ pub(crate) trait Selectors {
     }
 }
 
-pub(crate) trait Selector {
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Stage {
+    Request,
+    Response,
+    ResponseEvent,
+    ResponseField,
+    Error,
+    Drop,
+}
+
+impl std::fmt::Display for Stage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Stage::Request => write!(f, "request"),
+            Stage::Response => write!(f, "response"),
+            Stage::ResponseEvent => write!(f, "response_event"),
+            Stage::ResponseField => write!(f, "response_field"),
+            Stage::Error => write!(f, "error"),
+            Stage::Drop => write!(f, "drop"),
+        }
+    }
+}
+
+impl From<EventOn> for Stage {
+    fn from(value: EventOn) -> Self {
+        match value {
+            EventOn::Request => Self::Request,
+            EventOn::Response => Self::Response,
+            EventOn::EventResponse => Self::ResponseEvent,
+            EventOn::Error => Self::Error,
+        }
+    }
+}
+
+pub(crate) trait Selector: std::fmt::Debug {
     type Request;
     type Response;
     type EventResponse;
@@ -79,6 +115,8 @@ pub(crate) trait Selector {
     fn on_drop(&self) -> Option<Value> {
         None
     }
+
+    fn is_active(&self, stage: Stage) -> bool;
 }
 
 pub(crate) trait DefaultForLevel {

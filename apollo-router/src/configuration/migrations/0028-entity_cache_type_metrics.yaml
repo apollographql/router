@@ -1,0 +1,5 @@
+description: Entity cache entity.type attribute renamed to graphql.type.name
+actions:
+  - type: move
+    from: telemetry.instrumentation.instruments.cache["apollo.router.operations.entity.cache"].attributes["entity.type"]
+    to: telemetry.instrumentation.instruments.cache["apollo.router.operations.entity.cache"].attributes["graphql.type.name"]

@@ -87,6 +87,7 @@ pub struct IntegrationTest {
     _subgraph_overrides: HashMap<String, String>,
     bind_address: Arc<Mutex<Option<SocketAddr>>>,
     redis_namespace: String,
+    log: String,
 }
 
 impl IntegrationTest {
@@ -278,6 +279,7 @@ impl IntegrationTest {
         collect_stdio: Option<tokio::sync::oneshot::Sender<String>>,
         supergraph: Option<PathBuf>,
         mut subgraph_overrides: HashMap<String, String>,
+        log: Option<String>,
     ) -> Self {
         let redis_namespace = Uuid::new_v4().to_string();
         let telemetry = telemetry.unwrap_or_default();
@@ -346,6 +348,7 @@ impl IntegrationTest {
             _tracer_provider_subgraph: tracer_provider_subgraph,
             telemetry,
             redis_namespace,
+            log: log.unwrap_or_else(|| "error,apollo_router=info".to_owned()),
         }
     }
 
@@ -380,15 +383,15 @@ impl IntegrationTest {
         }
 
         router
-            .args([
+            .args(dbg!([
                 "--hr",
                 "--config",
                 &self.test_config_location.to_string_lossy(),
                 "--supergraph",
                 &self.test_schema_location.to_string_lossy(),
                 "--log",
-                "error,apollo_router=info",
-            ])
+                &self.log,
+            ]))
             .stdout(Stdio::piped());
 
         let mut router = router.spawn().expect("router should start");

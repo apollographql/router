@@ -6,7 +6,7 @@ rhai:
   main: test_callbacks.rhai
 include_subgraph_errors:
   all: true
-preview_demand_control:
+demand_control:
   mode: measure
   enabled: false
   strategy:

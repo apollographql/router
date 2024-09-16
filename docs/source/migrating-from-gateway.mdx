@@ -4,6 +4,12 @@ subtitle: Migrating to the router from @apollo/gateway
 description: Learn how to migrate a federated graph from @apollo/gateway to the Apollo GraphOS Router or Apollo Router Core without any changes to your subgraphs.
 ---
 
+<SummitCallout
+  topic="router adoption"
+  panelName="GraphOS Router Success Stories"
+URL="https://reg.summit.graphql.com/flow/apollo/summit24/AttendeePortal/page/catalog/session/1718978817067001IOVg"
+/>
+
 Learn how to migrate a federated supergraph using the `@apollo/gateway` library to the GraphOS Router or Apollo Router Core and gain significant performance improvements while making zero changes to your subgraphs.
 
 ## What's different?
@@ -132,6 +138,12 @@ Examples for each are provided in their respective documentation, and in the [Ro
 ## Kubernetes deployment
 
 For migrating to the router deployed on Kubernetes, see some tips for [configuring your router deployment](./containerization/kubernetes/#configure-for-migration-from-gateway).
+
+## Responses and errors
+
+Apollo Gateway runs its core GraphQL server using Apollo Server and a user configured HTTP server. GraphOS Router is built as an all-in-one product with the GraphQL and HTTP server bundled together. With this change there may be some slight difference to the logic of HTTP status codes or GraphQL error extension codes.
+
+Refer the full list of [router error codes](./errors) for any changes to your gateway implementation. If you need to customize the responses, refer to [router customizations](./customizations/overview).
 
 ## Reporting migration issues
 

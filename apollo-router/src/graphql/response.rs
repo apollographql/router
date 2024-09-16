@@ -9,6 +9,7 @@ use serde_json_bytes::Map;
 
 use crate::error::Error;
 use crate::error::FetchError;
+use crate::graphql::IntoGraphQLErrors;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
@@ -241,6 +242,35 @@ impl IncrementalResponse {
     /// append_errors default the errors `path` with the one provided.
     pub fn append_errors(&mut self, errors: &mut Vec<Error>) {
         self.errors.append(errors)
+    }
+}
+
+impl From<apollo_compiler::execution::Response> for Response {
+    fn from(response: apollo_compiler::execution::Response) -> Response {
+        let apollo_compiler::execution::Response {
+            errors,
+            data,
+            extensions,
+        } = response;
+        Self {
+            errors: errors.into_graphql_errors().unwrap(),
+            data: match data {
+                apollo_compiler::execution::ResponseData::Object(map) => {
+                    Some(serde_json_bytes::Value::Object(map))
+                }
+                apollo_compiler::execution::ResponseData::Null => {
+                    Some(serde_json_bytes::Value::Null)
+                }
+                apollo_compiler::execution::ResponseData::Absent => None,
+            },
+            extensions,
+            label: None,
+            path: None,
+            has_next: None,
+            subscribed: None,
+            created_at: None,
+            incremental: Vec::new(),
+        }
     }
 }
 

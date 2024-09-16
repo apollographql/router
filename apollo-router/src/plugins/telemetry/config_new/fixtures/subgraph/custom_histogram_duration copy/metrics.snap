@@ -1,0 +1,23 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
+description: standard instrument http.client.request.duration
+expression: "&metrics.all()"
+info:
+  telemetry:
+    instrumentation:
+      instruments:
+        default_requirement_level: none
+        subgraph:
+          http.client.request.duration:
+            attributes:
+              subgraph.name:
+                alias: apollo_subgraph_name
+---
+- name: http.client.request.duration
+  description: Duration of HTTP client requests.
+  unit: s
+  data:
+    datapoints:
+      - sum: 0.1
+        attributes:
+          apollo_subgraph_name: products

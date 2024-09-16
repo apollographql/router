@@ -39,8 +39,7 @@ use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
 use crate::plugins::telemetry::tracing::datadog_exporter;
-use crate::plugins::telemetry::tracing::datadog_exporter::propagator::TRACE_STATE_MEASURE;
-use crate::plugins::telemetry::tracing::datadog_exporter::propagator::TRACE_STATE_TRUE_VALUE;
+use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
@@ -255,19 +254,17 @@ impl SpanExporter for ExporterWrapper {
             };
 
             // Unfortunately trace state is immutable, so we have to create a new one
-            if let Some(true) = self.span_metrics.get(final_span_name) {
-                let new_trace_state = span
-                    .span_context
-                    .trace_state()
-                    .insert(TRACE_STATE_MEASURE, TRACE_STATE_TRUE_VALUE)
-                    .expect("valid trace state");
-                span.span_context = SpanContext::new(
-                    span.span_context.trace_id(),
-                    span.span_context.span_id(),
-                    span.span_context.trace_flags(),
-                    span.span_context.is_remote(),
-                    new_trace_state,
-                )
+            if let Some(setting) = self.span_metrics.get(final_span_name) {
+                if *setting != span.span_context.trace_state().measuring_enabled() {
+                    let new_trace_state = span.span_context.trace_state().with_measuring(*setting);
+                    span.span_context = SpanContext::new(
+                        span.span_context.trace_id(),
+                        span.span_context.span_id(),
+                        span.span_context.trace_flags(),
+                        span.span_context.is_remote(),
+                        new_trace_state,
+                    )
+                }
             }
 
             // Set the span kind https://github.com/DataDog/dd-trace-go/blob/main/ddtrace/ext/span_kind.go

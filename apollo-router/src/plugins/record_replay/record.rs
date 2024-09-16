@@ -22,9 +22,6 @@ use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::spec::query::Query;
-use crate::spec::Schema;
-use crate::Configuration;
 
 const RECORD_HEADER: &str = "x-apollo-router-record";
 
@@ -48,7 +45,6 @@ struct Record {
     enabled: bool,
     supergraph_sdl: Arc<String>,
     storage_path: Arc<Path>,
-    schema: Arc<Schema>,
 }
 
 register_plugin!("experimental", "record", Record);
@@ -67,7 +63,6 @@ impl Plugin for Record {
             enabled: init.config.enabled,
             supergraph_sdl: init.supergraph_sdl.clone(),
             storage_path: storage_path.clone().into(),
-            schema: Arc::new(Schema::parse_arc(init.supergraph_sdl, &Default::default())?),
         };
 
         if init.config.enabled {
@@ -150,20 +145,11 @@ impl Plugin for Record {
             return service;
         }
 
-        let schema = self.schema.clone();
         let supergraph_sdl = self.supergraph_sdl.clone();
 
         ServiceBuilder::new()
             .map_request(move |req: supergraph::Request| {
-                if is_introspection(
-                    req.supergraph_request
-                        .body()
-                        .query
-                        .clone()
-                        .unwrap_or_default(),
-                    req.supergraph_request.body().operation_name.as_deref(),
-                    schema.clone(),
-                ) {
+                if is_introspection(&req) {
                     return req;
                 }
 
@@ -317,8 +303,18 @@ async fn write_file(dir: Arc<Path>, path: &PathBuf, contents: &[u8]) -> Result<(
     Ok(())
 }
 
-fn is_introspection(query: String, operation_name: Option<&str>, schema: Arc<Schema>) -> bool {
-    Query::parse(query, operation_name, &schema, &Configuration::default())
-        .map(|q| q.contains_introspection())
-        .unwrap_or_default()
+fn is_introspection(request: &supergraph::Request) -> bool {
+    request
+        .context
+        .unsupported_executable_document()
+        .is_some_and(|doc| {
+            doc.operations
+                .get(request.supergraph_request.body().operation_name.as_deref())
+                .ok()
+                .is_some_and(|op| {
+                    op.root_fields(&doc).all(|field| {
+                        matches!(field.name.as_str(), "__typename" | "__schema" | "__type")
+                    })
+                })
+        })
 }

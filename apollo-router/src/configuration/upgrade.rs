@@ -144,7 +144,7 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
                 }
             }
             Action::Change { path, from, to } => {
-                if !jsonpath_lib::select(config, &format!("$.{path} == {from}"))
+                if !jsonpath_lib::select(config, &format!("$[?(@.{path} == {from})]"))
                     .unwrap_or_default()
                     .is_empty()
                 {

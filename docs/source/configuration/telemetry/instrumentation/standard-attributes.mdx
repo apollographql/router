@@ -22,6 +22,21 @@ telemetry:
           http.response.status_code: true
 ```
 
+### Alias
+
+If you don't want to use the standard name you can still create an alias and use that alias for the name, for example:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    spans:
+      router:
+        attributes:
+          # Standard attributes
+          http.response.status_code:
+            alias: status_code # It will be named status_code instead of http.response.status_code
+```
+
 ### Attribute configuration reference 
 
 <RouterServices />

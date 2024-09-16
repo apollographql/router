@@ -92,10 +92,10 @@ async fn config(
             Some(serde_json::Value::Bool(use_legacy_request_span))
         })
         .expect("Could not sub in endpoint");
-    config = jsonpath_lib::replace_with(config, "$.preview_demand_control.enabled", &mut |_| {
+    config = jsonpath_lib::replace_with(config, "$.demand_control.enabled", &mut |_| {
         Some(serde_json::Value::Bool(demand_control))
     })
-    .expect("Could not sub in preview_demand_control");
+    .expect("Could not sub in demand_control");
 
     config = jsonpath_lib::replace_with(
         config,

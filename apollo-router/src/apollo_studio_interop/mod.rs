@@ -169,65 +169,6 @@ pub(crate) struct ComparableUsageReporting {
     pub(crate) result: UsageReporting,
 }
 
-/// Enum specifying the result of a comparison.
-#[derive(Debug)]
-pub(crate) enum UsageReportingComparisonResult {
-    /// The UsageReporting instances are the same
-    Equal,
-    /// The stats_report_key in the UsageReporting instances are different
-    StatsReportKeyNotEqual,
-    /// The referenced_fields in the UsageReporting instances are different. When comparing referenced
-    /// fields, we ignore the ordering of field names.
-    ReferencedFieldsNotEqual,
-    /// Both the stats_report_key and referenced_fields in the UsageReporting instances are different.
-    BothNotEqual,
-}
-
-impl ComparableUsageReporting {
-    /// Compare this to another UsageReporting.
-    pub(crate) fn compare(&self, other: &UsageReporting) -> UsageReportingComparisonResult {
-        let sig_equal = self.result.stats_report_key == other.stats_report_key;
-        let refs_equal = self.compare_referenced_fields(&other.referenced_fields_by_type);
-        match (sig_equal, refs_equal) {
-            (true, true) => UsageReportingComparisonResult::Equal,
-            (false, true) => UsageReportingComparisonResult::StatsReportKeyNotEqual,
-            (true, false) => UsageReportingComparisonResult::ReferencedFieldsNotEqual,
-            (false, false) => UsageReportingComparisonResult::BothNotEqual,
-        }
-    }
-
-    fn compare_referenced_fields(
-        &self,
-        other_ref_fields: &HashMap<String, ReferencedFieldsForType>,
-    ) -> bool {
-        let self_ref_fields = &self.result.referenced_fields_by_type;
-        if self_ref_fields.len() != other_ref_fields.len() {
-            return false;
-        }
-
-        for (name, self_refs) in self_ref_fields.iter() {
-            let maybe_other_refs = other_ref_fields.get(name);
-            if let Some(other_refs) = maybe_other_refs {
-                if self_refs.is_interface != other_refs.is_interface {
-                    return false;
-                }
-
-                let self_field_names_set: HashSet<_> =
-                    self_refs.field_names.clone().into_iter().collect();
-                let other_field_names_set: HashSet<_> =
-                    other_refs.field_names.clone().into_iter().collect();
-                if self_field_names_set != other_field_names_set {
-                    return false;
-                }
-            } else {
-                return false;
-            }
-        }
-
-        true
-    }
-}
-
 /// Generate a ComparableUsageReporting containing the stats_report_key (a normalized version of the operation signature)
 /// and referenced fields of an operation. The document used to generate the signature and for the references can be
 /// different to handle cases where the operation has been filtered, but we want to keep the same signature.

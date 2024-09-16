@@ -472,7 +472,7 @@ impl TestExecution {
             writeln!(out, "assertion `left == right` failed").unwrap();
             writeln!(
                 out,
-                " expected: {}",
+                "expected: {}",
                 serde_json::to_string(&expected_response).unwrap()
             )
             .unwrap();

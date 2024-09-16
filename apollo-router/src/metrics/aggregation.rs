@@ -99,9 +99,6 @@ pub(crate) enum InstrumentWrapper {
     F64Histogram {
         _keep_alive: Arc<Histogram<f64>>,
     },
-    U64Gauge {
-        _keep_alive: Arc<ObservableGauge<u64>>,
-    },
 }
 
 #[derive(Eq, PartialEq, Hash)]

@@ -429,27 +429,7 @@ mod test {
     #[test]
     fn test_executable_document_access() {
         let c = Context::new();
-        let schema = r#"
-        schema
-          @core(feature: "https://specs.apollo.dev/core/v0.1"),
-          @core(feature: "https://specs.apollo.dev/join/v0.1")
-        {
-          query: Query
-        }
-        type Query {
-          me: String
-        }
-        directive @core(feature: String!) repeatable on SCHEMA
-        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-
-        enum join__Graph {
-            ACCOUNTS @join__graph(name:"accounts" url: "http://localhost:4001/graphql")
-            INVENTORY
-              @join__graph(name: "inventory", url: "http://localhost:4004/graphql")
-            PRODUCTS
-            @join__graph(name: "products" url: "http://localhost:4003/graphql")
-            REVIEWS @join__graph(name: "reviews" url: "http://localhost:4002/graphql")
-        }"#;
+        let schema = include_str!("../testdata/minimal_supergraph.graphql");
         let schema = Schema::parse(schema, &Default::default()).unwrap();
         let document =
             Query::parse_document("{ me }", None, &schema, &Configuration::default()).unwrap();

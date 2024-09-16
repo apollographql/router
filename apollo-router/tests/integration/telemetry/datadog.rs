@@ -1,5 +1,6 @@
 extern crate core;
 
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::time::Duration;
 
@@ -51,6 +52,7 @@ async fn test_default_span_names() -> Result<(), BoxError> {
             .unwrap(),
         id.to_datadog()
     );
+    router.graceful_shutdown().await;
     TraceSpec::builder()
         .services(["client", "router", "subgraph"].into())
         .span_names(
@@ -72,7 +74,6 @@ async fn test_default_span_names() -> Result<(), BoxError> {
         .build()
         .validate_trace(id)
         .await?;
-    router.graceful_shutdown().await;
     Ok(())
 }
 
@@ -103,6 +104,7 @@ async fn test_override_span_names() -> Result<(), BoxError> {
             .unwrap(),
         id.to_datadog()
     );
+    router.graceful_shutdown().await;
     TraceSpec::builder()
         .services(["client", "router", "subgraph"].into())
         .span_names(
@@ -124,7 +126,6 @@ async fn test_override_span_names() -> Result<(), BoxError> {
         .build()
         .validate_trace(id)
         .await?;
-    router.graceful_shutdown().await;
     Ok(())
 }
 
@@ -155,6 +156,7 @@ async fn test_override_span_names_late() -> Result<(), BoxError> {
             .unwrap(),
         id.to_datadog()
     );
+    router.graceful_shutdown().await;
     TraceSpec::builder()
         .services(["client", "router", "subgraph"].into())
         .span_names(
@@ -176,7 +178,6 @@ async fn test_override_span_names_late() -> Result<(), BoxError> {
         .build()
         .validate_trace(id)
         .await?;
-    router.graceful_shutdown().await;
     Ok(())
 }
 
@@ -205,6 +206,7 @@ async fn test_basic() -> Result<(), BoxError> {
             .unwrap(),
         id.to_datadog()
     );
+    router.graceful_shutdown().await;
     TraceSpec::builder()
         .operation_name("ExampleQuery")
         .services(["client", "router", "subgraph"].into())
@@ -239,7 +241,74 @@ async fn test_basic() -> Result<(), BoxError> {
         .build()
         .validate_trace(id)
         .await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_with_parent_span() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Datadog)
+        .config(include_str!("fixtures/datadog.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
+    let mut headers = HashMap::new();
+    headers.insert(
+        "traceparent".to_string(),
+        String::from("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"),
+    );
+    let (id, result) = router.execute_query_with_headers(&query, headers).await;
+    assert_eq!(
+        result
+            .headers()
+            .get("apollo-custom-trace-id")
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        id.to_datadog()
+    );
     router.graceful_shutdown().await;
+    TraceSpec::builder()
+        .operation_name("ExampleQuery")
+        .services(["client", "router", "subgraph"].into())
+        .span_names(
+            [
+                "query_planning",
+                "client_request",
+                "ExampleQuery__products__0",
+                "products",
+                "fetch",
+                "/",
+                "execution",
+                "ExampleQuery",
+                "subgraph server",
+                "parse_query",
+            ]
+            .into(),
+        )
+        .measured_spans(
+            [
+                "query_planning",
+                "subgraph",
+                "http_request",
+                "subgraph_request",
+                "router",
+                "execution",
+                "supergraph",
+                "parse_query",
+            ]
+            .into(),
+        )
+        .build()
+        .validate_trace(id)
+        .await?;
     Ok(())
 }
 
@@ -314,6 +383,7 @@ async fn test_resource_mapping_override() -> Result<(), BoxError> {
         .get("apollo-custom-trace-id")
         .unwrap()
         .is_empty());
+    router.graceful_shutdown().await;
     TraceSpec::builder()
         .services(["client", "router", "subgraph"].into())
         .span_names(
@@ -334,7 +404,6 @@ async fn test_resource_mapping_override() -> Result<(), BoxError> {
         .build()
         .validate_trace(id)
         .await?;
-    router.graceful_shutdown().await;
     Ok(())
 }
 
@@ -359,6 +428,7 @@ async fn test_span_metrics() -> Result<(), BoxError> {
         .get("apollo-custom-trace-id")
         .unwrap()
         .is_empty());
+    router.graceful_shutdown().await;
     TraceSpec::builder()
         .operation_name("ExampleQuery")
         .services(["client", "router", "subgraph"].into())
@@ -381,7 +451,6 @@ async fn test_span_metrics() -> Result<(), BoxError> {
         .build()
         .validate_trace(id)
         .await?;
-    router.graceful_shutdown().await;
     Ok(())
 }
 
@@ -426,12 +495,12 @@ impl TraceSpec {
             .await?;
         tracing::debug!("{}", serde_json::to_string_pretty(&trace)?);
         self.verify_trace_participants(&trace)?;
+        self.verify_spans_present(&trace)?;
+        self.validate_measured_spans(&trace)?;
         self.verify_operation_name(&trace)?;
         self.verify_priority_sampled(&trace)?;
         self.verify_version(&trace)?;
-        self.verify_spans_present(&trace)?;
         self.validate_span_kinds(&trace)?;
-        self.validate_measured_spans(&trace)?;
         Ok(())
     }
 
@@ -581,6 +650,8 @@ impl TraceSpec {
     fn verify_priority_sampled(&self, trace: &Value) -> Result<(), BoxError> {
         let binding = trace.select_path("$.._sampling_priority_v1")?;
         let sampling_priority = binding.first();
+        // having this priority set to 1.0 everytime is not a problem as we're doing pre sampling in the full telemetry stack
+        // So basically if the trace was not sampled it wouldn't get to this stage and so nothing would be sent
         assert_eq!(
             sampling_priority
                 .expect("sampling priority expected")

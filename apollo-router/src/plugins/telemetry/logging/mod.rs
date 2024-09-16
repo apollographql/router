@@ -22,13 +22,13 @@ mod test {
                         .body("query { foo }")
                         .build()
                         .expect("expecting valid request"),
-                    |_r| {
+                    |_r| async {
                         tracing::info!("response");
-                        router::Response::fake_builder()
+                        Ok(router::Response::fake_builder()
                             .header("custom-header", "val1")
                             .data(serde_json::json!({"data": "res"}))
                             .build()
-                            .expect("expecting valid response")
+                            .expect("expecting valid response"))
                     },
                 )
                 .await

@@ -17,7 +17,7 @@ const DEFAULT_INTROSPECTION_CACHE_CAPACITY: NonZeroUsize =
 /// A cache containing our well known introspection queries.
 pub(crate) struct Introspection {
     cache: CacheStorage<String, Response>,
-    planner: Arc<Planner<QueryPlanResult>>,
+    pub(crate) planner: Arc<Planner<QueryPlanResult>>,
 }
 
 impl Introspection {

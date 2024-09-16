@@ -356,10 +356,24 @@ fn write_selections(
 impl fmt::Display for FetchDataPathElement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Key(name) => f.write_str(name),
-            Self::AnyIndex => f.write_str("@"),
+            Self::Key(name, conditions) => {
+                f.write_str(name)?;
+                write_conditions(conditions, f)
+            }
+            Self::AnyIndex(conditions) => {
+                f.write_str("@")?;
+                write_conditions(conditions, f)
+            }
             Self::TypenameEquals(name) => write!(f, "... on {name}"),
         }
+    }
+}
+
+fn write_conditions(conditions: &[Name], f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    if !conditions.is_empty() {
+        write!(f, "|[{}]", conditions.join(","))
+    } else {
+        Ok(())
     }
 }
 

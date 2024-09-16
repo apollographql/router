@@ -16,6 +16,7 @@ use crate::query_graph::graph_path::OpGraphPath;
 use crate::query_graph::graph_path::OpGraphPathTrigger;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphNode;
+use crate::utils::FallibleIterator;
 
 /// A "merged" tree representation for a vector of `GraphPath`s that start at a common query graph
 /// node, in which each node of the tree corresponds to a node in the query graph, and a tree's node
@@ -153,12 +154,9 @@ impl OpPathTree {
         if node_weight.source != *target {
             return Ok(false);
         }
-        for child in &self.childs {
-            if !child.tree.is_all_in_same_subgraph_internal(target)? {
-                return Ok(false);
-            }
-        }
-        Ok(true)
+        self.childs
+            .iter()
+            .fallible_all(|child| child.tree.is_all_in_same_subgraph_internal(target))
     }
 
     fn fmt_internal(
@@ -464,7 +462,6 @@ where
 mod tests {
     use std::sync::Arc;
 
-    use apollo_compiler::executable::DirectiveList;
     use apollo_compiler::ExecutableDocument;
     use petgraph::stable_graph::NodeIndex;
     use petgraph::visit::EdgeRef;
@@ -542,8 +539,8 @@ mod tests {
                 schema: query_graph.schema().unwrap().clone(),
                 field_position: field_def.clone(),
                 alias: None,
-                arguments: Arc::new(Vec::new()),
-                directives: Arc::new(DirectiveList::new()),
+                arguments: Default::default(),
+                directives: Default::default(),
                 sibling_typename: None,
             };
             let trigger = OpGraphPathTrigger::OpPathElement(OpPathElement::Field(Field::new(data)));

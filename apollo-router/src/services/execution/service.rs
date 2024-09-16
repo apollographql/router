@@ -190,7 +190,7 @@ impl ExecutionService {
         let mut nullified_paths: Vec<Path> = vec![];
 
         let metrics_ref_mode = match &self.apollo_telemetry_config {
-            Some(conf) => conf.experimental_apollo_metrics_reference_mode,
+            Some(conf) => conf.metrics_reference_mode,
             _ => ApolloMetricsReferenceMode::default(),
         };
 
