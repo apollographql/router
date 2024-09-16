@@ -303,6 +303,16 @@ Invalidation requests are also reported under the following spans:
 
 Entity caching will greatly reduce traffic to subgraphs. Should there be an availability issue with a Redis cache, this could cause traffic to subgraphs to increase to a level where infrastructure becomes overwhelmed. To avoid such issues, the router should be configured with [rate limiting for subgraph requests](/router/configuration/traffic-shaping/#rate-limiting-1) to avoid overwhelming the subgraphs. It could also be paired with [subgraph query deduplication](/router/configuration/traffic-shaping/#query-deduplication) to further reduce traffic.
 
+#### Scalability and performance
+
+The scalability and performance of entity cache invalidation is based on its implementation with the Redis [`SCAN` command](https://redis.io/docs/latest/commands/scan/). The `SCAN` command provides a cursor for iterating over the entire key space and returns a list of keys matching a pattern. When executing an invalidation request, the router first runs a series of `SCAN` calls and then it runs [`DEL`](https://redis.io/docs/latest/commands/del/) calls for any matching keys. 
+
+The time complexity of a single invalidation request grows linearly with the number of entries, as each entry requires `SCAN` to iterate over. The router can also execute multiple invalidation requests simultaneously. This lowers latency but might increase the load on Redis instances.
+
+To help tune invalidation performance and scalability, you should benchmark the ratio of the invalidation rate against the number of entries that will be recorded. If it's too low, you can tune it with the following:
+- Increase the number of pooled Redis connections.
+- Increasing the `SCAN` count option. This shouldn't be too large, with 1000 as a generally reasonable value, because larger values will reduce the operation throughput of the Redis instance.
+- Use separate Redis instances for some subgraphs.
 ### Private information caching
 
 A subgraph can return a response with the header `Cache-Control: private`, indicating that it contains user-personalized data. Although this usually forbids intermediate servers from storing data, the router may be able to recognize different users and store their data in different parts of the cache.
