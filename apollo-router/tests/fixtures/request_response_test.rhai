@@ -35,6 +35,9 @@ fn process_common_request(check_context_method_and_id, check_body, request) {
     if request.uri.path != "/" {
         throw(`query: expected: "/", actual: ${request.uri.path}`);
     }
+    if request.uri.port != {} {
+        throw(`query: expected: {}, actual: ${request.uri.port}`);
+    }
 }
 
 fn process_router_request(request){
@@ -149,6 +152,18 @@ fn process_common_response(response) {
     }
     if type_of(response.id) != "string" {
         throw(`query: expected: "string", actual: ${type_of(response.id)}`);
+    }
+}
+
+fn test_parse_request_details(request){
+    if request.uri.host != "not-default" {
+        throw(`query: expected: not-default, actual: ${request.uri.host}`);
+    }
+    if request.uri.path != "/path" {
+        throw(`query: expected: "/path", actual: ${request.uri.path}`);
+    }
+    if request.uri.port != 8080 {
+        throw(`query: expected: 8080, actual: ${request.uri.port}`);
     }
 }
 

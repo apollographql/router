@@ -449,6 +449,18 @@ async fn it_can_process_subgraph_response() {
         .expect("test failed");
 }
 
+#[tokio::test]
+async fn it_can_parse_request_uri() {
+    let mut request = SupergraphRequest::canned_builder()
+        .operation_name("canned")
+        .build()
+        .expect("build canned supergraph request");
+    *request.supergraph_request.uri_mut() = "https://not-default:8080/path".parse().unwrap();
+    call_rhai_function_with_arg("test_parse_request_details", request)
+        .await
+        .expect("test failed");
+}
+
 #[test]
 fn it_can_urlencode_string() {
     let engine = new_rhai_test_engine();
@@ -657,7 +669,7 @@ async fn it_can_process_string_subgraph_forbidden() {
     if let Err(error) = call_rhai_function("process_subgraph_response_string").await {
         let processed_error = process_error(error);
         assert_eq!(processed_error.status, StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(processed_error.message, Some("rhai execution error: 'Runtime error: I have raised an error (line 229, position 5)'".to_string()));
+        assert_eq!(processed_error.message, Some("rhai execution error: 'Runtime error: I have raised an error (line 238, position 5)'".to_string()));
     } else {
         // Test failed
         panic!("error processed incorrectly");
@@ -685,7 +697,7 @@ async fn it_cannot_process_om_subgraph_missing_message_and_body() {
         assert_eq!(
             processed_error.message,
             Some(
-                "rhai execution error: 'Runtime error: #{\"status\": 400} (line 240, position 5)'"
+                "rhai execution error: 'Runtime error: #{\"status\": 400} (line 249, position 5)'"
                     .to_string()
             )
         );
