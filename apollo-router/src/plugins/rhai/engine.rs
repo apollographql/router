@@ -46,6 +46,10 @@ use crate::graphql::Response;
 use crate::http_ext;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::cache::entity::CONTEXT_CACHE_KEY;
+use crate::plugins::demand_control::COST_ACTUAL_KEY;
+use crate::plugins::demand_control::COST_ESTIMATED_KEY;
+use crate::plugins::demand_control::COST_RESULT_KEY;
+use crate::plugins::demand_control::COST_STRATEGY_KEY;
 use crate::plugins::subscription::SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS;
 use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::Context;
@@ -1777,6 +1781,14 @@ impl Rhai {
         );
         global_variables.insert("APOLLO_ENTITY_CACHE_KEY".into(), CONTEXT_CACHE_KEY.into());
         global_variables.insert("APOLLO_OPERATION_ID".into(), APOLLO_OPERATION_ID.into());
+        // Demand Control Context Keys
+        global_variables.insert(
+            "APOLLO_COST_ESTIMATED_KEY".into(),
+            COST_ESTIMATED_KEY.into(),
+        );
+        global_variables.insert("APOLLO_COST_ACTUAL_KEY".into(), COST_ACTUAL_KEY.into());
+        global_variables.insert("APOLLO_COST_STRATEGY_KEY".into(), COST_STRATEGY_KEY.into());
+        global_variables.insert("APOLLO_COST_RESULT_KEY".into(), COST_RESULT_KEY.into());
 
         let shared_globals = Arc::new(global_variables);
 

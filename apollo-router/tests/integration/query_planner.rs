@@ -13,7 +13,7 @@ const BOTH_BEST_EFFORT_QP: &str = "experimental_query_planner_mode: both_best_ef
 async fn fed1_schema_with_legacy_qp() {
     let mut router = IntegrationTest::builder()
         .config(LEGACY_QP)
-        .supergraph("../examples/graphql/local.graphql")
+        .supergraph("../examples/graphql/supergraph-fed1.graphql")
         .build()
         .await;
     router.start().await;
@@ -26,7 +26,7 @@ async fn fed1_schema_with_legacy_qp() {
 async fn fed1_schema_with_new_qp() {
     let mut router = IntegrationTest::builder()
         .config(NEW_QP)
-        .supergraph("../examples/graphql/local.graphql")
+        .supergraph("../examples/graphql/supergraph-fed1.graphql")
         .build()
         .await;
     router.start().await;
@@ -44,7 +44,7 @@ async fn fed1_schema_with_new_qp() {
 async fn fed1_schema_with_both_qp() {
     let mut router = IntegrationTest::builder()
         .config(BOTH_QP)
-        .supergraph("../examples/graphql/local.graphql")
+        .supergraph("../examples/graphql/supergraph-fed1.graphql")
         .build()
         .await;
     router.start().await;
@@ -62,7 +62,7 @@ async fn fed1_schema_with_both_qp() {
 async fn fed1_schema_with_both_best_effort_qp() {
     let mut router = IntegrationTest::builder()
         .config(BOTH_BEST_EFFORT_QP)
-        .supergraph("../examples/graphql/local.graphql")
+        .supergraph("../examples/graphql/supergraph-fed1.graphql")
         .build()
         .await;
     router.start().await;
@@ -84,7 +84,7 @@ async fn fed1_schema_with_legacy_qp_reload_to_new_keep_previous_config() {
     let config = format!("{PROMETHEUS_METRICS_CONFIG}\n{LEGACY_QP}");
     let mut router = IntegrationTest::builder()
         .config(config)
-        .supergraph("../examples/graphql/local.graphql")
+        .supergraph("../examples/graphql/supergraph-fed1.graphql")
         .build()
         .await;
     router.start().await;
@@ -111,7 +111,7 @@ async fn fed1_schema_with_legacy_qp_reload_to_both_best_effort_keep_previous_con
     let config = format!("{PROMETHEUS_METRICS_CONFIG}\n{LEGACY_QP}");
     let mut router = IntegrationTest::builder()
         .config(config)
-        .supergraph("../examples/graphql/local.graphql")
+        .supergraph("../examples/graphql/supergraph-fed1.graphql")
         .build()
         .await;
     router.start().await;
@@ -143,7 +143,7 @@ async fn fed2_schema_with_new_qp() {
     let config = format!("{PROMETHEUS_METRICS_CONFIG}\n{NEW_QP}");
     let mut router = IntegrationTest::builder()
         .config(config)
-        .supergraph("../examples/graphql/supergraph-fed2.graphql")
+        .supergraph("../examples/graphql/supergraph.graphql")
         .build()
         .await;
     router.start().await;

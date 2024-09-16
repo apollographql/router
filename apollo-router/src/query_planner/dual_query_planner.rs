@@ -22,6 +22,7 @@ use super::FlattenNode;
 use crate::error::format_bridge_errors;
 use crate::executable::USING_CATCH_UNWIND;
 use crate::query_planner::bridge_query_planner::metric_query_planning_plan_duration;
+use crate::query_planner::bridge_query_planner::JS_QP_MODE;
 use crate::query_planner::bridge_query_planner::RUST_QP_MODE;
 use crate::query_planner::convert::convert_root_query_plan_node;
 use crate::query_planner::render_diff;
@@ -38,6 +39,7 @@ const WORKER_THREAD_COUNT: usize = 1;
 
 pub(crate) struct BothModeComparisonJob {
     pub(crate) rust_planner: Arc<QueryPlanner>,
+    pub(crate) js_duration: f64,
     pub(crate) document: Arc<Valid<ExecutableDocument>>,
     pub(crate) operation_name: Option<String>,
     pub(crate) js_result: Result<QueryPlanResult, Arc<Vec<router_bridge::planner::PlanError>>>,
@@ -88,7 +90,11 @@ impl BothModeComparisonJob {
             // No question mark operator or macro from here …
             let result = self.rust_planner.build_query_plan(&self.document, name);
 
-            metric_query_planning_plan_duration(RUST_QP_MODE, start);
+            let elapsed = start.elapsed().as_secs_f64();
+            metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
+
+            metric_query_planning_plan_both_comparison_duration(RUST_QP_MODE, elapsed);
+            metric_query_planning_plan_both_comparison_duration(JS_QP_MODE, self.js_duration);
 
             // … to here, so the thread can only eiher reach here or panic.
             // We unset USING_CATCH_UNWIND in both cases.
@@ -167,6 +173,18 @@ impl BothModeComparisonJob {
             "generation.rust_error" = rust_result.is_err()
         );
     }
+}
+
+pub(crate) fn metric_query_planning_plan_both_comparison_duration(
+    planner: &'static str,
+    elapsed: f64,
+) {
+    f64_histogram!(
+        "apollo.router.operations.query_planner.both.duration",
+        "Comparing JS v.s. Rust query plan duration.",
+        elapsed,
+        "planner" = planner
+    );
 }
 
 // Specific comparison functions
@@ -817,5 +835,33 @@ mod ast_comparison_tests {
         let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
         let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
         assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Instant;
+
+    use super::*;
+
+    #[test]
+    fn test_metric_query_planning_plan_both_comparison_duration() {
+        let start = Instant::now();
+        let elapsed = start.elapsed().as_secs_f64();
+        metric_query_planning_plan_both_comparison_duration(RUST_QP_MODE, elapsed);
+        assert_histogram_exists!(
+            "apollo.router.operations.query_planner.both.duration",
+            f64,
+            "planner" = "rust"
+        );
+
+        let start = Instant::now();
+        let elapsed = start.elapsed().as_secs_f64();
+        metric_query_planning_plan_both_comparison_duration(JS_QP_MODE, elapsed);
+        assert_histogram_exists!(
+            "apollo.router.operations.query_planner.both.duration",
+            f64,
+            "planner" = "js"
+        );
     }
 }

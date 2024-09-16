@@ -29,6 +29,7 @@ use crate::cache::estimate_size;
 use crate::cache::storage::InMemoryCache;
 use crate::cache::storage::ValueType;
 use crate::cache::DeduplicatingCache;
+use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
 use crate::configuration::QueryPlanReuseMode;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
@@ -183,7 +184,7 @@ where
         previous_cache: Option<InMemoryCachePlanner>,
         count: Option<usize>,
         experimental_reuse_query_plans: QueryPlanReuseMode,
-        experimental_pql_prewarm: bool,
+        experimental_pql_prewarm: &PersistedQueriesPrewarmQueryPlanCache,
     ) {
         let _timer = Timer::new(|duration| {
             ::tracing::info!(
@@ -238,8 +239,9 @@ where
 
         cache_keys.shuffle(&mut thread_rng());
 
-        let should_warm_with_pqs =
-            (experimental_pql_prewarm && previous_cache.is_none()) || previous_cache.is_some();
+        let should_warm_with_pqs = (experimental_pql_prewarm.on_startup
+            && previous_cache.is_none())
+            || (experimental_pql_prewarm.on_reload && previous_cache.is_some());
         let persisted_queries_operations = persisted_query_layer.all_operations();
 
         let capacity = if should_warm_with_pqs {
@@ -474,14 +476,19 @@ where
 }
 
 impl CachingQueryPlanner<BridgeQueryPlannerPool> {
-    pub(crate) fn planners(&self) -> Vec<Arc<Planner<QueryPlanResult>>> {
-        self.delegate.planners()
+    pub(crate) fn js_planners(&self) -> Vec<Arc<Planner<QueryPlanResult>>> {
+        self.delegate.js_planners()
     }
 
     pub(crate) fn subgraph_schemas(
         &self,
     ) -> Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>> {
         self.delegate.subgraph_schemas()
+    }
+
+    pub(crate) fn activate(&self) {
+        self.cache.activate();
+        self.delegate.activate();
     }
 }
 

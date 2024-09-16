@@ -15,6 +15,7 @@ use displaydoc::Display;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 pub(crate) use persisted_queries::PersistedQueries;
+pub(crate) use persisted_queries::PersistedQueriesPrewarmQueryPlanCache;
 #[cfg(test)]
 pub(crate) use persisted_queries::PersistedQueriesSafelist;
 use regex::Regex;
@@ -446,6 +447,7 @@ impl Configuration {
                 apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig {
                     enable_defer: self.supergraph.defer_support,
                 },
+            type_conditioned_fetching: self.experimental_type_conditioned_fetching,
             debug: Default::default(),
         }
     }
