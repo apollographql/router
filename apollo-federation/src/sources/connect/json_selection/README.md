@@ -84,12 +84,11 @@ below.
 JSONSelection        ::= NakedSubSelection | PathSelection
 NakedSubSelection    ::= NamedSelection* StarSelection?
 SubSelection         ::= "{" NakedSubSelection "}"
-NamedSelection       ::= NamedPathSelection | NamedFieldSelection | NamedQuotedSelection | NamedGroupSelection
+NamedSelection       ::= NamedPathSelection | NamedFieldSelection | NamedGroupSelection
 NamedPathSelection   ::= Alias PathSelection
-NamedFieldSelection  ::= Alias? Identifier SubSelection?
-NamedQuotedSelection ::= Alias LitString SubSelection?
+NamedFieldSelection  ::= Alias? Key SubSelection?
 NamedGroupSelection  ::= Alias SubSelection
-Alias                ::= Identifier ":"
+Alias                ::= Key ":"
 PathSelection        ::= (VarPath | KeyPath | AtPath) SubSelection?
 VarPath              ::= "$" (NO_SPACE Identifier)? PathStep*
 KeyPath              ::= Key PathStep+
@@ -380,9 +379,6 @@ from the input JSON to match the desired output shape.
 In addition to renaming, `Alias` can provide names to otherwise anonymous
 structures, such as those selected by `PathSelection`, `NamedGroupSelection`, or
 `StarSelection` syntax.
-
-Because we always want to generate GraphQL-safe output properties, an `Alias`
-must be a valid GraphQL identifier, rather than a quoted string.
 
 ### `PathSelection ::=`
 

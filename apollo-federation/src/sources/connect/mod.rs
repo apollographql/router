@@ -20,8 +20,8 @@ pub use json_selection::PathSelection;
 pub use json_selection::SubSelection;
 pub use models::CustomConfiguration;
 pub(crate) use spec::ConnectSpecDefinition;
-pub use url_template::Parameter;
 pub use url_template::URLTemplate;
+pub use url_template::Variable;
 
 pub use self::models::Connector;
 pub use self::models::EntityResolver;

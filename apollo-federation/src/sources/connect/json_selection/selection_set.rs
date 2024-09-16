@@ -27,6 +27,8 @@ use multimap::MultiMap;
 
 use super::known_var::KnownVariable;
 use super::lit_expr::LitExpr;
+use super::location::Ranged;
+use super::location::WithRange;
 use super::parser::MethodArgs;
 use super::parser::PathList;
 use crate::sources::connect::json_selection::Alias;
@@ -64,19 +66,27 @@ impl SubSelection {
         // the user defined a __typename mapping.
         if field_map.contains_key("__typename") {
             new_selections.push(NamedSelection::Path(
-                Alias {
-                    name: "__typename".to_string(),
-                },
+                Alias::new("__typename"),
                 PathSelection {
-                    path: PathList::Var(
-                        KnownVariable::Dollar,
-                        Box::new(PathList::Method(
-                            "echo".to_string(),
-                            Some(MethodArgs(vec![LitExpr::String(
-                                selection_set.ty.to_string(),
-                            )])),
-                            Box::new(PathList::Empty),
-                        )),
+                    path: WithRange::new(
+                        PathList::Var(
+                            WithRange::new(KnownVariable::Dollar, None),
+                            WithRange::new(
+                                PathList::Method(
+                                    WithRange::new("echo".to_string(), None),
+                                    Some(MethodArgs {
+                                        args: vec![WithRange::new(
+                                            LitExpr::String(selection_set.ty.to_string()),
+                                            None,
+                                        )],
+                                        ..Default::default()
+                                    }),
+                                    WithRange::new(PathList::Empty, None),
+                                ),
+                                None,
+                            ),
+                        ),
+                        None,
                     ),
                 },
             ));
@@ -85,41 +95,21 @@ impl SubSelection {
         for selection in &self.selections {
             match selection {
                 NamedSelection::Field(alias, name, sub) => {
-                    let key = alias.as_ref().map(|a| a.name.as_str()).unwrap_or(name);
+                    let key = alias
+                        .as_ref()
+                        .map(|a| a.name.as_str())
+                        .unwrap_or(name.as_str());
                     if let Some(fields) = field_map.get_vec(key) {
                         if self.star.is_some() {
                             referenced_fields.insert(key);
                         }
                         for field in fields {
                             let field_response_key = field.response_key().as_str();
-                            let alias = if field_response_key == name {
-                                None
-                            } else {
-                                Some(Alias {
-                                    name: field_response_key.to_string(),
-                                })
-                            };
                             new_selections.push(NamedSelection::Field(
-                                alias,
-                                name.clone(),
-                                sub.as_ref()
-                                    .map(|sub| sub.apply_selection_set(&field.selection_set)),
-                            ));
-                        }
-                    } else if self.star.is_some() {
-                        dropped_fields.insert(key, ());
-                    }
-                }
-                NamedSelection::Quoted(alias, name, sub) => {
-                    let key = alias.name.as_str();
-                    if let Some(fields) = field_map.get_vec(key) {
-                        if self.star.is_some() {
-                            referenced_fields.insert(key);
-                        }
-                        for field in fields {
-                            new_selections.push(NamedSelection::Quoted(
-                                Alias {
-                                    name: field.response_key().to_string(),
+                                if field_response_key == name.as_str() {
+                                    None
+                                } else {
+                                    Some(Alias::new(field_response_key))
                                 },
                                 name.clone(),
                                 sub.as_ref()
@@ -140,9 +130,7 @@ impl SubSelection {
                         }
                         for field in fields {
                             new_selections.push(NamedSelection::Path(
-                                Alias {
-                                    name: field.response_key().to_string(),
-                                },
+                                Alias::new(field.response_key().as_str()),
                                 path_selection.apply_selection_set(&field.selection_set),
                             ));
                         }
@@ -157,9 +145,7 @@ impl SubSelection {
                     if let Some(fields) = field_map.get_vec(key) {
                         for field in fields {
                             new_selections.push(NamedSelection::Group(
-                                Alias {
-                                    name: field.response_key().to_string(),
-                                },
+                                Alias::new(field.response_key().as_str()),
                                 sub.apply_selection_set(&field.selection_set),
                             ));
                         }
@@ -175,8 +161,8 @@ impl SubSelection {
             for (dropped, _) in dropped_fields {
                 let name = format!("__unused__{dropped}");
                 new_selections.push(NamedSelection::Field(
-                    Some(Alias { name }),
-                    dropped.to_string(),
+                    Some(Alias::new(name.as_str())),
+                    WithRange::new(Key::field(dropped), None),
                     None,
                 ));
             }
@@ -185,6 +171,10 @@ impl SubSelection {
         Self {
             selections: new_selections,
             star: new_star,
+            // Keep the old range even though it may be inaccurate after the
+            // removal of selections, since it still indicates where the
+            // original SubSelection came from.
+            range: self.range.clone(),
         }
     }
 }
@@ -193,7 +183,10 @@ impl PathSelection {
     /// Apply a selection set to create a new [`PathSelection`]
     pub fn apply_selection_set(&self, selection_set: &SelectionSet) -> Self {
         Self {
-            path: self.path.apply_selection_set(selection_set),
+            path: WithRange::new(
+                self.path.apply_selection_set(selection_set),
+                self.path.range(),
+            ),
         }
     }
 }
@@ -203,16 +196,16 @@ impl PathList {
         match self {
             Self::Var(name, path) => Self::Var(
                 name.clone(),
-                Box::new(path.apply_selection_set(selection_set)),
+                WithRange::new(path.apply_selection_set(selection_set), path.range()),
             ),
             Self::Key(key, path) => Self::Key(
                 key.clone(),
-                Box::new(path.apply_selection_set(selection_set)),
+                WithRange::new(path.apply_selection_set(selection_set), path.range()),
             ),
             Self::Method(method_name, args, path) => Self::Method(
                 method_name.clone(),
                 args.clone(),
-                Box::new(path.apply_selection_set(selection_set)),
+                WithRange::new(path.apply_selection_set(selection_set), path.range()),
             ),
             Self::Selection(sub) => Self::Selection(sub.apply_selection_set(selection_set)),
             Self::Empty => Self::Empty,
@@ -222,9 +215,8 @@ impl PathList {
 
 #[inline]
 fn key_name(path_selection: &PathSelection) -> Option<&str> {
-    match &path_selection.path {
-        PathList::Key(Key::Field(name), _) => Some(name),
-        PathList::Key(Key::Quoted(name), _) => Some(name),
+    match path_selection.path.as_ref() {
+        PathList::Key(key, _) => Some(key.as_str()),
         _ => None,
     }
 }
@@ -404,7 +396,7 @@ mod tests {
   b_alias: b
   c {
     e
-    h: "h"
+    "h"
     group: {
       j
     }

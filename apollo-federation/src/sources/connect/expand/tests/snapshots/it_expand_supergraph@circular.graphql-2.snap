@@ -6,7 +6,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ci
 {
     "one_Query_t_0": Connector {
         id: ConnectId {
-            label: "one.json http: GET /t/{$args.id!}",
+            label: "one.json http: GET /t/{$args.id}",
             subgraph_name: "one",
             source_name: Some(
                 "json",
@@ -38,20 +38,20 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ci
             connect_template: URLTemplate {
                 base: None,
                 path: [
-                    ParameterValue {
+                    Component {
                         parts: [
                             Text(
                                 "t",
                             ),
                         ],
                     },
-                    ParameterValue {
+                    Component {
                         parts: [
                             Var(
-                                VariableExpression {
-                                    var_path: "$args.id",
-                                    batch_separator: None,
-                                    required: true,
+                                Variable {
+                                    var_type: Args,
+                                    path: "id",
+                                    location: 4..12,
                                 },
                             ),
                         ],
@@ -68,11 +68,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ci
                 selections: [
                     Field(
                         None,
-                        "id",
+                        WithRange {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                0..2,
+                            ),
+                        },
                         None,
                     ),
                 ],
                 star: None,
+                range: Some(
+                    0..2,
+                ),
             },
         ),
         config: None,
@@ -81,7 +91,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ci
     },
     "one_T_ts_0": Connector {
         id: ConnectId {
-            label: "one.json http: GET /t/{$this.id!}/ts",
+            label: "one.json http: GET /t/{$this.id}/ts",
             subgraph_name: "one",
             source_name: Some(
                 "json",
@@ -113,25 +123,25 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ci
             connect_template: URLTemplate {
                 base: None,
                 path: [
-                    ParameterValue {
+                    Component {
                         parts: [
                             Text(
                                 "t",
                             ),
                         ],
                     },
-                    ParameterValue {
+                    Component {
                         parts: [
                             Var(
-                                VariableExpression {
-                                    var_path: "$this.id",
-                                    batch_separator: None,
-                                    required: true,
+                                Variable {
+                                    var_type: This,
+                                    path: "id",
+                                    location: 4..12,
                                 },
                             ),
                         ],
                     },
-                    ParameterValue {
+                    Component {
                         parts: [
                             Text(
                                 "ts",
@@ -150,11 +160,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ci
                 selections: [
                     Field(
                         None,
-                        "id",
+                        WithRange {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                0..2,
+                            ),
+                        },
                         None,
                     ),
                 ],
                 star: None,
+                range: Some(
+                    0..2,
+                ),
             },
         ),
         config: None,

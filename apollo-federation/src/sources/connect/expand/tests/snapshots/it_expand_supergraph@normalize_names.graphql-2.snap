@@ -49,16 +49,33 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/no
                 selections: [
                     Field(
                         None,
-                        "id",
+                        WithRange {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                0..2,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "a",
+                        WithRange {
+                            node: Field(
+                                "a",
+                            ),
+                            range: Some(
+                                3..4,
+                            ),
+                        },
                         None,
                     ),
                 ],
                 star: None,
+                range: Some(
+                    0..4,
+                ),
             },
         ),
         config: None,
@@ -67,7 +84,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/no
     },
     "connectors-subgraph_Query_user_0": Connector {
         id: ConnectId {
-            label: "connectors-subgraph.example http: GET /{$args.id!}",
+            label: "connectors-subgraph.example http: GET /{$args.id}",
             subgraph_name: "connectors-subgraph",
             source_name: Some(
                 "example",
@@ -99,13 +116,13 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/no
             connect_template: URLTemplate {
                 base: None,
                 path: [
-                    ParameterValue {
+                    Component {
                         parts: [
                             Var(
-                                VariableExpression {
-                                    var_path: "$args.id",
-                                    batch_separator: None,
-                                    required: true,
+                                Variable {
+                                    var_type: Args,
+                                    path: "id",
+                                    location: 2..10,
                                 },
                             ),
                         ],
@@ -122,21 +139,45 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/no
                 selections: [
                     Field(
                         None,
-                        "id",
+                        WithRange {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                0..2,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "a",
+                        WithRange {
+                            node: Field(
+                                "a",
+                            ),
+                            range: Some(
+                                3..4,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "b",
+                        WithRange {
+                            node: Field(
+                                "b",
+                            ),
+                            range: Some(
+                                5..6,
+                            ),
+                        },
                         None,
                     ),
                 ],
                 star: None,
+                range: Some(
+                    0..6,
+                ),
             },
         ),
         config: None,

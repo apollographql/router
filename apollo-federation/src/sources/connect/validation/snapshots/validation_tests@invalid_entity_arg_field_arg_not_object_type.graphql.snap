@@ -1,0 +1,27 @@
+---
+source: apollo-federation/src/sources/connect/validation/mod.rs
+expression: "format!(\"{:#?}\", errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_entity_arg_field_arg_not_object_type.graphql
+---
+[
+    Message {
+        code: EntityResolverArgumentMismatch,
+        message: "`Query.product` with `@connect(entity: true)` has invalid arguments. Mismatched type on field `id` - expected `ID` but found `ProductInput`.",
+        locations: [
+            LineColumn {
+                line: 13,
+                column: 9,
+            }..LineColumn {
+                line: 13,
+                column: 26,
+            },
+            LineColumn {
+                line: 18,
+                column: 9,
+            }..LineColumn {
+                line: 18,
+                column: 21,
+            },
+        ],
+    },
+]

@@ -327,11 +327,15 @@ fn serialize_response(
 fn aggregate_apply_to_errors(errors: &[ApplyToError]) -> Vec<serde_json_bytes::Value> {
     let mut aggregated = vec![];
 
-    for (key, group) in &errors.iter().chunk_by(|e| (e.message(), e.path())) {
+    for (key, group) in &errors
+        .iter()
+        .chunk_by(|e| (e.message(), e.path(), e.range()))
+    {
         let group = group.collect_vec();
         aggregated.push(json!({
             "message": key.0,
             "path": key.1,
+            "range": key.2,
             "count": group.len(),
         }));
     }

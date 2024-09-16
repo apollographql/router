@@ -49,49 +49,96 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                 selections: [
                     Field(
                         None,
-                        "a",
+                        WithRange {
+                            node: Field(
+                                "a",
+                            ),
+                            range: Some(
+                                0..1,
+                            ),
+                        },
                         Some(
                             SubSelection {
                                 selections: [
                                     Field(
                                         None,
-                                        "id",
+                                        WithRange {
+                                            node: Field(
+                                                "id",
+                                            ),
+                                            range: Some(
+                                                4..6,
+                                            ),
+                                        },
                                         None,
                                     ),
                                 ],
                                 star: None,
+                                range: Some(
+                                    2..8,
+                                ),
                             },
                         ),
                     ),
                     Field(
                         None,
-                        "b",
+                        WithRange {
+                            node: Field(
+                                "b",
+                            ),
+                            range: Some(
+                                9..10,
+                            ),
+                        },
                         Some(
                             SubSelection {
                                 selections: [
                                     Field(
                                         None,
-                                        "a",
+                                        WithRange {
+                                            node: Field(
+                                                "a",
+                                            ),
+                                            range: Some(
+                                                13..14,
+                                            ),
+                                        },
                                         Some(
                                             SubSelection {
                                                 selections: [
                                                     Field(
                                                         None,
-                                                        "id",
+                                                        WithRange {
+                                                            node: Field(
+                                                                "id",
+                                                            ),
+                                                            range: Some(
+                                                                17..19,
+                                                            ),
+                                                        },
                                                         None,
                                                     ),
                                                 ],
                                                 star: None,
+                                                range: Some(
+                                                    15..21,
+                                                ),
                                             },
                                         ),
                                     ),
                                 ],
                                 star: None,
+                                range: Some(
+                                    11..23,
+                                ),
                             },
                         ),
                     ),
                 ],
                 star: None,
+                range: Some(
+                    0..23,
+                ),
             },
         ),
         config: None,

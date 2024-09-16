@@ -38,14 +38,14 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
             connect_template: URLTemplate {
                 base: None,
                 path: [
-                    ParameterValue {
+                    Component {
                         parts: [
                             Text(
                                 "create",
                             ),
                         ],
                     },
-                    ParameterValue {
+                    Component {
                         parts: [
                             Text(
                                 "user",
@@ -60,93 +60,211 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
             body: Some(
                 Path(
                     PathSelection {
-                        path: Var(
-                            $args,
-                            Key(
-                                Field(
-                                    "input",
-                                ),
-                                Selection(
-                                    SubSelection {
-                                        selections: [
-                                            Field(
-                                                None,
-                                                "name",
-                                                None,
+                        path: WithRange {
+                            node: Var(
+                                WithRange {
+                                    node: $args,
+                                    range: Some(
+                                        0..5,
+                                    ),
+                                },
+                                WithRange {
+                                    node: Key(
+                                        WithRange {
+                                            node: Field(
+                                                "input",
                                             ),
-                                            Field(
-                                                None,
-                                                "username",
-                                                None,
+                                            range: Some(
+                                                6..11,
                                             ),
-                                            Field(
-                                                None,
-                                                "email",
-                                                None,
-                                            ),
-                                            Field(
-                                                None,
-                                                "status",
-                                                None,
-                                            ),
-                                            Field(
-                                                None,
-                                                "address",
-                                                Some(
-                                                    SubSelection {
-                                                        selections: [
-                                                            Field(
-                                                                None,
-                                                                "street",
-                                                                None,
-                                                            ),
-                                                            Field(
-                                                                None,
-                                                                "suite",
-                                                                None,
-                                                            ),
-                                                            Field(
-                                                                None,
-                                                                "city",
-                                                                None,
-                                                            ),
-                                                            Field(
-                                                                None,
-                                                                "zipcode",
-                                                                None,
-                                                            ),
-                                                            Field(
-                                                                None,
-                                                                "geo",
-                                                                Some(
-                                                                    SubSelection {
-                                                                        selections: [
-                                                                            Field(
-                                                                                None,
-                                                                                "lat",
-                                                                                None,
-                                                                            ),
-                                                                            Field(
-                                                                                None,
-                                                                                "lng",
-                                                                                None,
-                                                                            ),
-                                                                        ],
-                                                                        star: None,
-                                                                    },
+                                        },
+                                        WithRange {
+                                            node: Selection(
+                                                SubSelection {
+                                                    selections: [
+                                                        Field(
+                                                            None,
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "name",
                                                                 ),
+                                                                range: Some(
+                                                                    14..18,
+                                                                ),
+                                                            },
+                                                            None,
+                                                        ),
+                                                        Field(
+                                                            None,
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "username",
+                                                                ),
+                                                                range: Some(
+                                                                    19..27,
+                                                                ),
+                                                            },
+                                                            None,
+                                                        ),
+                                                        Field(
+                                                            None,
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "email",
+                                                                ),
+                                                                range: Some(
+                                                                    28..33,
+                                                                ),
+                                                            },
+                                                            None,
+                                                        ),
+                                                        Field(
+                                                            None,
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "status",
+                                                                ),
+                                                                range: Some(
+                                                                    34..40,
+                                                                ),
+                                                            },
+                                                            None,
+                                                        ),
+                                                        Field(
+                                                            None,
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "address",
+                                                                ),
+                                                                range: Some(
+                                                                    41..48,
+                                                                ),
+                                                            },
+                                                            Some(
+                                                                SubSelection {
+                                                                    selections: [
+                                                                        Field(
+                                                                            None,
+                                                                            WithRange {
+                                                                                node: Field(
+                                                                                    "street",
+                                                                                ),
+                                                                                range: Some(
+                                                                                    51..57,
+                                                                                ),
+                                                                            },
+                                                                            None,
+                                                                        ),
+                                                                        Field(
+                                                                            None,
+                                                                            WithRange {
+                                                                                node: Field(
+                                                                                    "suite",
+                                                                                ),
+                                                                                range: Some(
+                                                                                    58..63,
+                                                                                ),
+                                                                            },
+                                                                            None,
+                                                                        ),
+                                                                        Field(
+                                                                            None,
+                                                                            WithRange {
+                                                                                node: Field(
+                                                                                    "city",
+                                                                                ),
+                                                                                range: Some(
+                                                                                    64..68,
+                                                                                ),
+                                                                            },
+                                                                            None,
+                                                                        ),
+                                                                        Field(
+                                                                            None,
+                                                                            WithRange {
+                                                                                node: Field(
+                                                                                    "zipcode",
+                                                                                ),
+                                                                                range: Some(
+                                                                                    69..76,
+                                                                                ),
+                                                                            },
+                                                                            None,
+                                                                        ),
+                                                                        Field(
+                                                                            None,
+                                                                            WithRange {
+                                                                                node: Field(
+                                                                                    "geo",
+                                                                                ),
+                                                                                range: Some(
+                                                                                    77..80,
+                                                                                ),
+                                                                            },
+                                                                            Some(
+                                                                                SubSelection {
+                                                                                    selections: [
+                                                                                        Field(
+                                                                                            None,
+                                                                                            WithRange {
+                                                                                                node: Field(
+                                                                                                    "lat",
+                                                                                                ),
+                                                                                                range: Some(
+                                                                                                    83..86,
+                                                                                                ),
+                                                                                            },
+                                                                                            None,
+                                                                                        ),
+                                                                                        Field(
+                                                                                            None,
+                                                                                            WithRange {
+                                                                                                node: Field(
+                                                                                                    "lng",
+                                                                                                ),
+                                                                                                range: Some(
+                                                                                                    87..90,
+                                                                                                ),
+                                                                                            },
+                                                                                            None,
+                                                                                        ),
+                                                                                    ],
+                                                                                    star: None,
+                                                                                    range: Some(
+                                                                                        81..92,
+                                                                                    ),
+                                                                                },
+                                                                            ),
+                                                                        ),
+                                                                    ],
+                                                                    star: None,
+                                                                    range: Some(
+                                                                        49..94,
+                                                                    ),
+                                                                },
                                                             ),
-                                                        ],
-                                                        star: None,
-                                                    },
-                                                ),
+                                                        ),
+                                                    ],
+                                                    star: None,
+                                                    range: Some(
+                                                        12..96,
+                                                    ),
+                                                },
                                             ),
-                                        ],
-                                        star: None,
-                                    },
-                                ),
+                                            range: Some(
+                                                12..96,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        5..96,
+                                    ),
+                                },
                             ),
-                        ),
+                            range: Some(
+                                0..96,
+                            ),
+                        },
                     },
                 ),
             ),
@@ -156,11 +274,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                 selections: [
                     Field(
                         None,
-                        "id",
+                        WithRange {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                0..2,
+                            ),
+                        },
                         None,
                     ),
                 ],
                 star: None,
+                range: Some(
+                    0..2,
+                ),
             },
         ),
         config: None,
@@ -201,14 +329,14 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
             connect_template: URLTemplate {
                 base: None,
                 path: [
-                    ParameterValue {
+                    Component {
                         parts: [
                             Text(
                                 "filter",
                             ),
                         ],
                     },
-                    ParameterValue {
+                    Component {
                         parts: [
                             Text(
                                 "users",
@@ -226,22 +354,60 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                         selections: [
                             Path(
                                 Alias {
-                                    name: "emailDomain",
+                                    name: WithRange {
+                                        node: Field(
+                                            "emailDomain",
+                                        ),
+                                        range: Some(
+                                            0..11,
+                                        ),
+                                    },
+                                    range: Some(
+                                        0..12,
+                                    ),
                                 },
                                 PathSelection {
-                                    path: Var(
-                                        $args,
-                                        Key(
-                                            Field(
-                                                "email",
-                                            ),
-                                            Empty,
+                                    path: WithRange {
+                                        node: Var(
+                                            WithRange {
+                                                node: $args,
+                                                range: Some(
+                                                    13..18,
+                                                ),
+                                            },
+                                            WithRange {
+                                                node: Key(
+                                                    WithRange {
+                                                        node: Field(
+                                                            "email",
+                                                        ),
+                                                        range: Some(
+                                                            19..24,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Empty,
+                                                        range: Some(
+                                                            24..24,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    18..24,
+                                                ),
+                                            },
                                         ),
-                                    ),
+                                        range: Some(
+                                            13..24,
+                                        ),
+                                    },
                                 },
                             ),
                         ],
                         star: None,
+                        range: Some(
+                            0..24,
+                        ),
                     },
                 ),
             ),
@@ -251,16 +417,33 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                 selections: [
                     Field(
                         None,
-                        "id",
+                        WithRange {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                0..2,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "name",
+                        WithRange {
+                            node: Field(
+                                "name",
+                            ),
+                            range: Some(
+                                3..7,
+                            ),
+                        },
                         None,
                     ),
                 ],
                 star: None,
+                range: Some(
+                    0..7,
+                ),
             },
         ),
         config: None,
@@ -269,7 +452,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
     },
     "connectors_Query_usersByCompany_0": Connector {
         id: ConnectId {
-            label: "connectors.example http: GET /by-company/{$args.company.name!}",
+            label: "connectors.example http: GET /by-company/{$args.company.name}",
             subgraph_name: "connectors",
             source_name: Some(
                 "example",
@@ -301,20 +484,20 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
             connect_template: URLTemplate {
                 base: None,
                 path: [
-                    ParameterValue {
+                    Component {
                         parts: [
                             Text(
                                 "by-company",
                             ),
                         ],
                     },
-                    ParameterValue {
+                    Component {
                         parts: [
                             Var(
-                                VariableExpression {
-                                    var_path: "$args.company.name",
-                                    batch_separator: None,
-                                    required: true,
+                                Variable {
+                                    var_type: Args,
+                                    path: "company.name",
+                                    location: 13..31,
                                 },
                             ),
                         ],
@@ -331,42 +514,90 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                 selections: [
                     Field(
                         None,
-                        "id",
+                        WithRange {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                0..2,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "name",
+                        WithRange {
+                            node: Field(
+                                "name",
+                            ),
+                            range: Some(
+                                3..7,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "company",
+                        WithRange {
+                            node: Field(
+                                "company",
+                            ),
+                            range: Some(
+                                8..15,
+                            ),
+                        },
                         Some(
                             SubSelection {
                                 selections: [
                                     Field(
                                         None,
-                                        "name",
+                                        WithRange {
+                                            node: Field(
+                                                "name",
+                                            ),
+                                            range: Some(
+                                                20..24,
+                                            ),
+                                        },
                                         None,
                                     ),
                                     Field(
                                         None,
-                                        "catchPhrase",
+                                        WithRange {
+                                            node: Field(
+                                                "catchPhrase",
+                                            ),
+                                            range: Some(
+                                                27..38,
+                                            ),
+                                        },
                                         None,
                                     ),
                                     Field(
                                         None,
-                                        "bs",
+                                        WithRange {
+                                            node: Field(
+                                                "bs",
+                                            ),
+                                            range: Some(
+                                                41..43,
+                                            ),
+                                        },
                                         None,
                                     ),
                                 ],
                                 star: None,
+                                range: Some(
+                                    16..45,
+                                ),
                             },
                         ),
                     ),
                 ],
                 star: None,
+                range: Some(
+                    0..45,
+                ),
             },
         ),
         config: None,
@@ -375,7 +606,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
     },
     "connectors_Query_user_0": Connector {
         id: ConnectId {
-            label: "connectors.example http: GET /{$args.id!}",
+            label: "connectors.example http: GET /{$args.id}",
             subgraph_name: "connectors",
             source_name: Some(
                 "example",
@@ -407,13 +638,13 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
             connect_template: URLTemplate {
                 base: None,
                 path: [
-                    ParameterValue {
+                    Component {
                         parts: [
                             Var(
-                                VariableExpression {
-                                    var_path: "$args.id",
-                                    batch_separator: None,
-                                    required: true,
+                                Variable {
+                                    var_type: Args,
+                                    path: "id",
+                                    location: 2..10,
                                 },
                             ),
                         ],
@@ -430,119 +661,264 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                 selections: [
                     Field(
                         None,
-                        "id",
+                        WithRange {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                0..2,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "name",
+                        WithRange {
+                            node: Field(
+                                "name",
+                            ),
+                            range: Some(
+                                3..7,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "username",
+                        WithRange {
+                            node: Field(
+                                "username",
+                            ),
+                            range: Some(
+                                8..16,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "email",
+                        WithRange {
+                            node: Field(
+                                "email",
+                            ),
+                            range: Some(
+                                17..22,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "address",
+                        WithRange {
+                            node: Field(
+                                "address",
+                            ),
+                            range: Some(
+                                23..30,
+                            ),
+                        },
                         Some(
                             SubSelection {
                                 selections: [
                                     Field(
                                         None,
-                                        "street",
+                                        WithRange {
+                                            node: Field(
+                                                "street",
+                                            ),
+                                            range: Some(
+                                                35..41,
+                                            ),
+                                        },
                                         None,
                                     ),
                                     Field(
                                         None,
-                                        "suite",
+                                        WithRange {
+                                            node: Field(
+                                                "suite",
+                                            ),
+                                            range: Some(
+                                                44..49,
+                                            ),
+                                        },
                                         None,
                                     ),
                                     Field(
                                         None,
-                                        "city",
+                                        WithRange {
+                                            node: Field(
+                                                "city",
+                                            ),
+                                            range: Some(
+                                                52..56,
+                                            ),
+                                        },
                                         None,
                                     ),
                                     Field(
                                         None,
-                                        "zipcode",
+                                        WithRange {
+                                            node: Field(
+                                                "zipcode",
+                                            ),
+                                            range: Some(
+                                                59..66,
+                                            ),
+                                        },
                                         None,
                                     ),
                                     Field(
                                         None,
-                                        "geo",
+                                        WithRange {
+                                            node: Field(
+                                                "geo",
+                                            ),
+                                            range: Some(
+                                                69..72,
+                                            ),
+                                        },
                                         Some(
                                             SubSelection {
                                                 selections: [
                                                     Field(
                                                         None,
-                                                        "lat",
+                                                        WithRange {
+                                                            node: Field(
+                                                                "lat",
+                                                            ),
+                                                            range: Some(
+                                                                79..82,
+                                                            ),
+                                                        },
                                                         None,
                                                     ),
                                                     Field(
                                                         None,
-                                                        "lng",
+                                                        WithRange {
+                                                            node: Field(
+                                                                "lng",
+                                                            ),
+                                                            range: Some(
+                                                                87..90,
+                                                            ),
+                                                        },
                                                         None,
                                                     ),
                                                 ],
                                                 star: None,
+                                                range: Some(
+                                                    73..94,
+                                                ),
                                             },
                                         ),
                                     ),
                                 ],
                                 star: None,
+                                range: Some(
+                                    31..96,
+                                ),
                             },
                         ),
                     ),
                     Field(
                         None,
-                        "phone",
+                        WithRange {
+                            node: Field(
+                                "phone",
+                            ),
+                            range: Some(
+                                97..102,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "website",
+                        WithRange {
+                            node: Field(
+                                "website",
+                            ),
+                            range: Some(
+                                103..110,
+                            ),
+                        },
                         None,
                     ),
                     Field(
                         None,
-                        "company",
+                        WithRange {
+                            node: Field(
+                                "company",
+                            ),
+                            range: Some(
+                                111..118,
+                            ),
+                        },
                         Some(
                             SubSelection {
                                 selections: [
                                     Field(
                                         None,
-                                        "name",
+                                        WithRange {
+                                            node: Field(
+                                                "name",
+                                            ),
+                                            range: Some(
+                                                123..127,
+                                            ),
+                                        },
                                         None,
                                     ),
                                     Field(
                                         None,
-                                        "catchPhrase",
+                                        WithRange {
+                                            node: Field(
+                                                "catchPhrase",
+                                            ),
+                                            range: Some(
+                                                130..141,
+                                            ),
+                                        },
                                         None,
                                     ),
                                     Field(
                                         None,
-                                        "bs",
+                                        WithRange {
+                                            node: Field(
+                                                "bs",
+                                            ),
+                                            range: Some(
+                                                144..146,
+                                            ),
+                                        },
                                         None,
                                     ),
                                     Field(
                                         None,
-                                        "email",
+                                        WithRange {
+                                            node: Field(
+                                                "email",
+                                            ),
+                                            range: Some(
+                                                149..154,
+                                            ),
+                                        },
                                         None,
                                     ),
                                 ],
                                 star: None,
+                                range: Some(
+                                    119..156,
+                                ),
                             },
                         ),
                     ),
                 ],
                 star: None,
+                range: Some(
+                    0..156,
+                ),
             },
         ),
         config: None,
