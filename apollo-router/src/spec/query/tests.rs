@@ -100,6 +100,11 @@ impl FormatTest {
         self
     }
 
+    fn expected_errors(mut self, v: serde_json_bytes::Value) -> Self {
+        self.expected_errors = Some(v);
+        self
+    }
+
     fn expected_extensions(mut self, v: serde_json_bytes::Value) -> Self {
         self.expected_extensions = Some(v);
         self
@@ -1180,6 +1185,109 @@ fn reformat_response_array_of_id_duplicate() {
                 "array": ["hello","world"],
             },
         }})
+        .test();
+}
+
+#[test]
+// If this test fails, this means you got greedy about allocations,
+// beware of aliases!
+fn reformat_response_expected_int_got_string() {
+    FormatTest::builder()
+        .schema(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                i: Int
+                s: String
+                f: Float
+                b: Boolean
+                e: E
+                u: U
+                id: ID
+            }
+            
+            enum E {
+              A
+              B
+            }
+            union U = ObjA | ObjB
+            type ObjA {
+                a: String
+            }
+            type ObjB {
+                a: String
+            }
+            ",
+        )
+        .query(
+            r#"{
+            get {
+                i
+                s
+                f
+                ... on Thing {
+                  b
+                  e
+                  u {
+                    ... on ObjA {
+                      a
+                    }
+                  }
+                }
+            }
+        }"#,
+        )
+        .response(json! {{
+            "get": {
+                "i": "hello",
+                "s": 1.0,
+                "f": [1],
+                "b": 0,
+                "e": "X",
+                "u": 1,
+                // "id": {
+                //     "test": "test"
+                // }
+            },
+        }})
+        .expected(json! {{
+            "get": {
+                "i": null,
+                "s": null,
+                "f": null,
+                "b": null,
+                "e": null,
+                "u": null,
+                //"id": null
+            },
+        }})
+        .expected_errors(json! ([
+            {
+                "message": "Invalid value found for field Thing.i",
+                "path": ["get", "i"]
+            },
+            {
+                "message": "Invalid value found for field Thing.s",
+                "path": ["get", "s"]
+            },
+            {
+                "message": "Invalid value found for field Thing.f",
+                "path": ["get", "f"]
+            },
+            {
+                "message": "Invalid value found for field Thing.b",
+                "path": ["get", "b"]
+            },
+            {
+                "message": "Expected a valid enum value for type enum E",
+                "path": ["get", "e"]
+            },
+            {
+                "message": "Invalid non-object value of type number for composite type U",
+                "path": ["get", "u"]
+            }
+        ]))
         .test();
 }
 

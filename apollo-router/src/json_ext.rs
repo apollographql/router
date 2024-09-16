@@ -478,7 +478,6 @@ impl ValueExt for Value {
                 })
     }
 
-
     fn json_type_name(&self) -> &'static str {
         match self {
             Value::Array(_) => "array",
