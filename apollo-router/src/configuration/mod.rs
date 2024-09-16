@@ -1,16 +1,4 @@
 //! Logic for loading configuration in to an object model
-pub(crate) mod cors;
-pub(crate) mod expansion;
-mod experimental;
-pub(crate) mod metrics;
-mod persisted_queries;
-mod schema;
-pub(crate) mod subgraph;
-#[cfg(test)]
-mod tests;
-mod upgrade;
-mod yaml;
-
 use std::fmt;
 use std::io;
 use std::io::BufReader;
@@ -27,6 +15,7 @@ use displaydoc::Display;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 pub(crate) use persisted_queries::PersistedQueries;
+pub(crate) use persisted_queries::PersistedQueriesPrewarmQueryPlanCache;
 #[cfg(test)]
 pub(crate) use persisted_queries::PersistedQueriesSafelist;
 use regex::Regex;
@@ -58,20 +47,28 @@ use crate::cache::DEFAULT_CACHE_CAPACITY;
 use crate::configuration::schema::Mode;
 use crate::graphql;
 use crate::notification::Notify;
-#[cfg(not(test))]
-use crate::notification::RouterBroadcasts;
 use crate::plugin::plugins;
-#[cfg(not(test))]
+use crate::plugins::limits;
 use crate::plugins::subscription::SubscriptionConfig;
-#[cfg(not(test))]
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
-#[cfg(not(test))]
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN_NAME;
 use crate::uplink::UplinkConfig;
 use crate::ApolloRouterError;
 
+pub(crate) mod cors;
+pub(crate) mod expansion;
+mod experimental;
+pub(crate) mod metrics;
+mod persisted_queries;
+mod schema;
+pub(crate) mod shared;
+pub(crate) mod subgraph;
+#[cfg(test)]
+mod tests;
+mod upgrade;
+mod yaml;
+
 // TODO: Talk it through with the teams
-#[cfg(not(test))]
 static HEARTBEAT_TIMEOUT_DURATION_SECONDS: u64 = 15;
 
 static SUPERGRAPH_ENDPOINT_REGEX: Lazy<Regex> = Lazy::new(|| {
@@ -157,20 +154,20 @@ pub struct Configuration {
 
     /// Configuration for operation limits, parser limits, HTTP limits, etc.
     #[serde(default)]
-    pub(crate) limits: Limits,
+    pub(crate) limits: limits::Config,
 
     /// Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.
     /// You probably don’t want this in production!
     #[serde(default)]
     pub(crate) experimental_chaos: Chaos,
 
-    /// Set the GraphQL validation implementation to use.
+    /// Set the query planner implementation to use.
     #[serde(default)]
-    pub(crate) experimental_graphql_validation_mode: GraphQLValidationMode,
+    pub(crate) experimental_query_planner_mode: QueryPlannerMode,
 
-    /// Set the API schema generation implementation to use.
+    /// Set the GraphQL schema introspection implementation to use.
     #[serde(default)]
-    pub(crate) experimental_api_schema_generation_mode: ApiSchemaMode,
+    pub(crate) experimental_introspection_mode: IntrospectionMode,
 
     /// Plugin configuration
     #[serde(default)]
@@ -190,7 +187,11 @@ pub struct Configuration {
 
     /// Batching configuration.
     #[serde(default)]
-    pub(crate) experimental_batching: Batching,
+    pub(crate) batching: Batching,
+
+    /// Type conditioned fetching configuration.
+    #[serde(default)]
+    pub(crate) experimental_type_conditioned_fetching: bool,
 }
 
 impl PartialEq for Configuration {
@@ -199,33 +200,49 @@ impl PartialEq for Configuration {
     }
 }
 
-/// GraphQL validation modes.
+/// Query planner modes.
 #[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
 #[derivative(Debug)]
-#[serde(rename_all = "lowercase")]
-pub(crate) enum GraphQLValidationMode {
+#[serde(rename_all = "snake_case")]
+pub(crate) enum QueryPlannerMode {
     /// Use the new Rust-based implementation.
+    ///
+    /// Raises an error at Router startup if the the new planner does not support the schema
+    /// (such as using legacy Apollo Federation 1)
     New,
     /// Use the old JavaScript-based implementation.
     Legacy,
-    /// Use Rust-based and Javascript-based implementations side by side, logging warnings if the
-    /// implementations disagree.
-    #[default]
+    /// Use primarily the Javascript-based implementation,
+    /// but also schedule background jobs to run the Rust implementation and compare results,
+    /// logging warnings if the implementations disagree.
+    ///
+    /// Raises an error at Router startup if the the new planner does not support the schema
+    /// (such as using legacy Apollo Federation 1)
     Both,
+    /// Use primarily the Javascript-based implementation,
+    /// but also schedule on a best-effort basis background jobs
+    /// to run the Rust implementation and compare results,
+    /// logging warnings if the implementations disagree.
+    ///
+    /// Falls back to `legacy` with a warning
+    /// if the the new planner does not support the schema
+    /// (such as using legacy Apollo Federation 1)
+    #[default]
+    BothBestEffort,
 }
 
-/// API schema generation modes.
-#[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
+/// Which implementation of GraphQL schema introspection to use, if enabled
+#[derive(Copy, Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
 #[derivative(Debug)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum ApiSchemaMode {
+pub(crate) enum IntrospectionMode {
     /// Use the new Rust-based implementation.
     New,
     /// Use the old JavaScript-based implementation.
     #[default]
     Legacy,
-    /// Use Rust-based and Javascript-based implementations side by side, logging warnings if the
-    /// implementations disagree.
+    /// Use Rust-based and Javascript-based implementations side by side,
+    /// logging warnings if the implementations disagree.
     Both,
 }
 
@@ -250,33 +267,51 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             tls: Tls,
             apq: Apq,
             persisted_queries: PersistedQueries,
-            #[serde(skip)]
-            uplink: UplinkConfig,
-            limits: Limits,
+            limits: limits::Config,
             experimental_chaos: Chaos,
-            experimental_graphql_validation_mode: GraphQLValidationMode,
-            experimental_batching: Batching,
+            batching: Batching,
+            experimental_type_conditioned_fetching: bool,
+            experimental_query_planner_mode: QueryPlannerMode,
+            experimental_introspection_mode: IntrospectionMode,
         }
-        let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
+        let mut ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
-        Configuration::builder()
-            .health_check(ad_hoc.health_check)
-            .sandbox(ad_hoc.sandbox)
-            .homepage(ad_hoc.homepage)
-            .supergraph(ad_hoc.supergraph)
-            .cors(ad_hoc.cors)
-            .plugins(ad_hoc.plugins.plugins.unwrap_or_default())
-            .apollo_plugins(ad_hoc.apollo_plugins.plugins)
-            .tls(ad_hoc.tls)
-            .apq(ad_hoc.apq)
-            .persisted_query(ad_hoc.persisted_queries)
-            .operation_limits(ad_hoc.limits)
-            .chaos(ad_hoc.experimental_chaos)
-            .uplink(ad_hoc.uplink)
-            .graphql_validation_mode(ad_hoc.experimental_graphql_validation_mode)
-            .experimental_batching(ad_hoc.experimental_batching)
-            .build()
-            .map_err(|e| serde::de::Error::custom(e.to_string()))
+        let notify = Configuration::notify(&ad_hoc.apollo_plugins.plugins)
+            .map_err(|e| serde::de::Error::custom(e.to_string()))?;
+
+        // Allow the limits plugin to use the configuration from the configuration struct.
+        // This means that the limits plugin will get the regular configuration via plugin init.
+        ad_hoc.apollo_plugins.plugins.insert(
+            "limits".to_string(),
+            serde_json::to_value(&ad_hoc.limits).unwrap(),
+        );
+
+        // Use a struct literal instead of a builder to ensure this is exhaustive
+        Configuration {
+            health_check: ad_hoc.health_check,
+            sandbox: ad_hoc.sandbox,
+            homepage: ad_hoc.homepage,
+            supergraph: ad_hoc.supergraph,
+            cors: ad_hoc.cors,
+            tls: ad_hoc.tls,
+            apq: ad_hoc.apq,
+            persisted_queries: ad_hoc.persisted_queries,
+            limits: ad_hoc.limits,
+            experimental_chaos: ad_hoc.experimental_chaos,
+            experimental_type_conditioned_fetching: ad_hoc.experimental_type_conditioned_fetching,
+            experimental_query_planner_mode: ad_hoc.experimental_query_planner_mode,
+            experimental_introspection_mode: ad_hoc.experimental_introspection_mode,
+            plugins: ad_hoc.plugins,
+            apollo_plugins: ad_hoc.apollo_plugins,
+            batching: ad_hoc.batching,
+
+            // serde(skip)
+            notify,
+            uplink: None,
+            validated_yaml: None,
+        }
+        .validate()
+        .map_err(|e| serde::de::Error::custom(e.to_string()))
     }
 }
 
@@ -286,12 +321,12 @@ fn default_graphql_listen() -> ListenAddr {
     SocketAddr::from_str("127.0.0.1:4000").unwrap().into()
 }
 
-// This isn't dead code! we use it in buildstructor's fake_new
-#[allow(dead_code)]
+#[cfg(test)]
 fn test_listen() -> ListenAddr {
     SocketAddr::from_str("127.0.0.1:0").unwrap().into()
 }
 
+#[cfg(test)]
 #[buildstructor::buildstructor]
 impl Configuration {
     #[builder]
@@ -304,28 +339,17 @@ impl Configuration {
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
         tls: Option<Tls>,
-        notify: Option<Notify<String, graphql::Response>>,
         apq: Option<Apq>,
         persisted_query: Option<PersistedQueries>,
-        operation_limits: Option<Limits>,
+        operation_limits: Option<limits::Config>,
         chaos: Option<Chaos>,
         uplink: Option<UplinkConfig>,
-        graphql_validation_mode: Option<GraphQLValidationMode>,
-        experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
-        experimental_batching: Option<Batching>,
+        experimental_type_conditioned_fetching: Option<bool>,
+        batching: Option<Batching>,
+        experimental_query_planner_mode: Option<QueryPlannerMode>,
+        experimental_introspection_mode: Option<IntrospectionMode>,
     ) -> Result<Self, ConfigurationError> {
-        #[cfg(not(test))]
-        let notify_queue_cap = match apollo_plugins.get(APOLLO_SUBSCRIPTION_PLUGIN_NAME) {
-            Some(plugin_conf) => {
-                let conf = serde_json::from_value::<SubscriptionConfig>(plugin_conf.clone())
-                    .map_err(|err| ConfigurationError::PluginConfiguration {
-                        plugin: APOLLO_SUBSCRIPTION_PLUGIN.to_string(),
-                        error: format!("{err:?}"),
-                    })?;
-                conf.queue_capacity
-            }
-            None => None,
-        };
+        let notify = Self::notify(&apollo_plugins)?;
 
         let conf = Self {
             validated_yaml: Default::default(),
@@ -338,8 +362,8 @@ impl Configuration {
             persisted_queries: persisted_query.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
-            experimental_graphql_validation_mode: graphql_validation_mode.unwrap_or_default(),
-            experimental_api_schema_generation_mode:  experimental_api_schema_generation_mode.unwrap_or_default(),
+            experimental_query_planner_mode: experimental_query_planner_mode.unwrap_or_default(),
+            experimental_introspection_mode: experimental_introspection_mode.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
@@ -348,15 +372,68 @@ impl Configuration {
             },
             tls: tls.unwrap_or_default(),
             uplink,
-            experimental_batching: experimental_batching.unwrap_or_default(),
-            #[cfg(test)]
-            notify: notify.unwrap_or_default(),
-            #[cfg(not(test))]
-            notify: notify.map(|n| n.set_queue_size(notify_queue_cap))
-                .unwrap_or_else(|| Notify::builder().and_queue_size(notify_queue_cap).ttl(Duration::from_secs(HEARTBEAT_TIMEOUT_DURATION_SECONDS)).router_broadcasts(Arc::new(RouterBroadcasts::new())).heartbeat_error_message(graphql::Response::builder().errors(vec![graphql::Error::builder().message("the connection has been closed because it hasn't heartbeat for a while").extension_code("SUBSCRIPTION_HEARTBEAT_ERROR").build()]).build()).build()),
+            batching: batching.unwrap_or_default(),
+            experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
+                .unwrap_or_default(),
+            notify,
         };
 
         conf.validate()
+    }
+}
+
+impl Configuration {
+    fn notify(
+        apollo_plugins: &Map<String, Value>,
+    ) -> Result<Notify<String, graphql::Response>, ConfigurationError> {
+        if cfg!(test) {
+            return Ok(Notify::for_tests());
+        }
+        let notify_queue_cap = match apollo_plugins.get(APOLLO_SUBSCRIPTION_PLUGIN_NAME) {
+            Some(plugin_conf) => {
+                let conf = serde_json::from_value::<SubscriptionConfig>(plugin_conf.clone())
+                    .map_err(|err| ConfigurationError::PluginConfiguration {
+                        plugin: APOLLO_SUBSCRIPTION_PLUGIN.to_string(),
+                        error: format!("{err:?}"),
+                    })?;
+                conf.queue_capacity
+            }
+            None => None,
+        };
+        Ok(Notify::builder()
+            .and_queue_size(notify_queue_cap)
+            .ttl(Duration::from_secs(HEARTBEAT_TIMEOUT_DURATION_SECONDS))
+            .heartbeat_error_message(
+                graphql::Response::builder()
+                .errors(vec![
+                    graphql::Error::builder()
+                    .message("the connection has been closed because it hasn't heartbeat for a while")
+                    .extension_code("SUBSCRIPTION_HEARTBEAT_ERROR")
+                    .build()
+                ])
+                .build()
+            ).build())
+    }
+
+    pub(crate) fn js_query_planner_config(&self) -> router_bridge::planner::QueryPlannerConfig {
+        router_bridge::planner::QueryPlannerConfig {
+            reuse_query_fragments: self.supergraph.reuse_query_fragments,
+            generate_query_fragments: Some(self.supergraph.generate_query_fragments),
+            incremental_delivery: Some(router_bridge::planner::IncrementalDeliverySupport {
+                enable_defer: Some(self.supergraph.defer_support),
+            }),
+            graphql_validation: false,
+            debug: Some(router_bridge::planner::QueryPlannerDebugConfig {
+                bypass_planner_for_single_subgraph: None,
+                max_evaluated_plans: self
+                    .supergraph
+                    .query_planning
+                    .experimental_plans_limit
+                    .or(Some(10000)),
+                paths_limit: self.supergraph.query_planning.experimental_paths_limit,
+            }),
+            type_conditioned_fetching: self.experimental_type_conditioned_fetching,
+        }
     }
 }
 
@@ -383,12 +460,13 @@ impl Configuration {
         notify: Option<Notify<String, graphql::Response>>,
         apq: Option<Apq>,
         persisted_query: Option<PersistedQueries>,
-        operation_limits: Option<Limits>,
+        operation_limits: Option<limits::Config>,
         chaos: Option<Chaos>,
         uplink: Option<UplinkConfig>,
-        graphql_validation_mode: Option<GraphQLValidationMode>,
-        experimental_batching: Option<Batching>,
-        experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
+        batching: Option<Batching>,
+        experimental_type_conditioned_fetching: Option<bool>,
+        experimental_query_planner_mode: Option<QueryPlannerMode>,
+        experimental_introspection_mode: Option<IntrospectionMode>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
             validated_yaml: Default::default(),
@@ -399,9 +477,8 @@ impl Configuration {
             cors: cors.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
-            experimental_graphql_validation_mode: graphql_validation_mode.unwrap_or_default(),
-            experimental_api_schema_generation_mode: experimental_api_schema_generation_mode
-                .unwrap_or_default(),
+            experimental_query_planner_mode: experimental_query_planner_mode.unwrap_or_default(),
+            experimental_introspection_mode: experimental_introspection_mode.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
@@ -413,7 +490,9 @@ impl Configuration {
             apq: apq.unwrap_or_default(),
             persisted_queries: persisted_query.unwrap_or_default(),
             uplink,
-            experimental_batching: experimental_batching.unwrap_or_default(),
+            experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
+                .unwrap_or_default(),
+            batching: batching.unwrap_or_default(),
         };
 
         configuration.validate()
@@ -629,18 +708,6 @@ pub(crate) struct Supergraph {
     /// Log a message if the client closes the connection before the response is sent.
     /// Default: false.
     pub(crate) experimental_log_on_broken_pipe: bool,
-
-    /// Configuration options pertaining to the query planner component.
-    pub(crate) query_planner: QueryPlanner,
-}
-
-/// Configuration options pertaining to the query planner component.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct QueryPlanner {
-    /// Set the size of a pool of workers to enable query planning parallelism.
-    /// Default: 1.
-    pub(crate) experimental_parallelism: AvailableParallelism,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
@@ -662,15 +729,6 @@ impl Default for AvailableParallelism {
     }
 }
 
-impl QueryPlanner {
-    pub(crate) fn experimental_query_planner_parallelism(&self) -> io::Result<NonZeroUsize> {
-        match self.experimental_parallelism {
-            AvailableParallelism::Auto(Auto::Auto) => std::thread::available_parallelism(),
-            AvailableParallelism::Fixed(n) => Ok(n),
-        }
-    }
-}
-
 fn default_defer_support() -> bool {
     true
 }
@@ -688,7 +746,6 @@ impl Supergraph {
         generate_query_fragments: Option<bool>,
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
-        query_planner: Option<QueryPlanner>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
@@ -708,7 +765,6 @@ impl Supergraph {
             generate_query_fragments: generate_query_fragments.unwrap_or_default(),
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
-            query_planner: query_planner.unwrap_or_default(),
         }
     }
 }
@@ -727,7 +783,6 @@ impl Supergraph {
         generate_query_fragments: Option<bool>,
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
-        query_planner: Option<QueryPlanner>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(test_listen),
@@ -747,7 +802,6 @@ impl Supergraph {
             generate_query_fragments: generate_query_fragments.unwrap_or_default(),
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
-            query_planner: query_planner.unwrap_or_default(),
         }
     }
 }
@@ -772,106 +826,6 @@ impl Supergraph {
         }
 
         path
-    }
-}
-
-/// Configuration for operation limits, parser limits, HTTP limits, etc.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
-pub(crate) struct Limits {
-    /// If set, requests with operations deeper than this maximum
-    /// are rejected with a HTTP 400 Bad Request response and GraphQL error with
-    /// `"extensions": {"code": "MAX_DEPTH_LIMIT"}`
-    ///
-    /// Counts depth of an operation, looking at its selection sets,
-    /// including fields in fragments and inline fragments. The following
-    /// example has a depth of 3.
-    ///
-    /// ```graphql
-    /// query getProduct {
-    ///   book { # 1
-    ///     ...bookDetails
-    ///   }
-    /// }
-    ///
-    /// fragment bookDetails on Book {
-    ///   details { # 2
-    ///     ... on ProductDetailsBook {
-    ///       country # 3
-    ///     }
-    ///   }
-    /// }
-    /// ```
-    pub(crate) max_depth: Option<u32>,
-
-    /// If set, requests with operations higher than this maximum
-    /// are rejected with a HTTP 400 Bad Request response and GraphQL error with
-    /// `"extensions": {"code": "MAX_DEPTH_LIMIT"}`
-    ///
-    /// Height is based on simple merging of fields using the same name or alias,
-    /// but only within the same selection set.
-    /// For example `name` here is only counted once and the query has height 3, not 4:
-    ///
-    /// ```graphql
-    /// query {
-    ///     name { first }
-    ///     name { last }
-    /// }
-    /// ```
-    ///
-    /// This may change in a future version of Apollo Router to do
-    /// [full field merging across fragments][merging] instead.
-    ///
-    /// [merging]: https://spec.graphql.org/October2021/#sec-Field-Selection-Merging]
-    pub(crate) max_height: Option<u32>,
-
-    /// If set, requests with operations with more root fields than this maximum
-    /// are rejected with a HTTP 400 Bad Request response and GraphQL error with
-    /// `"extensions": {"code": "MAX_ROOT_FIELDS_LIMIT"}`
-    ///
-    /// This limit counts only the top level fields in a selection set,
-    /// including fragments and inline fragments.
-    pub(crate) max_root_fields: Option<u32>,
-
-    /// If set, requests with operations with more aliases than this maximum
-    /// are rejected with a HTTP 400 Bad Request response and GraphQL error with
-    /// `"extensions": {"code": "MAX_ALIASES_LIMIT"}`
-    pub(crate) max_aliases: Option<u32>,
-
-    /// If set to true (which is the default is dev mode),
-    /// requests that exceed a `max_*` limit are *not* rejected.
-    /// Instead they are executed normally, and a warning is logged.
-    pub(crate) warn_only: bool,
-
-    /// Limit recursion in the GraphQL parser to protect against stack overflow.
-    /// default: 500
-    pub(crate) parser_max_recursion: usize,
-
-    /// Limit the number of tokens the GraphQL parser processes before aborting.
-    pub(crate) parser_max_tokens: usize,
-
-    /// Limit the size of incoming HTTP requests read from the network,
-    /// to protect against running out of memory. Default: 2000000 (2 MB)
-    pub(crate) http_max_request_bytes: usize,
-}
-
-impl Default for Limits {
-    fn default() -> Self {
-        Self {
-            // These limits are opt-in
-            max_depth: None,
-            max_height: None,
-            max_root_fields: None,
-            max_aliases: None,
-            warn_only: false,
-            http_max_request_bytes: 2_000_000,
-            parser_max_tokens: 15_000,
-
-            // This is `apollo-parser`’s default, which protects against stack overflow
-            // but is still very high for "reasonable" queries.
-            // https://github.com/apollographql/apollo-rs/blob/apollo-parser%400.7.3/crates/apollo-parser/src/parser/mod.rs#L93-L104
-            parser_max_recursion: 500,
-        }
     }
 }
 
@@ -930,7 +884,7 @@ impl Default for Apq {
 }
 
 /// Query planning cache configuration
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct QueryPlanning {
     /// Cache configuration
@@ -939,7 +893,6 @@ pub(crate) struct QueryPlanning {
     /// a list of the most used queries (from the in memory cache)
     /// Configures the number of queries warmed up. Defaults to 1/3 of
     /// the in memory cache
-    #[serde(default)]
     pub(crate) warmed_up_queries: Option<usize>,
 
     /// Sets a limit to the number of generated query plans.
@@ -968,6 +921,45 @@ pub(crate) struct QueryPlanning {
     /// If cache warm up is configured, this will allow the router to keep a query plan created with
     /// the old schema, if it determines that the schema update does not affect the corresponding query
     pub(crate) experimental_reuse_query_plans: bool,
+
+    /// Set the size of a pool of workers to enable query planning parallelism.
+    /// Default: 1.
+    pub(crate) experimental_parallelism: AvailableParallelism,
+
+    /// Activates introspection response caching
+    /// Historically, the Router has executed introspection queries in the query planner, and cached their
+    /// response in its cache because they were expensive. This will change soon as introspection will be
+    /// removed from the query planner. In the meantime, since storing introspection responses can fill up
+    /// the cache, this option can be used to deactivate it.
+    /// Default: true
+    pub(crate) legacy_introspection_caching: bool,
+}
+
+impl Default for QueryPlanning {
+    fn default() -> Self {
+        Self {
+            cache: QueryPlanCache::default(),
+            warmed_up_queries: Default::default(),
+            experimental_plans_limit: Default::default(),
+            experimental_parallelism: Default::default(),
+            experimental_paths_limit: Default::default(),
+            experimental_reuse_query_plans: Default::default(),
+            legacy_introspection_caching: default_legacy_introspection_caching(),
+        }
+    }
+}
+
+const fn default_legacy_introspection_caching() -> bool {
+    true
+}
+
+impl QueryPlanning {
+    pub(crate) fn experimental_query_planner_parallelism(&self) -> io::Result<NonZeroUsize> {
+        match self.experimental_parallelism {
+            AvailableParallelism::Auto(Auto::Auto) => std::thread::available_parallelism(),
+            AvailableParallelism::Fixed(n) => Ok(n),
+        }
+    }
 }
 
 /// Cache configuration
@@ -1019,11 +1011,19 @@ pub(crate) struct QueryPlanRedisCache {
     #[serde(default = "default_reset_ttl")]
     /// When a TTL is set on a key, reset it when reading the data from that key
     pub(crate) reset_ttl: bool,
+
+    #[serde(default = "default_query_planner_cache_pool_size")]
+    /// The size of the Redis connection pool
+    pub(crate) pool_size: u32,
 }
 
 fn default_query_plan_cache_ttl() -> Duration {
     // Default TTL set to 30 days
     Duration::from_secs(86400 * 30)
+}
+
+fn default_query_planner_cache_pool_size() -> u32 {
+    1
 }
 
 /// Cache configuration
@@ -1097,10 +1097,18 @@ pub(crate) struct RedisCache {
     #[serde(default = "default_reset_ttl")]
     /// When a TTL is set on a key, reset it when reading the data from that key
     pub(crate) reset_ttl: bool,
+
+    #[serde(default = "default_pool_size")]
+    /// The size of the Redis connection pool
+    pub(crate) pool_size: u32,
 }
 
 fn default_required_to_start() -> bool {
     false
+}
+
+fn default_pool_size() -> u32 {
+    1
 }
 
 impl From<QueryPlanRedisCache> for RedisCache {
@@ -1115,6 +1123,7 @@ impl From<QueryPlanRedisCache> for RedisCache {
             tls: value.tls,
             required_to_start: value.required_to_start,
             reset_ttl: value.reset_ttl,
+            pool_size: value.pool_size,
         }
     }
 }
@@ -1570,4 +1579,42 @@ pub(crate) struct Batching {
 
     /// Batching mode
     pub(crate) mode: BatchingMode,
+
+    /// Subgraph options for batching
+    pub(crate) subgraph: Option<SubgraphConfiguration<CommonBatchingConfig>>,
+}
+
+/// Common options for configuring subgraph batching
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+pub(crate) struct CommonBatchingConfig {
+    /// Whether this batching config should be enabled
+    pub(crate) enabled: bool,
+}
+
+impl Batching {
+    // Check if we should enable batching for a particular subgraph (service_name)
+    pub(crate) fn batch_include(&self, service_name: &str) -> bool {
+        match &self.subgraph {
+            Some(subgraph_batching_config) => {
+                // Override by checking if all is enabled
+                if subgraph_batching_config.all.enabled {
+                    // If it is, require:
+                    // - no subgraph entry OR
+                    // - an enabled subgraph entry
+                    subgraph_batching_config
+                        .subgraphs
+                        .get(service_name)
+                        .map_or(true, |x| x.enabled)
+                } else {
+                    // If it isn't, require:
+                    // - an enabled subgraph entry
+                    subgraph_batching_config
+                        .subgraphs
+                        .get(service_name)
+                        .is_some_and(|x| x.enabled)
+                }
+            }
+            None => false,
+        }
+    }
 }

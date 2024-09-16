@@ -6,15 +6,14 @@ use std::hash::Hasher;
 use apollo_compiler::ast;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::FieldDefinition;
-use apollo_compiler::ast::Name;
 use apollo_compiler::executable;
+use apollo_compiler::parser::Parser;
 use apollo_compiler::schema;
 use apollo_compiler::schema::DirectiveList;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::NodeStr;
-use apollo_compiler::Parser;
 use sha2::Digest;
 use sha2::Sha256;
 use tower::BoxError;
@@ -33,11 +32,16 @@ pub(crate) const JOIN_TYPE_DIRECTIVE_NAME: &str = "join__type";
 /// then the hash will stay the same
 pub(crate) struct QueryHashVisitor<'a> {
     schema: &'a schema::Schema,
+    // TODO: remove once introspection has been moved out of query planning
+    // For now, introspection is stiull handled by the planner, so when an
+    // introspection query is hashed, it should take the whole schema into account
+    schema_str: &'a str,
     hasher: Sha256,
-    fragments: HashMap<&'a ast::Name, &'a Node<executable::Fragment>>,
+    fragments: HashMap<&'a Name, &'a Node<executable::Fragment>>,
     hashed_types: HashSet<String>,
     // name, field
     hashed_fields: HashSet<(String, String)>,
+    seen_introspection: bool,
     join_field_directive_name: Option<String>,
     join_type_directive_name: Option<String>,
 }
@@ -45,14 +49,17 @@ pub(crate) struct QueryHashVisitor<'a> {
 impl<'a> QueryHashVisitor<'a> {
     pub(crate) fn new(
         schema: &'a schema::Schema,
+        schema_str: &'a str,
         executable: &'a executable::ExecutableDocument,
     ) -> Self {
         Self {
             schema,
+            schema_str,
             hasher: Sha256::new(),
             fragments: executable.fragments.iter().collect(),
             hashed_types: HashSet::new(),
             hashed_fields: HashSet::new(),
+            seen_introspection: false,
             // should we just return an error if we do not find those directives?
             join_field_directive_name: Schema::directive_name(
                 schema,
@@ -71,11 +78,13 @@ impl<'a> QueryHashVisitor<'a> {
 
     pub(crate) fn hash_query(
         schema: &'a schema::Schema,
+        schema_str: &'a str,
         executable: &'a executable::ExecutableDocument,
         operation_name: Option<&str>,
     ) -> Result<Vec<u8>, BoxError> {
-        let mut visitor = QueryHashVisitor::new(schema, executable);
+        let mut visitor = QueryHashVisitor::new(schema, schema_str, executable);
         traverse::document(&mut visitor, executable, operation_name)?;
+        executable.to_string().hash(&mut visitor);
         Ok(visitor.finish())
     }
 
@@ -309,7 +318,7 @@ impl<'a> QueryHashVisitor<'a> {
                     .argument_by_name("requires")
                     .and_then(|arg| arg.as_str())
                 {
-                    if let Ok(parent_type) = Name::new(NodeStr::new(parent_type)) {
+                    if let Ok(parent_type) = Name::new(parent_type) {
                         let mut parser = Parser::new();
 
                         if let Ok(field_set) = parser.parse_field_set(
@@ -357,6 +366,12 @@ impl<'a> Visitor for QueryHashVisitor<'a> {
         field_def: &ast::FieldDefinition,
         node: &executable::Field,
     ) -> Result<(), BoxError> {
+        if !self.seen_introspection && (field_def.name == "__schema" || field_def.name == "__type")
+        {
+            self.seen_introspection = true;
+            self.schema_str.hash(self);
+        }
+
         self.hash_field(
             parent_type.to_string(),
             field_def.name.as_str().to_string(),
@@ -411,9 +426,37 @@ mod tests {
     use super::QueryHashVisitor;
     use crate::spec::query::traverse;
 
+    #[derive(Debug)]
+    struct HashComparator {
+        from_visitor: String,
+        from_hash_query: String,
+    }
+
+    impl From<(String, String)> for HashComparator {
+        fn from(value: (String, String)) -> Self {
+            Self {
+                from_visitor: value.0,
+                from_hash_query: value.1,
+            }
+        }
+    }
+
+    // The non equality check is not the same
+    // as one would expect from PartialEq.
+    // This is why HashComparator doesn't implement it.
+    impl HashComparator {
+        fn equals(&self, other: &Self) -> bool {
+            self.from_visitor == other.from_visitor && self.from_hash_query == other.from_hash_query
+        }
+        fn doesnt_match(&self, other: &Self) -> bool {
+            // This is intentional, we check to prevent BOTH hashes from being equal
+            self.from_visitor != other.from_visitor && self.from_hash_query != other.from_hash_query
+        }
+    }
+
     #[track_caller]
-    fn hash(schema: &str, query: &str) -> String {
-        let schema = Schema::parse(schema, "schema.graphql")
+    fn hash(schema_str: &str, query: &str) -> HashComparator {
+        let schema = Schema::parse(schema_str, "schema.graphql")
             .unwrap()
             .validate()
             .unwrap();
@@ -424,22 +467,26 @@ mod tests {
             .unwrap()
             .validate(&schema)
             .unwrap();
-        let mut visitor = QueryHashVisitor::new(&schema, &exec);
+        let mut visitor = QueryHashVisitor::new(&schema, schema_str, &exec);
         traverse::document(&mut visitor, &exec, None).unwrap();
 
-        hex::encode(visitor.finish())
+        (
+            hex::encode(visitor.finish()),
+            hex::encode(QueryHashVisitor::hash_query(&schema, schema_str, &exec, None).unwrap()),
+        )
+            .into()
     }
 
     #[track_caller]
-    fn hash_subgraph_query(schema: &str, query: &str) -> String {
-        let schema = Valid::assume_valid(Schema::parse(schema, "schema.graphql").unwrap());
+    fn hash_subgraph_query(schema_str: &str, query: &str) -> String {
+        let schema = Valid::assume_valid(Schema::parse(schema_str, "schema.graphql").unwrap());
         let doc = Document::parse(query, "query.graphql").unwrap();
         let exec = doc
             .to_executable(&schema)
             .unwrap()
             .validate(&schema)
             .unwrap();
-        let mut visitor = QueryHashVisitor::new(&schema, &exec);
+        let mut visitor = QueryHashVisitor::new(&schema, schema_str, &exec);
         traverse::document(&mut visitor, &exec, None).unwrap();
 
         hex::encode(visitor.finish())
@@ -479,20 +526,18 @@ mod tests {
         }
         "#;
         let query = "query { me { name } }";
-        assert_eq!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query).equals(&hash(schema2, query)));
 
         // id is nullable in 1, non nullable in 2
         let query = "query { me { id name } }";
-        assert_ne!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
 
         // simple normalization
         let query = "query {  moi: me { name   } }";
-        assert_eq!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query).equals(&hash(schema2, query)));
 
-        assert_ne!(
-            hash(schema1, "query { me { id name } }"),
-            hash(schema1, "query { me { name id } }")
-        );
+        assert!(hash(schema1, "query { me { id name } }")
+            .doesnt_match(&hash(schema1, "query { me { name id } }")));
     }
 
     #[test]
@@ -532,13 +577,13 @@ mod tests {
         }
         "#;
         let query = "query { me { name } }";
-        assert_eq!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query).equals(&hash(schema2, query)));
 
         let query = "query { me { id name } }";
-        assert_ne!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
 
         let query = "query { customer { id } }";
-        assert_ne!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
     }
 
     #[test]
@@ -586,13 +631,13 @@ mod tests {
         "#;
 
         let query = "query { me { id name } }";
-        assert_eq!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query).equals(&hash(schema2, query)));
 
         let query = "query { customer { id } }";
-        assert_ne!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
 
         let query = "query { customer { ... on User { name } } }";
-        assert_ne!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
     }
 
     #[test]
@@ -614,19 +659,19 @@ mod tests {
         "#;
 
         let query = "query { a(i: 0) }";
-        assert_ne!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
 
         let query = "query { b }";
-        assert_ne!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
 
         let query = "query { b(i: 0)}";
-        assert_ne!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
 
         let query = "query { c(j: 0)}";
-        assert_ne!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
 
         let query = "query { c(i:0, j: 0)}";
-        assert_ne!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
     }
 
     #[test]
@@ -817,10 +862,10 @@ mod tests {
         }
         "#;
         let query = "query { me { name } }";
-        assert_ne!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
 
         let query = "query { itf { name } }";
-        assert_ne!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
     }
 
     #[test]
@@ -945,9 +990,95 @@ mod tests {
         }
         "#;
         let query = "query { me { username } }";
-        assert_ne!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
 
         let query = "query { me { a } }";
-        assert_ne!(hash(schema1, query), hash(schema2, query));
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
+    }
+
+    #[test]
+    fn introspection() {
+        let schema1: &str = r#"
+        schema {
+          query: Query
+        }
+    
+        type Query {
+          me: User
+          customer: User
+        }
+    
+        type User {
+          id: ID
+          name: String
+        }
+        "#;
+
+        let schema2: &str = r#"
+        schema {
+            query: Query
+        }
+    
+        type Query {
+          me: NotUser
+        }
+    
+    
+        type NotUser {
+          id: ID!
+          name: String
+        }
+        "#;
+
+        let query = "{ __schema { types { name } } }";
+
+        assert!(hash(schema1, query).doesnt_match(&hash(schema2, query)));
+    }
+
+    #[test]
+    fn fields_with_different_arguments_have_different_hashes() {
+        let schema: &str = r#"
+        schema {
+          query: Query
+        }
+    
+        type Query {
+          test(arg: Int): String
+        }
+        "#;
+
+        let query_one = "query { a: test(arg: 1) b: test(arg: 2) }";
+        let query_two = "query { a: test(arg: 1) b: test(arg: 3) }";
+
+        // This assertion tests an internal hash function that isn't directly
+        // used for the query hash, and we'll need to make it pass to rely
+        // solely on the internal function again.
+        //
+        // assert!(hash(schema, query_one).doesnt_match(&hash(schema,
+        // query_two)));
+        assert!(hash(schema, query_one).from_hash_query != hash(schema, query_two).from_hash_query);
+    }
+
+    #[test]
+    fn fields_with_different_aliases_have_different_hashes() {
+        let schema: &str = r#"
+        schema {
+          query: Query
+        }
+    
+        type Query {
+          test(arg: Int): String
+        }
+        "#;
+
+        let query_one = "query { a: test }";
+        let query_two = "query { b: test }";
+
+        // This assertion tests an internal hash function that isn't directly
+        // used for the query hash, and we'll need to make it pass to rely
+        // solely on the internal function again.
+        //
+        // assert!(hash(schema, query_one).doesnt_match(&hash(schema, query_two)));
+        assert!(hash(schema, query_one).from_hash_query != hash(schema, query_two).from_hash_query);
     }
 }

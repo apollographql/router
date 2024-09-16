@@ -1,0 +1,147 @@
+telemetry:
+  apollo:
+    client_name_header: name_header
+    client_version_header: version_header
+  instrumentation:
+    events:
+      router:
+        # Standard events
+        request:
+          level: info
+          condition:
+            eq:
+            - request_header: x-log-request
+            - "log"
+        response:
+          level: info
+          condition:
+            any:
+            - eq:
+              - on_graphql_error: true
+              - true
+            - eq:
+              - response_header: x-log-response
+              - "log"
+        error: info
+
+        # Custom events
+        my.disabled_request_event:
+          message: "my event message"
+          level: off
+          on: request
+          attributes:
+            http.request.body.size: true
+          # Only log when the x-log-request header is `log` 
+          condition:
+            eq:
+              - "log"
+              - request_header: "x-log-request"
+        my.request_event:
+          message: "my event message"
+          level: info
+          on: request
+          attributes:
+            http.request.body.size: true
+          # Only log when the x-log-request header is `log` 
+          condition:
+            eq:
+              - "log"
+              - request_header: "x-log-request"
+        my.response_event:
+          message: "my response event message"
+          level: info
+          on: response
+          attributes:
+            http.response.body.size: true
+          # Only log when the x-log-request header is `log` 
+          condition:
+            eq:
+              - "log"
+              - response_header: "x-log-request"
+      supergraph:
+        # Standard events
+        request:
+          level: info
+          condition:
+            eq:
+            - request_header: x-log-request
+            - "log"
+        response:
+          level: info
+          condition:
+            eq:
+            - on_graphql_error: true
+            - true
+        error: info
+
+        # Custom events
+        my.disabled_request.event:
+          message: "my event message"
+          level: off
+          on: request
+          # Only log when the x-log-request header is `log` 
+          condition:
+            eq:
+              - "log"
+              - request_header: "x-log-request"
+        my.request.event:
+          message: "my event message"
+          level: info
+          on: request
+          # Only log when the x-log-request header is `log` 
+          condition:
+            eq:
+              - "log"
+              - request_header: "x-log-request"
+        my.response_event:
+          message: "my response event message"
+          level: warn
+          on: response
+          condition:
+            any:
+            - eq:
+              - on_graphql_error: true
+              - true
+            - eq:
+              - response_header: x-log-response
+              - "log"
+      subgraph:
+        # Standard events
+        request:
+          level: info
+          condition:
+            eq:
+            - subgraph_request_header: x-log-request
+            - "log"
+        response:
+          level: warn
+          condition:
+            all:
+            - eq:
+              - subgraph_response_header: x-log-response
+              - "log"
+            - eq:
+              - subgraph_name: true
+              - "subgraph"
+        error: error
+
+        # Custom events
+        my.disabled_request.event:
+          message: "my event message"
+          level: off
+          on: request
+        my.request.event:
+          message: "my event message"
+          level: info
+          on: request
+        my.response.event:
+          message: "my response event message"
+          level: error
+          on: response
+          attributes:
+            subgraph.name: true
+            response_status:
+              subgraph_response_status: code
+            "my.custom.attribute":
+              subgraph_response_data: "$.*"
+              default: "missing"

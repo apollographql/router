@@ -1,0 +1,65 @@
+---
+source: apollo-federation/tests/composition_tests.rs
+expression: print_sdl(supergraph.schema.schema())
+---
+"""A cool schema"""
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
+  query: Query
+}
+
+"""The foo directive description"""
+directive @foo(url: String) on FIELD
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, overrideLabel: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on INTERFACE | OBJECT
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on ENUM | INPUT_OBJECT | INTERFACE | OBJECT | SCALAR | UNION
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+"""An enum"""
+enum E @join__type(graph: SUBGRAPH2) {
+  """The A value"""
+  A @join__enumValue(graph: SUBGRAPH2)
+  """The B value"""
+  B @join__enumValue(graph: SUBGRAPH2)
+}
+
+scalar Import @join__type(graph: SUBGRAPH1) @join__type(graph: SUBGRAPH2)
+
+"""
+Available queries
+Not much yet
+"""
+type Query @join__type(graph: SUBGRAPH1) @join__type(graph: SUBGRAPH2) {
+  """Returns tea"""
+  t(
+    """An argument that is very important"""
+    x: String!,
+  ): String @join__field(graph: SUBGRAPH1)
+}
+
+scalar join__FieldSet
+
+enum join__Graph {
+  SUBGRAPH1 @join__graph(name: "Subgraph1", url: "https://subgraph1")
+  SUBGRAPH2 @join__graph(name: "Subgraph2", url: "https://subgraph2")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  """
+  SECURITY features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """EXECUTION features provide metadata necessary for operation execution."""
+  EXECUTION
+}

@@ -6,53 +6,16 @@ use tower::ServiceExt;
 
 use crate::graphql;
 use crate::plugin::test::MockSubgraph;
+use crate::plugin::test::MockSubgraphService;
+use crate::plugins::authorization::CacheKeyMetadata;
 use crate::services::router;
+use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::Context;
 use crate::MockedSubgraphs;
 use crate::TestHarness;
 
-const SCHEMA: &str = r#"schema
-    @core(feature: "https://specs.apollo.dev/core/v0.1")
-    @core(feature: "https://specs.apollo.dev/join/v0.1")
-    @core(feature: "https://specs.apollo.dev/inaccessible/v0.1")
-     {
-    query: Query
-}
-directive @core(feature: String!) repeatable on SCHEMA
-directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet) on FIELD_DEFINITION
-directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
-directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
-directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
-scalar join__FieldSet
-enum join__Graph {
-   USER @join__graph(name: "user", url: "http://localhost:4001/graphql")
-   ORGA @join__graph(name: "orga", url: "http://localhost:4002/graphql")
-}
-type Query {
-   currentUser: User @join__field(graph: USER)
-   orga(id: ID): Organization @join__field(graph: ORGA)
-}
-type User
-@join__owner(graph: USER)
-@join__type(graph: ORGA, key: "id")
-@join__type(graph: USER, key: "id"){
-   id: ID!
-   name: String
-   phone: String
-   activeOrganization: Organization
-}
-type Organization
-@join__owner(graph: ORGA)
-@join__type(graph: ORGA, key: "id")
-@join__type(graph: USER, key: "id") {
-   id: ID
-   creatorUser: User
-   name: String
-   nonNullId: ID!
-   suborga: [Organization]
-}"#;
+const SCHEMA: &str = include_str!("../../testdata/orga_supergraph.graphql");
 
 #[tokio::test]
 async fn authenticated_request() {
@@ -1012,6 +975,145 @@ async fn errors_in_extensions() {
         .await
         .unwrap()
         .unwrap();
+
+    insta::assert_json_snapshot!(response);
+}
+
+const CACHE_KEY_SCHEMA: &str = r#"schema
+@link(url: "https://specs.apollo.dev/link/v1.0")
+@link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+@link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY)
+@link(url: "https://specs.apollo.dev/requiresScopes/v0.1", for: SECURITY)
+@link(url: "https://specs.apollo.dev/policy/v0.1", for: SECURITY)
+
+{
+query: Query
+}
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+scalar link__Import
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+scalar federation__Scope
+directive @requiresScopes(scopes: [[federation__Scope!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+directive @policy(policies: [[String!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+
+scalar join__FieldSet
+enum join__Graph {
+ USER @join__graph(name: "user", url: "http://localhost:4001/graphql")
+ ORGA @join__graph(name: "orga", url: "http://localhost:4002/graphql")
+}
+
+type Query
+@join__type(graph: ORGA)
+@join__type(graph: USER){
+ currentUser: User @join__field(graph: USER)
+ orga(id: ID): Organization @join__field(graph: ORGA)
+}
+type User
+@join__type(graph: ORGA, key: "id")
+@join__type(graph: USER, key: "id"){
+ id: ID! @requiresScopes(scopes: [["id"]])
+ name: String @policy(policies: [["name"]])
+ phone: String @authenticated
+ activeOrganization: Organization
+}
+type Organization
+@join__type(graph: ORGA, key: "id")
+@join__type(graph: USER, key: "id") {
+ id: ID @authenticated
+ creatorUser: User
+ name: String
+ nonNullId: ID!
+ suborga: [Organization]
+}"#;
+
+#[tokio::test]
+async fn cache_key_metadata() {
+    let query = "query { currentUser { id name phone } }";
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": {
+                "all": true
+            },
+            "authorization": {
+                "directives": {
+                    "enabled": true
+                }
+            }
+        }))
+        .unwrap()
+        .schema(CACHE_KEY_SCHEMA)
+        .subgraph_hook(|_name, _service| {
+            let mut mock_subgraph_service = MockSubgraphService::new();
+            mock_subgraph_service.expect_call().times(1).returning(
+                move |req: subgraph::Request| {
+                    assert_eq!(
+                        *req.authorization,
+                        CacheKeyMetadata {
+                            is_authenticated: true,
+                            scopes: vec!["id".to_string()],
+                            policies: vec![]
+                        }
+                    );
+
+                    Ok(subgraph::Response::fake_builder()
+                        .context(req.context)
+                        .data(serde_json::json! {{
+
+                                "currentUser": {
+                                    "id": 1,
+                                    "name": "A", // This will be filtered because we don't have the policy
+                                    "phone": "1234"
+                                }
+
+                        }})
+                        .build())
+                },
+            );
+            mock_subgraph_service.boxed()
+        })
+        .build_router()
+        .await
+        .unwrap();
+
+    let context = Context::new();
+    context
+        .insert(
+            "apollo_authentication::JWT::claims",
+            json! {{ "scope": "id test" }},
+        )
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(context)
+        .build()
+        .unwrap();
+    let mut response = service
+        .oneshot(router::Request::try_from(request).unwrap())
+        .await
+        .unwrap();
+    let response = response.next_response().await.unwrap().unwrap();
+    let response: serde_json::Value = serde_json::from_slice(&response).unwrap();
 
     insta::assert_json_snapshot!(response);
 }

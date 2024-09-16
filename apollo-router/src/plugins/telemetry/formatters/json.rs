@@ -1,16 +1,18 @@
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
 use std::io;
 
 use opentelemetry::sdk::Resource;
 use opentelemetry::Array;
+use opentelemetry::Key;
+use opentelemetry::OrderMap;
 use opentelemetry::Value;
 use serde::ser::SerializeMap;
 use serde::ser::Serializer as _;
 use serde_json::Serializer;
 use tracing_core::Event;
 use tracing_core::Subscriber;
-use tracing_opentelemetry::OtelData;
 use tracing_serde::AsSerde;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
@@ -20,9 +22,14 @@ use super::get_trace_and_span_id;
 use super::EventFormatter;
 use super::APOLLO_PRIVATE_PREFIX;
 use super::EXCLUDED_ATTRIBUTES;
+use crate::plugins::telemetry::config::AttributeValue;
+use crate::plugins::telemetry::config::TraceIdFormat;
+use crate::plugins::telemetry::config_new::logging::DisplayTraceIdFormat;
 use crate::plugins::telemetry::config_new::logging::JsonFormat;
+use crate::plugins::telemetry::dynamic_attribute::EventAttributes;
 use crate::plugins::telemetry::dynamic_attribute::LogAttributes;
 use crate::plugins::telemetry::formatters::to_list;
+use crate::plugins::telemetry::otel::OtelData;
 
 #[derive(Debug)]
 pub(crate) struct Json {
@@ -224,16 +231,65 @@ where
 
             if let Some(ref span) = current_span {
                 if let Some((trace_id, span_id)) = get_trace_and_span_id(span) {
-                    if self.config.display_trace_id {
+                    let trace_id = match self.config.display_trace_id {
+                        DisplayTraceIdFormat::Bool(true)
+                        | DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::Hexadecimal)
+                        | DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::OpenTelemetry) => {
+                            Some(TraceIdFormat::Hexadecimal.format(trace_id))
+                        }
+                        DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::Decimal) => {
+                            Some(TraceIdFormat::Decimal.format(trace_id))
+                        }
+                        DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::Datadog) => {
+                            Some(TraceIdFormat::Datadog.format(trace_id))
+                        }
+                        DisplayTraceIdFormat::TraceIdFormat(TraceIdFormat::Uuid) => {
+                            Some(TraceIdFormat::Uuid.format(trace_id))
+                        }
+                        DisplayTraceIdFormat::Bool(false) => None,
+                    };
+                    if let Some(trace_id) = trace_id {
                         serializer
-                            .serialize_entry("trace_id", &trace_id.to_string())
+                            .serialize_entry("trace_id", &trace_id)
                             .unwrap_or(());
                     }
-                    if self.config.display_trace_id {
+                    if self.config.display_span_id {
                         serializer
                             .serialize_entry("span_id", &span_id.to_string())
                             .unwrap_or(());
                     }
+                };
+                let event_attributes = {
+                    let mut extensions = span.extensions_mut();
+                    let otel_data = extensions.get_mut::<OtelData>();
+                    let attrs = otel_data.and_then(|od| od.event_attributes.take());
+                    match attrs {
+                        Some(attrs) => Some(attrs),
+                        None => {
+                            let event_attributes = extensions.get_mut::<EventAttributes>();
+                            event_attributes.map(|event_attributes| {
+                                OrderMap::from_iter(
+                                    event_attributes
+                                        .take()
+                                        .into_iter()
+                                        .map(|kv| (kv.key, kv.value)),
+                                )
+                            })
+                        }
+                    }
+                };
+                if let Some(event_attributes) = event_attributes {
+                    for (key, value) in event_attributes {
+                        serializer.serialize_entry(key.as_str(), &AttributeValue::from(value))?;
+                    }
+                }
+            }
+
+            if !self.config.span_attributes.is_empty() {
+                for (key, value) in
+                    extract_span_attributes(ctx.lookup_current(), &self.config.span_attributes)
+                {
+                    serializer.serialize_entry(key.as_str(), &AttributeValue::from(value))?;
                 }
             }
 
@@ -272,7 +328,6 @@ where
                     serializer.serialize_entry("dd.trace_id", &dd_trace_id)?;
                 }
             }
-
             if self.config.display_span_list && current_span.is_some() {
                 serializer.serialize_entry(
                     "spans",
@@ -324,6 +379,66 @@ fn extract_dd_trace_id<'a, 'b, T: LookupSpan<'a>>(span: &SpanRef<'a, T>) -> Opti
     dd_trace_id
 }
 
+fn extract_span_attributes<'a, 'b, Span>(
+    current: Option<SpanRef<'a, Span>>,
+    include_attributes: &HashSet<String>,
+) -> HashMap<Key, Value>
+where
+    Span: for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>,
+{
+    let mut attributes = HashMap::new();
+    if let Some(leaf_span) = &current {
+        for span in leaf_span.scope().from_root() {
+            let ext = span.extensions();
+
+            // Get otel attributes
+            {
+                let otel_attributes = ext
+                    .get::<OtelData>()
+                    .and_then(|otel_data| otel_data.builder.attributes.as_ref());
+                if let Some(otel_attributes) = otel_attributes {
+                    attributes.extend(
+                        otel_attributes
+                            .iter()
+                            .filter(|(key, _)| {
+                                let key_name = key.as_str();
+                                !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
+                                    && include_attributes.contains(key_name)
+                            })
+                            .map(|(key, val)| (key.clone(), val.clone())),
+                    );
+                }
+            }
+            // Get custom dynamic attributes
+            {
+                let custom_attributes = ext.get::<LogAttributes>().map(|attrs| attrs.attributes());
+                if let Some(custom_attributes) = custom_attributes {
+                    #[cfg(test)]
+                    let custom_attributes: Vec<&opentelemetry::KeyValue> = {
+                        let mut my_custom_attributes: Vec<&opentelemetry::KeyValue> =
+                            custom_attributes.iter().collect();
+                        my_custom_attributes.sort_by_key(|kv| &kv.key);
+                        my_custom_attributes
+                    };
+                    #[allow(clippy::into_iter_on_ref)]
+                    attributes.extend(
+                        custom_attributes
+                            .into_iter()
+                            .filter(|kv| {
+                                let key_name = kv.key.as_str();
+                                !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
+                                    && include_attributes.contains(key_name)
+                            })
+                            .map(|kv| (kv.key.clone(), kv.value.clone())),
+                    );
+                }
+            }
+        }
+    }
+
+    attributes
+}
+
 struct WriteAdaptor<'a> {
     fmt_write: &'a mut dyn fmt::Write,
 }
@@ -368,9 +483,10 @@ mod test {
     use tracing_subscriber::Layer;
     use tracing_subscriber::Registry;
 
-    use crate::plugins::telemetry::dynamic_attribute::DynAttribute;
     use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
+    use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
     use crate::plugins::telemetry::formatters::json::extract_dd_trace_id;
+    use crate::plugins::telemetry::otel;
 
     struct RequiresDatadogLayer;
     impl<S> Layer<S> for RequiresDatadogLayer
@@ -393,7 +509,7 @@ mod test {
         subscriber::with_default(
             Registry::default()
                 .with(RequiresDatadogLayer)
-                .with(tracing_opentelemetry::layer()),
+                .with(otel::layer().force_sampling()),
             || {
                 let root_span = tracing::info_span!("root", dd.trace_id = "1234");
                 let _root_span = root_span.enter();
@@ -408,10 +524,10 @@ mod test {
             Registry::default()
                 .with(RequiresDatadogLayer)
                 .with(DynAttributeLayer)
-                .with(tracing_opentelemetry::layer()),
+                .with(otel::layer().force_sampling()),
             || {
                 let root_span = tracing::info_span!("root");
-                root_span.set_dyn_attribute("dd.trace_id".into(), "1234".into());
+                root_span.set_span_dyn_attribute("dd.trace_id".into(), "1234".into());
                 let _root_span = root_span.enter();
                 tracing::info!("test");
             },
@@ -425,7 +541,7 @@ mod test {
             Registry::default()
                 .with(RequiresDatadogLayer)
                 .with(DynAttributeLayer)
-                .with(tracing_opentelemetry::layer()),
+                .with(otel::layer().force_sampling()),
             || {
                 let root_span = tracing::info_span!("root");
                 let _root_span = root_span.enter();

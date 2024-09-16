@@ -5,95 +5,62 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 
-use apollo_compiler::ast;
 use apollo_compiler::schema::Implementers;
-use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::validation::WithErrors;
+use apollo_compiler::Name;
+use apollo_federation::schema::ValidFederationSchema;
+use apollo_federation::ApiSchemaOptions;
+use apollo_federation::Supergraph;
 use http::Uri;
 use semver::Version;
 use semver::VersionReq;
 use sha2::Digest;
 use sha2::Sha256;
 
-use crate::configuration::GraphQLValidationMode;
 use crate::error::ParseErrors;
 use crate::error::SchemaError;
-use crate::error::ValidationErrors;
 use crate::query_planner::OperationKind;
 use crate::Configuration;
 
 /// A GraphQL schema.
-#[derive(Debug)]
 pub(crate) struct Schema {
     pub(crate) raw_sdl: Arc<String>,
-    pub(crate) definitions: Valid<apollo_compiler::Schema>,
-    /// Stored for comparison with the validation errors from query planning.
-    diagnostics: Option<DiagnosticList>,
+    supergraph: Supergraph,
     subgraphs: HashMap<String, Uri>,
-    pub(crate) implementers_map: HashMap<ast::Name, Implementers>,
-    api_schema: Option<Box<Schema>>,
+    pub(crate) implementers_map: apollo_compiler::collections::HashMap<Name, Implementers>,
+    api_schema: ApiSchema,
+    pub(crate) schema_id: Arc<String>,
 }
 
+/// Wrapper type to distinguish from `Schema::definitions` for the supergraph schema
+#[derive(Debug)]
+pub(crate) struct ApiSchema(pub(crate) ValidFederationSchema);
+
 impl Schema {
-    #[cfg(test)]
-    pub(crate) fn parse_test(s: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
-        let schema = Self::parse(s, configuration)?;
-        let api_schema = Self::parse(
-            &schema
-                .create_api_schema(configuration)
-                // Avoid adding an error branch that's only used in tests--stick the error
-                // string in an existing generic one
-                .map_err(|err| {
-                    SchemaError::Api(format!(
-                        "The supergraph schema failed to produce a valid API schema: {err}"
-                    ))
-                })?,
-            configuration,
-        )?;
-        Ok(schema.with_api_schema(api_schema))
+    pub(crate) fn parse(raw_sdl: &str, config: &Configuration) -> Result<Self, SchemaError> {
+        Self::parse_arc(raw_sdl.to_owned().into(), config)
     }
 
-    pub(crate) fn parse_ast(sdl: &str) -> Result<ast::Document, SchemaError> {
-        let mut parser = apollo_compiler::Parser::new();
-        let result = parser.parse_ast(sdl, "schema.graphql");
+    pub(crate) fn parse_arc(
+        raw_sdl: Arc<String>,
+        config: &Configuration,
+    ) -> Result<Self, SchemaError> {
+        let start = Instant::now();
+        let mut parser = apollo_compiler::parser::Parser::new();
+        let result = parser.parse_ast(raw_sdl.as_ref(), "schema.graphql");
 
         // Trace log recursion limit data
         let recursion_limit = parser.recursion_reached();
         tracing::trace!(?recursion_limit, "recursion limit data");
 
-        result.map_err(|invalid| {
-            SchemaError::Parse(ParseErrors {
-                errors: invalid.errors,
-            })
-        })
-    }
-
-    pub(crate) fn parse(sdl: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
-        let start = Instant::now();
-        let ast = Self::parse_ast(sdl)?;
-        let validate =
-            configuration.experimental_graphql_validation_mode != GraphQLValidationMode::Legacy;
-        // Stretch the meaning of "assume valid" to "we’ll check later that it’s valid"
-        let (definitions, diagnostics) = if validate {
-            match ast.to_schema_validate() {
-                Ok(schema) => (schema, None),
-                Err(WithErrors { partial, errors }) => (Valid::assume_valid(partial), Some(errors)),
-            }
-        } else {
-            match ast.to_schema() {
-                Ok(schema) => (Valid::assume_valid(schema), None),
-                Err(WithErrors { partial, .. }) => (Valid::assume_valid(partial), None),
-            }
-        };
-
-        // Only error out if new validation is used: with `Both`, we take the legacy
-        // validation as authoritative and only use the new result for comparison
-        if configuration.experimental_graphql_validation_mode == GraphQLValidationMode::New {
-            if let Some(errors) = diagnostics {
-                return Err(SchemaError::Validate(ValidationErrors { errors }));
-            }
-        }
+        let definitions = result
+            .map_err(|invalid| {
+                SchemaError::Parse(ParseErrors {
+                    errors: invalid.errors,
+                })
+            })?
+            .to_schema_validate()
+            .map_err(|errors| SchemaError::Validate(errors.into()))?;
 
         let mut subgraphs = HashMap::new();
         // TODO: error if not found?
@@ -132,20 +99,44 @@ impl Schema {
             }
         }
 
-        tracing::info!(
-            histogram.apollo.router.schema.load.duration = start.elapsed().as_secs_f64()
+        f64_histogram!(
+            "apollo.router.schema.load.duration",
+            "Time spent loading the supergraph schema.",
+            start.elapsed().as_secs_f64()
         );
 
         let implementers_map = definitions.implementers_map();
+        let supergraph = Supergraph::from_schema(definitions)?;
+
+        let schema_id = Arc::new(Schema::schema_id(&raw_sdl));
+
+        let api_schema = supergraph
+            .to_api_schema(ApiSchemaOptions {
+                include_defer: config.supergraph.defer_support,
+                ..Default::default()
+            })
+            .map_err(|e| {
+                SchemaError::Api(format!(
+                    "The supergraph schema failed to produce a valid API schema: {e}"
+                ))
+            })?;
 
         Ok(Schema {
-            raw_sdl: Arc::new(sdl.to_owned()),
-            definitions,
-            diagnostics,
+            raw_sdl,
+            supergraph,
             subgraphs,
             implementers_map,
-            api_schema: None,
+            api_schema: ApiSchema(api_schema),
+            schema_id,
         })
+    }
+
+    pub(crate) fn federation_supergraph(&self) -> &Supergraph {
+        &self.supergraph
+    }
+
+    pub(crate) fn supergraph_schema(&self) -> &Valid<apollo_compiler::Schema> {
+        self.supergraph.schema.schema()
     }
 
     pub(crate) fn schema_id(sdl: &str) -> String {
@@ -154,39 +145,18 @@ impl Schema {
         format!("{:x}", hasher.finalize())
     }
 
-    pub(crate) fn create_api_schema(
-        &self,
-        configuration: &Configuration,
-    ) -> Result<String, apollo_federation::error::FederationError> {
-        use apollo_federation::ApiSchemaOptions;
-        use apollo_federation::Supergraph;
-
-        let schema = Supergraph::from_schema(self.definitions.clone())?;
-        let api_schema = schema.to_api_schema(ApiSchemaOptions {
-            include_defer: configuration.supergraph.defer_support,
-            ..Default::default()
-        })?;
-        Ok(api_schema.schema().to_string())
-    }
-
-    pub(crate) fn with_api_schema(mut self, api_schema: Schema) -> Self {
-        self.api_schema = Some(Box::new(api_schema));
-        self
-    }
-}
-
-impl Schema {
     /// Extracts a string containing the entire [`Schema`].
     pub(crate) fn as_string(&self) -> &Arc<String> {
         &self.raw_sdl
     }
 
     pub(crate) fn is_subtype(&self, abstract_type: &str, maybe_subtype: &str) -> bool {
-        self.definitions.is_subtype(abstract_type, maybe_subtype)
+        self.supergraph_schema()
+            .is_subtype(abstract_type, maybe_subtype)
     }
 
     pub(crate) fn is_implementation(&self, interface: &str, implementor: &str) -> bool {
-        self.definitions
+        self.supergraph_schema()
             .get_interface(interface)
             .map(|interface| {
                 // FIXME: this looks backwards
@@ -196,11 +166,9 @@ impl Schema {
     }
 
     pub(crate) fn is_interface(&self, abstract_type: &str) -> bool {
-        self.definitions.get_interface(abstract_type).is_some()
-    }
-
-    pub(crate) fn is_union(&self, abstract_type: &str) -> bool {
-        self.definitions.get_union(abstract_type).is_some()
+        self.supergraph_schema()
+            .get_interface(abstract_type)
+            .is_some()
     }
 
     // given two field, returns the one that implements the other, if applicable
@@ -233,29 +201,23 @@ impl Schema {
         self.subgraphs.get(service_name)
     }
 
-    pub(crate) fn api_schema(&self) -> &Schema {
-        match &self.api_schema {
-            Some(schema) => schema,
-            None => self,
-        }
+    /// Return the API schema for this supergraph.
+    pub(crate) fn api_schema(&self) -> &ApiSchema {
+        &self.api_schema
     }
 
     pub(crate) fn root_operation_name(&self, kind: OperationKind) -> &str {
-        if let Some(name) = self.definitions.root_operation(kind.into()) {
+        if let Some(name) = self.supergraph_schema().root_operation(kind.into()) {
             name.as_str()
         } else {
-            kind.as_str()
+            kind.default_type_name()
         }
-    }
-
-    pub(crate) fn has_errors(&self) -> bool {
-        self.diagnostics.is_some()
     }
 
     /// Return the federation major version based on the @link or @core directives in the schema,
     /// or None if there are no federation directives.
     pub(crate) fn federation_version(&self) -> Option<i64> {
-        for directive in &self.definitions.schema_definition.directives {
+        for directive in &self.supergraph_schema().schema_definition.directives {
             let join_url = if directive.name == "core" {
                 let Some(feature) = directive
                     .argument_by_name("feature")
@@ -288,7 +250,7 @@ impl Schema {
     }
 
     pub(crate) fn has_spec(&self, base_url: &str, expected_version_range: &str) -> bool {
-        self.definitions
+        self.supergraph_schema()
             .schema_definition
             .directives
             .iter()
@@ -364,8 +326,31 @@ impl Schema {
     }
 }
 
-#[derive(Debug)]
-pub(crate) struct InvalidObject;
+impl std::fmt::Debug for Schema {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self {
+            raw_sdl,
+            supergraph: _, // skip
+            subgraphs,
+            implementers_map,
+            api_schema: _, // skip
+            schema_id: _,
+        } = self;
+        f.debug_struct("Schema")
+            .field("raw_sdl", raw_sdl)
+            .field("subgraphs", subgraphs)
+            .field("implementers_map", implementers_map)
+            .finish()
+    }
+}
+
+impl std::ops::Deref for ApiSchema {
+    type Target = Valid<apollo_compiler::Schema>;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.schema()
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -376,12 +361,23 @@ mod tests {
             "{}\n{}",
             r#"
         schema
-            @core(feature: "https://specs.apollo.dev/core/v0.1")
-            @core(feature: "https://specs.apollo.dev/join/v0.1") {
+            @link(url: "https://specs.apollo.dev/link/v1.0")
+            @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+        {
             query: Query
         }
-        directive @core(feature: String!) repeatable on SCHEMA
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+        directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
         directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+        scalar link__Import
+        scalar join__FieldSet
+
+        enum link__Purpose {
+          SECURITY
+          EXECUTION
+        }
+
         enum join__Graph {
             TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
         }
@@ -413,7 +409,7 @@ mod tests {
             "#,
             );
             let schema = format!("{base_schema}\n{schema}");
-            Schema::parse_test(&schema, &Default::default()).unwrap()
+            Schema::parse(&schema, &Default::default()).unwrap()
         }
 
         fn gen_schema_interfaces(schema: &str) -> Schema {
@@ -437,7 +433,7 @@ mod tests {
             "#,
             );
             let schema = format!("{base_schema}\n{schema}");
-            Schema::parse_test(&schema, &Default::default()).unwrap()
+            Schema::parse(&schema, &Default::default()).unwrap()
         }
         let schema = gen_schema_types("union UnionType = Foo | Bar | Baz");
         assert!(schema.is_subtype("UnionType", "Foo"));
@@ -472,28 +468,8 @@ mod tests {
 
     #[test]
     fn routing_urls() {
-        let schema = r#"
-        schema
-          @core(feature: "https://specs.apollo.dev/core/v0.1"),
-          @core(feature: "https://specs.apollo.dev/join/v0.1")
-        {
-          query: Query
-        }
-        type Query {
-          me: String
-        }
-        directive @core(feature: String!) repeatable on SCHEMA
-        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-
-        enum join__Graph {
-            ACCOUNTS @join__graph(name:"accounts" url: "http://localhost:4001/graphql")
-            INVENTORY
-              @join__graph(name: "inventory", url: "http://localhost:4004/graphql")
-            PRODUCTS
-            @join__graph(name: "products" url: "http://localhost:4003/graphql")
-            REVIEWS @join__graph(name: "reviews" url: "http://localhost:4002/graphql")
-        }"#;
-        let schema = Schema::parse_test(schema, &Default::default()).unwrap();
+        let schema = include_str!("../testdata/minimal_local_inventory_supergraph.graphql");
+        let schema = Schema::parse(schema, &Default::default()).unwrap();
 
         assert_eq!(schema.subgraphs.len(), 4);
         assert_eq!(
@@ -512,7 +488,7 @@ mod tests {
                 .get("inventory")
                 .map(|s| s.to_string())
                 .as_deref(),
-            Some("http://localhost:4004/graphql"),
+            Some("http://localhost:4002/graphql"),
             "Incorrect url for inventory"
         );
 
@@ -532,7 +508,7 @@ mod tests {
                 .get("reviews")
                 .map(|s| s.to_string())
                 .as_deref(),
-            Some("http://localhost:4002/graphql"),
+            Some("http://localhost:4004/graphql"),
             "Incorrect url for reviews"
         );
 
@@ -542,32 +518,31 @@ mod tests {
     #[test]
     fn api_schema() {
         let schema = include_str!("../testdata/contract_schema.graphql");
-        let schema = Schema::parse_test(schema, &Default::default()).unwrap();
-        let has_in_stock_field = |schema: &Schema| {
+        let schema = Schema::parse(schema, &Default::default()).unwrap();
+        let has_in_stock_field = |schema: &apollo_compiler::Schema| {
             schema
-                .definitions
                 .get_object("Product")
                 .unwrap()
                 .fields
                 .contains_key("inStock")
         };
-        assert!(has_in_stock_field(&schema));
-        assert!(!has_in_stock_field(schema.api_schema.as_ref().unwrap()));
+        assert!(has_in_stock_field(schema.supergraph_schema()));
+        assert!(!has_in_stock_field(schema.api_schema()));
     }
 
     #[test]
     fn federation_version() {
         // @core directive
-        let schema = Schema::parse_test(
-            include_str!("../testdata/minimal_supergraph.graphql"),
+        let schema = Schema::parse(
+            include_str!("../testdata/minimal_fed1_supergraph.graphql"),
             &Default::default(),
         )
         .unwrap();
         assert_eq!(schema.federation_version(), Some(1));
 
         // @link directive
-        let schema = Schema::parse_test(
-            include_str!("../testdata/minimal_fed2_supergraph.graphql"),
+        let schema = Schema::parse(
+            include_str!("../testdata/minimal_supergraph.graphql"),
             &Default::default(),
         )
         .unwrap();
@@ -579,16 +554,11 @@ mod tests {
         #[cfg(not(windows))]
         {
             let schema = include_str!("../testdata/starstuff@current.graphql");
-            let schema = Schema::parse_test(schema, &Default::default()).unwrap();
+            let schema = Schema::parse(schema, &Default::default()).unwrap();
 
             assert_eq!(
                 Schema::schema_id(&schema.raw_sdl),
-                "8e2021d131b23684671c3b85f82dfca836908c6a541bbd5c3772c66e7f8429d8".to_string()
-            );
-
-            assert_eq!(
-                Schema::schema_id(&schema.api_schema().raw_sdl),
-                "6af283f857f47055b0069547a8ee21c942c2c72ceebbcaabf78a42f0d1786318".to_string()
+                "23bcf0ea13a4e0429c942bba59573ba70b8d6970d73ad00c5230d08788bb1ba2".to_string()
             );
         }
     }
@@ -597,12 +567,11 @@ mod tests {
     #[test]
     fn inaccessible_on_non_core() {
         let schema = include_str!("../testdata/inaccessible_on_non_core.graphql");
-        match Schema::parse_test(schema, &Default::default()) {
+        match Schema::parse(schema, &Default::default()) {
             Err(SchemaError::Api(s)) => {
                 assert_eq!(
                     s,
                     r#"The supergraph schema failed to produce a valid API schema: The following errors occurred:
-
   - Input field `InputObject.privateField` is @inaccessible but is used in the default value of `@foo(someArg:)`, which is in the API schema."#
                 );
             }
@@ -614,7 +583,7 @@ mod tests {
     #[test]
     fn unclosed_brace_error_does_not_panic() {
         let schema = "schema {";
-        let result = Schema::parse_test(schema, &Default::default());
+        let result = Schema::parse(schema, &Default::default());
         assert!(result.is_err());
     }
 }

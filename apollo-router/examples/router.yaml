@@ -1,7 +1,7 @@
 supergraph:
   listen: 0.0.0.0:4100
   introspection: true
-  query_planner:
+  query_planning:
     experimental_parallelism: auto # or any number
 plugins:
   experimental.expose_query_plan: true

@@ -3,6 +3,7 @@
 
 use apollo_compiler::ast;
 use apollo_compiler::name;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use tower::BoxError;
@@ -10,9 +11,10 @@ use tower::BoxError;
 use crate::spec::query::subselections::DEFER_DIRECTIVE_NAME;
 use crate::spec::query::transform;
 use crate::spec::query::transform::document;
+use crate::spec::query::transform::TransformState;
 use crate::spec::query::transform::Visitor;
 
-const LABEL_NAME: ast::Name = name!("label");
+const LABEL_NAME: Name = name!("label");
 
 /// go through the query and adds labels to defer fragments that do not have any
 ///
@@ -24,12 +26,14 @@ pub(crate) fn add_defer_labels(
     let mut visitor = Labeler {
         next_label: 0,
         schema,
+        state: TransformState::new(),
     };
     document(&mut visitor, doc)
 }
 
 pub(crate) struct Labeler<'a> {
     schema: &'a Schema,
+    state: TransformState,
     next_label: u32,
 }
 
@@ -64,6 +68,10 @@ impl Visitor for Labeler<'_> {
     fn schema(&self) -> &apollo_compiler::Schema {
         self.schema
     }
+
+    fn state(&mut self) -> &mut TransformState {
+        &mut self.state
+    }
 }
 
 fn directives(
@@ -81,7 +89,7 @@ fn directives(
                 has_label = true;
                 if let ast::Value::String(label) = arg.make_mut().value.make_mut() {
                     // Add a prefix to existing labels
-                    *label = format!("_{label}").into();
+                    *label = format!("_{label}");
                 } else {
                     return Err("@defer with a non-string label".into());
                 }

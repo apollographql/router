@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use apollo_compiler::validation::Valid;
 use futures::future::join_all;
 use futures::prelude::*;
 use tokio::sync::broadcast;
@@ -49,6 +50,7 @@ impl QueryPlan {
         service_factory: &'a Arc<SubgraphServiceFactory>,
         supergraph_request: &'a Arc<http::Request<Request>>,
         schema: &'a Arc<Schema>,
+        subgraph_schemas: &'a Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
         sender: mpsc::Sender<Response>,
         subscription_handle: Option<SubscriptionHandle>,
         subscription_config: &'a Option<SubscriptionConfig>,
@@ -72,6 +74,7 @@ impl QueryPlan {
                     root_node: &self.root,
                     subscription_handle: &subscription_handle,
                     subscription_config,
+                    subgraph_schemas,
                 },
                 &root,
                 &initial_value.unwrap_or_default(),
@@ -99,6 +102,7 @@ pub(crate) struct ExecutionParameters<'a> {
     pub(crate) context: &'a Context,
     pub(crate) service_factory: &'a Arc<SubgraphServiceFactory>,
     pub(crate) schema: &'a Arc<Schema>,
+    pub(crate) subgraph_schemas: &'a Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     pub(crate) supergraph_request: &'a Arc<http::Request<Request>>,
     pub(crate) deferred_fetches: &'a HashMap<String, broadcast::Sender<(Value, Vec<Error>)>>,
     pub(crate) query: &'a Arc<Query>,
@@ -175,7 +179,7 @@ impl PlanNode {
                 }
                 PlanNode::Flatten(FlattenNode { path, node }) => {
                     // Note that the span must be `info` as we need to pick this up in apollo tracing
-                    let current_dir = current_dir.join(path);
+                    let current_dir = current_dir.join(path.remove_empty_key_root());
                     let (v, err) = node
                         .execute_recursively(
                             parameters,
@@ -190,7 +194,6 @@ impl PlanNode {
                             "otel.kind" = "INTERNAL"
                         ))
                         .await;
-
                     value = v;
                     errors = err;
                 }
@@ -203,7 +206,7 @@ impl PlanNode {
                             .instrument(tracing::info_span!(
                                 SUBSCRIBE_SPAN_NAME,
                                 "otel.kind" = "INTERNAL",
-                                "apollo.subgraph.name" = primary.service_name.as_str(),
+                                "apollo.subgraph.name" = primary.service_name.as_ref(),
                                 "apollo_private.sent_time_offset" = fetch_time_offset
                             ))
                             .await;
@@ -226,9 +229,7 @@ impl PlanNode {
                     if parameters
                         .context
                         .extensions()
-                        .lock()
-                        .get::<CanceledRequest>()
-                        .is_some()
+                        .with_lock(|lock| lock.get::<CanceledRequest>().is_some())
                     {
                         value = Value::Object(Object::default());
                         errors = Vec::new();
@@ -238,7 +239,7 @@ impl PlanNode {
                             .instrument(tracing::info_span!(
                                 FETCH_SPAN_NAME,
                                 "otel.kind" = "INTERNAL",
-                                "apollo.subgraph.name" = fetch_node.service_name.as_str(),
+                                "apollo.subgraph.name" = fetch_node.service_name.as_ref(),
                                 "apollo_private.sent_time_offset" = fetch_time_offset
                             ))
                             .await;
@@ -247,12 +248,7 @@ impl PlanNode {
                     }
                 }
                 PlanNode::Defer {
-                    primary:
-                        Primary {
-                            path: _primary_path,
-                            node,
-                            ..
-                        },
+                    primary: Primary { node, .. },
                     deferred,
                 } => {
                     value = parent_value.clone();
@@ -298,6 +294,7 @@ impl PlanNode {
                                         root_node: parameters.root_node,
                                         subscription_handle: parameters.subscription_handle,
                                         subscription_config: parameters.subscription_config,
+                                        subgraph_schemas: parameters.subgraph_schemas,
                                     },
                                     current_dir,
                                     &value,
@@ -437,9 +434,10 @@ impl DeferredNode {
         //FIXME/ is there a solution without cloning the entire node? Maybe it could be moved instead?
         let deferred_inner = self.node.clone();
         let deferred_path = self.query_path.clone();
-        let label = self.label.clone();
+        let label = self.label.as_ref().map(|l| l.to_string());
         let tx = sender;
         let sc = parameters.schema.clone();
+        let subgraph_schemas = parameters.subgraph_schemas.clone();
         let orig = parameters.supergraph_request.clone();
         let sf = parameters.service_factory.clone();
         let root_node = parameters.root_node.clone();
@@ -486,6 +484,7 @@ impl DeferredNode {
                             root_node: &root_node,
                             subscription_handle: &subscription_handle,
                             subscription_config: &subscription_config,
+                            subgraph_schemas: &subgraph_schemas,
                         },
                         &Path::default(),
                         &value,

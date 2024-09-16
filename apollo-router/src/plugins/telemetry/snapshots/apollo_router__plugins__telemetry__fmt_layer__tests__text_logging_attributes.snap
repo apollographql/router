@@ -2,5 +2,4 @@
 source: apollo-router/src/plugins/telemetry/fmt_layer.rs
 expression: buff
 ---
-[2m[timestamp][0m [32mINFO[0m [2mtest{another=2,custom_dyn=test,first=one,} [0m[2m[0m Hello from test event_attr="foo"
-
+[2m[timestamp][0m [32mINFO[0m [2mtest{another=2,custom_dyn=test,first=one,} [0m[2m[0m Hello from test [3mevent_attr[0m[2m=[0m"foo"

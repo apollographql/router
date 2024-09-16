@@ -1,18 +1,19 @@
 ---
-title: Writing native Rust plugins for the Apollo Router
-description: Extend the Apollo Router with custom Rust code
+title: Writing Native Rust Plugins 
+subtitle: Extend the router with custom Rust code
+description: Extend the Apollo GraphOS Router or Apollo Router Core with custom Rust code. Plan, build, and register plugins. Define plugin configuration and implement lifecycle hooks.
 ---
 
 import ElasticNotice from '../../shared/elastic-notice.mdx';
 import NativePluginNotice from '../../shared/native-plugin-notice.mdx';
 
-Your federated graph might have specific requirements that aren't supported by the Apollo Router's built-in [configuration options](../configuration/overview/). For example, you might need to further customize the behavior of:
+Your federated graph might have specific requirements that aren't supported by the built-in [configuration options](../configuration/overview/) of the GraphOS Router or Apollo Router Core. For example, you might need to further customize the behavior of:
 
 * Authentication/authorization
 * Logging
 * Operation tracing
 
-In these cases, you can create custom plugins for the Apollo Router.
+In these cases, you can create custom plugins for the router.
 
 <NativePluginNotice />
 
@@ -20,13 +21,13 @@ In these cases, you can create custom plugins for the Apollo Router.
 
 ## Planning a plugin
 
-When designing a new plugin, you first want to determine which of the Apollo Router's **services** the plugin should hook into to achieve its use case.
+When designing a new plugin, you first want to determine which of the router's **services** the plugin should hook into to achieve its use case.
 
 For descriptions of these services, see [Router request lifecycle](./rhai#router-request-lifecycle).
 
 ## Building a plugin
 
-To demonstrate building a plugin, we'll walk through the [hello world example plugin](https://github.com/apollographql/router/tree/main/examples/hello-world) in the Router repo.
+To demonstrate building a plugin, we'll walk through the [hello world example plugin](https://github.com/apollographql/router/tree/main/examples/hello-world) in the router repo.
 
 ### 1. Add modules
 
@@ -69,7 +70,7 @@ impl Plugin for HelloWorld {
 
 ### 3. Implement the `Plugin` trait
 
-All router plugins must implement the `Plugin` trait. This trait defines lifecycle hooks that enable hooking into Apollo Router services.
+All router plugins must implement the `Plugin` trait. This trait defines lifecycle hooks that enable hooking into a router's services.
 
 The trait also provides a default implementations for each hook, which returns the associated service unmodified.
 
@@ -100,8 +101,8 @@ impl Plugin for HelloWorld {
 
     fn supergraph_service(
         &self,
-        service: router::BoxService,
-    ) -> router::BoxService {
+        service: supergraph::BoxService,
+    ) -> supergraph::BoxService {
         service
     }
 
@@ -154,7 +155,7 @@ fn supergraph_service(
 }
 ```
 
-The [tower-rs](https://github.com/tower-rs) library (which the Apollo Router is built on) comes with many "off-the-shelf" layers. In addition, Apollo provides layers that cover common functionality and integration with third-party products.
+The [tower-rs](https://github.com/tower-rs) library (which the router is built on) comes with many "off-the-shelf" layers. In addition, Apollo provides layers that cover common functionality and integration with third-party products.
 
 Some notable layers are:
 * **buffered** - Make a service `Clone`. Typically required for any `async` layers.
@@ -174,7 +175,7 @@ Sometimes you might need to pass custom information between services. For exampl
 * Authentication information obtained by the `SupergraphService` might be required by `SubgraphService`s.
 * Cache control headers from `SubgraphService`s might be aggregated and returned to the client by the `SupergraphService`.
 
-Whenever the Apollo Router receives a request, it creates a corresponding `context` object and passes it along to each service. This object can store anything that's Serde-compatible (e.g., all simple types or a custom type).
+Whenever the router receives a request, it creates a corresponding `context` object and passes it along to each service. This object can store anything that's Serde-compatible (e.g., all simple types or a custom type).
 
 All of your plugin's hooks can interact with the `context` object using the following functions:
 
@@ -206,9 +207,19 @@ Use `upsert` if you might need to resolve multiple simultaneous writes to a sing
 
 Note: `upsert` requires v to implement `Default`.
 
+#### `enter_active_request`
+
+```rust
+let _guard = context.enter_active_request();
+http_client.request().await;
+drop(_guard);
+```
+
+The Router measures how much time it spends working on a request, by subtracting the time spent waiting on network calls, like subgraphs or coprocessors. The result is reported in the `apollo_router_processing_time` metric. If the native plugin is performing network calls, then they should be taken into account in this metric. It is done by calling the `enter_active_request` method, which returns a guard value. Until that value is dropped, the router will consider that a network request is happening.
+
 ### 6. Register your plugin
 
-To enable the Apollo Router to discover your plugin, you need to **register** the plugin.
+To enable the router to discover your plugin, you need to **register** the plugin.
 
 To do so, use the `register_plugin!()` macro provided by `apollo-router`. This takes 3 arguments:
 
@@ -234,17 +245,17 @@ plugins:
     # Any values here are passed to the plugin as part of your configuration
 ```
 
-## Add custom metrics
+## Using macros
+To create custom metrics, traces, and spans, you can use [`tracing` macros](https://docs.rs/tracing/latest/tracing/index.html#macros) to generate events and logs.
 
+### Add custom metrics
 <Note>
 
-Make sure to [enable prometheus metrics](../configuration/telemetry/exporters/metrics/prometheus) in your configuration if you want to have metrics generated by the Router.
+Make sure to [enable Prometheus metrics](../configuration/telemetry/exporters/metrics/prometheus) in your configuration if you want to have metrics generated by the router.
 
 </Note>
 
-### Using macros
-
-To create your custom metrics in [Prometheus](https://prometheus.io/) you can use the [tracing macros](https://docs.rs/tracing/latest/tracing/index.html#macros) to generate an event.
+To create your custom metrics in [Prometheus](https://prometheus.io/) you can use [event macros](https://docs.rs/tracing/latest/tracing/index.html#macros) to generate an event.
 If you observe a specific naming pattern for your event you'll be able to generate your own custom metrics directly in Prometheus.
 
 To publish a new metric, use tracing macros to generate an event that contains one of the following prefixes:
@@ -281,9 +292,25 @@ tracing::info!(
 );
 ```
 
+### Add custom spans
+<Note>
+
+Make sure to [enable OpenTelemetry tracing](../configuration/telemetry/exporters/tracing/overview) in your configuration if you want customize the traces generated and linked by the router.
+
+</Note>
+
+To create custom spans and traces you can use [`tracing` macros](https://docs.rs/tracing/latest/tracing/index.html#macros) to generate a span.
+
+```rust
+use tracing::info_span;
+
+info_span!("my_span");
+```
+
+
 ## Plugin Lifecycle
 
-Like individual requests, plugins follow their own strict lifecycle that helps provide structure to the Apollo Router's execution.
+Like individual requests, plugins follow their own strict lifecycle that helps provide structure to the router's execution.
 
 ### Creation
 

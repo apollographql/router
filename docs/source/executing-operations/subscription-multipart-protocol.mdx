@@ -1,15 +1,16 @@
 ---
-title: Multipart HTTP protocol for GraphQL subscriptions
-description: For GraphQL clients communicating with the Apollo Router
+title: Multipart HTTP protocol for GraphQL Subscriptions
+subtitle: Enable clients to receive real-time updates via multipart HTTP protocol
+description: Enable real-time updates via multipart HTTP protocol for GraphQL subscriptions with the GraphOS Router. Learn about execution, heartbeats, and error handling.
 ---
 
-To execute GraphQL subscription operations on the Apollo Router, client apps do _not_ communicate over WebSocket. Instead, they use **HTTP with multipart responses**. This multipart protocol is built on the same [Incremental Delivery over HTTP](https://github.com/graphql/graphql-over-http/blob/main/rfcs/IncrementalDelivery.md) spec that the Apollo Router uses to support [the `@defer` directive](./defer-support/).
+To execute GraphQL subscription operations on the GraphOS Router, client apps do _not_ communicate over WebSocket. Instead, they use **HTTP with multipart responses**. This multipart protocol is built on the same [Incremental Delivery over HTTP](https://github.com/graphql/graphql-over-http/blob/main/rfcs/IncrementalDelivery.md) spec that the GraphOS Router uses to support [the `@defer` directive](./defer-support/).
 
 Use this reference if you're adding protocol support to a new GraphQL client library. [Apollo Client](/react/data/subscriptions#http), [Apollo Kotlin](/kotlin/essentials/subscriptions#configuring-http-subscriptions), and [Apollo iOS](/ios/fetching/subscriptions#http) all support this protocol. Apollo Client also provides network adapters for the [Relay](/react/data/subscriptions#relay) and [urql](/react/data/subscriptions#urql) libraries.
 
 ## Executing a subscription
 
-To execute a subscription on the Apollo Router, a GraphQL client sends an HTTP request with _almost_ the exact same format that it uses for query and mutation requests.
+To execute a subscription on the GraphOS Router, a GraphQL client sends an HTTP request with _almost_ the exact same format that it uses for query and mutation requests.
 
 The only difference is that the request should include the following `Accept` header:
 
@@ -44,7 +45,7 @@ Content-Type: application/json
 
 ## Heartbeats
 
-While a client subscription remains active, the Apollo Router sends periodic "heartbeat" response parts to prevent any intermediaries from closing the connection. The body of a heartbeat is an empty JSON object, which clients should ignore silently:
+While a client subscription remains active, the GraphOS Router sends periodic "heartbeat" response parts to prevent any intermediaries from closing the connection. The body of a heartbeat is an empty JSON object, which clients should ignore silently:
 
 ```text title="Heartbeat response part"
 --graphql
@@ -60,7 +61,7 @@ This protocol differentiates between transport-level errors and GraphQL errors i
 
 With the exception of [heartbeats](#heartbeats), every response part body includes a `payload` property, which contains standard GraphQL response properties. **The `payload` property can be null if a transport-level error occurs.**
 
-**If a GraphQL-level error occurs,** the Apollo Router can sometimes still return partial data, and the subscription connection should remain open. These errors are provided _within_ the `payload` property:
+**If a GraphQL-level error occurs,** the GraphOS Router can sometimes still return partial data, and the subscription connection should remain open. These errors are provided _within_ the `payload` property:
 
 ```json
 {

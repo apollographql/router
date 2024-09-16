@@ -1,0 +1,11 @@
+# Simple config to enable batching for all subgraphs
+
+batching:
+  enabled: true
+  mode: batch_http_link
+  subgraph:
+    all:
+      enabled: true
+
+include_subgraph_errors:
+  all: true

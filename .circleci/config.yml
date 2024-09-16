@@ -25,53 +25,48 @@ executors:
       - image: cimg/redis:7.2.4
       - image: jaegertracing/all-in-one:1.54.0
       - image: openzipkin/zipkin:2.23.2
+      - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.17.0
     resource_class: xlarge
     environment:
       CARGO_BUILD_JOBS: 4
-      RUST_TEST_THREADS: 6
   arm_linux_build: &arm_linux_build_executor
     machine:
       image: ubuntu-2004:2024.01.1
     resource_class: arm.large
     environment:
       CARGO_BUILD_JOBS: 8
-      RUST_TEST_THREADS: 8
   arm_linux_test: &arm_linux_test_executor
     machine:
       image: ubuntu-2004:2024.01.1
     resource_class: arm.xlarge
     environment:
       CARGO_BUILD_JOBS: 8
-      RUST_TEST_THREADS: 8
-  arm_macos_build: &arm_macos_build_executor
+  macos_build: &macos_build_executor
     macos:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
       # at https://circleci.com/docs/using-macos#supported-xcode-versions.
       # We use the major.minor notation to bring in compatible patches.
-      xcode: 14.2
+      xcode: "14.2.0"
     resource_class: macos.m1.medium.gen1
-  intel_macos_build: &intel_macos_build_executor
-    macos:
-      # See https://circleci.com/docs/xcode-policy along with the support matrix
-      # at https://circleci.com/docs/using-macos#supported-xcode-versions.
-      # We use the major.minor notation to bring in compatible patches.
-      xcode: 14.2
-    resource_class: macos.x86.medium.gen2
   macos_test: &macos_test_executor
     macos:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
       # at https://circleci.com/docs/using-macos#supported-xcode-versions.
       # We use the major.minor notation to bring in compatible patches.
-      xcode: 14.2
+      # 
+      # TODO: remove workaround added in https://github.com/apollographql/router/pull/5462
+      # once we update to Xcode >= 15.1.0 
+      # See: https://github.com/apollographql/router/pull/5462
+      xcode: "14.2.0"
     resource_class: macos.m1.medium.gen1
   windows_build: &windows_build_executor
     machine:
-      image: "windows-server-2019-vs2019:2022.08.1"
+      image: "windows-server-2019-vs2019:2024.02.21"
     resource_class: windows.xlarge
     shell: bash.exe --login -eo pipefail
   windows_test: &windows_test_executor
     machine:
-      image: "windows-server-2019-vs2019:2022.08.1"
+      image: "windows-server-2019-vs2019:2024.02.21"
     resource_class: windows.xlarge
     shell: bash.exe --login -eo pipefail
 
@@ -90,6 +85,10 @@ parameters:
     type: string
     default: "21.8"
   nightly:
+    type: boolean
+    default: false
+  # quick_nightly will skip testing and only build the release artifacts.
+  quick_nightly:
     type: boolean
     default: false
 
@@ -167,7 +166,7 @@ commands:
       - when:
           condition:
             or:
-              - equal: [ *arm_macos_build_executor, << parameters.platform >> ]
+              - equal: [ *macos_build_executor, << parameters.platform >> ]
               - equal: [ *macos_test_executor, << parameters.platform >> ]
           steps:
             - run:
@@ -178,20 +177,7 @@ commands:
             - run:
                 name: Write arch
                 command: |
-                  echo 'osx-aarch64' >> ~/.arch
-      - when:
-          condition:
-            equal: [ *intel_macos_build_executor, << parameters.platform >> ]
-          steps:
-            - run:
-                name: Make link to md5
-                command: |
-                  mkdir -p ~/.local/aliases
-                  ln -s /sbin/md5 ~/.local/aliases/md5sum
-            - run:
-                name: Write arch
-                command: |
-                  echo 'osx-x86' >> ~/.arch
+                  echo 'osx' >> ~/.arch
       - when:
           condition:
             or:
@@ -221,7 +207,7 @@ commands:
             find xtask/src -type f | while read name; do md5sum $name; done | sort -k 2 | md5sum > ~/.xtask_version
             # The closest common ancestor to the default branch, so that test jobs can take advantage previous compiles
             git remote set-head origin -a
-            TARGET_BRANCH=$(git rev-parse --abbrev-ref origin/HEAD)    
+            TARGET_BRANCH=$(git rev-parse --abbrev-ref origin/HEAD)
             echo "Target branch is ${TARGET_BRANCH}"
             COMMON_ANCESTOR_REF=$(git merge-base HEAD "${TARGET_BRANCH}")
             echo "Common ancestor is ${COMMON_ANCESTOR_REF}"
@@ -264,8 +250,7 @@ commands:
       - when:
           condition:
             or:
-              - equal: [ *intel_macos_build_executor, << parameters.platform >> ]
-              - equal: [ *arm_macos_build_executor, << parameters.platform >> ]
+              - equal: [ *macos_build_executor, << parameters.platform >> ]
               - equal: [ *macos_test_executor, << parameters.platform >> ]
           steps:
             - run:
@@ -306,8 +291,7 @@ commands:
       - when:
           condition:
             or:
-              - equal: [ *intel_macos_build_executor, << parameters.platform >> ]
-              - equal: [ *arm_macos_build_executor, << parameters.platform >> ]
+              - equal: [ *macos_build_executor, << parameters.platform >> ]
               - equal: [ *macos_test_executor, << parameters.platform >> ]
           steps:
             - run:
@@ -342,7 +326,8 @@ commands:
             if [[ ! -d "$HOME/.cargo" ]]; then
               curl https://sh.rustup.rs -sSf -o rustup.sh
               chmod 755 ./rustup.sh
-              ./rustup.sh -y --profile minimal --component clippy --component rustfmt
+              ./rustup.sh -y --profile minimal --component clippy --component rustfmt --default-toolchain none
+              $HOME/.cargo/bin/rustc -V
             fi
             echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$BASH_ENV"
 
@@ -356,6 +341,24 @@ commands:
                 name: Special case for Windows because of ssh-agent
                 command: |
                   printf "[net]\ngit-fetch-with-cli = true" >> ~/.cargo/Cargo.toml
+      - when:
+          condition:
+            or:
+              - equal: [ *macos_build_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Special case for OSX x86_64 builds
+                command: |
+                  rustup target add x86_64-apple-darwin
+
+      - when:
+          condition:
+            equal: [ *arm_linux_test_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Install nightly Rust to build the fuzzers
+                command: |
+                  rustup install nightly
 
   install_extra_tools:
     steps:
@@ -363,7 +366,14 @@ commands:
           name: Install cargo deny, about, edit
           command: |
             if [[ ! -f "$HOME/.cargo/bin/cargo-deny$EXECUTABLE_SUFFIX" ]]; then
-              cargo install --locked cargo-deny cargo-about cargo-edit
+              cargo install --locked --version 0.14.21 cargo-deny
+              cargo install --locked --version 0.6.1 cargo-about
+              cargo install --locked --version 0.12.2 cargo-edit
+              cargo install --locked --version 0.12.0 cargo-fuzz
+            fi
+
+            if [[ ! -f "$HOME/.cargo/bin/cargo-nextest$EXECUTABLE_SUFFIX" ]]; then
+              cargo install --locked --version 0.9.70 cargo-nextest
             fi
 
   fetch_dependencies:
@@ -421,7 +431,7 @@ commands:
             # Create list of kube versions
             CURRENT_KUBE_VERSIONS=$(curl -s -L https://raw.githubusercontent.com/kubernetes/website/main/data/releases/schedule.yaml \
               | yq -o json '.' \
-              | jq --raw-output '.schedules[] | select((now | strftime("%Y-%m-%dT00:00:00Z")) as $date | .releaseDate < $date and .endOfLifeDate > $date) | .previousPatches[].release')
+              | jq --raw-output '.schedules[] | select((now | strftime("%Y-%m-%dT00:00:00Z")) as $date | .releaseDate < $date and .endOfLifeDate > $date) | select(.previousPatches != null) | .previousPatches[].release')
 
             TEMPLATE_DIR=$(mktemp -d)
             MINOR_VERSION="${kube_version%.*}"
@@ -488,7 +498,14 @@ commands:
             - "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
       - run:
           name: Run tests
-          command: xtask test --workspace --locked
+          environment:
+            # Use the settings from the "ci" profile in nextest configuration.
+            NEXTEST_PROFILE: ci
+            # Temporary disable lib backtrace since it crashing on MacOS
+            # TODO: remove this workaround once we update to Xcode >= 15.1.0 
+            # See: https://github.com/apollographql/router/pull/5462
+            RUST_LIB_BACKTRACE: 0
+          command: xtask test --workspace --locked --features ci
       - run:
           name: Delete large files from cache
           command: |
@@ -498,10 +515,17 @@ commands:
           condition:
             equal: [ "dev", "<< pipeline.git.branch >>" ]
           steps:
-          - save_cache:
-              key: "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
-              paths:
-                - target
+            - save_cache:
+                key: "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
+                paths:
+                  - target
+      - store_test_results:
+          # The results from nextest that power the CircleCI Insights.
+          path: ./target/nextest/ci/junit.xml
+  fuzz_build:
+    steps:
+      - run: cargo +nightly fuzz build
+
 jobs:
   lint:
     environment:
@@ -526,7 +550,7 @@ jobs:
     steps:
       - when:
           condition:
-            equal: [*amd_linux_helm_executor, << parameters.platform >>]
+            equal: [ *amd_linux_helm_executor, << parameters.platform >> ]
           steps:
             - checkout
             - xtask_check_helm
@@ -556,6 +580,11 @@ jobs:
       - setup_environment:
           platform: << parameters.platform >>
       - xtask_test
+      - when:
+          condition:
+            equal: [ *arm_linux_test_executor, << parameters.platform >> ]
+          steps:
+            - fuzz_build
 
   test_updated:
     environment:
@@ -601,6 +630,7 @@ jobs:
       RELEASE_BIN: router
       APPLE_TEAM_ID: "YQK948L752"
       APPLE_USERNAME: "opensource@apollographql.com"
+      REPO_URL: << pipeline.project.git_url >>
     steps:
       - checkout
       - setup_environment:
@@ -608,8 +638,7 @@ jobs:
       - when:
           condition:
             or:
-              - equal: [ *intel_macos_build_executor, << parameters.platform >> ]
-              - equal: [ *arm_macos_build_executor, << parameters.platform >> ]
+              - equal: [ *macos_build_executor, << parameters.platform >> ]
 
           steps:
             - when:
@@ -619,13 +648,28 @@ jobs:
                   - run: cargo xtask release prepare nightly
             - run:
                 command: >
-                  cargo xtask dist
+                  cargo xtask dist --target aarch64-apple-darwin
+            - run:
+                command: >
+                  cargo xtask dist --target x86_64-apple-darwin
             - run:
                 command: >
                   mkdir -p artifacts
             - run:
                 command: >
                   cargo xtask package
+                  --target aarch64-apple-darwin
+                  --apple-team-id ${APPLE_TEAM_ID}
+                  --apple-username ${APPLE_USERNAME}
+                  --cert-bundle-base64 ${MACOS_CERT_BUNDLE_BASE64}
+                  --cert-bundle-password ${MACOS_CERT_BUNDLE_PASSWORD}
+                  --keychain-password ${MACOS_KEYCHAIN_PASSWORD}
+                  --notarization-password ${MACOS_NOTARIZATION_PASSWORD}
+                  --output artifacts/
+            - run:
+                command: >
+                  cargo xtask package
+                  --target x86_64-apple-darwin
                   --apple-team-id ${APPLE_TEAM_ID}
                   --apple-username ${APPLE_USERNAME}
                   --cert-bundle-base64 ${MACOS_CERT_BUNDLE_BASE64}
@@ -685,18 +729,34 @@ jobs:
             and:
               - equal: [ *amd_linux_build_executor, << parameters.platform >> ]
               - equal: [ true, << parameters.nightly >> ]
-              - equal: [ "https://github.com/apollographql/router", << pipeline.project.git_url >> ]
+              - matches:
+                  pattern: "^https:\\/\\/github\\.com\\/apollographql\\/router.*$"
+                  value: << pipeline.project.git_url >>
           steps:
             - setup_remote_docker:
-                version: 20.10.11
+                # CircleCI Image Policy
+                #   https://circleci.com/docs/remote-docker-images-support-policy/
+                version: docker23
                 docker_layer_caching: true
             - run:
                 name: Docker build
                 command: |
+                  # Source of the new image will be ser to the repo URL.
+                  # This will have the effect of setting org.opencontainers.image.source and org.opencontainers.image.author to the originating pipeline
+                  # Therefore the docker image will have the same permissions as the originating project. 
+                  # See: https://docs.github.com/en/packages/learn-github-packages/connecting-a-repository-to-a-package#connecting-a-repository-to-a-container-image-using-the-command-line
+                  
                   BASE_VERSION=$(cargo metadata --format-version=1 --no-deps | jq --raw-output '.packages[0].version')
                   ARTIFACT_URL="https://output.circle-artifacts.com/output/job/${CIRCLE_WORKFLOW_JOB_ID}/artifacts/0/artifacts/router-v${BASE_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
                   VERSION="v$(echo "${BASE_VERSION}" | tr "+" "-")"
                   ROUTER_TAG=ghcr.io/apollographql/nightly/router
+                  
+                  echo "REPO_URL: ${REPO_URL}"
+                  echo "BASE_VERSION: ${BASE_VERSION}"
+                  echo "ARTIFACT_URL: ${ARTIFACT_URL}"
+                  echo "VERSION: ${VERSION}"
+                  echo "ROUTER_TAG: ${ROUTER_TAG}"
+                  
                   # Create a multi-arch builder which works properly under qemu
                   docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
                   docker context create buildx-build
@@ -706,16 +766,16 @@ jobs:
                   echo ${GITHUB_OCI_TOKEN} | docker login ghcr.io -u apollo-bot2 --password-stdin
                   # TODO: Can't figure out how to build multi-arch image from ARTIFACT_URL right now. Figure out later...
                   # Build and push debug image
-                  docker buildx build --load --platform linux/amd64 --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug .
+                  docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug .
                   docker push ${ROUTER_TAG}:${VERSION}-debug
                   # Build and push release image
-                  docker buildx build --load --platform linux/amd64 --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} .
+                  docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} .
                   docker push ${ROUTER_TAG}:${VERSION}
                   # save containers for analysis
                   mkdir built-containers
                   docker save -o built-containers/router_${VERSION}-debug.tar ${ROUTER_TAG}:${VERSION}-debug
-                  docker save -o built-containers/router_${VERSION}.tar ${ROUTER_TAG}:${VERSION}  
-                 
+                  docker save -o built-containers/router_${VERSION}.tar ${ROUTER_TAG}:${VERSION}
+
             - persist_to_workspace:
                 root: .
                 paths:
@@ -805,7 +865,7 @@ jobs:
             not:
               equal: [ "https://github.com/apollographql/router", << pipeline.project.git_url >> ]
           steps:
-             - run:
+            - run:
                 command: >
                   echo "Not publishing any github release."
       - when:
@@ -814,7 +874,9 @@ jobs:
           steps:
             - checkout
             - setup_remote_docker:
-                version: 20.10.11
+                # CircleCI Image Policy
+                #   https://circleci.com/docs/remote-docker-images-support-policy/
+                version: 20.10.24
                 docker_layer_caching: true
             - attach_workspace:
                 at: artifacts
@@ -881,7 +943,10 @@ jobs:
 workflows:
   ci_checks:
     when:
-      not: << pipeline.parameters.nightly >>
+      not:
+        or:
+          - << pipeline.parameters.nightly >>
+          - << pipeline.parameters.quick_nightly >>
     jobs:
       - lint:
           matrix:
@@ -915,6 +980,18 @@ workflows:
               platform:
                 [ macos_test, windows_test, amd_linux_test, arm_linux_test ]
 
+  quick-nightly:
+    when: << pipeline.parameters.quick_nightly >>
+    jobs:
+      - build_release:
+          nightly: true
+          context:
+            - router
+            - orb-publishing
+          matrix:
+            parameters:
+              platform:
+                [ macos_build, windows_build, amd_linux_build, arm_linux_build ]
   nightly:
     when: << pipeline.parameters.nightly >>
     jobs:
@@ -954,11 +1031,13 @@ workflows:
             - test
             - test_updated
           nightly: true
-          context: router
+          context:
+            - router
+            - orb-publishing
           matrix:
             parameters:
               platform:
-                [ intel_macos_build, arm_macos_build, windows_build, amd_linux_build, arm_linux_build ]
+                [ macos_build, windows_build, amd_linux_build, arm_linux_build ]
       - secops/wiz-docker:
           context:
             - platform-docker-ro
@@ -970,8 +1049,8 @@ workflows:
           # Disables all PR comments from this job
           do-pr-comments: false
           # Scan job will return 1 if findings violating the Wiz policy are found.
-          # Toggle off to prevent any CI failures OR 
-          # contact Apollo's Security team to adjust what violates the 
+          # Toggle off to prevent any CI failures OR
+          # contact Apollo's Security team to adjust what violates the
           # Wiz policy used in this scan.
           fail-on-findings: true
           # Configure scan job to use a policy specific to apollo-router.
@@ -981,7 +1060,10 @@ workflows:
 
   release:
     when:
-      not: << pipeline.parameters.nightly >>
+      not:
+        or:
+          - << pipeline.parameters.nightly >>
+          - << pipeline.parameters.quick_nightly >>
     jobs:
       - pre_verify_release:
           matrix:
@@ -1020,10 +1102,6 @@ workflows:
             tags:
               only: /v.*/
       - test_updated:
-          requires:
-            - lint
-            - check_helm
-            - check_compliance
           matrix:
             parameters:
               platform:
@@ -1034,10 +1112,6 @@ workflows:
             tags:
               only: /v.*/
       - test:
-          requires:
-            - lint
-            - check_helm
-            - check_compliance
           matrix:
             parameters:
               platform:
@@ -1048,30 +1122,36 @@ workflows:
             tags:
               only: /v.*/
       - build_release:
-          requires:
-            - pre_verify_release
-            - test
-            - test_updated
           matrix:
             parameters:
               platform:
-                [ intel_macos_build, arm_macos_build, windows_build, amd_linux_build, arm_linux_build ]
+                [ macos_build, windows_build, amd_linux_build, arm_linux_build ]
           filters:
             branches:
               ignore: /.*/
             tags:
               only: /v.*/
       - publish_github_release:
-          requires: [ build_release ]
+          requires:
+            - build_release
+            - lint
+            - check_helm
+            - check_compliance
+            - pre_verify_release
+            - test
+            - test_updated
           filters:
             branches:
               ignore: /.*/
             tags:
               only: /v.*/
-  
+
   security-scans:
     when:
-      not: << pipeline.parameters.nightly >>
+      not:
+        or:
+          - << pipeline.parameters.nightly >>
+          - << pipeline.parameters.quick_nightly >>
     jobs:
       - secops/gitleaks:
           context:

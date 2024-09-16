@@ -492,11 +492,11 @@ mod tests {
         let response = router_handle.request(request).await.unwrap();
 
         assert_eq!(
-            "parsing error: no field `name` in type `User`", response.errors[0].message,
+            r#"Cannot query field "name" on type "User"."#, response.errors[0].message,
             "{response:?}"
         );
         assert_eq!(
-            "PARSING_ERROR",
+            "GRAPHQL_VALIDATION_FAILED",
             response.errors[0].extensions.get("code").unwrap()
         );
 
@@ -554,11 +554,11 @@ mod tests {
         let response = router_handle.request(request).await.unwrap();
 
         assert_eq!(
-            "parsing error: no field `name` in type `User`",
-            response.errors[0].message
+            r#"Cannot query field "name" on type "User"."#,
+            response.errors[0].message,
         );
         assert_eq!(
-            "PARSING_ERROR",
+            "GRAPHQL_VALIDATION_FAILED",
             response.errors[0].extensions.get("code").unwrap()
         );
         router_handle.shutdown().await.unwrap();

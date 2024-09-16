@@ -9,23 +9,19 @@ use std::sync::Arc;
 
 use apollo_compiler::executable;
 use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::validation::WithErrors;
 use apollo_compiler::ExecutableDocument;
 use derivative::Derivative;
 use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
-use tower::BoxError;
 use tracing::level_filters::LevelFilter;
 
 use self::change::QueryHashVisitor;
 use self::subselections::BooleanValues;
 use self::subselections::SubSelectionKey;
 use self::subselections::SubSelectionValue;
-use crate::configuration::GraphQLValidationMode;
 use crate::error::FetchError;
-use crate::error::ValidationErrors;
 use crate::graphql::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;
@@ -38,6 +34,7 @@ use crate::query_planner::fetch::OperationKind;
 use crate::query_planner::fetch::QueryHash;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::ParsedDocumentInner;
+use crate::spec::schema::ApiSchema;
 use crate::spec::FieldType;
 use crate::spec::Fragments;
 use crate::spec::InvalidValue;
@@ -72,14 +69,6 @@ pub(crate) struct Query {
     pub(crate) defer_stats: DeferStats,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) is_original: bool,
-    /// Validation errors, used for comparison with the JS implementation.
-    ///
-    /// `ValidationErrors` is not serde-serializable. If this comes from cache,
-    /// the plan ought also to be cached, so we should not need this value anyways.
-    /// XXX(@goto-bus-stop): Remove when only Rust validation is used
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    #[serde(skip)]
-    pub(crate) validation_error: Option<ValidationErrors>,
 
     /// This is a hash that depends on:
     /// - the query itself
@@ -117,10 +106,9 @@ impl Query {
             defer_stats: DeferStats {
                 has_defer: false,
                 has_unconditional_defer: false,
-                conditional_defer_variable_names: IndexSet::new(),
+                conditional_defer_variable_names: IndexSet::default(),
             },
             is_original: true,
-            validation_error: None,
             schema_aware_hash: vec![],
         }
     }
@@ -135,7 +123,7 @@ impl Query {
         response: &mut Response,
         operation_name: Option<&str>,
         variables: Object,
-        schema: &Schema,
+        schema: &ApiSchema,
         defer_conditions: BooleanValues,
     ) -> Vec<Path> {
         let data = std::mem::take(&mut response.data);
@@ -168,7 +156,7 @@ impl Query {
                                         .then(|| *op.kind())
                                 });
                             if let Some(operation_kind) = operation_kind_if_root_typename {
-                                output.insert(TYPENAME, operation_kind.as_str().into());
+                                output.insert(TYPENAME, operation_kind.default_type_name().into());
                             }
 
                             response.data = Some(
@@ -215,7 +203,10 @@ impl Query {
                             .collect()
                     };
 
-                    let operation_type_name = schema.root_operation_name(operation.kind);
+                    let operation_type_name = schema
+                        .root_operation(operation.kind.into())
+                        .map(|name| name.as_str())
+                        .unwrap_or(operation.kind.default_type_name());
                     let mut parameters = FormatParameters {
                         variables: &all_variables,
                         schema,
@@ -259,7 +250,7 @@ impl Query {
                 response.data = match operation_kind_if_root_typename {
                     Some(operation_kind) => {
                         let mut output = Object::default();
-                        output.insert(TYPENAME, operation_kind.as_str().into());
+                        output.insert(TYPENAME, operation_kind.default_type_name().into());
                         Some(output.into())
                     }
                     None => Some(Value::default()),
@@ -283,26 +274,21 @@ impl Query {
         schema: &Schema,
         configuration: &Configuration,
     ) -> Result<ParsedDocument, SpecError> {
-        let parser = &mut apollo_compiler::Parser::new()
+        let parser = &mut apollo_compiler::parser::Parser::new()
             .recursion_limit(configuration.limits.parser_max_recursion)
             .token_limit(configuration.limits.parser_max_tokens);
-        let (ast, parse_errors) = match parser.parse_ast(query, "query.graphql") {
-            Ok(ast) => (ast, None),
-            Err(WithErrors { partial, errors }) => (partial, Some(errors)),
-        };
-        let schema = &schema.api_schema().definitions;
-        let validate =
-            configuration.experimental_graphql_validation_mode != GraphQLValidationMode::Legacy;
-        // Stretch the meaning of "assume valid" to "we’ll check later"
-        let (executable_document, validation_errors) = if validate {
-            match ast.to_executable_validate(schema) {
-                Ok(doc) => (doc.into_inner(), None),
-                Err(WithErrors { partial, errors }) => (partial, Some(errors)),
+        let ast = match parser.parse_ast(query, "query.graphql") {
+            Ok(ast) => ast,
+            Err(errors) => {
+                return Err(SpecError::ParseError(errors.into()));
             }
-        } else {
-            match ast.to_executable(schema) {
-                Ok(doc) => (doc, None),
-                Err(WithErrors { partial, .. }) => (partial, None),
+        };
+
+        let api_schema = schema.api_schema();
+        let executable_document = match ast.to_executable_validate(api_schema) {
+            Ok(doc) => doc,
+            Err(errors) => {
+                return Err(SpecError::ValidationError(errors.into()));
             }
         };
 
@@ -310,28 +296,31 @@ impl Query {
         let recursion_limit = parser.recursion_reached();
         tracing::trace!(?recursion_limit, "recursion limit data");
 
-        let hash = QueryHashVisitor::hash_query(schema, &executable_document, operation_name)
-            .map_err(|e| SpecError::QueryHashing(e.to_string()))?;
+        let hash = QueryHashVisitor::hash_query(
+            schema.supergraph_schema(),
+            &schema.raw_sdl,
+            &executable_document,
+            operation_name,
+        )
+        .map_err(|e| SpecError::QueryHashing(e.to_string()))?;
 
         Ok(Arc::new(ParsedDocumentInner {
             ast,
             executable: Arc::new(executable_document),
             hash: Arc::new(QueryHash(hash)),
-            parse_errors,
-            validation_errors,
         }))
     }
 
+    #[cfg(test)]
     pub(crate) fn parse(
         query: impl Into<String>,
         operation_name: Option<&str>,
         schema: &Schema,
         configuration: &Configuration,
-    ) -> Result<Self, BoxError> {
+    ) -> Result<Self, tower::BoxError> {
         let query = query.into();
 
         let doc = Self::parse_document(&query, operation_name, schema, configuration)?;
-        Self::check_errors(&doc)?;
         let (fragments, operations, defer_stats, schema_aware_hash) =
             Self::extract_query_information(schema, &doc.executable, operation_name)?;
 
@@ -344,25 +333,8 @@ impl Query {
             filtered_query: None,
             defer_stats,
             is_original: true,
-            validation_error: None,
             schema_aware_hash,
         })
-    }
-
-    /// Check for parse errors in a query in the compiler.
-    pub(crate) fn check_errors(document: &ParsedDocument) -> Result<(), SpecError> {
-        match document.parse_errors.clone() {
-            Some(errors) => Err(SpecError::ParsingError(errors.to_string())),
-            None => Ok(()),
-        }
-    }
-
-    /// Check for validation errors in a query in the compiler.
-    pub(crate) fn validate_query(document: &ParsedDocument) -> Result<(), ValidationErrors> {
-        match document.validation_errors.clone() {
-            Some(errors) => Err(ValidationErrors { errors }),
-            None => Ok(()),
-        }
     }
 
     /// Extract serializable data structures from the apollo-compiler HIR.
@@ -374,17 +346,19 @@ impl Query {
         let mut defer_stats = DeferStats {
             has_defer: false,
             has_unconditional_defer: false,
-            conditional_defer_variable_names: IndexSet::new(),
+            conditional_defer_variable_names: IndexSet::default(),
         };
         let fragments = Fragments::from_hir(document, schema, &mut defer_stats)?;
         let operations = document
-            .all_operations()
+            .operations
+            .iter()
             .map(|operation| Operation::from_hir(operation, schema, &mut defer_stats, &fragments))
             .collect::<Result<Vec<_>, SpecError>>()?;
 
-        let mut visitor = QueryHashVisitor::new(&schema.definitions, document);
+        let mut visitor =
+            QueryHashVisitor::new(schema.supergraph_schema(), &schema.raw_sdl, document);
         traverse::document(&mut visitor, document, operation_name).map_err(|e| {
-            SpecError::ParsingError(format!("could not calculate the query hash: {e}"))
+            SpecError::QueryHashing(format!("could not calculate the query hash: {e}"))
         })?;
         let hash = visitor.finish();
 
@@ -543,7 +517,7 @@ impl Query {
             executable::Type::Named(type_name) => {
                 // we cannot know about the expected format of custom scalars
                 // so we must pass them directly to the client
-                match parameters.schema.definitions.types.get(type_name) {
+                match parameters.schema.types.get(type_name) {
                     Some(ExtendedType::Scalar(_)) => {
                         *output = input.clone();
                         return Ok(());
@@ -578,7 +552,7 @@ impl Query {
                             // some subgraph can have returned a __typename that is the name of an interface in the supergraph, and this is fine (that is, we should not
                             // return such a __typename to the user, but as long as it's not returned, having it in the internal data is ok and sometimes expected).
                             let Some(ExtendedType::Object(_) | ExtendedType::Interface(_)) =
-                                parameters.schema.definitions.types.get(input_type)
+                                parameters.schema.types.get(input_type)
                             else {
                                 parameters.nullified.push(Path::from_response_slice(path));
                                 *output = Value::Null;
@@ -594,21 +568,17 @@ impl Query {
                         let typename = input_object
                             .get(TYPENAME)
                             .and_then(|val| val.as_str())
-                            .and_then(|s| {
-                                Some(apollo_compiler::ast::Type::Named(
-                                    apollo_compiler::ast::NamedType::new(
-                                        apollo_compiler::NodeStr::new(s),
-                                    )
-                                    .ok()?,
-                                ))
-                            });
+                            .and_then(|s| apollo_compiler::ast::NamedType::new(s).ok())
+                            .map(apollo_compiler::ast::Type::Named);
 
                         let current_type = if parameters
                             .schema
-                            .is_interface(field_type.inner_named_type().as_str())
+                            .get_interface(field_type.inner_named_type())
+                            .is_some()
                             || parameters
                                 .schema
-                                .is_union(field_type.inner_named_type().as_str())
+                                .get_union(field_type.inner_named_type())
+                                .is_some()
                         {
                             typename.as_ref().unwrap_or(field_type)
                         } else {
@@ -680,12 +650,7 @@ impl Query {
                                 ))
                             });
                         if let Some(input_str) = input_value.as_str() {
-                            if parameters
-                                .schema
-                                .definitions
-                                .get_object(input_str)
-                                .is_some()
-                            {
+                            if parameters.schema.get_object(input_str).is_some() {
                                 output.insert((*field_name).clone(), input_value);
                             } else {
                                 return Err(InvalidValue);
@@ -1030,10 +995,6 @@ impl Query {
         }
     }
 
-    pub(crate) fn contains_introspection(&self) -> bool {
-        self.operations.iter().any(Operation::is_introspection)
-    }
-
     pub(crate) fn variable_value<'a>(
         &'a self,
         operation_name: Option<&str>,
@@ -1130,7 +1091,7 @@ struct FormatParameters<'a> {
     variables: &'a Object,
     errors: Vec<Error>,
     nullified: Vec<Path>,
-    schema: &'a Schema,
+    schema: &'a ApiSchema,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1190,43 +1151,6 @@ impl Operation {
             type_name,
             variables,
             kind,
-        })
-    }
-
-    /// Checks to see if this is a query or mutation containing only
-    /// `__typename` at the root level (possibly more than one time, possibly
-    /// with aliases). If so, returns Some with a Vec of the output keys
-    /// corresponding.
-    pub(crate) fn is_only_typenames_with_output_keys(&self) -> Option<Vec<ByteString>> {
-        if self.selection_set.is_empty() {
-            None
-        } else {
-            let output_keys: Vec<ByteString> = self
-                .selection_set
-                .iter()
-                .filter_map(|s| s.output_key_if_typename_field())
-                .collect();
-            if output_keys.len() == self.selection_set.len() {
-                Some(output_keys)
-            } else {
-                None
-            }
-        }
-    }
-
-    fn is_introspection(&self) -> bool {
-        // If the only field is `__typename` it's considered as an introspection query
-        if self.is_only_typenames_with_output_keys().is_some() {
-            return true;
-        }
-        self.selection_set.iter().all(|sel| match sel {
-            Selection::Field { name, .. } => {
-                let name = name.as_str();
-                // `__typename` can only be resolved in runtime,
-                // so this query cannot be seen as an introspection query
-                name == "__schema" || name == "__type"
-            }
-            _ => false,
         })
     }
 

@@ -7,9 +7,14 @@ use opentelemetry::trace::TraceContextExt;
 use serde::Deserialize;
 use serde::Serialize;
 use tracing::Span;
-use tracing_opentelemetry::OpenTelemetrySpanExt;
+use tracing_subscriber::registry::LookupSpan;
+use tracing_subscriber::Registry;
+
+use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
+use crate::plugins::telemetry::reload::IsSampled;
 
 /// Trace ID
+#[cfg_attr(test, derive(Default))]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct TraceId([u8; 16]);
 
@@ -27,13 +32,35 @@ impl TraceId {
         }
     }
 
+    /// Get the current trace id if it's a valid one, even if it's not sampled
+    pub(crate) fn current() -> Option<Self> {
+        let trace_id = Span::current()
+            .with_subscriber(move |(id, dispatch)| {
+                if let Some(reg) = dispatch.downcast_ref::<Registry>() {
+                    match reg.span(id) {
+                        None => {
+                            eprintln!("no spanref, this is a bug");
+                            None
+                        }
+                        Some(s) => s.get_trace_id(),
+                    }
+                } else {
+                    ::tracing::error!("no Registry, this is a bug");
+                    None
+                }
+            })
+            .flatten();
+
+        trace_id
+    }
+
     /// Convert the TraceId to bytes.
     pub fn as_bytes(&self) -> &[u8; 16] {
         &self.0
     }
 
     /// Convert the TraceId to u128.
-    pub fn to_u128(&self) -> u128 {
+    pub const fn to_u128(&self) -> u128 {
         u128::from_be_bytes(self.0)
     }
 }
@@ -41,6 +68,12 @@ impl TraceId {
 impl fmt::Display for TraceId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:032x}", self.to_u128())
+    }
+}
+
+impl From<[u8; 16]> for TraceId {
+    fn from(value: [u8; 16]) -> Self {
+        Self(value)
     }
 }
 
@@ -59,6 +92,7 @@ mod test {
     use tracing_subscriber::Registry;
 
     use super::TraceId;
+    use crate::plugins::telemetry::otel;
 
     // If we try to run more than one test concurrently which relies on the existence of a pipeline,
     // then the tests will fail due to manipulation of global state in the opentelemetry crates.
@@ -101,7 +135,7 @@ mod test {
             .build();
         let tracer = provider.versioned_tracer("noop", None::<String>, None::<String>, None);
 
-        let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+        let telemetry = otel::layer().force_sampling().with_tracer(tracer);
         // Use the tracing subscriber `Registry`, or any other subscriber
         // that impls `LookupSpan`
         let subscriber = Registry::default().with(telemetry);
@@ -125,7 +159,7 @@ mod test {
             .with_simple_exporter(opentelemetry_stdout::SpanExporter::default())
             .build();
         let tracer = provider.versioned_tracer("noop", None::<String>, None::<String>, None);
-        let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+        let telemetry = otel::layer().force_sampling().with_tracer(tracer);
         // Use the tracing subscriber `Registry`, or any other subscriber
         // that impls `LookupSpan`
         let subscriber = Registry::default().with(telemetry);
@@ -150,7 +184,7 @@ mod test {
             .with_simple_exporter(opentelemetry_stdout::SpanExporter::default())
             .build();
         let tracer = provider.versioned_tracer("noop", None::<String>, None::<String>, None);
-        let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+        let telemetry = otel::layer().force_sampling().with_tracer(tracer);
         // Use the tracing subscriber `Registry`, or any other subscriber
         // that impls `LookupSpan`
         let subscriber = Registry::default().with(telemetry);

@@ -19,11 +19,9 @@ use crate::plugin::PluginInit;
 use crate::services::execution;
 use crate::services::external::externalize_header_map;
 use crate::services::router;
+use crate::services::router::body::RouterBody;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::spec::query::Query;
-use crate::spec::Schema;
-use crate::Configuration;
 
 const RECORD_HEADER: &str = "x-apollo-router-record";
 
@@ -47,7 +45,6 @@ struct Record {
     enabled: bool,
     supergraph_sdl: Arc<String>,
     storage_path: Arc<Path>,
-    schema: Arc<Schema>,
 }
 
 register_plugin!("experimental", "record", Record);
@@ -66,10 +63,6 @@ impl Plugin for Record {
             enabled: init.config.enabled,
             supergraph_sdl: init.supergraph_sdl.clone(),
             storage_path: storage_path.clone().into(),
-            schema: Arc::new(Schema::parse(
-                init.supergraph_sdl.clone().as_str(),
-                &Configuration::default(),
-            )?),
         };
 
         if init.config.enabled {
@@ -103,7 +96,9 @@ impl Plugin for Record {
                     let context = res.context.clone();
 
                     let after_complete = once(async move {
-                        let recording = context.extensions().lock().remove::<Recording>();
+                        let recording = context
+                            .extensions()
+                            .with_lock(|mut lock| lock.remove::<Recording>());
 
                         if let Some(mut recording) = recording {
                             let res_headers = externalize_header_map(&headers)?;
@@ -136,7 +131,7 @@ impl Plugin for Record {
                         context: res.context,
                         response: http::Response::from_parts(
                             parts,
-                            hyper::Body::wrap_stream(stream),
+                            RouterBody::wrap_stream(stream).into_inner(),
                         ),
                     })
                 }
@@ -150,31 +145,24 @@ impl Plugin for Record {
             return service;
         }
 
-        let schema = self.schema.clone();
         let supergraph_sdl = self.supergraph_sdl.clone();
 
         ServiceBuilder::new()
             .map_request(move |req: supergraph::Request| {
-                if is_introspection(
-                    req.supergraph_request
-                        .body()
-                        .query
-                        .clone()
-                        .unwrap_or_default(),
-                    req.supergraph_request.body().operation_name.as_deref(),
-                    schema.clone(),
-                ) {
+                if is_introspection(&req) {
                     return req;
                 }
 
                 let recording_enabled =
                     if req.supergraph_request.headers().contains_key(RECORD_HEADER) {
-                        req.context.extensions().lock().insert(Recording {
-                            supergraph_sdl: supergraph_sdl.clone().to_string(),
-                            client_request: Default::default(),
-                            client_response: Default::default(),
-                            formatted_query_plan: Default::default(),
-                            subgraph_fetches: Default::default(),
+                        req.context.extensions().with_lock(|mut lock| {
+                            lock.insert(Recording {
+                                supergraph_sdl: supergraph_sdl.clone().to_string(),
+                                client_request: Default::default(),
+                                client_response: Default::default(),
+                                formatted_query_plan: Default::default(),
+                                subgraph_fetches: Default::default(),
+                            })
                         });
                         true
                     } else {
@@ -190,26 +178,29 @@ impl Plugin for Record {
                     let method = req.supergraph_request.method().to_string();
                     let uri = req.supergraph_request.uri().to_string();
 
-                    if let Some(recording) = req.context.extensions().lock().get_mut::<Recording>()
-                    {
-                        recording.client_request = RequestDetails {
-                            query,
-                            operation_name,
-                            variables,
-                            headers,
-                            method,
-                            uri,
-                        };
-                    }
+                    req.context.extensions().with_lock(|mut lock| {
+                        if let Some(recording) = lock.get_mut::<Recording>() {
+                            recording.client_request = RequestDetails {
+                                query,
+                                operation_name,
+                                variables,
+                                headers,
+                                method,
+                                uri,
+                            };
+                        }
+                    });
                 }
                 req
             })
             .map_response(|res: supergraph::Response| {
                 let context = res.context.clone();
                 res.map_stream(move |chunk| {
-                    if let Some(recording) = context.extensions().lock().get_mut::<Recording>() {
-                        recording.client_response.chunks.push(chunk.clone());
-                    }
+                    context.extensions().with_lock(|mut lock| {
+                        if let Some(recording) = lock.get_mut::<Recording>() {
+                            recording.client_response.chunks.push(chunk.clone());
+                        }
+                    });
 
                     chunk
                 })
@@ -221,9 +212,12 @@ impl Plugin for Record {
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
         ServiceBuilder::new()
             .map_request(|req: execution::Request| {
-                if let Some(recording) = req.context.extensions().lock().get_mut::<Recording>() {
-                    recording.formatted_query_plan = req.query_plan.formatted_query_plan.clone();
-                }
+                req.context.extensions().with_lock(|mut lock| {
+                    if let Some(recording) = lock.get_mut::<Recording>() {
+                        recording.formatted_query_plan =
+                            req.query_plan.formatted_query_plan.clone();
+                    }
+                });
                 req
             })
             .service(service)
@@ -276,17 +270,17 @@ impl Plugin for Record {
                                     request: req,
                                 };
 
-                                if let Some(recording) =
-                                    res.context.extensions().lock().get_mut::<Recording>()
-                                {
-                                    if recording.subgraph_fetches.is_none() {
-                                        recording.subgraph_fetches = Some(Default::default());
-                                    }
+                                res.context.extensions().with_lock(|mut lock| {
+                                    if let Some(recording) = lock.get_mut::<Recording>() {
+                                        if recording.subgraph_fetches.is_none() {
+                                            recording.subgraph_fetches = Some(Default::default());
+                                        }
 
-                                    if let Some(fetches) = &mut recording.subgraph_fetches {
-                                        fetches.insert(operation_name, subgraph);
+                                        if let Some(fetches) = &mut recording.subgraph_fetches {
+                                            fetches.insert(operation_name, subgraph);
+                                        }
                                     }
-                                }
+                                });
                                 Ok(res)
                             }
                             Err(err) => Err(err),
@@ -309,8 +303,18 @@ async fn write_file(dir: Arc<Path>, path: &PathBuf, contents: &[u8]) -> Result<(
     Ok(())
 }
 
-fn is_introspection(query: String, operation_name: Option<&str>, schema: Arc<Schema>) -> bool {
-    Query::parse(query, operation_name, &schema, &Configuration::default())
-        .map(|q| q.contains_introspection())
-        .unwrap_or_default()
+fn is_introspection(request: &supergraph::Request) -> bool {
+    request
+        .context
+        .unsupported_executable_document()
+        .is_some_and(|doc| {
+            doc.operations
+                .get(request.supergraph_request.body().operation_name.as_deref())
+                .ok()
+                .is_some_and(|op| {
+                    op.root_fields(&doc).all(|field| {
+                        matches!(field.name.as_str(), "__typename" | "__schema" | "__type")
+                    })
+                })
+        })
 }

@@ -1,15 +1,16 @@
 ---
-title: Operation request format
-description: How to send requests to the Apollo Router over HTTP
+title: Operation Request Format
+subtitle: Send requests to the router over HTTP
+description: Learn how to format and send GraphQL requests to Apollo GraphOS Router or Apollo Router Core over HTTP. Explore POST and GET  examples and the automatic persisted queries protocol.
 ---
 
-By default, almost every GraphQL IDE and client library takes care of sending operations in a format that the Apollo Router supports. This article describes that format, which is also described on [graphql.org](https://graphql.org/learn/serving-over-http/) and in [this preliminary spec](https://github.com/graphql/graphql-over-http).
+By default, almost every GraphQL IDE and client library takes care of sending operations in a format that the GraphOS Router or Apollo Router Core supports. This article describes that format, which is also described on [graphql.org](https://graphql.org/learn/serving-over-http/) and in [this preliminary spec](https://github.com/graphql/graphql-over-http).
 
-The Apollo Router accepts queries, mutations, and subscriptions sent as POST requests. It also accepts queries sent as GET requests.
+The router accepts queries, mutations, and subscriptions sent as POST requests. It also accepts queries sent as GET requests.
 
 ## POST requests
 
-The Apollo Router accepts POST requests with a JSON body. A valid request contains a `query` field, along with optional `variables` and an `operationName` (if `query` contains multiple possible operations).
+The router accepts POST requests with a JSON body. A valid request contains a `query` field, along with optional `variables` and an `operationName` (if `query` contains multiple possible operations).
 
 Let's say we want to execute the following query:
 
@@ -42,13 +43,13 @@ curl --request POST \
   https://rover.apollo.dev/quickstart/products/graphql
 ```
 
-The Apollo Router's default landing page provides a `curl` command you can use to execute a test query on your own server:
+The router's default landing page provides a `curl` command you can use to execute a test query on your own server:
 
 <img class="screenshot" src="../images/as-landing-page-production.jpg" width="500" />
 
 ## GET requests
 
-The Apollo Router also accepts GET requests for queries (but not mutations). With a GET request, query details (`query`, `operationName`, `variables`) are provided as URL query parameters. The `variables` option is a URL-escaped JSON object.
+The router also accepts GET requests for queries (but not mutations). With a GET request, query details (`query`, `operationName`, `variables`) are provided as URL query parameters. The `variables` option is a URL-escaped JSON object.
 
 Here's the same query from [POST requests](#post-requests) formatted for a `curl` GET request:
 
@@ -59,7 +60,7 @@ curl --request GET \
 
 ## Persisted queries protocol
 
-The Automatic Persisted Queries (APQ) and Persisted Query List (PQL) features of the Apollo Router use a separate protocol to send the operation document information in the `extensions`. This protocal can also use HTTP POST or GET. See the Apollo Client docs on the [APQ protocol](/react/api/link/persisted-queries/#protocol) for details.
+The Automatic Persisted Queries (APQ) feature available for Apollo Router Core and the Persisted Query List (PQL) feature available for GraphOS Router use a separate protocol to send the operation document information in the `extensions`. This protocol can also use HTTP POST or GET. See the Apollo Client docs on the [APQ protocol](/react/api/link/persisted-queries/#protocol) for details.
 
 
 ## Related topics

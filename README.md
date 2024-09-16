@@ -2,11 +2,18 @@
 
 [![CircleCI](https://circleci.com/gh/apollographql/router/tree/main.svg?style=shield)](https://circleci.com/gh/apollographql/router/tree/main)
 
-# Apollo Router
+---
 
-The **Apollo Router** is a configurable, high-performance **graph router** written in Rust to run a [federated supergraph](https://www.apollographql.com/docs/federation/) that uses [Apollo Federation 2](https://www.apollographql.com/docs/federation/v2/federation-2/new-in-federation-2).
+**Announcement:**   
+Join 1000+ engineers at GraphQL Summit for talks, workshops, and office hours, Oct 8-10 in NYC. [Get your pass here ->](https://summit.graphql.com/?utm_campaign=github_federation_readme)
 
-Apollo Router is well-tested, regularly benchmarked, includes most major features of Apollo Gateway and is able to serve production-scale workloads. Please note that the (pre-1.0) version is not yet "semver stable" and we may still make breaking changes. Generally speaking, we expect most breaking changes to be on the plugin API and the configuration file format. We will clearly convey such changes in the release notes.
+---
+
+# Apollo Router Core
+
+The **Apollo Router Core** is a configurable, high-performance **graph router** written in Rust to run a [federated supergraph](https://www.apollographql.com/docs/federation/) that uses [Apollo Federation 2](https://www.apollographql.com/docs/federation/v2/federation-2/new-in-federation-2).
+
+Apollo Router Core is well-tested, regularly benchmarked, includes most major features of Apollo Gateway and is able to serve production-scale workloads.
 
 New releases and their release notes (along with notes about any breaking changes) can be found on the [Releases](https://github.com/apollographql/router/releases) page, and the latest release can always be found [on the latest page](https://github.com/apollographql/router/releases/latest). The `CHANGELOG.md` at the root of this repository also contains _unreleased_ changes in addition to the full history of changes.
 
@@ -14,13 +21,13 @@ Currently, we're publishing new releases every 1-2 weeks.
 
 ## Getting started
 
-Follow the [quickstart tutorial](https://www.apollographql.com/docs/router/quickstart/) to get up and running with the Apollo Router.
+Follow the [quickstart tutorial](https://www.apollographql.com/docs/router/quickstart/) to get up and running with the router.
 
 See [the documentation](https://www.apollographql.com/docs/router) for more details.
 
 ## Usage
 
-Apollo Router requires [a supergraph file](https://www.apollographql.com/docs/rover/commands/supergraphs/) to be passed as the `--supergraph` argument and [an optional configuration file](https://www.apollographql.com/docs/router/configuration/overview/#yaml-config-file).
+Apollo Router Core requires [a supergraph file](https://www.apollographql.com/docs/rover/commands/supergraphs/) to be passed as the `--supergraph` argument and [an optional configuration file](https://www.apollographql.com/docs/router/configuration/overview/#yaml-config-file).
 to be supplied. These are either located in the current directory or explicitly
 specified via flag, either by an absolute path, or a path relative to the current
 directory.
@@ -61,11 +68,11 @@ Options:
 
 ## Who is Apollo?
 
-[Apollo](https://apollographql.com/) is building software and a graph platform to unify GraphQL across your apps and services. We help you ship faster with:
+[Apollo](https://apollographql.com/) builds open-source tools and commercial services to make application development easier, better, and accessible to more people. We help you ship faster with:
 
-* [Apollo Studio](https://www.apollographql.com/graphos) – A free, end-to-end platform for managing your GraphQL lifecycle. Track your GraphQL schemas in a hosted registry to create a source of truth for everything in your graph. Studio provides an IDE (Apollo Explorer) so you can explore data, collaborate on queries, observe usage, and safely make schema changes.
-* [Apollo Federation](https://www.apollographql.com/docs/federation/) – The industry-standard open architecture for building a distributed graph. Compose and manage your graphs using [Rover](https://www.apollographql.com/docs/rover) and then use Apollo Router to query plan and route requests across multiple subgraphs.
-* [Apollo Client](https://www.apollographql.com/docs/react/) – The most popular GraphQL client for the web. Apollo also builds and maintains [Apollo iOS](https://github.com/apollographql/apollo-ios) and [Apollo Android](https://github.com/apollographql/apollo-android).
+* [GraphOS](https://www.apollographql.com/graphos) - The platform for building, managing, and scaling a supergraph: a unified network of your organization's microservices and their data sources—all composed into a single distributed API.
+* [Apollo Federation](https://www.apollographql.com/federation) – The industry-standard open architecture for building a distributed graph. Use Apollo’s gateway to compose a unified graph from multiple subgraphs, determine a query plan, and route requests across your services.
+* [Apollo Client](https://github.com/apollographql/apollo-client) – The most popular GraphQL client for the web. Apollo also builds and maintains [Apollo iOS](https://github.com/apollographql/apollo-ios) and [Apollo Kotlin](https://github.com/apollographql/apollo-kotlin).
 * [Apollo Server](https://www.apollographql.com/docs/apollo-server/) – A production-ready JavaScript GraphQL server that connects to any microservice, API, or database. Compatible with all popular JavaScript frameworks and deployable in serverless environments.
 
 ## Learn how to build with Apollo
@@ -74,7 +81,7 @@ Check out the [Odyssey](https://odyssey.apollographql.com/) learning platform, t
 
 ## Design principles
 
-The development of the Apollo Router is driven by the following design principles that inform
+The development of the Apollo Router Core is driven by the following design principles that inform
 architecture decisions and implementation.
 
 **Correctness:** the router strives to be the most correct implementation of GraphQL and Federation, we care about testing and documenting everything implied by the specification, up to failure cases. The router’s behavior should follow the principle of least surprise for developers.
@@ -84,6 +91,7 @@ architecture decisions and implementation.
 **Safe experimentation:** the router will support all the future work around Federation, so it must allow new ideas and explorations without disturbing existing features. The project is still in movement, we cannot allow it to crystallize too early, while still following the principles of correctness and reliability.
 
 **Usability:** the router must be simple to operate. Prefer extensibility over configuration options, and ensure that the user has enough information to help themselves when things go wrong. For example:
+
 * Common environmental misconfiguration should be detected and surfaced to the user in the form of mitigation steps.
 * User supplied extensions should be observable and flagged when they cause performance issues. Tell the users how much time an extension is consuming per request and why.
 

@@ -1,0 +1,23 @@
+override_subgraph_url:
+  products: http://localhost:4005
+include_subgraph_errors:
+  all: true
+
+preview_entity_cache:
+  enabled: true
+  redis:
+    urls:
+      ["redis://localhost:6379",]
+  subgraph:
+    all:
+      enabled: true
+    subgraphs:
+      invalidation-entity-key-reviews:
+        ttl: 120s
+        enabled: true
+
+telemetry:
+  exporters:
+    logging:
+      stdout:
+        format: text

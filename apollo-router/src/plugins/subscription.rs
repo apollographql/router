@@ -32,19 +32,20 @@ use crate::graphql::Response;
 use crate::json_ext::Object;
 use crate::layers::ServiceBuilderExt;
 use crate::notification::Notify;
+use crate::notification::NotifyError;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::protocols::websocket::WebSocketProtocol;
 use crate::query_planner::OperationKind;
 use crate::register_plugin;
 use crate::services::router;
+use crate::services::router::body::RouterBody;
 use crate::services::subgraph;
 use crate::Endpoint;
 use crate::ListenAddr;
 
 type HmacSha256 = Hmac<sha2::Sha256>;
 pub(crate) const APOLLO_SUBSCRIPTION_PLUGIN: &str = "apollo.subscription";
-#[cfg(not(test))]
 pub(crate) const APOLLO_SUBSCRIPTION_PLUGIN_NAME: &str = "subscription";
 pub(crate) static SUBSCRIPTION_CALLBACK_HMAC_KEY: OnceCell<String> = OnceCell::new();
 pub(crate) const SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS: &str =
@@ -209,14 +210,6 @@ pub(crate) enum Enabled {
     Enabled,
 }
 
-/// Using websocket to directly connect to subgraph
-#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
-pub(crate) struct PassthroughMode {
-    /// WebSocket configuration for specific subgraphs
-    subgraph: SubgraphPassthroughMode,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// WebSocket configuration for a specific subgraph
@@ -236,7 +229,7 @@ fn default_path() -> String {
     String::from("/callback")
 }
 
-fn default_listen_addr() -> ListenAddr {
+pub(crate) fn default_listen_addr() -> ListenAddr {
     ListenAddr::SocketAddr("127.0.0.1:4000".parse().expect("valid ListenAddr"))
 }
 
@@ -437,7 +430,7 @@ impl Service<router::Request> for CallbackService {
 
                 match parts.method {
                     Method::POST => {
-                        let cb_body = hyper::body::to_bytes(body)
+                        let cb_body = Into::<RouterBody>::into(body).to_bytes()
                             .await
                             .map_err(|e| format!("failed to get the request body: {e}"))
                             .and_then(|bytes| {
@@ -519,7 +512,7 @@ impl Service<router::Request> for CallbackService {
                                 Ok(router::Response {
                                     response: http::Response::builder()
                                         .status(StatusCode::OK)
-                                        .body::<hyper::Body>("".into())
+                                        .body("".into())
                                         .map_err(BoxError::from)?,
                                     context: req.context,
                                 })
@@ -532,7 +525,7 @@ impl Service<router::Request> for CallbackService {
                                         response: http::Response::builder()
                                             .status(StatusCode::NO_CONTENT)
                                             .header(HeaderName::from_static(CALLBACK_SUBSCRIPTION_HEADER_NAME), HeaderValue::from_static(CALLBACK_SUBSCRIPTION_HEADER_VALUE))
-                                            .body::<hyper::Body>("".into())
+                                            .body("".into())
                                             .map_err(BoxError::from)?,
                                         context: req.context,
                                     })
@@ -567,7 +560,7 @@ impl Service<router::Request> for CallbackService {
                                     Ok(router::Response {
                                         response: http::Response::builder()
                                             .status(StatusCode::NO_CONTENT)
-                                            .body::<hyper::Body>("".into())
+                                            .body("".into())
                                             .map_err(BoxError::from)?,
                                         context: req.context,
                                     })
@@ -612,22 +605,57 @@ impl Service<router::Request> for CallbackService {
                                 ..
                             }) => {
                                 if let Some(errors) = errors {
-                                    let mut handle =
-                                        notify.subscribe(id.clone()).await?.into_sink();
+                                    let mut handle = match notify.subscribe(id.clone()).await {
+                                         Ok(handle) => handle.into_sink(),
+                                         Err(NotifyError::UnknownTopic) => {
+                                            return Ok(router::Response {
+                                                response: http::Response::builder()
+                                                    .status(StatusCode::NOT_FOUND)
+                                                    .body("unknown topic".into())
+                                                    .map_err(BoxError::from)?,
+                                                context: req.context,
+                                            });
+                                         },
+                                         Err(err) => {
+                                            return Ok(router::Response {
+                                                response: http::Response::builder()
+                                                    .status(StatusCode::NOT_FOUND)
+                                                    .body(err.to_string().into())
+                                                    .map_err(BoxError::from)?,
+                                                context: req.context,
+                                            });
+                                         }
+                                    };
                                     tracing::info!(
                                         monotonic_counter.apollo.router.operations.subscriptions.events = 1u64,
                                         subscriptions.mode="callback",
                                         subscriptions.complete=true
                                     );
-                                    handle.send_sync(
+                                    if let Err(_err) = handle.send_sync(
                                         graphql::Response::builder().errors(errors).build(),
-                                    )?;
+                                    ) {
+                                        return Ok(router::Response {
+                                            response: http::Response::builder()
+                                                .status(StatusCode::NOT_FOUND)
+                                                .body("cannot send errors to the client".into())
+                                                .map_err(BoxError::from)?,
+                                            context: req.context,
+                                        });
+                                    }
                                 }
-                                notify.force_delete(id).await?;
+                                if let Err(_err) = notify.force_delete(id).await {
+                                    return Ok(router::Response {
+                                        response: http::Response::builder()
+                                            .status(StatusCode::NOT_FOUND)
+                                            .body("cannot force delete".into())
+                                            .map_err(BoxError::from)?,
+                                        context: req.context,
+                                    });
+                                }
                                 Ok(router::Response {
                                     response: http::Response::builder()
                                         .status(StatusCode::ACCEPTED)
-                                        .body::<hyper::Body>("".into())
+                                        .body("".into())
                                         .map_err(BoxError::from)?,
                                     context: req.context,
                                 })
@@ -637,7 +665,7 @@ impl Service<router::Request> for CallbackService {
                     _ => Ok(router::Response {
                         response: http::Response::builder()
                             .status(StatusCode::METHOD_NOT_ALLOWED)
-                            .body::<hyper::Body>("".into())
+                            .body("".into())
                             .map_err(BoxError::from)?,
                         context: req.context,
                     }),
@@ -670,7 +698,7 @@ fn ensure_id_consistency(
             Err(router::Response {
                 response: http::Response::builder()
                     .status(StatusCode::BAD_REQUEST)
-                    .body::<hyper::Body>("id from url path and id from body are different".into())
+                    .body("id from url path and id from body are different".into())
                     .expect("this body is valid"),
                 context: context.clone(),
             })
@@ -756,13 +784,16 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(hyper::Body::from(
-            serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Check {
-                id: new_sub_id.clone(),
-                verifier: verifier.clone(),
-            }))
-            .unwrap(),
-        ))
+        .body(
+            RouterBody::from(
+                serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Check {
+                    id: new_sub_id.clone(),
+                    verifier: verifier.clone(),
+                }))
+                .unwrap(),
+            )
+            .into_inner(),
+        )
         .unwrap();
         let resp = web_endpoint.clone().oneshot(http_req).await.unwrap();
         assert_eq!(resp.status(), http::StatusCode::NO_CONTENT);
@@ -776,7 +807,7 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(hyper::Body::from(
+        .body(RouterBody::from(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
                 payload: graphql::Response::builder()
@@ -785,7 +816,7 @@ mod tests {
                 verifier: verifier.clone(),
             }))
             .unwrap(),
-        ))
+        ).into_inner())
         .unwrap();
         let resp = web_endpoint.clone().oneshot(http_req).await.unwrap();
         assert_eq!(resp.status(), http::StatusCode::OK);
@@ -805,7 +836,7 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(hyper::Body::from(
+        .body(RouterBody::from(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
                 payload: graphql::Response::builder()
@@ -814,7 +845,7 @@ mod tests {
                 verifier: verifier.clone(),
             }))
             .unwrap(),
-        ))
+         ).into_inner())
         .unwrap();
         let resp = web_endpoint.clone().oneshot(http_req).await.unwrap();
         assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
@@ -823,16 +854,19 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(hyper::Body::from(
-            serde_json::to_vec(&CallbackPayload::Subscription(
-                SubscriptionPayload::Heartbeat {
-                    id: new_sub_id.clone(),
-                    ids: vec![new_sub_id, "FAKE_SUB_ID".to_string()],
-                    verifier: verifier.clone(),
-                },
-            ))
-            .unwrap(),
-        ))
+        .body(
+            RouterBody::from(
+                serde_json::to_vec(&CallbackPayload::Subscription(
+                    SubscriptionPayload::Heartbeat {
+                        id: new_sub_id.clone(),
+                        ids: vec![new_sub_id, "FAKE_SUB_ID".to_string()],
+                        verifier: verifier.clone(),
+                    },
+                ))
+                .unwrap(),
+            )
+            .into_inner(),
+        )
         .unwrap();
         let resp = web_endpoint.oneshot(http_req).await.unwrap();
         assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
@@ -897,13 +931,16 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(hyper::Body::from(
-            serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Check {
-                id: new_sub_id.clone(),
-                verifier: verifier.clone(),
-            }))
-            .unwrap(),
-        ))
+        .body(
+            RouterBody::from(
+                serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Check {
+                    id: new_sub_id.clone(),
+                    verifier: verifier.clone(),
+                }))
+                .unwrap(),
+            )
+            .into_inner(),
+        )
         .unwrap();
         let resp = web_endpoint.clone().oneshot(http_req).await.unwrap();
         assert_eq!(resp.status(), http::StatusCode::UNAUTHORIZED);
@@ -911,7 +948,7 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(hyper::Body::from(
+        .body(RouterBody::from(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
                 payload: graphql::Response::builder()
@@ -920,7 +957,7 @@ mod tests {
                 verifier: verifier.clone(),
             }))
             .unwrap(),
-        ))
+        ).into_inner())
         .unwrap();
         let resp = web_endpoint.clone().oneshot(http_req).await.unwrap();
         assert_eq!(resp.status(), http::StatusCode::UNAUTHORIZED);
@@ -986,13 +1023,16 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(hyper::Body::from(
-            serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Check {
-                id: new_sub_id.clone(),
-                verifier: verifier.clone(),
-            }))
-            .unwrap(),
-        ))
+        .body(
+            RouterBody::from(
+                serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Check {
+                    id: new_sub_id.clone(),
+                    verifier: verifier.clone(),
+                }))
+                .unwrap(),
+            )
+            .into_inner(),
+        )
         .unwrap();
         let resp = web_endpoint.clone().oneshot(http_req).await.unwrap();
         assert_eq!(resp.status(), http::StatusCode::NO_CONTENT);
@@ -1006,7 +1046,7 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(hyper::Body::from(
+        .body(crate::services::router::Body::from(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
                 payload: graphql::Response::builder()
@@ -1033,19 +1073,22 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(hyper::Body::from(
-            serde_json::to_vec(&CallbackPayload::Subscription(
-                SubscriptionPayload::Complete {
-                    id: new_sub_id.clone(),
-                    errors: Some(vec![graphql::Error::builder()
-                        .message("cannot complete the subscription")
-                        .extension_code("SUBSCRIPTION_ERROR")
-                        .build()]),
-                    verifier: verifier.clone(),
-                },
-            ))
-            .unwrap(),
-        ))
+        .body(
+            RouterBody::from(
+                serde_json::to_vec(&CallbackPayload::Subscription(
+                    SubscriptionPayload::Complete {
+                        id: new_sub_id.clone(),
+                        errors: Some(vec![graphql::Error::builder()
+                            .message("cannot complete the subscription")
+                            .extension_code("SUBSCRIPTION_ERROR")
+                            .build()]),
+                        verifier: verifier.clone(),
+                    },
+                ))
+                .unwrap(),
+            )
+            .into_inner(),
+        )
         .unwrap();
         let resp = web_endpoint.clone().oneshot(http_req).await.unwrap();
         assert_eq!(resp.status(), http::StatusCode::ACCEPTED);
@@ -1065,7 +1108,7 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(hyper::Body::from(
+        .body(RouterBody::from(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
                 payload: graphql::Response::builder()
@@ -1074,7 +1117,7 @@ mod tests {
                 verifier,
             }))
             .unwrap(),
-        ))
+        ).into_inner())
         .unwrap();
         let resp = web_endpoint.oneshot(http_req).await.unwrap();
         assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);

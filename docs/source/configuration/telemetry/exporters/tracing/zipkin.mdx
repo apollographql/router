@@ -1,18 +1,18 @@
 ---
 title: Zipkin exporter
 subtitle: Configure the Zipkin exporter for tracing
-description: Enable and configure the Zipkin exporter for tracing in the Apollo Router
+description: Enable and configure the Zipkin exporter for tracing in the Apollo GraphOS Router or Apollo Router Core.
 ---
 import BatchProcessorPreamble from '../../../../../shared/batch-processor-preamble.mdx';
 import BatchProcessorRef from '../../../../../shared/batch-processor-ref.mdx';
 
-Enable and configure the [Zipkin](https://zipkin.io/) exporter for tracing in the Apollo Router.
+Enable and configure the [Zipkin](https://zipkin.io/) exporter for tracing in the GraphOS Router or Apollo Router Core.
 
 For general tracing configuration, refer to [Router Tracing Configuration](./overview).
 
 ## Zipkin configuration
 
-The Apollo Router can be configured to export tracing data for Zipkin to either the default collector address or a URL:
+The router can be configured to export tracing data for Zipkin to either the default collector address or a URL:
 
 ```yaml title="router.yaml"
 telemetry:

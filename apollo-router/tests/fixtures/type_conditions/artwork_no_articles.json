@@ -1,0 +1,52 @@
+{
+    "mocks": [
+        {
+            "request": {
+                "query":"query Search__artworkSubgraph__1($representations:[_Any!]!$movieResultParam:String){_entities(representations:$representations){...on EntityCollectionSection{title artwork(params:$movieResultParam)}...on GallerySection{artwork(params:$movieResultParam)}}}",
+                "operationName":"Search__artworkSubgraph__1",
+                "variables":{
+                    "movieResultParam":"movieResultEnabled",
+                    "representations":[
+                        {
+                            "__typename":"EntityCollectionSection",
+                            "id":"d9077ad2-d79a-45b5-b5ee-25ded226f03c"
+                        },
+                        {
+                            "__typename":"EntityCollectionSection",
+                            "id":"9f1f1ebb-21d3-4afe-bb7d-6de706f78f02"
+                        },
+                        {
+                            "__typename":"EntityCollectionSection",
+                            "id":"24cea0de-2ac8-4cbe-85b6-8b1b80647c12"
+                        },
+                        {
+                            "__typename":"GallerySection",
+                            "id":"2f772201-42ca-4376-9871-2252cc052262"
+                        }
+                    ]
+                }
+            },
+            "response": {
+                "data":{
+                    "_entities":[
+                        {
+                            "title": "d9077ad2-d79a-45b5-b5ee-25ded226f03c title",
+                            "artwork":"movieResultEnabled artwork"
+                        },
+                        {
+                            "title": "9f1f1ebb-21d3-4afe-bb7d-6de706f78f02 title",
+                            "artwork":"movieResultEnabled artwork"
+                        },
+                        {
+                            "title": "24cea0de-2ac8-4cbe-85b6-8b1b80647c12 title",
+                            "artwork":"movieResultEnabled artwork"
+                        },
+                        {
+                            "artwork":"movieResultEnabled artwork"
+                        }
+                    ]
+                }
+            }
+        }
+    ]
+}

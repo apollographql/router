@@ -1,8 +1,16 @@
 ---
-title: In-memory caching in the Apollo Router
+title: In-Memory Caching
+subtitle: Configure router caching for query plans and automatic persisted queries
+description: Configure in-memory caching for improved performance in Apollo GraphOS Router or Apollo Router Core. Configure query plans and automatic persisted queries caching.
 ---
 
-The Apollo Router uses an in-memory LRU cache to store the following data:
+<SummitCallout
+  topic="graph performance"
+  workshopName="Better, faster, stronger: Advanced configurations to boost your router performance"
+  URL="https://reg.summit.graphql.com/flow/apollo/summit24/AttendeePortal/page/catalog/session/1712947098784001VPCx"
+/>
+
+Both GraphOS Router and Apollo Router Core use an in-memory LRU cache to store the following data:
 
 - [Generated query plans](#caching-query-plans)
 - [Automatic persisted queries (APQ)](#caching-automatic-persisted-queries-apq)
@@ -12,9 +20,13 @@ You can configure certain caching behaviors for generated query plans and APQ (b
 
 <Tip>
 
-If you have a GraphOS Enterprise plan, you can also configure a Redis-backed _distributed_ cache that enables multiple router instances to share cached values. For details, see [Distributed caching in the Apollo Router](./distributed-caching/).
+If you have a GraphOS Enterprise plan, you can also configure a Redis-backed _distributed_ cache that enables multiple router instances to share cached values. For details, see [Distributed caching in the GraphOS Router](./distributed-caching/).
 
 </Tip>
+
+## Performance improvements vs stability
+
+The router is a highly scalable and low-latency runtime. Even with all caching **disabled**, the time to process operations and query plans will be very minimal (nanoseconds to milliseconds) when compared to the overall supergraph request, except in the edge cases of extremely large operations and supergraphs. Caching offers stability to those running a large graph so that your overhead for given operations stays consistent, not that it dramatically improves. If you would like to validate the performance wins of operation caching, check out the [traces and metrics in the router](/router/configuration/telemetry/instrumentation/standard-instruments#performance) to take measurements before and after. In extremely large edge cases though, we have seen the cache save 2-10x time to create the query plan, which is still a small part of the overall request.
 
 ## Caching query plans
 
@@ -22,7 +34,7 @@ Whenever your router receives an incoming GraphQL operation, it generates a [que
 
 By caching previously generated query plans, your router can _skip_ generating them _again_ if a client later sends the exact same operation. This improves your router's responsiveness.
 
-The Apollo Router enables query plan caching by default. In your router's [YAML config file](./overview/#yaml-config-file), you can configure the maximum number of query plan entries in the cache like so:
+The GraphOS Router enables query plan caching by default. In your router's [YAML config file](./overview/#yaml-config-file), you can configure the maximum number of query plan entries in the cache like so:
 
 ```yaml title="router.yaml"
 supergraph:
@@ -32,29 +44,15 @@ supergraph:
         limit: 512 # This is the default value.
 ```
 
-On schema reloads, the cache will be reset, and queries will need to go through query planning again. To avoid latencies right after the reload, you can configure the router to pregenerate query plans for the most used queries before switching to the new schema:
-
-```yaml title="router.yaml"
-supergraph:
-  query_planning:
-    # Pre-plan the 100 most used operations when the supergraph changes.  (Default is "0", disabled.)
-    warmed_up_queries: 100
-    cache:
-      in_memory:
-        limit: 512
-```
-
 ### Cache warm-up
 
 When loading a new schema, a query plan might change for some queries, so cached query plans cannot be reused. 
 
-To prevent increased latency upon query plan cache invalidation, the Router precomputes query plans for:
-* The most used queries from the cache.
-* The entire list of persisted queries.
+To prevent increased latency upon query plan cache invalidation, the router precomputes query plans for the most used queries from the cache when a new schema is loaded.
 
-Precomputed plans will be cached before the Router switches traffic over to the new schema.
+Precomputed plans will be cached before the router switches traffic over to the new schema.
 
-By default, the Router warms up the cache with 30% of the queries already in cache, but it can be configured as follows:
+By default, the router warms up the cache with 30% of the queries already in cache, but it can be configured as follows:
 
 ```yaml title="router.yaml"
 supergraph:
@@ -63,25 +61,30 @@ supergraph:
     warmed_up_queries: 100
 ```
 
+(In addition, the router can use the contents of the [persisted query list](./persisted-queries) to prewarm the cache. By default, it does this when loading a new schema but not on startup; you can [configure](./persisted-queries#persisted-queries#experimental_prewarm_query_plan_cache) it to change either of these defaults.)
+
 To get more information on the planning and warm-up process use the following metrics (where `<storage>` can be `redis` for distributed cache or `memory`):
 
 * counters:
-  * `apollo_router_cache_size{kind="query planner", storage="<storage>}`: current size of the cache (only for in-memory cache)
-  * `apollo_router_cache_hit_count{kind="query planner", storage="<storage>}`
-  * `apollo_router_cache_miss_count{kind="query planner", storage="<storage>}`
+  * `apollo_router_cache_hit_count{kind="query planner", storage="<storage>"}`
+  * `apollo_router_cache_miss_count{kind="query planner", storage="<storage>"}`
 
 * histograms:
-  * `apollo_router_query_planning_time`: time spent planning queries
+  * `apollo.router.query_planning.plan.duration`: time spent planning queries
   * `apollo_router_schema_loading_time`: time spent loading a schema
-  * `apollo_router_cache_hit_time{kind="query planner", storage="<storage>}`: time to get a value from the cache
-  * `apollo_router_cache_miss_time{kind="query planner", storage="<storage>}`
+  * `apollo_router_cache_hit_time{kind="query planner", storage="<storage>"}`: time to get a value from the cache
+  * `apollo_router_cache_miss_time{kind="query planner", storage="<storage>"}`
+
+* gauges
+  * `apollo_router_cache_size{kind="query planner", storage="memory"}`: current size of the cache (only for in-memory cache)
+  * `apollo.router.cache.storage.estimated_size{kind="query planner", storage="memory"}`: estimated storage size of the cache (only for in-memory query planner cache)
 
 Typically, we would look at `apollo_router_cache_size` and the cache hit rate to define the right size of the in memory cache,
-then look at `apollo_router_schema_loading_time` and `apollo_router_query_planning_time` to decide how much time we want to spend warming up queries.
+then look at `apollo_router_schema_loading_time` and `apollo.router.query_planning.plan.duration` to decide how much time we want to spend warming up queries.
 
 #### Cache warm-up with distributed caching
 
-If the Router is using distributed caching for query plans, the warm-up phase will also store the new query plans in Redis. Since all Router instances might have the same distributions of queries in their in-memory cache, the list of queries is shuffled before warm-up, so each Router instance can plan queries in a different order and share their results through the cache.
+If the router is using distributed caching for query plans, the warm-up phase will also store the new query plans in Redis. Since all Router instances might have the same distributions of queries in their in-memory cache, the list of queries is shuffled before warm-up, so each Router instance can plan queries in a different order and share their results through the cache.
 
 #### Schema aware query hashing
 
@@ -100,7 +103,7 @@ supergraph:
 
 [Automatic Persisted Queries (**APQ**)](/apollo-server/performance/apq/) enable GraphQL clients to send a server the _hash_ of their query string, _instead of_ sending the query string itself. When query strings are very large, this can significantly reduce network usage.
 
-The Apollo Router supports using APQ in its communications with both clients _and_ subgraphs:
+The router supports using APQ in its communications with both clients _and_ subgraphs:
 
 - **In its communications with clients,** the router acts as a GraphQL _server_, because it _receives_ queries from clients.
 - **In its communications with subgraphs,** the router acts as a GraphQL _client_, because it _sends_ queries to subgraphs.
@@ -109,7 +112,7 @@ Because the router's role differs between these two interactions, you configure 
 
 ### APQ with clients
 
-The Apollo Router enables APQ caching for client operations by default. In your router's [YAML config file](./overview/#yaml-config-file), you can configure the maximum number of APQ entries in the cache like so:
+The router enables APQ caching for client operations by default. In your router's [YAML config file](./overview/#yaml-config-file), you can configure the maximum number of APQ entries in the cache like so:
 
 ```yaml title="router.yaml"
 apq:
@@ -128,7 +131,7 @@ apq:
 
 ### APQ with subgraphs
 
-By default, the Apollo Router does _not_ use APQ when sending queries to its subgraphs.
+By default, the router does _not_ use APQ when sending queries to its subgraphs.
 
 In your router's [YAML config file](./overview/#yaml-config-file), you can configure this APQ support with a combination of global and per-subgraph settings:
 

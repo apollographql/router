@@ -1,5 +1,6 @@
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 use futures::future;
 use serde::Deserialize;
@@ -56,16 +57,16 @@ impl SubscriptionHandle {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SubscriptionNode {
     /// The name of the service or subgraph that the subscription is querying.
-    pub(crate) service_name: String,
+    pub(crate) service_name: Arc<str>,
 
     /// The variables that are used for the subgraph subscription.
-    pub(crate) variable_usages: Vec<String>,
+    pub(crate) variable_usages: Vec<Arc<str>>,
 
     /// The GraphQL subquery that is used for the subscription.
-    pub(crate) operation: String,
+    pub(crate) operation: super::fetch::SubgraphOperation,
 
     /// The GraphQL subquery operation name.
-    pub(crate) operation_name: Option<String>,
+    pub(crate) operation_name: Option<Arc<str>>,
 
     /// The GraphQL operation kind that is used for the fetch.
     pub(crate) operation_kind: OperationKind,
@@ -150,7 +151,7 @@ impl SubscriptionNode {
                         subscription_handle,
                         subscription_config,
                         stream_rx: rx_handle.into(),
-                        service_name: self.service_name.clone(),
+                        service_name: self.service_name.to_string(),
                     };
 
                     if let Err(err) = subscription_conf_tx.send(subs_params).await {
@@ -200,13 +201,14 @@ impl SubscriptionNode {
 
         let Variables { variables, .. } = match Variables::new(
             &[],
-            self.variable_usages.as_ref(),
+            &self.variable_usages,
             data,
             current_dir,
             // Needs the original request here
             parameters.supergraph_request,
             parameters.schema,
             &self.input_rewrites,
+            &None,
         ) {
             Some(variables) => variables,
             None => {
@@ -232,8 +234,8 @@ impl SubscriptionNode {
                     )
                     .body(
                         Request::builder()
-                            .query(operation)
-                            .and_operation_name(operation_name.clone())
+                            .query(operation.as_serialized())
+                            .and_operation_name(operation_name.as_ref().map(|n| n.to_string()))
                             .variables(variables.clone())
                             .build(),
                     )
@@ -242,7 +244,7 @@ impl SubscriptionNode {
             )
             .operation_kind(OperationKind::Subscription)
             .context(parameters.context.clone())
-            .subgraph_name(self.service_name.clone())
+            .subgraph_name(self.service_name.to_string())
             .subscription_stream(tx_gql)
             .and_connection_closed_signal(parameters.subscription_handle.as_ref().map(|s| s.closed_signal.resubscribe()))
             .build();

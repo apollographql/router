@@ -1,13 +1,20 @@
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
-use tracing_opentelemetry::OtelData;
+use opentelemetry::OrderMap;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
 use tracing_subscriber::Registry;
 
+use super::consts::OTEL_KIND;
+use super::consts::OTEL_NAME;
+use super::consts::OTEL_STATUS_CODE;
+use super::consts::OTEL_STATUS_MESSAGE;
+use super::formatters::APOLLO_PRIVATE_PREFIX;
+use super::otel::layer::str_to_span_kind;
+use super::otel::layer::str_to_status;
+use super::otel::OtelData;
 use super::reload::IsSampled;
-use super::tracing::APOLLO_PRIVATE_PREFIX;
 
 #[derive(Debug, Default)]
 pub(crate) struct LogAttributes {
@@ -28,6 +35,7 @@ impl LogAttributes {
     }
 }
 
+/// To add dynamic attributes for spans
 pub(crate) struct DynAttributeLayer;
 
 impl<S> Layer<S> for DynAttributeLayer
@@ -45,6 +53,9 @@ where
         if extensions.get_mut::<LogAttributes>().is_none() {
             extensions.insert(LogAttributes::default());
         }
+        if extensions.get_mut::<EventAttributes>().is_none() {
+            extensions.insert(EventAttributes::default());
+        }
     }
 }
 
@@ -54,13 +65,14 @@ impl DynAttributeLayer {
     }
 }
 
-pub(crate) trait DynAttribute {
-    fn set_dyn_attribute(&self, key: Key, value: opentelemetry::Value);
-    fn set_dyn_attributes(&self, attributes: impl IntoIterator<Item = KeyValue>);
+/// To add dynamic attributes for spans
+pub(crate) trait SpanDynAttribute {
+    fn set_span_dyn_attribute(&self, key: Key, value: opentelemetry::Value);
+    fn set_span_dyn_attributes(&self, attributes: impl IntoIterator<Item = KeyValue>);
 }
 
-impl DynAttribute for ::tracing::Span {
-    fn set_dyn_attribute(&self, key: Key, value: opentelemetry::Value) {
+impl SpanDynAttribute for ::tracing::Span {
+    fn set_span_dyn_attribute(&self, key: Key, value: opentelemetry::Value) {
         self.with_subscriber(move |(id, dispatch)| {
             if let Some(reg) = dispatch.downcast_ref::<Registry>() {
                 match reg.span(id) {
@@ -70,6 +82,7 @@ impl DynAttribute for ::tracing::Span {
                             let mut extensions = s.extensions_mut();
                             match extensions.get_mut::<OtelData>() {
                                 Some(otel_data) => {
+                                    update_otel_data(otel_data, &key, &value);
                                     if otel_data.builder.attributes.is_none() {
                                         otel_data.builder.attributes =
                                             Some([(key, value)].into_iter().collect());
@@ -110,7 +123,7 @@ impl DynAttribute for ::tracing::Span {
         });
     }
 
-    fn set_dyn_attributes(&self, attributes: impl IntoIterator<Item = KeyValue>) {
+    fn set_span_dyn_attributes(&self, attributes: impl IntoIterator<Item = KeyValue>) {
         let mut attributes = attributes.into_iter().peekable();
         if attributes.peek().is_none() {
             return;
@@ -125,8 +138,23 @@ impl DynAttribute for ::tracing::Span {
                             match extensions.get_mut::<OtelData>() {
                                 Some(otel_data) => {
                                     if otel_data.builder.attributes.is_none() {
-                                        otel_data.builder.attributes = Some(attributes.collect());
+                                        otel_data.builder.attributes = Some(
+                                            attributes
+                                                .inspect(|attr| {
+                                                    update_otel_data(
+                                                        otel_data,
+                                                        &attr.key,
+                                                        &attr.value,
+                                                    )
+                                                })
+                                                .collect(),
+                                        );
                                     } else {
+                                        let attributes: Vec<KeyValue> = attributes
+                                            .inspect(|attr| {
+                                                update_otel_data(otel_data, &attr.key, &attr.value)
+                                            })
+                                            .collect();
                                         otel_data
                                             .builder
                                             .attributes
@@ -155,6 +183,99 @@ impl DynAttribute for ::tracing::Span {
                                 None => {
                                     // Can't use ::tracing::error! because it could create deadlock on extensions
                                     eprintln!("no LogAttributes, this is a bug");
+                                }
+                            }
+                        }
+                    }
+                };
+            } else {
+                ::tracing::error!("no Registry, this is a bug");
+            }
+        });
+    }
+}
+
+fn update_otel_data(otel_data: &mut OtelData, key: &Key, value: &opentelemetry::Value) {
+    match key.as_str() {
+        OTEL_NAME if otel_data.forced_span_name.is_none() => {
+            otel_data.forced_span_name = Some(value.to_string())
+        }
+        OTEL_KIND => otel_data.builder.span_kind = str_to_span_kind(&value.as_str()),
+        OTEL_STATUS_CODE => otel_data.forced_status = str_to_status(&value.as_str()).into(),
+        OTEL_STATUS_MESSAGE => {
+            otel_data.builder.status =
+                opentelemetry::trace::Status::error(value.as_str().to_string())
+        }
+        _ => {}
+    }
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct EventAttributes {
+    attributes: Vec<KeyValue>,
+}
+
+impl EventAttributes {
+    pub(crate) fn extend(&mut self, other: impl IntoIterator<Item = KeyValue>) {
+        self.attributes.extend(other);
+    }
+
+    pub(crate) fn take(&mut self) -> Vec<KeyValue> {
+        std::mem::take(&mut self.attributes)
+    }
+}
+
+/// To add dynamic attributes for spans
+pub(crate) trait EventDynAttribute {
+    /// Always use before sending the event
+    fn set_event_dyn_attributes(&self, attributes: impl IntoIterator<Item = KeyValue>);
+}
+
+impl EventDynAttribute for ::tracing::Span {
+    fn set_event_dyn_attributes(&self, attributes: impl IntoIterator<Item = KeyValue>) {
+        let mut attributes = attributes.into_iter().peekable();
+        if attributes.peek().is_none() {
+            return;
+        }
+        self.with_subscriber(move |(id, dispatch)| {
+            if let Some(reg) = dispatch.downcast_ref::<Registry>() {
+                match reg.span(id) {
+                    None => eprintln!("no spanref, this is a bug"),
+                    Some(s) => {
+                        if s.is_sampled() {
+                            let mut extensions = s.extensions_mut();
+                            match extensions.get_mut::<OtelData>() {
+                                Some(otel_data) => match &mut otel_data.event_attributes {
+                                    Some(event_attributes) => {
+                                        event_attributes
+                                            .extend(attributes.map(|kv| (kv.key, kv.value)));
+                                    }
+                                    None => {
+                                        otel_data.event_attributes = Some(OrderMap::from_iter(
+                                            attributes.map(|kv| (kv.key, kv.value)),
+                                        ));
+                                    }
+                                },
+                                None => {
+                                    // Can't use ::tracing::error! because it could create deadlock on extensions
+                                    eprintln!("no OtelData, this is a bug");
+                                }
+                            }
+                        } else {
+                            let mut attributes = attributes
+                                .filter(|kv| !kv.key.as_str().starts_with(APOLLO_PRIVATE_PREFIX))
+                                .peekable();
+                            if attributes.peek().is_none() {
+                                return;
+                            }
+                            let mut extensions = s.extensions_mut();
+                            match extensions.get_mut::<EventAttributes>() {
+                                Some(registered_attributes) => {
+                                    registered_attributes.extend(attributes);
+                                }
+                                None => {
+                                    // Can't use ::tracing::error! because it could create deadlock on extensions
+                                    eprintln!("no EventAttributes, this is a bug");
                                 }
                             }
                         }

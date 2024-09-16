@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -6,9 +8,7 @@ use async_trait::async_trait;
 use clap::CommandFactory;
 use http::header::CONTENT_TYPE;
 use http::header::USER_AGENT;
-use jsonschema::output::BasicOutput;
-use jsonschema::paths::PathChunk;
-use jsonschema::JSONSchema;
+use jsonpath_rust::JsonPathInst;
 use mime::APPLICATION_JSON;
 use once_cell::sync::OnceCell;
 use serde::Serialize;
@@ -97,7 +97,7 @@ impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
         &'a mut self,
         is_telemetry_disabled: bool,
         configuration: Arc<Configuration>,
-        schema: String,
+        schema: Arc<Schema>,
         previous_router: Option<&'a Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     ) -> Result<Self::RouterFactory, BoxError> {
@@ -110,7 +110,7 @@ impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
                 extra_plugins,
             )
             .await
-            .map(|factory| {
+            .inspect(|factory| {
                 if !is_telemetry_disabled {
                     let schema = factory.supergraph_creator.schema();
 
@@ -122,7 +122,6 @@ impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
                         }
                     });
                 }
-                factory
             })
     }
 }
@@ -235,77 +234,71 @@ fn visit_config(usage: &mut HashMap<String, u64>, config: &Value) {
     // We have to be careful not to expose names of headers, metadata or anything else sensitive.
     let raw_json_schema =
         serde_json::to_value(generate_config_schema()).expect("config schema must be valid");
-    let compiled_json_schema = JSONSchema::compile(
-        &serde_json::to_value(&raw_json_schema).expect("config schema must be valid"),
-    )
-    .expect("config schema must compile");
+    // We can't use json schema to redact the config as we don't have the annotations.
+    // Instead, we get the set of properties from the schema and anything that doesn't match a property is redacted.
+    let path = JsonPathInst::from_str("$..properties").expect("properties path must be valid");
+    let slice = path.find_slice(&raw_json_schema);
+    let schema_properties: HashSet<String> = slice
+        .iter()
+        .filter_map(|v| v.as_object())
+        .flat_map(|o| o.keys())
+        .map(|s| s.to_string())
+        .collect();
 
-    // We can use jsonschema to give us annotations about the validated config. This means that we get
-    // a pointer into the config document and also a pointer into the schema.
-    // For this to work ALL config must have an annotation, e.g. documentation.
-    // For each config path we need to sanitize the it for arrays and also custom names e.g. header names.
-    // This corresponds to the json schema keywords of `items` and `additionalProperties`
-    if let BasicOutput::Valid(output) = compiled_json_schema.apply(config).basic() {
-        for item in output {
-            let instance_ptr = item.instance_location();
-            let value = config
-                .pointer(&instance_ptr.to_string())
-                .expect("pointer must point to value");
+    // Now for each leaf in the config we get the path and redact anything that isn't in the schema.
+    visit_value(&schema_properties, usage, config, "");
+}
 
-            // Compose the redacted path.
-            let mut path = Vec::new();
-            for chunk in item.keyword_location() {
-                if let PathChunk::Property(property) = chunk {
-                    // We hit a properties keyword, we can grab the next keyword as it'll be a property name.
-                    path.push(property.to_string());
-                }
-                if &PathChunk::Keyword("additionalProperties") == chunk {
-                    // This is free format properties. It's redacted
-                    path.push("<redacted>".to_string());
-                }
-            }
+fn visit_value(
+    schema_properties: &HashSet<String>,
+    usage: &mut HashMap<String, u64>,
+    value: &Value,
+    path: &str,
+) {
+    match value {
+        Value::Bool(value) => {
+            *usage
+                .entry(format!("configuration.{path}.{value}"))
+                .or_default() += 1;
+        }
+        Value::Number(value) => {
+            *usage
+                .entry(format!("configuration.{path}.{value}"))
+                .or_default() += 1;
+        }
+        Value::String(_) => {
+            // Strings are never output
+            *usage
+                .entry(format!("configuration.{path}.<redacted>"))
+                .or_default() += 1;
+        }
+        Value::Object(o) => {
+            for (key, value) in o {
+                let key = if schema_properties.contains(key) {
+                    key
+                } else {
+                    "<redacted>"
+                };
 
-            let path = path.join(".");
-            if matches!(item.keyword_location().last(), Some(&PathChunk::Index(_))) {
-                *usage
-                    .entry(format!("configuration.{path}.len"))
-                    .or_default() += 1;
-            }
-            match value {
-                Value::Bool(value) => {
+                if path.is_empty() {
+                    visit_value(schema_properties, usage, value, key);
+                } else {
+                    visit_value(schema_properties, usage, value, &format!("{path}.{key}"));
                     *usage
-                        .entry(format!("configuration.{path}.{value}"))
+                        .entry(format!("configuration.{path}.{key}.len"))
                         .or_default() += 1;
                 }
-                Value::Number(value) => {
-                    *usage
-                        .entry(format!("configuration.{path}.{value}"))
-                        .or_default() += 1;
-                }
-                Value::String(_) => {
-                    // Strings are never output
-                    *usage
-                        .entry(format!("configuration.{path}.<redacted>"))
-                        .or_default() += 1;
-                }
-                Value::Object(o) => {
-                    if matches!(
-                        item.keyword_location().last(),
-                        Some(&PathChunk::Property(_))
-                    ) {
-                        let schema_node = raw_json_schema
-                            .pointer(&item.keyword_location().to_string())
-                            .expect("schema node must resolve");
-                        if let Some(Value::Bool(true)) = schema_node.get("additionalProperties") {
-                            *usage
-                                .entry(format!("configuration.{path}.len"))
-                                .or_default() += o.len() as u64;
-                        }
-                    }
-                }
-                _ => {}
             }
         }
+        Value::Array(a) => {
+            for value in a {
+                visit_value(schema_properties, usage, value, path);
+            }
+            *usage
+                .entry(format!("configuration.{path}.array.len"))
+                .or_default() += a.len() as u64;
+        }
+        Value::Null => {}
     }
 }
 
@@ -343,6 +336,10 @@ mod test {
         });
     }
 
+    // The following two tests are ignored because since allowing refs in schema we can no longer
+    // examine the annotations for redaction.
+    // https://github.com/Stranger6667/jsonschema-rs/issues/403
+    // We should remove the orbiter code and move to otel for both anonymous and non-anonymous telemetry.
     #[test]
     fn test_visit_config() {
         let config = Configuration::from_str(include_str!("testdata/redaction.router.yaml"))
@@ -383,7 +380,7 @@ mod test {
         let config = Configuration::from_str(include_str!("testdata/redaction.router.yaml"))
             .expect("config must be valid");
         let schema_string = include_str!("../testdata/minimal_supergraph.graphql");
-        let schema = crate::spec::Schema::parse(schema_string, &config).unwrap();
+        let schema = crate::spec::Schema::parse(schema_string, &Default::default()).unwrap();
         let report = create_report(Arc::new(config), Arc::new(schema));
         insta::with_settings!({sort_maps => true}, {
                     assert_yaml_snapshot!(report, {
@@ -401,7 +398,7 @@ mod test {
             .expect("config must be valid");
         config.validated_yaml = Some(Value::Null);
         let schema_string = include_str!("../testdata/minimal_supergraph.graphql");
-        let schema = crate::spec::Schema::parse(schema_string, &config).unwrap();
+        let schema = crate::spec::Schema::parse(schema_string, &Default::default()).unwrap();
         let report = create_report(Arc::new(config), Arc::new(schema));
         insta::with_settings!({sort_maps => true}, {
                     assert_yaml_snapshot!(report, {
@@ -419,7 +416,7 @@ mod test {
             .expect("config must be valid");
         config.validated_yaml = Some(json!({"garbage": "garbage"}));
         let schema_string = include_str!("../testdata/minimal_supergraph.graphql");
-        let schema = crate::spec::Schema::parse(schema_string, &config).unwrap();
+        let schema = crate::spec::Schema::parse(schema_string, &Default::default()).unwrap();
         let report = create_report(Arc::new(config), Arc::new(schema));
         insta::with_settings!({sort_maps => true}, {
                     assert_yaml_snapshot!(report, {

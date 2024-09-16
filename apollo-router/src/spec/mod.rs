@@ -20,7 +20,9 @@ use serde::Deserialize;
 use serde::Serialize;
 use thiserror::Error;
 
+use crate::error::ValidationErrors;
 use crate::graphql::ErrorExtension;
+use crate::graphql::IntoGraphQLErrors;
 use crate::json_ext::Object;
 
 pub(crate) const LINK_DIRECTIVE_NAME: &str = "link";
@@ -39,12 +41,21 @@ pub(crate) enum SpecError {
     InvalidType(String),
     /// cannot query field '{0}' on type '{1}'
     InvalidField(String, String),
+    // This branch used to be used for parse errors, and is now used primarily for errors
+    // during the query filtering / transform stage. It's also used for a handful of other
+    // random string errors.
     /// parsing error: {0}
-    ParsingError(String),
-    /// validation error
-    ValidationError(Vec<apollo_compiler::execution::GraphQLError>),
+    TransformError(String),
+    /// parsing error: {0}
+    ParseError(ValidationErrors),
+    /// validation error: {0}
+    ValidationError(ValidationErrors),
     /// Unknown operation named "{0}"
     UnknownOperation(String),
+    /// Must provide operation name if query contains multiple operations.
+    MultipleOperationWithoutOperationName,
+    /// Must provide an operation.
+    NoOperation,
     /// subscription operation is not supported
     SubscriptionNotSupported,
     /// query hashing failed: {0}
@@ -56,7 +67,7 @@ pub(crate) const GRAPHQL_VALIDATION_FAILURE_ERROR_KEY: &str = "## GraphQLValidat
 impl SpecError {
     pub(crate) const fn get_error_key(&self) -> &'static str {
         match self {
-            SpecError::ParsingError(_) => "## GraphQLParseFailure\n",
+            SpecError::TransformError(_) | SpecError::ParseError(_) => "## GraphQLParseFailure\n",
             SpecError::UnknownOperation(_) => "## GraphQLUnknownOperationName\n",
             _ => GRAPHQL_VALIDATION_FAILURE_ERROR_KEY,
         }
@@ -73,9 +84,12 @@ impl ErrorExtension for SpecError {
             SpecError::RecursionLimitExceeded => "RECURSION_LIMIT_EXCEEDED",
             SpecError::InvalidType(_) => "INVALID_TYPE",
             SpecError::InvalidField(_, _) => "INVALID_FIELD",
-            SpecError::ParsingError(_) => "PARSING_ERROR",
+            SpecError::TransformError(_) => "PARSING_ERROR",
+            SpecError::ParseError(_) => "PARSING_ERROR",
             SpecError::ValidationError(_) => "GRAPHQL_VALIDATION_FAILED",
             SpecError::UnknownOperation(_) => "GRAPHQL_VALIDATION_FAILED",
+            SpecError::MultipleOperationWithoutOperationName => "GRAPHQL_VALIDATION_FAILED",
+            SpecError::NoOperation => "GRAPHQL_VALIDATION_FAILED",
             SpecError::SubscriptionNotSupported => "SUBSCRIPTION_NOT_SUPPORTED",
             SpecError::QueryHashing(_) => "QUERY_HASHING",
         }
@@ -96,5 +110,53 @@ impl ErrorExtension for SpecError {
         }
 
         (!obj.is_empty()).then_some(obj)
+    }
+}
+
+impl IntoGraphQLErrors for SpecError {
+    fn into_graphql_errors(self) -> Result<Vec<crate::graphql::Error>, Self> {
+        match self {
+            SpecError::ParseError(e) => {
+                // Not using `ValidationErrors::into_graphql_errors` here,
+                // because it sets the extension code to GRAPHQL_VALIDATION_FAILED
+                Ok(e.errors
+                    .into_iter()
+                    .map(|error| {
+                        crate::graphql::Error::builder()
+                            .message(format!("parsing error: {}", error.message))
+                            .locations(
+                                error
+                                    .locations
+                                    .into_iter()
+                                    .map(|loc| crate::graphql::Location {
+                                        line: loc.line as u32,
+                                        column: loc.column as u32,
+                                    })
+                                    .collect(),
+                            )
+                            .extension_code("PARSING_ERROR")
+                            .build()
+                    })
+                    .collect())
+            }
+            SpecError::ValidationError(e) => {
+                e.into_graphql_errors().map_err(SpecError::ValidationError)
+            }
+            _ => {
+                let gql_err = match self.custom_extension_details() {
+                    Some(extension_details) => crate::graphql::Error::builder()
+                        .message(self.to_string())
+                        .extension_code(self.extension_code())
+                        .extensions(extension_details)
+                        .build(),
+                    None => crate::graphql::Error::builder()
+                        .message(self.to_string())
+                        .extension_code(self.extension_code())
+                        .build(),
+                };
+
+                Ok(vec![gql_err])
+            }
+        }
     }
 }

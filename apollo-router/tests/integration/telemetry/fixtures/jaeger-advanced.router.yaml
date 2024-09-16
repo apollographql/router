@@ -13,8 +13,8 @@ telemetry:
         enabled: true
         batch_processor:
           scheduled_delay: 100ms
-        agent:
-          endpoint: default
+        collector:
+          endpoint: http://127.0.0.1:14268/api/traces
     logging:
       experimental_when_header:
         - name: apollo-router-log-request
@@ -38,6 +38,14 @@ telemetry:
           "http.request.header.x-not-present":
             request_header: "x-not-present"
             default: nope
+          "http.request.header.x-my-header-condition":
+            request_header: "x-my-header"
+            condition:
+              eq:
+                - request_header: "head"
+                - "test"
+          studio.operation.id:
+            studio_operation_id: true
       supergraph:
         attributes:
           graphql.operation.name: true
@@ -47,7 +55,7 @@ telemetry:
         attributes:
           subgraph.graphql.operation.type: true
           subgraph.name: true
-          
+
 override_subgraph_url:
   products: http://localhost:4005
 include_subgraph_errors:

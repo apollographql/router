@@ -1,10 +1,10 @@
 ---
-title: Errors
-subtitle: Error and status codes returned by the Apollo Router
-description: Error codes and HTTP response status codes returned by the Apollo Router
+title: Router Errors
+subtitle: Error and status codes returned by GraphOS Router and Apollo Router Core
+description: Reference of error codes and HTTP status codes returned by Apollo GraphOS Router and Apollo Router Core, including explanations and solutions.
 ---
 
-Learn about error codes and HTTP response status codes returned by the Apollo Router.
+Learn about error codes and HTTP response status codes returned by GraphOS Router and Apollo Router Core.
 
 ## Status codes
 
@@ -42,6 +42,7 @@ A request's HTTP `Accept` header didn't contain any of the router's supported mi
 - `multipart/mixed;subscriptionSpec=1.0`.
 
 </Property>
+
 <Property name="429" short="Too many requests">
 
 Request traffic exceeded configured rate limits. See [client side traffic shaping](./configuration/traffic-shaping/#client-side-traffic-shaping).
@@ -57,6 +58,12 @@ The request was canceled because the client closed the connection, possibly due 
 The router encountered an unexpected issue. [Report](https://github.com/apollographql/router/issues/new?assignees=&labels=raised+by+user&projects=&template=bug_report.md&title=) this possible bug to the router team.
 
 </Property>
+
+<Property name="504" short="Request timed out">
+
+The request was not able to complete within a configured amount of time.  See [client side traffic shaping timeouts](./configuration/traffic-shaping/#timeouts).
+
+</Property>
 </PropertyList>
 
 <Note>
@@ -64,3 +71,32 @@ The router encountered an unexpected issue. [Report](https://github.com/apollogr
 You can create Rhai scripts that throw custom status codes. See [Terminating client requests](./customizations/rhai-api#terminating-client-requests) to learn more.
 
 </Note>
+
+## Error codes
+
+### Demand control
+
+Errors returned by the router when [demand control](./executing-operations/demand-control) is enabled.
+
+<PropertyList kind="errCodes">
+<Property name="COST_ESTIMATED_TOO_EXPENSIVE">
+
+The estimated cost of the query was greater than the configured maximum cost.
+
+</Property>
+<Property name="COST_ACTUAL_TOO_EXPENSIVE">
+
+The actual cost of the query was greater than the configured maximum cost.
+
+</Property>
+<Property name="COST_QUERY_PARSE_FAILURE">
+
+The query could not be parsed.
+
+</Property>
+ <Property name="COST_RESPONSE_TYPING_FAILURE">
+
+The response from a subgraph did not match the GraphQL schema.
+
+</Property>
+</PropertyList>

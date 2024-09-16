@@ -1,13 +1,14 @@
 ---
-title: Rhai script API reference
-description: For Apollo Router customizations
+title: Rhai Script API Reference
+subtitle: APIs for router customizations
+description: This reference documents the symbols and behaviors that are specific to Rhai customizations for the Apollo GraphOS Router and Apollo Router Core. Includes entry point hooks, logging, and more.
 ---
 
-This reference documents the symbols and behaviors that are specific to [Rhai customizations](./rhai/) for the Apollo Router.
+This reference documents the symbols and behaviors that are specific to [Rhai customizations](./rhai/) for the GraphOS Router and Apollo Router Core.
 
 ## Entry point hooks
 
-Your Rhai script's [main file](./rhai/#the-main-file) hooks into the individual services of the Apollo Router's [request-handling lifecycle](./rhai/#router-request-lifecycle). To do so, it defines whichever combination of the following entry point hooks it requires:
+Your Rhai script's [main file](./rhai/#the-main-file) hooks into the individual services of the router's [request-handling lifecycle](./rhai/#router-request-lifecycle). To do so, it defines whichever combination of the following entry point hooks it requires:
 
 ```rhai
 fn router_service(service) {}
@@ -35,7 +36,7 @@ fn supergraph_service(service) {
 
 ## Logging
 
-If your script logs a message with Rhai's built-in `print()` function, it's logged to the Apollo Router's logs at the "info" level:
+If your script logs a message with Rhai's built-in `print()` function, it's logged to the router's logs at the "info" level:
 
 ```rhai
 print("logged at the info level");
@@ -53,10 +54,11 @@ log_trace("trace-level log message");
 
 ## Terminating client requests
 
-Your Rhai script can terminate the associated client request that triggered it. To do so, it throws an exception. This returns an `Internal Server Error` to the client with a `500` response code.
+Your Rhai script can terminate the associated client request that triggered it. To do so, it must throw an exception from the supergraph service. This returns an `Internal Server Error` to the client with a `500` response code.
 
 For example:
 ```rhai
+// Must throw exception from supergraph service
 fn supergraph_service(service) {
     // Define a closure to process our response
     let f = |response| {
@@ -74,6 +76,7 @@ The key must be a number and the message must be something which can be converte
 
 For example:
 ```rhai
+// Must throw exception from supergraph service
 fn supergraph_service(service) {
     // Define a closure to process our response
     let f = |response| {
@@ -92,6 +95,7 @@ You can also `throw` a valid GraphQL response, which will be deserialized and de
 
 For example:
 ```rhai
+// Must throw exception from supergraph service
 fn supergraph_service(service) {
     // Define a closure to process our request
     let f = |request| {
@@ -137,7 +141,7 @@ fn process_response(response) {
 }
 
 fn supergraph_service(service) {
-    const response_callback = Fn("process_request");
+    const response_callback = Fn("process_response");
     service.map_response(response_callback);
 }
 ```
@@ -269,6 +273,24 @@ fn supergraph_service(service) {
 }
 ```
 
+## sha256 hash strings
+
+Your Rhai customization can use the function `sha256::digest()` to hash strings using the SHA256 hashing algorithm.
+
+```rhai
+fn supergraph_service(service){
+    service.map_request(|request|{
+        let sha = sha256::digest("hello world");
+        log_info(sha);
+    });
+}
+```
+<Note>
+
+You don't need to import the "sha256" module. It is imported in the router.
+
+</Note>
+
 ## Headers with multiple values
 
 The simple get/set api for dealing with single value headers is sufficient for most use cases. If you wish to set multiple values on a key then you should do this by supplying an array of values.
@@ -284,6 +306,16 @@ Your Rhai customization can use the function `unix_now()` to obtain the current 
 ```rhai
 fn supergraph_service(service) {
     let now = unix_now();
+}
+```
+
+## Unix timestamp (in milliseconds)
+
+Your Rhai customization can use the function `unix_ms_now()` to obtain the current Unix timestamp in milliseconds since the Unix epoch. 
+
+```rhai
+fn supergraph_service(service) {
+    let now = unix_ms_now();
 }
 ```
 
@@ -318,6 +350,23 @@ fn router_service(service) {
 * `get()` may fail, so it's best to handle exceptions when using it.
 
 </Note>
+
+## Available constants
+
+The router provides constants for your Rhai scripts that mostly help you fetch data from the context.
+
+```
+Router.APOLLO_SDL // Context key to access the SDL
+Router.APOLLO_START // Constant to calculate durations
+Router.APOLLO_AUTHENTICATION_JWT_CLAIMS // Context key to access authentication jwt claims
+Router.APOLLO_SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS // Context key to modify or access the custom connection params when using subscriptions in WebSocket to subgraphs (cf subscription docs)
+Router.APOLLO_ENTITY_CACHE_KEY // Context key to access the entity cache key
+Router.APOLLO_OPERATION_ID // Context key to get the value of apollo operation id (studio trace id) from the context
+Router.APOLLO_COST_ESTIMATED_KEY // Context key to get the estimated cost of an operation
+Router.APOLLO_COST_ACTUAL_KEY // Context key to get the actual cost of an operation
+Router.APOLLO_COST_STRATEGY_KEY // Context key to get the strategy used to calculate cost
+Router.APOLLO_COST_RESULT_KEY // Context key to get the cost result of an operation
+```
 
 ## `Request` interface
 
@@ -522,6 +571,7 @@ The `response` object includes the following fields:
 ```
 response.context
 response.id
+response.status_code
 response.headers
 response.body.label
 response.body.data
@@ -541,7 +591,7 @@ The following fields are identical in behavior to their `request` counterparts:
 
 ### `response.is_primary()`
 
-Be particularly careful when interacting with headers in a response context. For router_service(), supergraph_service() and execution_service(), response headers only exist for the first response in a deferred response stream. You can handle this by making use of the `is_primary()` function which will return true if a response is the first (or primary) response. If you do try to access the headers in a non-primary response, then you'll raise an exception which can be handled like any other rhai exception, but is not so convenient as using the `is_primary()` method.
+Be particularly careful when interacting with `headers` or `status_code` in a response context. For `router_service()`, `supergraph_service()` and `execution_service()`, response `headers` and `status_code` only exist for the first response in a deferred response stream. You can handle this by making use of the `is_primary()` function which will return true if a response is the first (or primary) response. If you do try to access the `headers` or `status_code` in a non-primary response, then you'll raise an exception which can be handled like any other rhai exception, but is not so convenient as using the `is_primary()` method.
 
 ```rhai
     if response.is_primary() {
@@ -600,3 +650,33 @@ let error_to_add = #{
 response.body.errors += error_to_add;
 print(`${response.body.errors}`); // logs the response errors
 ```
+
+### `response.status_code.to_string()`
+
+Convert response status code to a string.
+
+```rhai
+if response.status_code.to_string() == "200" {
+    print(`ok`);
+}
+```
+
+Also useful if you want to convert response status code to a number
+
+```rhai
+if parse_int(response.status_code.to_string()) == 200 {
+    print(`ok`);
+}
+```
+
+You can also create your own status code from an integer:
+
+```rhai
+if response.status_code == status_code_from_int(200) {
+    print(`ok`);
+}
+```
+
+<Note>
+The `response.status_code` object is available _only_ for `map_response` callbacks registered in `router_service` or `subgraph_service`.
+</Note>

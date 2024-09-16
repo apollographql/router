@@ -13,20 +13,21 @@ use apollo_compiler::ast;
 use apollo_compiler::executable;
 use apollo_compiler::schema;
 use apollo_compiler::schema::Implementers;
-use apollo_compiler::schema::Name;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
 use tower::BoxError;
 
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::spec::query::transform;
+use crate::spec::query::transform::TransformState;
 use crate::spec::query::traverse;
 use crate::spec::Schema;
 use crate::spec::TYPENAME;
 
 pub(crate) struct ScopeExtractionVisitor<'a> {
     schema: &'a schema::Schema,
-    fragments: HashMap<&'a ast::Name, &'a Node<executable::Fragment>>,
+    fragments: HashMap<&'a Name, &'a Node<executable::Fragment>>,
     pub(crate) extracted_scopes: HashSet<String>,
     requires_scopes_directive_name: String,
     entity_query: bool,
@@ -204,14 +205,14 @@ fn scopes_sets_argument(directive: &ast::Directive) -> impl Iterator<Item = Hash
 
 pub(crate) struct ScopeFilteringVisitor<'a> {
     schema: &'a schema::Schema,
-    fragments: HashMap<&'a ast::Name, &'a ast::FragmentDefinition>,
-    implementers_map: &'a HashMap<Name, Implementers>,
+    state: TransformState,
+    implementers_map: &'a apollo_compiler::collections::HashMap<Name, Implementers>,
     request_scopes: HashSet<String>,
     pub(crate) query_requires_scopes: bool,
     pub(crate) unauthorized_paths: Vec<Path>,
     // store the error paths from fragments so we can  add them at
     // the point of application
-    fragments_unauthorized_paths: HashMap<&'a ast::Name, Vec<Path>>,
+    fragments_unauthorized_paths: HashMap<String, Vec<Path>>,
     current_path: Path,
     requires_scopes_directive_name: String,
     dry_run: bool,
@@ -220,14 +221,13 @@ pub(crate) struct ScopeFilteringVisitor<'a> {
 impl<'a> ScopeFilteringVisitor<'a> {
     pub(crate) fn new(
         schema: &'a schema::Schema,
-        executable: &'a ast::Document,
-        implementers_map: &'a HashMap<Name, Implementers>,
+        implementers_map: &'a apollo_compiler::collections::HashMap<Name, Implementers>,
         scopes: HashSet<String>,
         dry_run: bool,
     ) -> Option<Self> {
         Some(Self {
             schema,
-            fragments: transform::collect_fragments(executable),
+            state: TransformState::new(),
             implementers_map,
             request_scopes: scopes,
             dry_run,
@@ -477,11 +477,10 @@ impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
 
         let implementors_with_different_field_requirements =
             self.implementors_with_different_field_requirements(parent_type, node);
-
         self.current_path
-            .push(PathElement::Key(field_name.as_str().into()));
+            .push(PathElement::Key(field_name.as_str().into(), None));
         if is_field_list {
-            self.current_path.push(PathElement::Flatten);
+            self.current_path.push(PathElement::Flatten(None));
         }
 
         let res = if is_authorized
@@ -528,17 +527,11 @@ impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
         };
 
         if self.unauthorized_paths.len() > current_unauthorized_paths_index {
-            if let Some((name, _)) = self.fragments.get_key_value(&node.name) {
-                self.fragments_unauthorized_paths.insert(
-                    name,
-                    self.unauthorized_paths
-                        .split_off(current_unauthorized_paths_index),
-                );
-            }
-        }
-
-        if let Ok(None) = res {
-            self.fragments.remove(&node.name);
+            self.fragments_unauthorized_paths.insert(
+                node.name.as_str().to_string(),
+                self.unauthorized_paths
+                    .split_off(current_unauthorized_paths_index),
+            );
         }
 
         res
@@ -549,28 +542,34 @@ impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
         node: &ast::FragmentSpread,
     ) -> Result<Option<ast::FragmentSpread>, BoxError> {
         // record the fragment errors at the point of application
-        if let Some(paths) = self.fragments_unauthorized_paths.get(&node.fragment_name) {
+        if let Some(paths) = self
+            .fragments_unauthorized_paths
+            .get(node.fragment_name.as_str())
+        {
             for path in paths {
                 let path = self.current_path.join(path);
                 self.unauthorized_paths.push(path);
             }
         }
 
-        let fragment = match self.fragments.get(&node.fragment_name) {
-            Some(fragment) => fragment,
+        let condition = match self
+            .state()
+            .fragments()
+            .get(node.fragment_name.as_str())
+            .map(|fragment| fragment.fragment.type_condition.clone())
+        {
+            Some(condition) => condition,
             None => return Ok(None),
         };
-
-        let condition = &fragment.type_condition;
-
-        self.current_path
-            .push(PathElement::Fragment(condition.as_str().into()));
 
         let fragment_is_authorized = self
             .schema
             .types
-            .get(condition)
+            .get(condition.as_str())
             .is_some_and(|ty| self.is_type_authorized(ty));
+
+        self.current_path
+            .push(PathElement::Fragment(condition.as_str().into()));
 
         let res = if !fragment_is_authorized {
             self.query_requires_scopes = true;
@@ -633,6 +632,10 @@ impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
 
     fn schema(&self) -> &apollo_compiler::Schema {
         self.schema
+    }
+
+    fn state(&mut self) -> &mut TransformState {
+        &mut self.state
     }
 }
 
@@ -749,7 +752,7 @@ mod tests {
         doc.to_executable_validate(&schema).unwrap();
 
         let map = schema.implementers_map();
-        let mut visitor = ScopeFilteringVisitor::new(&schema, &doc, &map, scopes, false).unwrap();
+        let mut visitor = ScopeFilteringVisitor::new(&schema, &map, scopes, false).unwrap();
         (
             transform::document(&mut visitor, &doc).unwrap(),
             visitor.unauthorized_paths,
@@ -797,7 +800,7 @@ mod tests {
         let extracted_scopes = extract(BASIC_SCHEMA, QUERY);
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: Vec::new(),
@@ -813,7 +816,7 @@ mod tests {
                 .collect(),
         );
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: ["profile".to_string(), "internal".to_string()]
@@ -835,7 +838,7 @@ mod tests {
             .into_iter()
             .collect(),
         );
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: [
@@ -861,7 +864,7 @@ mod tests {
             .into_iter()
             .collect(),
         );
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: [
@@ -891,7 +894,7 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: Vec::new(),
@@ -918,7 +921,7 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: Vec::new(),
@@ -945,7 +948,7 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: Vec::new(),
@@ -969,7 +972,7 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: Vec::new(),
@@ -998,7 +1001,7 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: Vec::new(),
@@ -1028,7 +1031,7 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: Vec::new(),
@@ -1042,7 +1045,7 @@ mod tests {
             ["read:user".to_string()].into_iter().collect(),
         );
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: ["read:user".to_string()].into_iter().collect(),
@@ -1058,7 +1061,7 @@ mod tests {
                 .collect(),
         );
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: ["read:user".to_string(), "read:username".to_string()]
@@ -1092,7 +1095,7 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: Vec::new(),
@@ -1106,7 +1109,7 @@ mod tests {
             ["read:user".to_string()].into_iter().collect(),
         );
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: ["read:user".to_string()].into_iter().collect(),
@@ -1122,7 +1125,7 @@ mod tests {
                 .collect(),
         );
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: ["read:user".to_string(), "read:username".to_string()]
@@ -1153,7 +1156,7 @@ mod tests {
         let extracted_scopes = extract(BASIC_SCHEMA, QUERY);
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: Vec::new(),
@@ -1216,7 +1219,7 @@ mod tests {
         let extracted_scopes = extract(INTERFACE_SCHEMA, QUERY);
         let (doc, paths) = filter(INTERFACE_SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: Vec::new(),
@@ -1230,7 +1233,7 @@ mod tests {
             ["itf".to_string()].into_iter().collect(),
         );
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: ["itf".to_string()].into_iter().collect(),
@@ -1255,7 +1258,7 @@ mod tests {
         let extracted_scopes = extract(INTERFACE_SCHEMA, QUERY2);
         let (doc, paths) = filter(INTERFACE_SCHEMA, QUERY2, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY2,
             extracted_scopes: &extracted_scopes,
             scopes: Vec::new(),
@@ -1269,7 +1272,7 @@ mod tests {
             ["itf".to_string()].into_iter().collect(),
         );
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY2,
             extracted_scopes: &extracted_scopes,
             scopes: ["itf".to_string()].into_iter().collect(),
@@ -1285,7 +1288,7 @@ mod tests {
                 .collect(),
         );
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY2,
             extracted_scopes: &extracted_scopes,
             scopes: ["itf".to_string(), "a".to_string(), "b".to_string()]
@@ -1355,7 +1358,7 @@ mod tests {
 
         let (doc, paths) = filter(INTERFACE_FIELD_SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: Vec::new(),
@@ -1383,7 +1386,7 @@ mod tests {
 
         let (doc, paths) = filter(INTERFACE_FIELD_SCHEMA, QUERY2, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY2,
             extracted_scopes: &extracted_scopes,
             scopes: Vec::new(),
@@ -1453,7 +1456,7 @@ mod tests {
             ["a".to_string(), "b".to_string()].into_iter().collect(),
         );
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: ["a".to_string(), "b".to_string()].into_iter().collect(),
@@ -1542,7 +1545,7 @@ mod tests {
 
         let (doc, paths) = filter(RENAMED_SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: Vec::new(),
@@ -1623,7 +1626,7 @@ mod tests {
 
         let (doc, paths) = filter(SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: Vec::new(),
@@ -1647,7 +1650,7 @@ mod tests {
 
         let (doc, paths) = filter(SCHEMA, QUERY2, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY2,
             extracted_scopes: &extracted_scopes,
             scopes: Vec::new(),

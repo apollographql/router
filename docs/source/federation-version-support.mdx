@@ -1,8 +1,10 @@
 ---
-title: Federation version support in the Apollo Router
+title: Federation Version Support
+subtitle: Check router version compatibility with Apollo Federation versions
+description: This reference shows which version of Apollo Federation each GraphOS Router and Apollo Router Core release is compiled against. Ensure your router uses at least the listed federation version.
 ---
 
-The Apollo Router supports supergraph schemas that are generated via Apollo Federation 2.x [composition](/federation/federated-types/composition/). This composition algorithm is usually performed by one of the following:
+The GraphOS Router and Apollo Router Core support supergraph schemas that are generated via Apollo Federation 2.x [composition](/federation/federated-types/composition/). This composition algorithm is usually performed by one of the following:
 
 * Apollo GraphOS (for supergraphs that use [managed federation](/federation/managed-federation/overview/))
 * The Rover CLI (for _non_-managed supergraphs)
@@ -35,7 +37,63 @@ The table below shows which version of federation each router release is compile
     <tbody>
     <tr>
         <td>
-            v1.39.0 and later (<a href="https://github.com/apollographql/router/releases">see latest releases</a>)
+            v1.53.0 and later (<a href="https://github.com/apollographql/router/releases">see latest releases</a>)
+        </td>
+        <td>
+            2.9.0
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.52.1
+        </td>
+        <td>
+            2.8.5
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.49.0 - v1.52.0
+        </td>
+        <td>
+            2.8.1
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.48.0 - v1.49.0
+        </td>
+        <td>
+            2.8.0
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.46.0 - v1.47.0
+        </td>
+        <td>
+            2.7.5
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.45.1
+        </td>
+        <td>
+            2.7.2
+        </td>
+    </tr>
+    <tr>
+        <td>
+            ⚠️ v1.45.0
+        </td>
+        <td>
+            2.7.2
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.39.0 - v1.44.0
         </td>
         <td>
             2.7.1
@@ -295,28 +353,32 @@ The table below shows which version of federation each router release is compile
         </td>
     </tr>
     <tr>
-        <td>v0.9.0 – v0.15.1
+        <td>
+        v0.9.0 – v0.15.1
         </td>
         <td>
             2.0.2
         </td>
     </tr>
     <tr>
-        <td>v0.1.0-preview.5 – v0.1.0-preview.7
+        <td>
+        v0.1.0-preview.5 – v0.1.0-preview.7
         </td>
         <td>
             2.0.1
         </td>
     </tr>
     <tr>
-        <td>v0.1.0-preview.4
+        <td>
+        v0.1.0-preview.4
         </td>
         <td>
             2.0.0
         </td>
     </tr>
     <tr>
-        <td>v0.1.0-preview.3
+        <td>
+        v0.1.0-preview.3
         </td>
         <td>
             2.0.0-preview.7
@@ -329,6 +391,6 @@ The table below shows which version of federation each router release is compile
 
 ## Federation 1 support
 
-Federation 2.x composition is backward compatible with Federation 1.x subgraph schemas, so you can use the Apollo Router with any valid Federation 1.x supergraph.
+Federation 2.x composition is backward compatible with Federation 1.x subgraph schemas, so you can use the router with any valid Federation 1.x supergraph.
 
-If your Federation 1.x supergraph _doesn't_ work with the Apollo Router, see possible causes in [Backward compatibility in Federation 2](/federation/federation-2/backward-compatibility/).
+If your Federation 1.x supergraph _doesn't_ work with the router, see possible causes in [Backward compatibility in Federation 2](/federation/federation-2/backward-compatibility/).

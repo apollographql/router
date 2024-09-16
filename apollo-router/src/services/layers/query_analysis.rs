@@ -1,20 +1,31 @@
+use std::collections::HashMap;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::hash::Hash;
 use std::sync::Arc;
 
 use apollo_compiler::ast;
-use apollo_compiler::validation::DiagnosticList;
+use apollo_compiler::executable::Operation;
+use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Node;
 use http::StatusCode;
 use lru::LruCache;
+use router_bridge::planner::UsageReporting;
 use tokio::sync::Mutex;
+use tokio::task;
 
+use crate::apollo_studio_interop::generate_extended_references;
+use crate::apollo_studio_interop::ExtendedReferenceStats;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::graphql::Error;
 use crate::graphql::ErrorExtension;
+use crate::graphql::IntoGraphQLErrors;
 use crate::plugins::authorization::AuthorizationPlugin;
+use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
+use crate::plugins::telemetry::config::Conf as TelemetryConfig;
+use crate::plugins::telemetry::consts::QUERY_PARSING_SPAN_NAME;
 use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::OperationKind;
 use crate::services::SupergraphRequest;
@@ -31,8 +42,9 @@ use crate::Context;
 pub(crate) struct QueryAnalysisLayer {
     pub(crate) schema: Arc<Schema>,
     configuration: Arc<Configuration>,
-    cache: Arc<Mutex<LruCache<QueryAnalysisKey, (Context, ParsedDocument)>>>,
+    cache: Arc<Mutex<LruCache<QueryAnalysisKey, Result<(Context, ParsedDocument), SpecError>>>>,
     enable_authorization_directives: bool,
+    metrics_reference_mode: ApolloMetricsReferenceMode,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -45,6 +57,8 @@ impl QueryAnalysisLayer {
     pub(crate) async fn new(schema: Arc<Schema>, configuration: Arc<Configuration>) -> Self {
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(&configuration, &schema).unwrap_or(false);
+        let metrics_reference_mode = TelemetryConfig::metrics_reference_mode(&configuration);
+
         Self {
             schema,
             cache: Arc::new(Mutex::new(LruCache::new(
@@ -57,20 +71,38 @@ impl QueryAnalysisLayer {
             ))),
             enable_authorization_directives,
             configuration,
+            metrics_reference_mode,
         }
     }
 
-    pub(crate) fn parse_document(
+    pub(crate) async fn parse_document(
         &self,
         query: &str,
         operation_name: Option<&str>,
-    ) -> Result<ParsedDocument, SpecError> {
-        Query::parse_document(
-            query,
-            operation_name,
-            self.schema.api_schema(),
-            &self.configuration,
-        )
+    ) -> Result<(ParsedDocument, Node<Operation>), SpecError> {
+        let query = query.to_string();
+        let operation_name = operation_name.map(|o| o.to_string());
+        let schema = self.schema.clone();
+        let conf = self.configuration.clone();
+
+        // Must be created *outside* of the spawn_blocking or the span is not connected to the
+        // parent
+        let span = tracing::info_span!(QUERY_PARSING_SPAN_NAME, "otel.kind" = "INTERNAL");
+
+        task::spawn_blocking(move || {
+            span.in_scope(|| {
+                let doc = Query::parse_document(
+                    &query,
+                    operation_name.as_deref(),
+                    schema.as_ref(),
+                    conf.as_ref(),
+                )?;
+                let operation = doc.get_operation(operation_name.as_deref())?.clone();
+                Ok((doc, operation))
+            })
+        })
+        .await
+        .expect("parse_document task panicked")
     }
 
     pub(crate) async fn supergraph_request(
@@ -117,93 +149,134 @@ impl QueryAnalysisLayer {
             })
             .cloned();
 
-        let (context, doc) = match entry {
-            None => {
-                let span = tracing::info_span!("parse_query", "otel.kind" = "INTERNAL");
-                let doc = match span.in_scope(|| self.parse_document(&query, op_name.as_deref())) {
-                    Ok(doc) => doc,
-                    Err(err) => {
-                        return Err(SupergraphResponse::builder()
-                            .errors(vec![Error::builder()
-                                .message(err.to_string())
-                                .extension_code(err.extension_code())
-                                .build()])
-                            .status_code(StatusCode::BAD_REQUEST)
-                            .context(request.context)
-                            .build()
-                            .expect("response is valid"));
-                    }
-                };
-
-                let context = Context::new();
-
-                let operation = doc.executable.get_operation(op_name.as_deref()).ok();
-                let operation_name = operation
-                    .as_ref()
-                    .and_then(|operation| operation.name.as_ref().map(|s| s.as_str().to_owned()));
-
-                context.insert(OPERATION_NAME, operation_name).unwrap();
-                let operation_kind = operation.map(|op| OperationKind::from(op.operation_type));
-                context
-                    .insert(OPERATION_KIND, operation_kind.unwrap_or_default())
-                    .expect("cannot insert operation kind in the context; this is a bug");
-
-                if self.enable_authorization_directives {
-                    if let Err(err) = AuthorizationPlugin::query_analysis(
-                        &query,
-                        op_name.as_deref(),
-                        &self.schema,
-                        &self.configuration,
-                        &context,
-                    ) {
-                        return Err(SupergraphResponse::builder()
-                            .errors(vec![Error::builder()
-                                .message(err.to_string())
-                                .extension_code(err.extension_code())
-                                .build()])
-                            .status_code(StatusCode::BAD_REQUEST)
-                            .context(request.context)
-                            .build()
-                            .expect("response is valid"));
-                    }
+        let res = match entry {
+            None => match self.parse_document(&query, op_name.as_deref()).await {
+                Err(errors) => {
+                    (*self.cache.lock().await).put(
+                        QueryAnalysisKey {
+                            query,
+                            operation_name: op_name.clone(),
+                        },
+                        Err(errors.clone()),
+                    );
+                    Err(errors)
                 }
+                Ok((doc, operation)) => {
+                    let context = Context::new();
 
-                (*self.cache.lock().await).put(
-                    QueryAnalysisKey {
-                        query,
-                        operation_name: op_name,
-                    },
-                    (context.clone(), doc.clone()),
-                );
+                    if self.enable_authorization_directives {
+                        AuthorizationPlugin::query_analysis(
+                            &doc,
+                            op_name.as_deref(),
+                            &self.schema,
+                            &context,
+                        );
+                    }
 
-                (context, doc)
-            }
+                    context
+                        .insert(OPERATION_NAME, operation.name.clone())
+                        .expect("cannot insert operation name into context; this is a bug");
+                    let operation_kind = OperationKind::from(operation.operation_type);
+                    context
+                        .insert(OPERATION_KIND, operation_kind)
+                        .expect("cannot insert operation kind in the context; this is a bug");
+
+                    (*self.cache.lock().await).put(
+                        QueryAnalysisKey {
+                            query,
+                            operation_name: op_name.clone(),
+                        },
+                        Ok((context.clone(), doc.clone())),
+                    );
+
+                    Ok((context, doc))
+                }
+            },
             Some(c) => c,
         };
 
-        request.context.extend(&context);
-        request
-            .context
-            .extensions()
-            .lock()
-            .insert::<ParsedDocument>(doc);
+        match res {
+            Ok((context, doc)) => {
+                request.context.extend(&context);
 
-        Ok(SupergraphRequest {
-            supergraph_request: request.supergraph_request,
-            context: request.context,
-        })
+                let extended_ref_stats = if matches!(
+                    self.metrics_reference_mode,
+                    ApolloMetricsReferenceMode::Extended
+                ) {
+                    Some(generate_extended_references(
+                        doc.executable.clone(),
+                        op_name,
+                        self.schema.api_schema(),
+                        &request.supergraph_request.body().variables.clone(),
+                    ))
+                } else {
+                    None
+                };
+
+                request.context.extensions().with_lock(|mut lock| {
+                    lock.insert::<ParsedDocument>(doc.clone());
+                    if let Some(stats) = extended_ref_stats {
+                        lock.insert::<ExtendedReferenceStats>(stats);
+                    }
+                });
+
+                Ok(SupergraphRequest {
+                    supergraph_request: request.supergraph_request,
+                    context: request.context,
+                })
+            }
+            Err(errors) => {
+                request.context.extensions().with_lock(|mut lock| {
+                    lock.insert(Arc::new(UsageReporting {
+                        stats_report_key: errors.get_error_key().to_string(),
+                        referenced_fields_by_type: HashMap::new(),
+                    }))
+                });
+                let errors = match errors.into_graphql_errors() {
+                    Ok(v) => v,
+                    Err(errors) => vec![Error::builder()
+                        .message(errors.to_string())
+                        .extension_code(errors.extension_code())
+                        .build()],
+                };
+                Err(SupergraphResponse::builder()
+                    .errors(errors)
+                    .status_code(StatusCode::BAD_REQUEST)
+                    .context(request.context)
+                    .build()
+                    .expect("response is valid"))
+            }
+        }
     }
 }
 
 pub(crate) type ParsedDocument = Arc<ParsedDocumentInner>;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct ParsedDocumentInner {
     pub(crate) ast: ast::Document,
-    pub(crate) executable: Arc<ExecutableDocument>,
+    pub(crate) executable: Arc<Valid<ExecutableDocument>>,
     pub(crate) hash: Arc<QueryHash>,
-    pub(crate) parse_errors: Option<DiagnosticList>,
-    pub(crate) validation_errors: Option<DiagnosticList>,
+}
+
+impl ParsedDocumentInner {
+    pub(crate) fn get_operation(
+        &self,
+        operation_name: Option<&str>,
+    ) -> Result<&Node<Operation>, SpecError> {
+        if let Ok(operation) = self.executable.operations.get(operation_name) {
+            Ok(operation)
+        } else if let Some(name) = operation_name {
+            Err(SpecError::UnknownOperation(name.to_owned()))
+        } else if self.executable.operations.is_empty() {
+            // Maybe not reachable?
+            // A valid document is non-empty and has no unused fragments
+            Err(SpecError::NoOperation)
+        } else {
+            debug_assert!(self.executable.operations.len() > 1);
+            Err(SpecError::MultipleOperationWithoutOperationName)
+        }
+    }
 }
 
 impl Display for ParsedDocumentInner {

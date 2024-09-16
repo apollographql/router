@@ -27,80 +27,13 @@ use http::StatusCode;
 use http::Uri;
 use maplit::hashmap;
 use mime::APPLICATION_JSON;
-use serde_json::to_string_pretty;
 use serde_json_bytes::json;
-use serde_json_bytes::Value;
 use tower::BoxError;
 use tower::ServiceExt;
 use walkdir::DirEntry;
 use walkdir::WalkDir;
 
 mod integration;
-
-macro_rules! assert_federated_response {
-    ($query:expr, $service_requests:expr $(,)?) => {
-        let request = supergraph::Request::fake_builder()
-            .query($query)
-            .variable("topProductsFirst", 2_i32)
-            .variable("reviewsForAuthorAuthorId", 1_i32)
-            .method(Method::POST)
-            .build()
-            .unwrap();
-
-        let expected = match query_node(&request).await {
-            Ok(e) => e,
-            Err(err) => {
-                panic!("query_node failed: {err}. Probably caused by missing gateway during testing");
-            }
-        };
-        assert_eq!(expected.errors, []);
-
-        let (actual, registry) = query_rust(request).await;
-        assert_eq!(actual.errors, []);
-
-        tracing::debug!("query:\n{}\n", $query);
-
-        assert!(
-            expected.data.as_ref().unwrap().is_object(),
-            "nodejs: no response's data: please check that the gateway and the subgraphs are running",
-        );
-
-        tracing::debug!("expected: {}", to_string_pretty(&expected).unwrap());
-        tracing::debug!("actual: {}", to_string_pretty(&actual).unwrap());
-
-        let expected = expected.data.as_ref().expect("expected data should not be none");
-        let actual = actual.data.as_ref().expect("received data should not be none");
-        assert!(
-            expected.eq_and_ordered(actual),
-            "the gateway and the router didn't return the same data:\ngateway:\n{}\nrouter\n{}",
-            expected,
-            actual
-        );
-        assert_eq!(registry.totals(), $service_requests);
-    };
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn basic_request() {
-    assert_federated_response!(
-        r#"{ topProducts { name name2:name } }"#,
-        hashmap! {
-            "products".to_string()=>1,
-        },
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn basic_composition() {
-    assert_federated_response!(
-        r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#,
-        hashmap! {
-            "products".to_string()=>2,
-            "reviews".to_string()=>1,
-            "accounts".to_string()=>1,
-        },
-    );
-}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn api_schema_hides_field() {
@@ -115,12 +48,12 @@ async fn api_schema_hides_field() {
 
     let message = &actual.errors[0].message;
     assert!(
-        message.contains("no field `inStock` in type `Product`"),
+        message.contains(r#"Cannot query field "inStock" on type "Product"."#),
         "{message}"
     );
     assert_eq!(
         actual.errors[0].extensions["code"].as_str(),
-        Some("PARSING_ERROR"),
+        Some("GRAPHQL_VALIDATION_FAILED"),
     );
 }
 
@@ -138,36 +71,12 @@ async fn validation_errors_from_rust() {
               "apollo": {
                     "field_level_instrumentation_sampler": "always_off"
                 }
-            },
-            "experimental_graphql_validation_mode": "new",
+            }
         }),
     )
     .await;
 
     insta::assert_json_snapshot!(response.errors);
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn basic_mutation() {
-    assert_federated_response!(
-        r#"mutation {
-              createProduct(upc:"8", name:"Bob") {
-                upc
-                name
-                reviews {
-                  body
-                }
-              }
-              createReview(upc: "8", id:"100", body: "Bif"){
-                id
-                body
-              }
-            }"#,
-        hashmap! {
-            "products".to_string()=>1,
-            "reviews".to_string()=>2,
-        },
-    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -558,7 +467,7 @@ async fn persisted_queries() {
     assert_eq!(
         actual.errors,
         vec![apollo_router::graphql::Error::builder()
-            .message(&format!(
+            .message(format!(
                 "Persisted query '{UNKNOWN_QUERY_ID}' not found in the persisted query list"
             ))
             .extension_code("PERSISTED_QUERY_NOT_IN_LIST")
@@ -827,8 +736,7 @@ async fn defer_path_with_disabled_config() {
             "apollo.include_subgraph_errors": {
                 "all": true
             }
-        },
-        "experimental_graphql_validation_mode": "both",
+        }
     });
     let request = supergraph::Request::fake_builder()
         .query(
@@ -1224,18 +1132,6 @@ async fn query_operation_id() {
         .is_none());
 }
 
-async fn query_node(request: &supergraph::Request) -> Result<graphql::Response, String> {
-    reqwest::Client::new()
-        .post("https://federation-demo-gateway.fly.dev/")
-        .json(request.supergraph_request.body())
-        .send()
-        .await
-        .map_err(|err| format!("HTTP fetch failed from 'test node': {err}"))?
-        .json()
-        .await
-        .map_err(|err| format!("service 'test node' response was malformed: {err}"))
-}
-
 async fn http_query_rust(
     request: supergraph::Request,
 ) -> (router::Response, CountingServiceRegistry) {
@@ -1252,8 +1148,7 @@ async fn query_rust(
               "apollo": {
                     "field_level_instrumentation_sampler": "always_off"
                 }
-            },
-            "experimental_graphql_validation_mode": "both",
+            }
         }),
     )
     .await
@@ -1392,52 +1287,6 @@ impl Plugin for CountingServiceRegistry {
                 request
             })
             .boxed()
-    }
-}
-
-trait ValueExt {
-    fn eq_and_ordered(&self, other: &Self) -> bool;
-}
-
-impl ValueExt for Value {
-    fn eq_and_ordered(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Value::Object(a), Value::Object(b)) => {
-                let mut it_a = a.iter();
-                let mut it_b = b.iter();
-
-                loop {
-                    match (it_a.next(), it_b.next()) {
-                        (Some(_), None) | (None, Some(_)) => break false,
-                        (None, None) => break true,
-                        (Some((field_a, value_a)), Some((field_b, value_b)))
-                            if field_a == field_b && ValueExt::eq_and_ordered(value_a, value_b) =>
-                        {
-                            continue
-                        }
-                        (Some(_), Some(_)) => break false,
-                    }
-                }
-            }
-            (Value::Array(a), Value::Array(b)) => {
-                let mut it_a = a.iter();
-                let mut it_b = b.iter();
-
-                loop {
-                    match (it_a.next(), it_b.next()) {
-                        (Some(_), None) | (None, Some(_)) => break false,
-                        (None, None) => break true,
-                        (Some(value_a), Some(value_b))
-                            if ValueExt::eq_and_ordered(value_a, value_b) =>
-                        {
-                            continue
-                        }
-                        (Some(_), Some(_)) => break false,
-                    }
-                }
-            }
-            (a, b) => a == b,
-        }
     }
 }
 

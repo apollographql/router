@@ -1,0 +1,44 @@
+{
+    "mocks": [
+        {
+            "request": {
+                "query":"query Search__searchSubgraph__0{search{__typename ...on MovieResult{sections{__typename ...on EntityCollectionSection{__typename id}...on GallerySection{__typename id}}id}...on ArticleResult{id sections{__typename ...on GallerySection{__typename id}...on EntityCollectionSection{__typename id}}}}}",
+                "operationName":"Search__searchSubgraph__0"
+            },
+            "response": {
+                "data":{
+                    "search":[
+                        {
+                            "__typename":"MovieResult",
+                            "id":"c5f4985f-8fb6-4414-a3f5-56f7f58dd043",
+                            "sections":[
+                                {
+                                    "__typename":"EntityCollectionSection",
+                                    "id":"d9077ad2-d79a-45b5-b5ee-25ded226f03c"
+                                },
+                                {
+                                    "__typename":"EntityCollectionSection",
+                                    "id":"9f1f1ebb-21d3-4afe-bb7d-6de706f78f02"
+                                }
+                            ]
+                        },
+                        {
+                            "__typename":"MovieResult",
+                            "id":"ff140d35-ce5d-48fe-bad7-1cfb2c3e310a",
+                            "sections":[
+                                {
+                                    "__typename":"EntityCollectionSection",
+                                    "id":"24cea0de-2ac8-4cbe-85b6-8b1b80647c12"
+                                },
+                                {
+                                    "__typename":"GallerySection",
+                                    "id":"2f772201-42ca-4376-9871-2252cc052262"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        }
+    ]
+}

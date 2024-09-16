@@ -1,26 +1,33 @@
-use apollo_router::plugin::Plugin;
-use apollo_router::plugin::PluginInit;
-use apollo_router::register_plugin;
-use apollo_router::services::supergraph;
-{{#if type_basic}}
-use apollo_router::services::router;
-use apollo_router::services::execution;
-use apollo_router::services::subgraph;
-{{/if}}
 {{#if type_auth}}
-use apollo_router::layers::ServiceBuilderExt;
 use std::ops::ControlFlow;
-use tower::ServiceExt;
-use tower::ServiceBuilder;
+
+use apollo_router::layers::ServiceBuilderExt;
 {{/if}}
 {{#if type_tracing}}
 use apollo_router::layers::ServiceBuilderExt;
-use tower::ServiceExt;
-use tower::ServiceBuilder;
 {{/if}}
+use apollo_router::plugin::Plugin;
+use apollo_router::plugin::PluginInit;
+use apollo_router::register_plugin;
+{{#if type_basic}}
+use apollo_router::services::execution;
+{{/if}}
+{{#if type_basic}}
+use apollo_router::services::router;
+use apollo_router::services::subgraph;
+{{/if}}
+use apollo_router::services::supergraph;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
+{{#if type_auth}}
+use tower::ServiceBuilder;
+use tower::ServiceExt;
+{{/if}}
+{{#if type_tracing}}
+use tower::ServiceBuilder;
+use tower::ServiceExt;
+{{/if}}
 
 #[derive(Debug)]
 struct {{pascal_name}} {
@@ -43,14 +50,13 @@ impl Plugin for {{pascal_name}} {
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         tracing::info!("{}", init.config.message);
-        Ok({{pascal_name}} { configuration: init.config })
+        Ok({{pascal_name}} {
+            configuration: init.config,
+        })
     }
 
     // Delete this function if you are not customizing it.
-    fn router_service(
-        &self,
-        service: router::BoxService,
-    ) -> router::BoxService {
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
         // Always use service builder to compose your plugins.
         // It provides off the shelf building blocks for your plugin.
         //
@@ -63,10 +69,7 @@ impl Plugin for {{pascal_name}} {
     }
 
     // Delete this function if you are not customizing it.
-    fn supergraph_service(
-        &self,
-        service: supergraph::BoxService,
-    ) -> supergraph::BoxService {
+    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         // Always use service builder to compose your plugins.
         // It provides off the shelf building blocks for your plugin.
         //
@@ -79,19 +82,12 @@ impl Plugin for {{pascal_name}} {
     }
 
     // Delete this function if you are not customizing it.
-    fn execution_service(
-        &self,
-        service: execution::BoxService,
-    ) -> execution::BoxService {
+    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
         service
     }
 
     // Delete this function if you are not customizing it.
-    fn subgraph_service(
-        &self,
-        _name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+    fn subgraph_service(&self, _name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
         service
     }
 }
@@ -104,21 +100,19 @@ impl Plugin for {{pascal_name}} {
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         tracing::info!("{}", init.config.message);
-        Ok({{pascal_name}} { configuration: init.config })
+        Ok({{pascal_name}} {
+            configuration: init.config,
+        })
     }
 
-    fn supergraph_service(
-        &self,
-        service: supergraph::BoxService,
-    ) -> supergraph::BoxService {
-
+    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         ServiceBuilder::new()
-                    .oneshot_checkpoint_async(|request : supergraph::Request| async {
-                        // Do some async call here to auth, and decide if to continue or not.
-                        Ok(ControlFlow::Continue(request))
-                    })
-                    .service(service)
-                    .boxed()
+            .oneshot_checkpoint_async(|request: supergraph::Request| async {
+                // Do some async call here to auth, and decide if to continue or not.
+                Ok(ControlFlow::Continue(request))
+            })
+            .service(service)
+            .boxed()
     }
 }
 {{/if}}
@@ -130,27 +124,25 @@ impl Plugin for {{pascal_name}} {
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         tracing::info!("{}", init.config.message);
-        Ok({{pascal_name}} { configuration: init.config })
+        Ok({{pascal_name}} {
+            configuration: init.config,
+        })
     }
 
-    fn supergraph_service(
-        &self,
-        service: supergraph::BoxService,
-    ) -> supergraph::BoxService {
-
+    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         ServiceBuilder::new()
-                    .instrument(|_request| {
-                        // Optionally take information from the request and insert it into the span as attributes
-                        // See https://docs.rs/tracing/latest/tracing/ for more information
-                        tracing::info_span!("my_custom_span")
-                    })
-                    .map_request(|request| {
-                        // Add a log message, this will appear within the context of the current span
-                        tracing::error!("error detected");
-                        request
-                    })
-                    .service(service)
-                    .boxed()
+            .instrument(|_request| {
+                // Optionally take information from the request and insert it into the span as attributes
+                // See https://docs.rs/tracing/latest/tracing/ for more information
+                tracing::info_span!("my_custom_span")
+            })
+            .map_request(|request| {
+                // Add a log message, this will appear within the context of the current span
+                tracing::error!("error detected");
+                request
+            })
+            .service(service)
+            .boxed()
     }
 }
 {{/if}}
@@ -161,9 +153,9 @@ register_plugin!("{{project_name}}", "{{snake_name}}", {{pascal_name}});
 
 #[cfg(test)]
 mod tests {
-    use apollo_router::TestHarness;
-    use apollo_router::services::supergraph;
     use apollo_router::graphql;
+    use apollo_router::services::supergraph;
+    use apollo_router::TestHarness;
     use tower::BoxError;
     use tower::ServiceExt;
 
@@ -184,11 +176,15 @@ mod tests {
         let request = supergraph::Request::canned_builder().build().unwrap();
         let mut streamed_response = test_harness.oneshot(request.try_into()?).await?;
 
-        let first_response: graphql::Response =
-            serde_json::from_slice(streamed_response
+        let first_response: graphql::Response = serde_json::from_slice(
+            streamed_response
                 .next_response()
                 .await
-                .expect("couldn't get primary response")?.to_vec().as_slice()).unwrap();
+                .expect("couldn't get primary response")?
+                .to_vec()
+                .as_slice(),
+        )
+        .unwrap();
 
         assert!(first_response.data.is_some());
 
@@ -201,4 +197,3 @@ mod tests {
         Ok(())
     }
 }
-

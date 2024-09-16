@@ -1,17 +1,25 @@
 ---
-title: Apollo Router Telemetry
+title: Router Telemetry
 subtitle: Collect observable data to monitor your router and supergraph
-description: Observe and monitor the health and performance of the Apollo Router and the supergraph by collecting and exporting telemetry logs, metrics, and traces
+description: Observe and monitor the health and performance of GraphQL operations in the Apollo GraphOS Router or Apollo Router Core by collecting and exporting telemetry logs, metrics, and traces.
 ---
 
+import TelemetryPerformanceNote from '../../../shared/telemetry-performance.mdx';
+
+<SummitCallout
+  topic="telemetry"
+  workshopName="Debugging your business with GraphOS Router advanced telemetry"
+  URL="https://reg.summit.graphql.com/flow/apollo/summit24/AttendeePortal/page/catalog/session/1722260608290001gftE"
+/>
+
 In this overview, learn about:
-- How Apollo Router telemetry enables supergraph observability and debuggability
+- How GraphOS Router and Apollo Router Core telemetry enable supergraph observability and debuggability
 - What data is captured in the router's logs, metrics, and traces
 - What exporters are available to provide telemetry to your application performance monitoring (APM) tools
 
 ```mermaid
 flowchart LR
-    subgraph Apollo Router
+    subgraph Router
     lifecycle("Request Lifecycle<br/>(telemetry sources)")
     exporters("Logs, Metrics,<br/>Traces Exporters")
     lifecycle-->exporters
@@ -28,7 +36,7 @@ The health of your supergraph is only as good as the health of your router. Beca
 
 Diagnosing your router's health and performance requires it to show observable data about its inner workings. The more observable data you can monitor and analyze, the faster you can identify unhealthy behaviors, deduce root causes, and implement fixes.
 
-The Apollo Router provides the necessary data to monitor its health and troubleshoot issues. The router's observability is critical for maintaining a healthy, performant supergraph and minimizing its [mean time to repair (MTTR)](https://en.wikipedia.org/wiki/Mean_time_to_repair). 
+The router provides the necessary data to monitor its health and troubleshoot issues. The router's observability is critical for maintaining a healthy, performant supergraph and minimizing its [mean time to repair (MTTR)](https://en.wikipedia.org/wiki/Mean_time_to_repair). 
  
 ## Collect exactly the telemetry you need
 
@@ -40,7 +48,7 @@ Router telemetry is customizable to meet the observability needs of different gr
 
 ## Router telemetry types
 
-The Apollo Router collects different types of telemetry, including:
+The router collects different types of telemetry, including:
 
 * [Logs and events](#logs-and-events)
 * [Metrics and instruments](#metrics-and-instruments)
@@ -50,7 +58,7 @@ These let you collect data about the inner workings of your router and export lo
 
 ```mermaid
 flowchart LR
-    subgraph Apollo Router
+    subgraph Router
     lifecycle("Request Lifecycle<br/>(telemetry sources)")
     logs_exporter("Logs<br/>Exporter")
         terminal(stdout)
@@ -84,7 +92,7 @@ flowchart LR
 
 ### Logs and events
 
-Logs record **events** in the Apollo Router. Examples of logged events include:
+Logs record **events** in the router. Examples of logged events include:
 
 * Information about the router lifecycle
 * Warnings about misconfiguration
@@ -94,19 +102,21 @@ Logs can be consumed by [logging exporters](./exporters/logging/overview) and as
 
 ### Metrics and instruments
 
-Metrics monitor aggregate information about the Apollo Router. Metrics include histograms, gauges, and counts. An individual metric is called an **instrument**. Examples of instruments include:
+Metrics are measurements of the router's behavior that can be exported and monitored. Different kinds of metrics include histograms, gauges, and counts. 
+
+Metrics can be consumed by _exporters_. See [Metrics exporters](./exporters/metrics/overview) for an overview of supported exporters.
+
+An individual metric is called an _instrument_. Example instruments of the router include:
 
 * Number of received requests 
 * Histogram of request durations
 * Number of in-flight requests
 
-You can find a full list of instruments in the [instrument documentation](./instrumentation/standard-instruments).
-
-Metrics can be consumed via [metrics exporters](./exporters/metrics/overview).
+See [Instruments](./instrumentation/instruments) for an overview of available instruments and a guide for configuring and customizing instruments.
 
 ### Traces and spans
 
-Traces monitor the flow of a request through the Apollo Router. A trace is composed of [**spans**](./instrumentation/spans). A span captures a request's duration as it flows through the router request lifecycle. Spans may include contextual information about the request, such as the HTTP status code, or the name of the subgraph being queried.
+Traces monitor the flow of a request through the router. A trace is composed of [**spans**](./instrumentation/spans). A span captures a request's duration as it flows through the router request lifecycle. Spans may include contextual information about the request, such as the HTTP status code, or the name of the subgraph being queried.
 
 Examples of spans include:
 
@@ -118,7 +128,7 @@ Traces are consumed via [tracing exporters](./exporters/tracing/overview).
 
 ## Router telemetry exporters
 
-The Apollo Router exports its collected telemetry in formats compatible with industry-standard APM tools. The router supports logging, metrics, and tracing exporters for a variety of tools, including:
+The router exports its collected telemetry in formats compatible with industry-standard APM tools. The router supports logging, metrics, and tracing exporters for a variety of tools, including:
 
 * Prometheus
 * OpenTelemetry Collector
@@ -131,7 +141,7 @@ For more information, see [logging exporters](./exporters/logging/overview), [me
 
 ## Router telemetry attributes
 
-You can annotate events, metrics, and spans with **attributes**. Attributes are key-value pairs that add contextual information about the Apollo Router pipeline to telemetry. You can then use these attributes to filter and group data in your APMs.
+You can annotate events, metrics, and spans with **attributes**. Attributes are key-value pairs that add contextual information about the router pipeline to telemetry. You can then use these attributes to filter and group data in your APMs.
 
 Example attributes include:
 
@@ -146,3 +156,9 @@ You can use [standard attributes](./instrumentation/standard-attributes) or [sel
 [Custom attributes for spans](./instrumentation/spans/#attributes) require a GraphOS [Dedicated or Enterprise plan](https://www.apollographql.com/pricing#observability).
 
 </PremiumFeature>
+
+## Best practices
+
+### Balancing telemetry and router performance
+
+<TelemetryPerformanceNote/>

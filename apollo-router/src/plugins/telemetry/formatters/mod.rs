@@ -15,7 +15,6 @@ use parking_lot::Mutex;
 use serde_json::Number;
 use tracing::Subscriber;
 use tracing_core::callsite::Identifier;
-use tracing_opentelemetry::OtelData;
 use tracing_subscriber::fmt::format::Writer;
 use tracing_subscriber::fmt::FormatEvent;
 use tracing_subscriber::fmt::FormatFields;
@@ -25,10 +24,12 @@ use tracing_subscriber::registry::SpanRef;
 
 use super::config_new::logging::RateLimit;
 use super::dynamic_attribute::LogAttributes;
+use super::reload::SampledSpan;
 use crate::metrics::layer::METRIC_PREFIX_COUNTER;
 use crate::metrics::layer::METRIC_PREFIX_HISTOGRAM;
 use crate::metrics::layer::METRIC_PREFIX_MONOTONIC_COUNTER;
 use crate::metrics::layer::METRIC_PREFIX_VALUE;
+use crate::plugins::telemetry::otel::OtelData;
 
 pub(crate) const APOLLO_PRIVATE_PREFIX: &str = "apollo_private.";
 // This list comes from Otel https://opentelemetry.io/docs/specs/semconv/attributes-registry/code/ and
@@ -314,5 +315,13 @@ where
             return Some((span_context.trace_id(), span_context.span_id()));
         }
     }
+    if let Some(sampled_span) = ext.get::<SampledSpan>() {
+        let (trace_id, span_id) = sampled_span.trace_and_span_id();
+        return Some((
+            opentelemetry_api::trace::TraceId::from(trace_id.to_u128()),
+            span_id,
+        ));
+    }
+
     None
 }

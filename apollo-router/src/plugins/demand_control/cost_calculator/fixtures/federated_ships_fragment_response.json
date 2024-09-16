@@ -1,0 +1,28 @@
+{
+    "data": {
+        "ships": [
+            {
+                "owner": {
+                    "licenseNumber": 1,
+                    "name": "Kate Chopin"
+                }
+            },
+            {
+                "owner": {
+                    "licenseNumber": 2,
+                    "name": "Paul Auster"
+                }
+            }
+        ],
+        "users": [
+            {
+                "licenseNumber": 1,
+                "name": "Kate Chopin"
+            },
+            {
+                "licenseNumber": 2,
+                "name": "Paul Auster"
+            }
+        ]
+    }
+}

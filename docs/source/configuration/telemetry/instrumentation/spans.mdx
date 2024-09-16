@@ -1,7 +1,7 @@
 ---
 title: Spans
 subtitle: Add router lifecycle context to traces
-description: Use spans to add contextual information from the Apollo Router to traces displayed by your application performance monitors (APM).
+description: Use spans to add contextual information from the Apollo GraphOS Router or Apollo Router Core to traces displayed by your application performance monitors (APM).
 ---
 
 import RouterServices from '../../../../shared/router-lifecycle-services.mdx';
@@ -33,15 +33,15 @@ telemetry:
 
 ### `attributes`
 
-Spans may have attributes attached to them from the Apollo Router pipeline. These attributes are used to filter and group spans in your APM.
+Spans may have attributes attached to them from the router pipeline. These attributes are used to filter and group spans in your APM.
 
 Attributes may be drawn from [standard attributes](./standard-attributes) or [selectors](./selectors). 
 
-<PremiumFeatureFeature>
+<PremiumFeature>
 
 Granular customization of attributes on spans requires a GraphOS [Dedicated or Enterprise plan](https://www.apollographql.com/pricing#observability).
 
-</PremiumFeatureFeature>
+</PremiumFeature>
 
 The attributes that are available depend on the service of the pipeline.
 
@@ -56,6 +56,24 @@ telemetry:
           # Custom attributes
           "my_attribute":
             response_header: "x-my-header"
+```
+
+You can also have [conditions](./conditions) on custom attributes using [selectors](./selectors). You can only have conditions on a selector at the same execution level.
+Example you can't have a condition on `response_header` if you want to set an attribute from `request_header`.
+
+```yaml title="desc.router.yaml"
+telemetry:
+  instrumentation:
+    spans: 
+      router: 
+        attributes:    
+          on_error: 
+            response_status: reason
+            condition:
+              not:
+                eq:
+                - response_status: code
+                - 200
 ```
 
 ### `default_attribute_requirement_level`
@@ -134,6 +152,43 @@ The `mode` option will be defaulted to `spec_compliant` in a future release, and
 
 </Note>
 
+## Span status
+
+By default spans are marked in error only if the http status code is different than 200. If you want to mark a span in error for other reason you can override the `otel.status_code` attribute which is responsible to mark a span in error or not.
+If it's in error then `otel.status_code` = `error`, if not it will be `ok`.
+
+## Naming
+
+By default, we will use a span naming convention that aligns with the current [semantinc conventions for GraphQL server in OpenTelemetry](https://opentelemetry.io/docs/specs/semconv/graphql/graphql-spans/) which means the root span name 
+must be of format `<graphql.operation.type> <graphql.operation.name>` provided that `graphql.operation.type` and `graphql.operation.name` are available. 
+
+If you want to change the name of spans we're creating for each services you can override this value by setting the `otel.name` attribute using any selectors you want.
+
+Here is an example if you want to mark the `router` and `supergraph` span in error if you have a graphql error in the payload and you want to enforce the `router` span name to be `graphql_router`.
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    spans:
+      router:
+        attributes:
+          otel.name:
+            static: graphql_router # Override the span name to graphql_router 
+          otel.status_code:
+            static: error
+            condition:
+              eq:
+              - true
+              - on_graphql_error: true
+      supergraph:
+        attributes:
+          otel.status_code:
+            static: error
+            condition:
+              exists:
+                response_errors: $[0].extensions.code # Here is an example to get the first error code, `on_graphql_error` is also available for supergraph
+```
+
 ## Span configuration example
 
 An example configuration of `telemetry.spans` in `router.yaml` sets both standard and custom attributes for the router service:
@@ -153,6 +208,18 @@ telemetry:
           http.request.method: false
           # ...
   
+          # Conditional custom attribute
+          otel.status_description: # You can conditionally put a status description attribute on your span if it respect the condition
+            static: "there was an error"
+            condition: # http response status code != 200 or it contains a graphql error in the payload
+              any:
+              - not:
+                  eq:
+                  - response_status: code
+                  - 200
+              - eq:
+                - on_graphql_error
+                - true
           # Custom attributes
           "acme.custom_1":
             trace_id: datadog
@@ -161,7 +228,8 @@ telemetry:
             default: "unknown"
           "acme.custom_3":
             env: "ENV_VAR"
-          "static_attribute": "my_static_value"
+          "static_attribute":
+            static: "my_static_value"
             # ...
           
       supergraph:
@@ -178,7 +246,7 @@ telemetry:
 |---------------------------------------|---------------------------------------------------------------------------|--------------------------------|------------------------------------------|
 | `<attribute-name>`                    |                                                                           |                                | The name of the custom attribute.        |
 | `attributes`                          | [standard attributes](./standard-attributes)\|[selectors](./selectors)    |                                | The attributes of the span.              |
+| `condition`                           | [conditions](./conditions)                                                |                                | The condition for adding a custom attribute. |
 | `default_attribute_requirement_level` | `required`\|`recommended`                                                 | `required`                     | The default attribute requirement level. |
-| `legacy_request_span`                 | `true`\|`false`                                                           |                                | Include the `request` span in traces.    |
 | `mode`                                | `spec_compliant` \| `deprecated`                                          | `deprecated`                   | The attributes of the span.              |
 

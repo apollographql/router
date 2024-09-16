@@ -1,0 +1,169 @@
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+{
+  query: Query
+  mutation: Mutation
+  subscription: Subscription
+}
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @noArgs on FIELD | FRAGMENT_DEFINITION | FRAGMENT_SPREAD | INLINE_FRAGMENT | MUTATION | QUERY | SUBSCRIPTION
+
+directive @withArgs(arg1: String = "Default", arg2: String, arg3: Boolean, arg4: Int, arg5: [ID]) on FIELD | FRAGMENT_DEFINITION | FRAGMENT_SPREAD | INLINE_FRAGMENT | MUTATION | QUERY | SUBSCRIPTION
+
+interface AnInterface
+  @join__type(graph: MAIN)
+{
+  sharedField: String!
+}
+
+type BasicResponse
+  @join__type(graph: MAIN)
+{
+  id: Int!
+  nullableId: Int
+}
+
+type BasicTypesResponse
+  @join__type(graph: MAIN)
+{
+  nullableId: ID
+  nonNullId: ID!
+  nullableInt: Int
+  nonNullInt: Int!
+  nullableString: String
+  nonNullString: String!
+  nullableFloat: Float
+  nonNullFloat: Float!
+  nullableBoolean: Boolean
+  nonNullBoolean: Boolean!
+}
+
+type EverythingResponse
+  @join__type(graph: MAIN)
+{
+  id: Int!
+  nullableId: Int
+  basicTypes: BasicTypesResponse
+  enumResponse: SomeEnum
+  interfaceResponse: AnInterface
+  interfaceImplementationResponse: InterfaceImplementation2
+  unionType2Response: UnionType2
+  listOfBools: [Boolean!]!
+  listOfInterfaces: [AnInterface]
+  objectTypeWithInputField(boolInput: Boolean, secondInput: Boolean!): ObjectTypeResponse
+  listOfObjects: [ObjectTypeResponse]
+}
+
+type InterfaceImplementation1 implements AnInterface
+  @join__implements(graph: MAIN, interface: "AnInterface")
+  @join__type(graph: MAIN)
+{
+  sharedField: String!
+  implementation1Field: Int!
+}
+
+type InterfaceImplementation2 implements AnInterface
+  @join__implements(graph: MAIN, interface: "AnInterface")
+  @join__type(graph: MAIN)
+{
+  sharedField: String!
+  implementation2Field: Float!
+}
+
+scalar join__FieldSet
+
+enum join__Graph {
+  MAIN @join__graph(name: "main", url: "http://localhost:4001/graphql")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+type Mutation
+  @join__type(graph: MAIN)
+{
+  noInputMutation: EverythingResponse!
+}
+
+type ObjectTypeResponse
+  @join__type(graph: MAIN)
+{
+  stringField: String!
+  intField: Int!
+  nullableField: String
+}
+
+type Query
+  @join__type(graph: MAIN)
+{
+  scalarInputQuery(listInput: [String!]!, stringInput: String!, nullableStringInput: String, intInput: Int!, floatInput: Float!, boolInput: Boolean!, enumInput: SomeEnum, idInput: ID!): EverythingResponse!
+  noInputQuery: EverythingResponse!
+  basicResponseQuery: BasicResponse!
+  scalarResponseQuery: String
+  defaultArgQuery(stringInput: String! = "default"): BasicResponse!
+  sortQuery(listInput: [String!]!, stringInput: String!, nullableStringInput: String, INTInput: Int!, floatInput: Float!, boolInput: Boolean!, enumInput: SomeEnum, idInput: ID!): SortResponse!
+}
+
+enum SomeEnum
+  @join__type(graph: MAIN)
+{
+  SOME_VALUE_1 @join__enumValue(graph: MAIN)
+  SOME_VALUE_2 @join__enumValue(graph: MAIN)
+  SOME_VALUE_3 @join__enumValue(graph: MAIN)
+}
+
+type SortResponse
+  @join__type(graph: MAIN)
+{
+  id: Int!
+  nullableId: Int
+  zzz: Int
+  aaa: Int
+  CCC: Int
+}
+
+type Subscription
+  @join__type(graph: MAIN)
+{
+  noInputSubscription: EverythingResponse!
+}
+
+type UnionType1
+  @join__type(graph: MAIN)
+{
+  unionType1Field: String!
+  nullableString: String
+}
+
+type UnionType2
+  @join__type(graph: MAIN)
+{
+  unionType2Field: String!
+  nullableString: String
+}

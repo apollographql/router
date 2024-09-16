@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use apollo_compiler::ast::Document;
 use apollo_compiler::Schema;
 use tower::ServiceExt;
 
@@ -11,10 +10,12 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::progressive_override::Config;
 use crate::plugins::progressive_override::ProgressiveOverridePlugin;
+use crate::plugins::progressive_override::JOIN_FIELD_DIRECTIVE_NAME;
+use crate::plugins::progressive_override::JOIN_SPEC_BASE_URL;
+use crate::plugins::progressive_override::JOIN_SPEC_VERSION_RANGE;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::plugins::progressive_override::UNRESOLVED_LABELS_KEY;
 use crate::services::layers::query_analysis::ParsedDocument;
-use crate::services::layers::query_analysis::ParsedDocumentInner;
 use crate::services::router;
 use crate::services::supergraph;
 use crate::services::RouterResponse;
@@ -24,6 +25,49 @@ use crate::TestHarness;
 
 const SCHEMA: &str = include_str!("testdata/supergraph.graphql");
 const SCHEMA_NO_USAGES: &str = include_str!("testdata/supergraph_no_usages.graphql");
+
+#[test]
+fn test_progressive_overrides_are_recognised_vor_join_v0_4_and_above() {
+    let schema_for_version = |version| {
+        format!(
+            r#"schema
+                @link(url: "https://specs.apollo.dev/link/v1.0")
+                @link(url: "https://specs.apollo.dev/join/{}", for: EXECUTION)
+                @link(url: "https://specs.apollo.dev/context/v0.1", for: SECURITY)
+
+                directive @join__field repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION"#,
+            version
+        )
+    };
+
+    let join_v3_schema = Schema::parse(schema_for_version("v0.3"), "test").unwrap();
+    assert!(crate::spec::Schema::directive_name(
+        &join_v3_schema,
+        JOIN_SPEC_BASE_URL,
+        JOIN_SPEC_VERSION_RANGE,
+        JOIN_FIELD_DIRECTIVE_NAME,
+    )
+    .is_none());
+
+    let join_v4_schema = Schema::parse(schema_for_version("v0.4"), "test").unwrap();
+    assert!(crate::spec::Schema::directive_name(
+        &join_v4_schema,
+        JOIN_SPEC_BASE_URL,
+        JOIN_SPEC_VERSION_RANGE,
+        JOIN_FIELD_DIRECTIVE_NAME,
+    )
+    .is_some());
+
+    let join_v5_schema = Schema::parse(schema_for_version("v0.5"), "test").unwrap();
+
+    assert!(crate::spec::Schema::directive_name(
+        &join_v5_schema,
+        JOIN_SPEC_BASE_URL,
+        JOIN_SPEC_VERSION_RANGE,
+        JOIN_FIELD_DIRECTIVE_NAME,
+    )
+    .is_some())
+}
 
 #[tokio::test]
 async fn plugin_disables_itself_with_no_progressive_override_usages() {
@@ -136,22 +180,19 @@ async fn assert_expected_and_absent_labels_for_supergraph_service(
     .unwrap()
     .supergraph_service(mock_service.boxed());
 
-    // plugin depends on the parsed document being in the context so we'll add
-    // it ourselves for testing purposes
-    let schema = Schema::parse_and_validate(SCHEMA, "").unwrap();
-    let document = Document::parse(query, "query.graphql").unwrap();
-    let executable = document.to_executable(&schema).unwrap();
-    let parsed_doc: ParsedDocument = Arc::from(ParsedDocumentInner {
-        ast: document,
-        executable: Arc::new(executable),
-        ..Default::default()
-    });
+    let schema = crate::spec::Schema::parse(
+        include_str!("./testdata/supergraph.graphql"),
+        &Default::default(),
+    )
+    .unwrap();
+    let parsed_doc =
+        crate::spec::Query::parse_document(query, None, &schema, &crate::Configuration::default())
+            .unwrap();
 
     let context = Context::new();
     context
         .extensions()
-        .lock()
-        .insert::<ParsedDocument>(parsed_doc);
+        .with_lock(|mut lock| lock.insert::<ParsedDocument>(parsed_doc));
 
     context
         .insert(
@@ -211,20 +252,19 @@ async fn plugin_supergraph_service_trims_0pc_label() {
 }
 
 async fn get_json_query_plan(query: &str) -> serde_json::Value {
-    let schema = Schema::parse_and_validate(SCHEMA, "").unwrap();
-    let document = Document::parse(query, "query.graphql").unwrap();
-    let executable = document.to_executable(&schema).unwrap();
-    let parsed_doc: ParsedDocument = Arc::from(ParsedDocumentInner {
-        ast: document,
-        executable: Arc::new(executable),
-        ..Default::default()
-    });
+    let schema = crate::spec::Schema::parse(
+        include_str!("./testdata/supergraph.graphql"),
+        &Default::default(),
+    )
+    .unwrap();
+    let parsed_doc =
+        crate::spec::Query::parse_document(query, None, &schema, &crate::Configuration::default())
+            .unwrap();
 
     let context: Context = Context::new();
     context
         .extensions()
-        .lock()
-        .insert::<ParsedDocument>(parsed_doc);
+        .with_lock(|mut lock| lock.insert::<ParsedDocument>(parsed_doc));
 
     let request = supergraph::Request::fake_builder()
         .query(query)
@@ -286,22 +326,19 @@ async fn query_with_labels(query: &str, labels_from_coprocessors: Vec<&str>) {
     .unwrap()
     .supergraph_service(mock_service.boxed());
 
-    // plugin depends on the parsed document being in the context so we'll add
-    // it ourselves for testing purposes
-    let schema = Schema::parse_and_validate(SCHEMA, "").unwrap();
-    let document = Document::parse(query, "query.graphql").unwrap();
-    let executable = document.to_executable(&schema).unwrap();
-    let parsed_doc: ParsedDocument = Arc::from(ParsedDocumentInner {
-        ast: document,
-        executable: Arc::new(executable),
-        ..Default::default()
-    });
+    let schema = crate::spec::Schema::parse(
+        include_str!("./testdata/supergraph.graphql"),
+        &Default::default(),
+    )
+    .unwrap();
+    let parsed_doc =
+        crate::spec::Query::parse_document(query, None, &schema, &crate::Configuration::default())
+            .unwrap();
 
     let context = Context::new();
     context
         .extensions()
-        .lock()
-        .insert::<ParsedDocument>(parsed_doc);
+        .with_lock(|mut lock| lock.insert::<ParsedDocument>(parsed_doc));
 
     context
         .insert(

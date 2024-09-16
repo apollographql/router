@@ -44,8 +44,6 @@ use test_log::test;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
-#[cfg(unix)]
-use tokio::io::BufReader;
 use tokio::sync::mpsc;
 use tokio_util::io::StreamReader;
 use tower::service_fn;
@@ -69,6 +67,7 @@ use crate::query_planner::BridgeQueryPlannerPool;
 use crate::router_factory::create_plugins;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
+use crate::services::execution;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::layers::static_page::home_page_content;
@@ -84,6 +83,7 @@ use crate::services::RouterResponse;
 use crate::services::SupergraphResponse;
 use crate::services::MULTIPART_DEFER_ACCEPT;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
+use crate::spec::Schema;
 use crate::test_harness::http_client;
 use crate::test_harness::http_client::MaybeMultipart;
 use crate::uplink::license_enforcement::LicenseState;
@@ -375,7 +375,7 @@ async fn it_displays_sandbox() {
 
     // Regular studio redirect
     let response = client
-        .get(&format!(
+        .get(format!(
             "{}/",
             server.graphql_listen_address().as_ref().unwrap()
         ))
@@ -421,7 +421,7 @@ async fn it_displays_sandbox_with_different_supergraph_path() {
 
     // Regular studio redirect
     let response = client
-        .get(&format!(
+        .get(format!(
             "{}/custom",
             server.graphql_listen_address().as_ref().unwrap()
         ))
@@ -460,7 +460,7 @@ async fn it_compress_response_body() -> Result<(), ApolloRouterError> {
     let response = client
         .post(url.as_str())
         .header(ACCEPT_ENCODING, HeaderValue::from_static("gzip"))
-        .body(json!({ "query": "query" }).to_string())
+        .body(json!({ "query": "query { me { name } }" }).to_string())
         .send()
         .await
         .unwrap()
@@ -484,7 +484,7 @@ async fn it_compress_response_body() -> Result<(), ApolloRouterError> {
     let response = client
         .get(url.as_str())
         .header(ACCEPT_ENCODING, HeaderValue::from_static("gzip"))
-        .query(&json!({ "query": "query" }))
+        .query(&json!({ "query": "query { me { name } }" }))
         .send()
         .await
         .unwrap()
@@ -515,7 +515,7 @@ async fn it_compress_response_body() -> Result<(), ApolloRouterError> {
 
 #[tokio::test]
 async fn it_decompress_request_body() -> Result<(), ApolloRouterError> {
-    let original_body = json!({ "query": "query" });
+    let original_body = json!({ "query": "query { me { name } }" });
     let mut encoder = GzipEncoder::new(Vec::new());
     encoder
         .write_all(original_body.to_string().as_bytes())
@@ -529,7 +529,10 @@ async fn it_decompress_request_body() -> Result<(), ApolloRouterError> {
     let example_response = expected_response.clone();
     let router_service = router::service::from_supergraph_mock_callback(move |req| {
         let example_response = example_response.clone();
-        assert_eq!(req.supergraph_request.into_body().query.unwrap(), "query");
+        assert_eq!(
+            req.supergraph_request.into_body().query.unwrap(),
+            "query { me { name } }"
+        );
         Ok(SupergraphResponse::new_from_graphql_response(
             example_response,
             req.context,
@@ -615,7 +618,7 @@ async fn response() -> Result<(), ApolloRouterError> {
     // Post query
     let response = client
         .post(url.as_str())
-        .body(json!({ "query": "query" }).to_string())
+        .body(json!({ "query": "query { me { name } }" }).to_string())
         .send()
         .await
         .unwrap()
@@ -630,7 +633,7 @@ async fn response() -> Result<(), ApolloRouterError> {
     // Get query
     let response = client
         .get(url.as_str())
-        .query(&json!({ "query": "query" }))
+        .query(&json!({ "query": "query { me { name } }" }))
         .send()
         .await
         .unwrap()
@@ -659,7 +662,7 @@ async fn bad_response() -> Result<(), ApolloRouterError> {
     // Post query
     let err = client
         .post(url.as_str())
-        .body(json!({ "query": "query" }).to_string())
+        .body(json!({ "query": "query { me { name } }" }).to_string())
         .send()
         .await
         .unwrap()
@@ -672,7 +675,7 @@ async fn bad_response() -> Result<(), ApolloRouterError> {
     // Get query
     let err = client
         .get(url.as_str())
-        .query(&json!({ "query": "query" }))
+        .query(&json!({ "query": "query { me { name } }" }))
         .send()
         .await
         .unwrap()
@@ -720,7 +723,7 @@ async fn response_with_root_wildcard() -> Result<(), ApolloRouterError> {
     // Post query
     let response = client
         .post(url.as_str())
-        .body(json!({ "query": "query" }).to_string())
+        .body(json!({ "query": "query { me { name } }" }).to_string())
         .send()
         .await
         .unwrap()
@@ -735,13 +738,13 @@ async fn response_with_root_wildcard() -> Result<(), ApolloRouterError> {
     // Post query without path
     let response = client
         .post(
-            &server
+            server
                 .graphql_listen_address()
                 .as_ref()
                 .unwrap()
                 .to_string(),
         )
-        .body(json!({ "query": "query" }).to_string())
+        .body(json!({ "query": "query { me { name } }" }).to_string())
         .send()
         .await
         .unwrap()
@@ -756,7 +759,7 @@ async fn response_with_root_wildcard() -> Result<(), ApolloRouterError> {
     // Get query
     let response = client
         .get(url.as_str())
-        .query(&json!({ "query": "query" }))
+        .query(&json!({ "query": "query { me { name } }" }))
         .send()
         .await
         .unwrap()
@@ -806,7 +809,7 @@ async fn response_with_custom_endpoint() -> Result<(), ApolloRouterError> {
     // Post query
     let response = client
         .post(url.as_str())
-        .body(json!({ "query": "query" }).to_string())
+        .body(json!({ "query": "query { me { name } }" }).to_string())
         .send()
         .await
         .unwrap()
@@ -821,7 +824,7 @@ async fn response_with_custom_endpoint() -> Result<(), ApolloRouterError> {
     // Get query
     let response = client
         .get(url.as_str())
-        .query(&json!({ "query": "query" }))
+        .query(&json!({ "query": "query { me { name } }" }))
         .send()
         .await
         .unwrap()
@@ -870,7 +873,7 @@ async fn response_with_custom_prefix_endpoint() -> Result<(), ApolloRouterError>
     // Post query
     let response = client
         .post(url.as_str())
-        .body(json!({ "query": "query" }).to_string())
+        .body(json!({ "query": "query { me { name } }" }).to_string())
         .send()
         .await
         .unwrap()
@@ -885,7 +888,7 @@ async fn response_with_custom_prefix_endpoint() -> Result<(), ApolloRouterError>
     // Get query
     let response = client
         .get(url.as_str())
-        .query(&json!({ "query": "query" }))
+        .query(&json!({ "query": "query { me { name } }" }))
         .send()
         .await
         .unwrap()
@@ -940,7 +943,7 @@ async fn response_with_custom_endpoint_wildcard() -> Result<(), ApolloRouterErro
         // Post query
         let response = client
             .post(url.as_str())
-            .body(json!({ "query": "query" }).to_string())
+            .body(json!({ "query": "query { me { name } }" }).to_string())
             .send()
             .await
             .unwrap()
@@ -955,7 +958,7 @@ async fn response_with_custom_endpoint_wildcard() -> Result<(), ApolloRouterErro
         // Get query
         let response = client
             .get(url.as_str())
-            .query(&json!({ "query": "query" }))
+            .query(&json!({ "query": "query { me { name } }" }))
             .send()
             .await
             .unwrap()
@@ -998,7 +1001,7 @@ async fn response_failure() -> Result<(), ApolloRouterError> {
         .body(
             json!(
             {
-              "query": "query",
+              "query": "query { me { name } }",
             })
             .to_string(),
         )
@@ -1042,7 +1045,7 @@ async fn cors_preflight() -> Result<(), ApolloRouterError> {
     let response = client
         .request(
             Method::OPTIONS,
-            &format!(
+            format!(
                 "{}/graphql",
                 server.graphql_listen_address().as_ref().unwrap()
             ),
@@ -1193,7 +1196,7 @@ async fn it_displays_homepage() {
         .await
         .unwrap();
     let response = client
-        .get(&format!(
+        .get(format!(
             "{}/",
             server.graphql_listen_address().as_ref().unwrap()
         ))
@@ -1240,7 +1243,7 @@ async fn it_doesnt_display_disabled_homepage() {
         .await
         .unwrap();
     let response = client
-        .get(&format!(
+        .get(format!(
             "{}/",
             server.graphql_listen_address().as_ref().unwrap()
         ))
@@ -1266,14 +1269,11 @@ async fn it_answers_to_custom_endpoint() -> Result<(), ApolloRouterError> {
         Ok::<_, BoxError>(
             http::Response::builder()
                 .status(StatusCode::OK)
-                .body(
-                    format!(
-                        "{} + {}",
-                        req.router_request.method(),
-                        req.router_request.uri().path()
-                    )
-                    .into(),
-                )
+                .body(format!(
+                    "{} + {}",
+                    req.router_request.method(),
+                    req.router_request.uri().path()
+                ))
                 .unwrap()
                 .into(),
         )
@@ -1299,7 +1299,7 @@ async fn it_answers_to_custom_endpoint() -> Result<(), ApolloRouterError> {
 
     for path in &["/a-custom-path", "/an-other-custom-path"] {
         let response = client
-            .get(&format!(
+            .get(format!(
                 "{}{}",
                 server.graphql_listen_address().as_ref().unwrap(),
                 path
@@ -1314,7 +1314,7 @@ async fn it_answers_to_custom_endpoint() -> Result<(), ApolloRouterError> {
 
     for path in &["/a-custom-path", "/an-other-custom-path"] {
         let response = client
-            .post(&format!(
+            .post(format!(
                 "{}{}",
                 server.graphql_listen_address().as_ref().unwrap(),
                 path
@@ -1376,14 +1376,11 @@ async fn it_refuses_to_bind_two_extra_endpoints_on_the_same_path() {
         Ok::<_, BoxError>(
             http::Response::builder()
                 .status(StatusCode::OK)
-                .body(
-                    format!(
-                        "{} + {}",
-                        req.router_request.method(),
-                        req.router_request.uri().path()
-                    )
-                    .into(),
-                )
+                .body(format!(
+                    "{} + {}",
+                    req.router_request.method(),
+                    req.router_request.uri().path()
+                ))
                 .unwrap()
                 .into(),
         )
@@ -1603,7 +1600,7 @@ async fn response_shape() -> Result<(), ApolloRouterError> {
     let (server, client) = init(router_service).await;
     let query = json!(
     {
-      "query": "query { test }",
+      "query": "query { me { name } }",
     });
     let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
     let response = client
@@ -1639,16 +1636,16 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
         let body = stream::iter(vec![
             graphql::Response::builder()
                 .data(json!({
-                    "test": "hello",
+                    "me": "id",
                 }))
                 .has_next(true)
                 .build(),
             graphql::Response::builder()
                 .incremental(vec![graphql::IncrementalResponse::builder()
                     .data(json!({
-                        "other": "world"
+                        "name": "Ada"
                     }))
-                    .path(Path::default())
+                    .path(Path::from("me"))
                     .build()])
                 .has_next(true)
                 .build(),
@@ -1664,7 +1661,7 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
     let (server, client) = init(router_service).await;
     let query = json!(
     {
-      "query": "query { test ... @defer { other } }",
+      "query": "query { me { id ... @defer { name } } }",
     });
     let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
     let mut response = client
@@ -1684,13 +1681,13 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
     let first = response.chunk().await.unwrap().unwrap();
     assert_eq!(
             std::str::from_utf8(&first).unwrap(),
-            "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"test\":\"hello\"},\"hasNext\":true}\r\n--graphql"
+            "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"me\":\"id\"},\"hasNext\":true}\r\n--graphql"
         );
 
     let second = response.chunk().await.unwrap().unwrap();
     assert_eq!(
             std::str::from_utf8(&second).unwrap(),
-        "\r\ncontent-type: application/json\r\n\r\n{\"hasNext\":true,\"incremental\":[{\"data\":{\"other\":\"world\"},\"path\":[]}]}\r\n--graphql"
+        "\r\ncontent-type: application/json\r\n\r\n{\"hasNext\":true,\"incremental\":[{\"data\":{\"name\":\"Ada\"},\"path\":[\"me\"]}]}\r\n--graphql"
         );
 
     let third = response.chunk().await.unwrap().unwrap();
@@ -1707,7 +1704,7 @@ async fn multipart_response_shape_with_one_chunk() -> Result<(), ApolloRouterErr
     let router_service = router::service::from_supergraph_mock_callback(move |req| {
         let body = stream::iter(vec![graphql::Response::builder()
             .data(json!({
-                "test": "hello",
+                "me": "name",
             }))
             .has_next(false)
             .build()])
@@ -1722,7 +1719,7 @@ async fn multipart_response_shape_with_one_chunk() -> Result<(), ApolloRouterErr
     let (server, client) = init(router_service).await;
     let query = json!(
     {
-      "query": "query { test }",
+      "query": "query { me { name } }",
     });
     let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
     let mut response = client
@@ -1742,7 +1739,7 @@ async fn multipart_response_shape_with_one_chunk() -> Result<(), ApolloRouterErr
     let first = response.chunk().await.unwrap().unwrap();
     assert_eq!(
             std::str::from_utf8(&first).unwrap(),
-            "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"test\":\"hello\"},\"hasNext\":false}\r\n--graphql--\r\n"
+            "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"me\":\"name\"},\"hasNext\":false}\r\n--graphql--\r\n"
         );
 
     server.shutdown().await
@@ -1871,7 +1868,7 @@ async fn http_compressed_service() -> impl Service<
         .map_err(Into::into);
 
     let service = http_client::response_decompression(service)
-        .map_request(|mut req: http::Request<hyper::Body>| {
+        .map_request(|mut req: http::Request<crate::services::router::Body>| {
             req.headers_mut().append(
                 ACCEPT,
                 HeaderValue::from_static(APPLICATION_JSON.essence_str()),
@@ -2067,12 +2064,12 @@ async fn listening_to_unix_socket() {
     let output = send_to_unix_socket(
         server.graphql_listen_address().as_ref().unwrap(),
         Method::POST,
-        r#"{"query":"query"}"#,
+        r#"{"query":"query { me { name } }"}"#,
     )
     .await;
 
     assert_eq!(
-        serde_json::from_slice::<graphql::Response>(&output).unwrap(),
+        serde_json::from_str::<graphql::Response>(&output).unwrap(),
         expected_response,
     );
 
@@ -2080,12 +2077,12 @@ async fn listening_to_unix_socket() {
     let output = send_to_unix_socket(
         server.graphql_listen_address().as_ref().unwrap(),
         Method::GET,
-        r#"query=query"#,
+        r#"/?query=query%7Bme%7Bname%7D%7D"#,
     )
     .await;
 
     assert_eq!(
-        serde_json::from_slice::<graphql::Response>(&output).unwrap(),
+        serde_json::from_str::<graphql::Response>(&output).unwrap(),
         expected_response,
     );
 
@@ -2093,67 +2090,31 @@ async fn listening_to_unix_socket() {
 }
 
 #[cfg(unix)]
-async fn send_to_unix_socket(addr: &ListenAddr, method: Method, body: &str) -> Vec<u8> {
-    use tokio::io::AsyncBufReadExt;
-    use tokio::io::Interest;
+async fn send_to_unix_socket(addr: &ListenAddr, method: Method, body: &str) -> String {
     use tokio::net::UnixStream;
+    let stream = UnixStream::connect(addr.to_string()).await.unwrap();
+    let (mut sender, conn) = hyper::client::conn::handshake(stream).await.unwrap();
+    tokio::task::spawn(async move {
+        if let Err(err) = conn.await {
+            println!("Connection failed: {:?}", err);
+        }
+    });
 
-    let content = match method {
-        Method::GET => {
-            format!(
-                "{} /?{} HTTP/1.1\r
-Host: localhost:4100\r
-Content-Length: {}\r
-Content-Type: application/json\r
-Accept: application/json\r
-
-\n",
-                method.as_str(),
-                body,
-                body.len(),
-            )
-        }
-        Method::POST => {
-            format!(
-                "{} / HTTP/1.1\r
-Host: localhost:4100\r
-Content-Length: {}\r
-Content-Type: application/json\r
-Accept: application/json\r
-
-{}\n",
-                method.as_str(),
-                body.len(),
-                body
-            )
-        }
-        _ => {
-            unimplemented!()
-        }
-    };
-    let mut stream = UnixStream::connect(addr.to_string()).await.unwrap();
-    stream.ready(Interest::WRITABLE).await.unwrap();
-    stream.write_all(content.as_bytes()).await.unwrap();
-    stream.flush().await.unwrap();
-    let stream = BufReader::new(stream);
-    let mut lines = stream.lines();
-    let header_first_line = lines
-        .next_line()
-        .await
-        .unwrap()
-        .expect("no header received");
-    // skip the rest of the headers
-    let mut headers = String::new();
-    let mut stream = lines.into_inner();
-    loop {
-        if stream.read_line(&mut headers).await.unwrap() == 2 {
-            break;
-        }
+    let http_body = hyper::Body::from(body.to_string());
+    let mut request = http::Request::builder()
+        .method(method.clone())
+        .header("Host", "localhost:4100")
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json")
+        .body(http_body)
+        .unwrap();
+    if method == Method::GET {
+        *request.uri_mut() = body.parse().unwrap();
     }
-    // get rest of the buffer as body
-    let body = stream.buffer().to_vec();
-    assert!(header_first_line.contains(" 200 "), "");
-    body
+
+    let response = sender.send_request(request).await.unwrap();
+    let body = response.collect().await.unwrap().to_bytes();
+    String::from_utf8(body.to_vec()).unwrap()
 }
 
 #[tokio::test]
@@ -2292,6 +2253,7 @@ async fn test_supergraph_and_health_check_same_port_different_listener() {
 async fn test_supergraph_timeout() {
     let config = serde_json::json!({
         "supergraph": {
+            "listen": "127.0.0.1:0",
             "defer_support": false,
         },
         "traffic_shaping": {
@@ -2304,20 +2266,43 @@ async fn test_supergraph_timeout() {
     let conf: Arc<Configuration> = Arc::new(serde_json::from_value(config).unwrap());
 
     let schema = include_str!("..//testdata/minimal_supergraph.graphql");
+    let schema = Arc::new(Schema::parse(schema, &conf).unwrap());
     let planner = BridgeQueryPlannerPool::new(
-        schema.to_string(),
+        Vec::new(),
+        schema.clone(),
         conf.clone(),
         NonZeroUsize::new(1).unwrap(),
     )
     .await
     .unwrap();
-    let schema = planner.schema();
 
     // we do the entire supergraph rebuilding instead of using `from_supergraph_mock_callback_and_configuration`
     // because we need the plugins to apply on the supergraph
-    let plugins = create_plugins(&conf, &schema, planner.subgraph_schemas(), None, None)
+    let mut plugins = create_plugins(&conf, &schema, planner.subgraph_schemas(), None, None)
         .await
         .unwrap();
+
+    plugins.insert("delay".into(), Box::new(Delay));
+
+    struct Delay;
+
+    #[async_trait::async_trait]
+    impl crate::plugin::Plugin for Delay {
+        type Config = ();
+
+        async fn new(_: crate::plugin::PluginInit<()>) -> Result<Self, BoxError> {
+            Ok(Self)
+        }
+
+        fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+            service
+                .map_future(|fut| async {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    fut.await
+                })
+                .boxed()
+        }
+    }
 
     let builder = PluggableSupergraphServiceBuilder::new(planner)
         .with_configuration(conf.clone())
@@ -2340,10 +2325,14 @@ async fn test_supergraph_timeout() {
     .make();
 
     // keep the server handle around otherwise it will immediately shutdown
-    let (_server, client) = init_with_config(service, conf.clone(), MultiMap::new())
+    let (server, client) = init_with_config(service, conf.clone(), MultiMap::new())
         .await
         .unwrap();
-    let url = "http://localhost:4000/";
+    let url = server
+        .graphql_listen_address()
+        .as_ref()
+        .unwrap()
+        .to_string();
 
     let response = client
         .post(url)
@@ -2353,6 +2342,18 @@ async fn test_supergraph_timeout() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
+
     let body = response.bytes().await.unwrap();
-    assert_eq!(std::str::from_utf8(&body).unwrap(), "request timed out");
+    let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        body,
+        json!({
+             "errors": [{
+                 "message": "Request timed out",
+                 "extensions": {
+                     "code": "REQUEST_TIMEOUT"
+                 }
+             }]
+        })
+    );
 }

@@ -1,0 +1,3 @@
+experimental_batching:
+  enabled: true
+  mode: batch_http_link

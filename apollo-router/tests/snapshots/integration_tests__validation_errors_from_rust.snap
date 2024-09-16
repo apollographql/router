@@ -4,7 +4,7 @@ expression: response.errors
 ---
 [
   {
-    "message": "the argument `notAnArg` is not supported by `Product.name`",
+    "message": "Unknown argument \"notAnArg\" on field \"Product.name\".",
     "locations": [
       {
         "line": 1,
@@ -16,7 +16,7 @@ expression: response.errors
     }
   },
   {
-    "message": "fragment `Unused` must be used in an operation",
+    "message": "Fragment \"Unused\" is never used.",
     "locations": [
       {
         "line": 1,

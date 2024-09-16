@@ -8,6 +8,7 @@
 //! every appear on the input side, while other will only appear on outputs, but it does not hurt
 //! to be future-proof by supporting all types of rewrites on both "sides".
 
+use apollo_compiler::Name;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -42,11 +43,11 @@ pub(crate) struct DataValueSetter {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DataKeyRenamer {
     pub(crate) path: Path,
-    pub(crate) rename_key_to: String,
+    pub(crate) rename_key_to: Name,
 }
 
 impl DataRewrite {
-    fn maybe_apply(&self, schema: &Schema, data: &mut Value) {
+    pub(crate) fn maybe_apply(&self, schema: &Schema, data: &mut Value) {
         match self {
             DataRewrite::ValueSetter(setter) => {
                 // The `path` of rewrites can only be either `Key` or `Fragment`, and so far
@@ -54,7 +55,9 @@ impl DataRewrite {
                 // `Key` and we ignore other cases (in theory, it could be `Fragment` needs
                 // to be supported someday if we ever need to rewrite full object values,
                 // but that can be added then).
-                if let Some((parent, PathElement::Key(k))) = split_path_last_element(&setter.path) {
+                if let Some((parent, PathElement::Key(k, _))) =
+                    split_path_last_element(&setter.path)
+                {
                     data.select_values_and_paths_mut(schema, &parent, |_path, obj| {
                         if let Some(value) = obj.get_mut(k) {
                             *value = setter.set_value_to.clone()
@@ -65,12 +68,23 @@ impl DataRewrite {
             DataRewrite::KeyRenamer(renamer) => {
                 // As the name implies, this only applies to renaming "keys", so we're
                 // guaranteed the last element is one and can ignore other cases.
-                if let Some((parent, PathElement::Key(k))) = split_path_last_element(&renamer.path)
+                if let Some((parent, PathElement::Key(k, _))) =
+                    split_path_last_element(&renamer.path)
                 {
                     data.select_values_and_paths_mut(schema, &parent, |_path, selected| {
                         if let Some(obj) = selected.as_object_mut() {
                             if let Some(value) = obj.remove(k.as_str()) {
-                                obj.insert(renamer.rename_key_to.clone(), value);
+                                obj.insert(renamer.rename_key_to.as_str(), value);
+                            }
+                        }
+
+                        if let Some(arr) = selected.as_array_mut() {
+                            for item in arr {
+                                if let Some(obj) = item.as_object_mut() {
+                                    if let Some(value) = obj.remove(k.as_str()) {
+                                        obj.insert(renamer.rename_key_to.as_str(), value);
+                                    }
+                                }
                             }
                         }
                     });
@@ -90,5 +104,91 @@ pub(crate) fn apply_rewrites(
         for rewrite in rewrites {
             rewrite.maybe_apply(schema, value);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use apollo_compiler::name;
+    use serde_json_bytes::json;
+
+    use super::*;
+
+    // The schema is not used for the tests
+    // but we need a valid one
+    const SCHEMA: &str = include_str!("../testdata/minimal_supergraph.graphql");
+
+    #[test]
+    fn test_key_renamer_object() {
+        let mut data = json!({
+            "data": {
+                "__typename": "TestType",
+                "testField__alias_0": {
+                    "__typename": "TestField",
+                    "field":"thisisatest"
+                }
+            }
+        });
+
+        let dr = DataRewrite::KeyRenamer(DataKeyRenamer {
+            path: "data/testField__alias_0".into(),
+            rename_key_to: name!("testField"),
+        });
+
+        dr.maybe_apply(
+            &Schema::parse(SCHEMA, &Default::default()).unwrap(),
+            &mut data,
+        );
+
+        assert_eq!(
+            json! {{
+                "data": {
+                    "__typename": "TestType",
+                    "testField": {
+                        "__typename": "TestField",
+                        "field":"thisisatest"
+                    }
+                }
+            }},
+            data
+        );
+    }
+
+    #[test]
+    fn test_key_renamer_array() {
+        let mut data = json!(
+            {
+                "data": [{
+                    "__typename": "TestType",
+                    "testField__alias_0": {
+                        "__typename": "TestField",
+                        "field":"thisisatest"
+                    }
+                }]
+            }
+        );
+
+        let dr = DataRewrite::KeyRenamer(DataKeyRenamer {
+            path: "data/testField__alias_0".into(),
+            rename_key_to: name!("testField"),
+        });
+
+        dr.maybe_apply(
+            &Schema::parse(SCHEMA, &Default::default()).unwrap(),
+            &mut data,
+        );
+
+        assert_eq!(
+            json! {{
+                "data": [{
+                    "__typename": "TestType",
+                    "testField": {
+                        "__typename": "TestField",
+                        "field":"thisisatest"
+                    }
+                }]
+            }},
+            data
+        );
     }
 }

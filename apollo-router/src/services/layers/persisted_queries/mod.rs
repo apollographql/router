@@ -121,8 +121,7 @@ impl PersistedQueryLayer {
                 request
                     .context
                     .extensions()
-                    .lock()
-                    .insert(UsedQueryIdFromManifest);
+                    .with_lock(|mut lock| lock.insert(UsedQueryIdFromManifest));
                 tracing::info!(monotonic_counter.apollo.router.operations.persisted_queries = 1u64);
                 Ok(request)
             } else if manifest_poller.augmenting_apq_with_pre_registration_and_no_safelisting() {
@@ -163,18 +162,21 @@ impl PersistedQueryLayer {
         };
 
         let doc = {
-            let context_guard = request.context.extensions().lock();
-
-            if context_guard.get::<UsedQueryIdFromManifest>().is_some() {
-                // We got this operation from the manifest, so there's no
-                // need to check the safelist.
-                drop(context_guard);
+            if request
+                .context
+                .extensions()
+                .with_lock(|lock| lock.get::<UsedQueryIdFromManifest>().is_some())
+            {
                 return Ok(request);
             }
 
-            match context_guard.get::<ParsedDocument>() {
+            let doc_opt = request
+                .context
+                .extensions()
+                .with_lock(|lock| lock.get::<ParsedDocument>().cloned());
+
+            match doc_opt {
                 None => {
-                    drop(context_guard);
                     // For some reason, QueryAnalysisLayer didn't give us a document?
                     return Err(supergraph_err(
                         graphql_err(
@@ -186,7 +188,7 @@ impl PersistedQueryLayer {
                         StatusCode::INTERNAL_SERVER_ERROR,
                     ));
                 }
-                Some(d) => d.clone(),
+                Some(d) => d,
             }
         };
 
@@ -196,21 +198,16 @@ impl PersistedQueryLayer {
         // __type/__schema/__typename.) We do want to make sure the document
         // parsed properly before poking around at it, though.
         if self.introspection_enabled
-            && doc.parse_errors.is_none()
             && doc
                 .executable
-                .all_operations()
+                .operations
+                .iter()
                 .all(|op| op.is_introspection(&doc.executable))
         {
             return Ok(request);
         }
 
-        let ast_result = if doc.parse_errors.is_none() {
-            Ok(&doc.ast)
-        } else {
-            Err(operation_body.as_str())
-        };
-        match manifest_poller.action_for_freeform_graphql(ast_result) {
+        match manifest_poller.action_for_freeform_graphql(Ok(&doc.ast)) {
             FreeformGraphQLAction::Allow => {
                 tracing::info!(monotonic_counter.apollo.router.operations.persisted_queries = 1u64,);
                 Ok(request)
@@ -703,9 +700,9 @@ mod tests {
         let pq_layer = PersistedQueryLayer::new(&config).await.unwrap();
 
         let schema = Arc::new(
-            Schema::parse_test(
+            Schema::parse(
                 include_str!("../../../testdata/supergraph.graphql"),
-                &config,
+                &Default::default(),
             )
             .unwrap(),
         );
@@ -741,12 +738,6 @@ mod tests {
                 &query_analysis_layer,
                 "fragment A on Query { me { id } }    query SomeOp { ...A ...B }    fragment,,, B on Query{me{username,name}  } # yeah"
             ).await;
-
-        // Documents with invalid syntax don't match...
-        denied_by_safelist(&pq_layer, &query_analysis_layer, "}}}}").await;
-
-        // ... unless they precisely match a safelisted document that also has invalid syntax.
-        allowed_by_safelist(&pq_layer, &query_analysis_layer, "}}}").await;
 
         // Introspection queries are allowed (even using fragments and aliases), because
         // introspection is enabled.

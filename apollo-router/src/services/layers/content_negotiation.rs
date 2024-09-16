@@ -52,10 +52,10 @@ where
                 if req.router_request.method() != Method::GET
                     && !content_type_is_json(req.router_request.headers())
                 {
-                    let response: http::Response<hyper::Body> = http::Response::builder()
+                    let response: http::Response<crate::services::router::Body> = http::Response::builder()
                         .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
                         .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(hyper::Body::from(
+                        .body(crate::services::router::Body::from(
                             serde_json::json!({
                                 "errors": [
                                     graphql::Error::builder()
@@ -93,7 +93,9 @@ where
                     || accepts.multipart_subscription
                     || accepts.json
                 {
-                    req.context.extensions().lock().insert(accepts);
+                    req.context
+                        .extensions()
+                        .with_lock(|mut lock| lock.insert(accepts));
 
                     Ok(ControlFlow::Continue(req))
                 } else {
@@ -143,11 +145,11 @@ where
                     json: accepts_json,
                     multipart_defer: accepts_multipart_defer,
                     multipart_subscription: accepts_multipart_subscription,
-                } = {
-                    let lock = context.extensions().lock();
-                    let cra = lock.get::<ClientRequestAccepts>();
-                    cra.cloned().unwrap_or_default()
-                };
+                } = context.extensions().with_lock(|lock| {
+                    lock.get::<ClientRequestAccepts>()
+                        .cloned()
+                        .unwrap_or_default()
+                });
 
                 if !res.has_next.unwrap_or_default() && (accepts_json || accepts_wildcard) {
                     parts

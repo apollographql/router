@@ -87,7 +87,9 @@ impl CacheControl {
             result.max_age = Some(duration.as_secs() as u32);
         }
 
+        let mut found = false;
         for header_value in headers.get_all(CACHE_CONTROL) {
+            found = true;
             for value in header_value.to_str()?.split(',') {
                 let mut it = value.trim().split('=');
                 let (k, v) = (it.next(), it.next());
@@ -142,6 +144,10 @@ impl CacheControl {
             }
         }
 
+        if !found {
+            result.no_store = true;
+        }
+
         if let Some(value) = headers.get("Age") {
             result.age = Some(value.to_str()?.trim().parse()?);
         }
@@ -154,8 +160,15 @@ impl CacheControl {
     pub(crate) fn to_headers(&self, headers: &mut HeaderMap) -> Result<(), BoxError> {
         let mut s = String::new();
         let mut prev = false;
+        let now = now_epoch_seconds();
         if let Some(max_age) = self.max_age {
-            write!(&mut s, "{}max-age={}", if prev { "," } else { "" }, max_age)?;
+            //FIXME: write no-store if max_age = 0?
+            write!(
+                &mut s,
+                "{}max-age={}",
+                if prev { "," } else { "" },
+                self.update_ttl(max_age, now)
+            )?;
             prev = true;
         }
         if let Some(s_max_age) = self.s_max_age {
@@ -163,7 +176,7 @@ impl CacheControl {
                 &mut s,
                 "{}s-maxage={}",
                 if prev { "," } else { "" },
-                s_max_age
+                self.update_ttl(s_max_age, now)
             )?;
             prev = true;
         }
@@ -226,14 +239,37 @@ impl CacheControl {
         Ok(())
     }
 
-    pub(crate) fn merge(&self, other: &CacheControl) -> CacheControl {
+    pub(super) fn no_store() -> Self {
         CacheControl {
-            created: std::cmp::min(self.created, other.created),
+            no_store: true,
+            ..Default::default()
+        }
+    }
+
+    fn update_ttl(&self, ttl: u32, now: u64) -> u32 {
+        let elapsed = self.elapsed_inner(now);
+        if elapsed >= ttl {
+            0
+        } else {
+            ttl - elapsed
+        }
+    }
+
+    pub(crate) fn merge(&self, other: &CacheControl) -> CacheControl {
+        self.merge_inner(other, now_epoch_seconds())
+    }
+
+    fn merge_inner(&self, other: &CacheControl, now: u64) -> CacheControl {
+        CacheControl {
+            created: now,
             max_age: match (self.ttl(), other.ttl()) {
                 (None, None) => None,
-                (None, Some(ttl)) => Some(ttl),
-                (Some(ttl), None) => Some(ttl),
-                (Some(ttl1), Some(ttl2)) => Some(std::cmp::min(ttl1, ttl2)),
+                (None, Some(ttl)) => Some(other.update_ttl(ttl, now)),
+                (Some(ttl), None) => Some(self.update_ttl(ttl, now)),
+                (Some(ttl1), Some(ttl2)) => Some(std::cmp::min(
+                    self.update_ttl(ttl1, now),
+                    other.update_ttl(ttl2, now),
+                )),
             },
             age: None,
             s_max_age: None,
@@ -242,9 +278,12 @@ impl CacheControl {
                 other.stale_while_revalidate,
             ) {
                 (None, None) => None,
-                (None, Some(ttl)) => Some(ttl),
-                (Some(ttl), None) => Some(ttl),
-                (Some(ttl1), Some(ttl2)) => Some(std::cmp::min(ttl1, ttl2)),
+                (None, Some(ttl)) => Some(other.update_ttl(ttl, now)),
+                (Some(ttl), None) => Some(self.update_ttl(ttl, now)),
+                (Some(ttl1), Some(ttl2)) => Some(std::cmp::min(
+                    self.update_ttl(ttl1, now),
+                    other.update_ttl(ttl2, now),
+                )),
             },
             no_cache: self.no_cache || other.no_cache,
             must_revalidate: self.must_revalidate || other.must_revalidate,
@@ -264,6 +303,14 @@ impl CacheControl {
         }
     }
 
+    pub(crate) fn elapsed(&self) -> u32 {
+        self.elapsed_inner(now_epoch_seconds())
+    }
+
+    pub(crate) fn elapsed_inner(&self, now: u64) -> u32 {
+        (now - self.created) as u32
+    }
+
     pub(crate) fn ttl(&self) -> Option<u32> {
         match (
             self.s_max_age.as_ref().or(self.max_age.as_ref()),
@@ -278,7 +325,11 @@ impl CacheControl {
     pub(crate) fn should_store(&self) -> bool {
         // FIXME: should we add support for must-understand?
         // public will be the default case
-        !(self.no_store || self.private)
+        !self.no_store
+    }
+
+    pub(crate) fn private(&self) -> bool {
+        self.private
     }
 
     // We don't support revalidation yet
@@ -288,11 +339,8 @@ impl CacheControl {
             return true;
         }
 
-        let elapsed = now_epoch_seconds() - self.created;
-        let expired = self
-            .ttl()
-            .map(|ttl| (ttl as u64) < elapsed)
-            .unwrap_or(false);
+        let elapsed = self.elapsed();
+        let expired = self.ttl().map(|ttl| ttl < elapsed).unwrap_or(false);
 
         if self.immutable && !expired {
             return false;
@@ -306,14 +354,106 @@ impl CacheControl {
     }
 
     pub(crate) fn can_use(&self) -> bool {
-        let elapsed = now_epoch_seconds() - self.created;
-        let expired = self
-            .ttl()
-            .map(|ttl| (ttl as u64) < elapsed)
-            .unwrap_or(false);
+        let elapsed = self.elapsed();
+        let expired = self.ttl().map(|ttl| ttl < elapsed).unwrap_or(false);
 
         // FIXME: we don't honor stale-while-revalidate yet
         // !expired || self.stale_while_revalidate
-        !expired
+        !expired && !self.no_store
+    }
+
+    #[cfg(test)]
+    pub(crate) fn remaining_time(&self, now: u64) -> Option<u32> {
+        self.ttl().map(|ttl| {
+            let elapsed = self.elapsed_inner(now);
+            if ttl > elapsed {
+                ttl - elapsed
+            } else {
+                0
+            }
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn merge_ttl() {
+        let now = now_epoch_seconds();
+
+        let first = CacheControl {
+            created: now - 10,
+            max_age: Some(40),
+            ..Default::default()
+        };
+
+        let second = CacheControl {
+            created: now - 20,
+            max_age: Some(60),
+            ..Default::default()
+        };
+
+        assert_eq!(first.remaining_time(now), Some(30));
+        assert_eq!(second.remaining_time(now), Some(40));
+
+        let merged = first.merge_inner(&second, now);
+        assert_eq!(merged.created, now);
+
+        assert_eq!(merged.ttl(), Some(30));
+        assert_eq!(merged.remaining_time(now), Some(30));
+        assert!(merged.can_use());
+    }
+
+    #[test]
+    fn merge_nostore() {
+        let now = now_epoch_seconds();
+
+        let first = CacheControl {
+            created: now,
+            max_age: Some(40),
+            no_store: true,
+            ..Default::default()
+        };
+
+        let second = CacheControl {
+            created: now,
+            max_age: Some(60),
+            no_store: false,
+            public: true,
+            ..Default::default()
+        };
+
+        let merged = first.merge_inner(&second, now);
+        assert!(merged.no_store);
+        assert!(merged.public);
+        assert!(!merged.can_use());
+    }
+
+    #[test]
+    fn merge_public_private() {
+        let now = now_epoch_seconds();
+
+        let first = CacheControl {
+            created: now,
+            max_age: Some(40),
+            public: true,
+            private: false,
+            ..Default::default()
+        };
+
+        let second = CacheControl {
+            created: now,
+            max_age: Some(60),
+            public: false,
+            private: true,
+            ..Default::default()
+        };
+
+        let merged = first.merge_inner(&second, now);
+        assert!(!merged.public);
+        assert!(merged.private);
+        assert!(merged.can_use());
     }
 }

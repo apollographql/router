@@ -16,6 +16,7 @@ use http::uri::Parts;
 use http::uri::PathAndQuery;
 use http::HeaderMap;
 use http::Method;
+use http::StatusCode;
 use http::Uri;
 use rhai::module_resolvers::FileModuleResolver;
 use rhai::plugin::*;
@@ -45,11 +46,19 @@ use crate::graphql::Response;
 use crate::http_ext;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::cache::entity::CONTEXT_CACHE_KEY;
+use crate::plugins::demand_control::COST_ACTUAL_KEY;
+use crate::plugins::demand_control::COST_ESTIMATED_KEY;
+use crate::plugins::demand_control::COST_RESULT_KEY;
+use crate::plugins::demand_control::COST_STRATEGY_KEY;
 use crate::plugins::subscription::SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS;
+use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::Context;
 
 const CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE: &str =
     "cannot access headers on a deferred response";
+
+const CANNOT_ACCESS_STATUS_CODE_ON_A_DEFERRED_RESPONSE: &str =
+    "cannot access status_code on a deferred response";
 
 const CANNOT_GET_ENVIRONMENT_VARIABLE: &str = "environment variable not found";
 
@@ -174,6 +183,17 @@ mod router_json {
 }
 
 #[export_module]
+mod router_sha256 {
+    use sha2::Digest;
+
+    #[rhai_fn(pure)]
+    pub(crate) fn digest(input: &mut ImmutableString) -> String {
+        let hash = sha2::Sha256::digest(input.as_bytes());
+        hex::encode(hash)
+    }
+}
+
+#[export_module]
 mod router_expansion {
     pub(crate) type Expansion = expansion::Expansion;
 
@@ -204,6 +224,40 @@ mod router_method {
     #[rhai_fn(name = "!=", pure)]
     pub(crate) fn method_not_equal_comparator(method: &mut Method, other: &str) -> bool {
         method.as_str().to_uppercase() != other.to_uppercase()
+    }
+}
+
+#[export_module]
+mod status_code {
+    use rhai::INT;
+
+    pub(crate) type StatusCode = http::StatusCode;
+
+    #[rhai_fn(return_raw)]
+    pub(crate) fn status_code_from_int(number: INT) -> Result<StatusCode, Box<EvalAltResult>> {
+        let code = StatusCode::from_u16(number as u16).map_err(|e| e.to_string())?;
+        Ok(code)
+    }
+
+    #[rhai_fn(name = "to_string", pure)]
+    pub(crate) fn status_code_to_string(status_code: &mut StatusCode) -> String {
+        status_code.as_str().to_string()
+    }
+
+    #[rhai_fn(name = "==", pure)]
+    pub(crate) fn status_code_equal_comparator(
+        status_code: &mut StatusCode,
+        other: StatusCode,
+    ) -> bool {
+        status_code == &other
+    }
+
+    #[rhai_fn(name = "!=", pure)]
+    pub(crate) fn status_code_not_equal_comparator(
+        status_code: &mut StatusCode,
+        other: StatusCode,
+    ) -> bool {
+        status_code != &other
     }
 }
 
@@ -440,6 +494,12 @@ mod router_context {
         obj.with_mut(|response| response.context = context);
         Ok(())
     }
+    #[rhai_fn(get = "status_code", pure)]
+    pub(crate) fn router_first_response_status_code_get(
+        obj: &mut SharedMut<router::FirstResponse>,
+    ) -> status_code::StatusCode {
+        obj.with_mut(|response| response.response.status())
+    }
 
     #[rhai_fn(get = "context", pure, return_raw)]
     pub(crate) fn supergraph_first_response_context_get(
@@ -651,6 +711,13 @@ mod router_plugin {
         _obj: &mut SharedMut<router::DeferredResponse>,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
         Err(CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE.into())
+    }
+
+    #[rhai_fn(get = "status_code", pure, return_raw)]
+    pub(crate) fn get_status_code_router_deferred_response(
+        _obj: &mut SharedMut<router::DeferredResponse>,
+    ) -> Result<HeaderMap, Box<EvalAltResult>> {
+        Err(CANNOT_ACCESS_STATUS_CODE_ON_A_DEFERRED_RESPONSE.into())
     }
 
     #[rhai_fn(name = "is_primary", pure)]
@@ -1137,7 +1204,9 @@ mod router_plugin {
     // TraceId support
     #[rhai_fn(return_raw)]
     pub(crate) fn traceid() -> Result<TraceId, Box<EvalAltResult>> {
-        TraceId::maybe_new().ok_or_else(|| "trace unavailable".into())
+        TraceId::maybe_new()
+            .or_else(TraceId::current)
+            .ok_or_else(|| "trace unavailable".into())
     }
 
     #[rhai_fn(name = "to_string")]
@@ -1186,6 +1255,14 @@ mod router_plugin {
             .map(|x| x.as_secs() as i64)
     }
 
+    #[rhai_fn(return_raw)]
+    pub(crate) fn unix_ms_now() -> Result<i64, Box<EvalAltResult>> {
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|e| e.to_string().into())
+            .map(|x| x.as_millis() as i64)
+    }
+
     // Add query plan getter to execution request
     #[rhai_fn(get = "query_plan")]
     pub(crate) fn execution_request_query_plan_get(
@@ -1195,7 +1272,8 @@ mod router_plugin {
             request
                 .query_plan
                 .formatted_query_plan
-                .clone()
+                .as_deref()
+                .cloned()
                 .unwrap_or_default()
         })
     }
@@ -1413,7 +1491,6 @@ macro_rules! register_rhai_router_interface {
                     Ok(obj.with_mut(|request| request.router_request.uri().clone()))
                 }
             );
-
             $engine.register_set(
                 "uri",
                 |obj: &mut SharedMut<$base::Request>, uri: Uri| {
@@ -1446,6 +1523,13 @@ macro_rules! register_rhai_interface {
                 "context",
                 |obj: &mut SharedMut<$base::Response>| -> Result<Context, Box<EvalAltResult>> {
                     Ok(obj.with_mut(|response| response.context.clone()))
+                }
+            );
+
+            $engine.register_get(
+                "status_code",
+                |obj: &mut SharedMut<$base::Response>| -> Result<StatusCode, Box<EvalAltResult>> {
+                    Ok(obj.with_mut(|response| response.response.status()))
                 }
             );
 
@@ -1621,10 +1705,12 @@ impl Rhai {
         let mut module = exported_module!(router_plugin);
         combine_with_exported_module!(&mut module, "header", router_header_map);
         combine_with_exported_module!(&mut module, "method", router_method);
+        combine_with_exported_module!(&mut module, "status_code", status_code);
         combine_with_exported_module!(&mut module, "context", router_context);
 
         let base64_module = exported_module!(router_base64);
         let json_module = exported_module!(router_json);
+        let sha256_module = exported_module!(router_sha256);
 
         let expansion_module = exported_module!(router_expansion);
 
@@ -1651,6 +1737,8 @@ impl Rhai {
             .register_static_module("base64", base64_module.into())
             // Register our json module (not global)
             .register_static_module("json", json_module.into())
+            // Register our SHA256 module (not global)
+            .register_static_module("sha256", sha256_module.into())
             // Register our expansion module (not global)
             // Hide the fact that it is an expansion module by calling it "env"
             .register_static_module("env", expansion_module.into())
@@ -1692,6 +1780,15 @@ impl Rhai {
             SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS.to_string().into(),
         );
         global_variables.insert("APOLLO_ENTITY_CACHE_KEY".into(), CONTEXT_CACHE_KEY.into());
+        global_variables.insert("APOLLO_OPERATION_ID".into(), APOLLO_OPERATION_ID.into());
+        // Demand Control Context Keys
+        global_variables.insert(
+            "APOLLO_COST_ESTIMATED_KEY".into(),
+            COST_ESTIMATED_KEY.into(),
+        );
+        global_variables.insert("APOLLO_COST_ACTUAL_KEY".into(), COST_ACTUAL_KEY.into());
+        global_variables.insert("APOLLO_COST_STRATEGY_KEY".into(), COST_STRATEGY_KEY.into());
+        global_variables.insert("APOLLO_COST_RESULT_KEY".into(), COST_RESULT_KEY.into());
 
         let shared_globals = Arc::new(global_variables);
 

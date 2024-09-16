@@ -1,23 +1,30 @@
+use events::EventOn;
 use opentelemetry::baggage::BaggageExt;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceId;
 use opentelemetry::KeyValue;
+use opentelemetry_api::Value;
 use paste::paste;
 use tower::BoxError;
 use tracing::Span;
-use tracing_opentelemetry::OpenTelemetrySpanExt;
 
+use super::otel::OpenTelemetrySpanExt;
 use super::otlp::TelemetryDataKind;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
+use crate::Context;
 
 /// These modules contain a new config structure for telemetry that will progressively move to
 pub(crate) mod attributes;
 pub(crate) mod conditions;
 
+pub(crate) mod cache;
+mod conditional;
+pub(crate) mod cost;
 pub(crate) mod events;
 mod experimental_when_header;
 pub(crate) mod extendable;
+pub(crate) mod graphql;
 pub(crate) mod instruments;
 pub(crate) mod logging;
 pub(crate) mod selectors;
@@ -26,17 +33,90 @@ pub(crate) mod spans;
 pub(crate) trait Selectors {
     type Request;
     type Response;
+    type EventResponse;
+
     fn on_request(&self, request: &Self::Request) -> Vec<KeyValue>;
     fn on_response(&self, response: &Self::Response) -> Vec<KeyValue>;
-    fn on_error(&self, error: &BoxError) -> Vec<KeyValue>;
+    fn on_response_event(&self, _response: &Self::EventResponse, _ctx: &Context) -> Vec<KeyValue> {
+        Vec::with_capacity(0)
+    }
+    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<KeyValue>;
+    fn on_response_field(
+        &self,
+        _attrs: &mut Vec<KeyValue>,
+        _ty: &apollo_compiler::executable::NamedType,
+        _field: &apollo_compiler::executable::Field,
+        _value: &serde_json_bytes::Value,
+        _ctx: &Context,
+    ) {
+    }
 }
 
-pub(crate) trait Selector {
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Stage {
+    Request,
+    Response,
+    ResponseEvent,
+    ResponseField,
+    Error,
+    Drop,
+}
+
+impl std::fmt::Display for Stage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Stage::Request => write!(f, "request"),
+            Stage::Response => write!(f, "response"),
+            Stage::ResponseEvent => write!(f, "response_event"),
+            Stage::ResponseField => write!(f, "response_field"),
+            Stage::Error => write!(f, "error"),
+            Stage::Drop => write!(f, "drop"),
+        }
+    }
+}
+
+impl From<EventOn> for Stage {
+    fn from(value: EventOn) -> Self {
+        match value {
+            EventOn::Request => Self::Request,
+            EventOn::Response => Self::Response,
+            EventOn::EventResponse => Self::ResponseEvent,
+            EventOn::Error => Self::Error,
+        }
+    }
+}
+
+pub(crate) trait Selector: std::fmt::Debug {
     type Request;
     type Response;
+    type EventResponse;
 
     fn on_request(&self, request: &Self::Request) -> Option<opentelemetry::Value>;
     fn on_response(&self, response: &Self::Response) -> Option<opentelemetry::Value>;
+    fn on_response_event(
+        &self,
+        _response: &Self::EventResponse,
+        _ctx: &Context,
+    ) -> Option<opentelemetry::Value> {
+        None
+    }
+    fn on_error(&self, error: &BoxError, ctx: &Context) -> Option<opentelemetry::Value>;
+    fn on_response_field(
+        &self,
+        _ty: &apollo_compiler::executable::NamedType,
+        _field: &apollo_compiler::executable::Field,
+        _value: &serde_json_bytes::Value,
+        _ctx: &Context,
+    ) -> Option<opentelemetry::Value> {
+        None
+    }
+
+    fn on_drop(&self) -> Option<Value> {
+        None
+    }
+
+    fn is_active(&self, stage: Stage) -> bool;
 }
 
 pub(crate) trait DefaultForLevel {
@@ -81,7 +161,7 @@ pub(crate) fn trace_id() -> Option<TraceId> {
     if span_context.is_valid() {
         Some(span_context.trace_id())
     } else {
-        None
+        crate::tracer::TraceId::current().map(|trace_id| TraceId::from(trace_id.to_u128()))
     }
 }
 
@@ -128,6 +208,10 @@ macro_rules! impl_to_otel_value {
                                 Some(opentelemetry::Value::Array(opentelemetry::Array::Bool(
                                     value.iter().filter_map(|v| v.as_bool()).collect(),
                                 )))
+                            } else if value.iter().all(|v| v.is_object()) {
+                                Some(opentelemetry::Value::Array(opentelemetry::Array::String(
+                                    value.iter().map(|v| v.to_string().into()).collect(),
+                                )))
                             } else if value.iter().all(|v| v.is_string()) {
                                 Some(opentelemetry::Value::Array(opentelemetry::Array::String(
                                     value
@@ -137,10 +221,11 @@ macro_rules! impl_to_otel_value {
                                         .collect(),
                                 )))
                             } else {
-                                None
+                                Some(serde_json::to_string(value).ok()?.into())
                             }
                         }
-                        _ => None,
+                        $type::Object(value) => Some(serde_json::to_string(value).ok()?.into()),
+                        _ => None
                     }
                 }
             }
@@ -164,6 +249,13 @@ impl From<opentelemetry::Value> for AttributeValue {
 
 #[cfg(test)]
 mod test {
+    use std::sync::OnceLock;
+
+    use apollo_compiler::ast::FieldDefinition;
+    use apollo_compiler::ast::NamedType;
+    use apollo_compiler::executable::Field;
+    use apollo_compiler::name;
+    use apollo_compiler::Node;
     use opentelemetry::trace::SpanContext;
     use opentelemetry::trace::SpanId;
     use opentelemetry::trace::TraceContextExt;
@@ -179,6 +271,26 @@ mod test {
     use crate::plugins::telemetry::config_new::trace_id;
     use crate::plugins::telemetry::config_new::DatadogId;
     use crate::plugins::telemetry::config_new::ToOtelValue;
+    use crate::plugins::telemetry::otel;
+
+    pub(crate) fn field() -> &'static Field {
+        static FIELD: OnceLock<Field> = OnceLock::new();
+        FIELD.get_or_init(|| {
+            Field::new(
+                name!("field_name"),
+                Node::new(FieldDefinition {
+                    description: None,
+                    name: name!("field_name"),
+                    arguments: vec![],
+                    ty: apollo_compiler::ty!(field_type),
+                    directives: Default::default(),
+                }),
+            )
+        })
+    }
+    pub(crate) fn ty() -> NamedType {
+        name!("type_name")
+    }
 
     #[test]
     fn dd_convert() {
@@ -190,10 +302,10 @@ mod test {
     #[test]
     fn test_trace_id() {
         // Create a span with a trace ID
-        let subscriber = tracing_subscriber::registry().with(tracing_opentelemetry::layer());
+        let subscriber = tracing_subscriber::registry().with(otel::layer());
         tracing::subscriber::with_default(subscriber, || {
             let span_context = SpanContext::new(
-                TraceId::from_u128(42),
+                TraceId::from(42),
                 SpanId::from_u64(42),
                 TraceFlags::default(),
                 false,
@@ -212,7 +324,7 @@ mod test {
     #[test]
     fn test_baggage() {
         // Create a span with a trace ID
-        let subscriber = tracing_subscriber::registry().with(tracing_opentelemetry::layer());
+        let subscriber = tracing_subscriber::registry().with(otel::layer());
         tracing::subscriber::with_default(subscriber, || {
             let span_context = SpanContext::new(
                 TraceId::from_u128(42),
@@ -262,7 +374,13 @@ mod test {
         );
 
         // Arrays must be uniform
-        assert!(json!(["1", 1]).maybe_to_otel_value().is_none());
-        assert!(json!([1.0, 1]).maybe_to_otel_value().is_none());
+        assert_eq!(
+            json!(["1", 1]).maybe_to_otel_value(),
+            Some(r#"["1",1]"#.to_string().into())
+        );
+        assert_eq!(
+            json!([1.0, 1]).maybe_to_otel_value(),
+            Some(r#"[1.0,1]"#.to_string().into())
+        );
     }
 }

@@ -8,21 +8,47 @@ platform:
   os: "[os]"
   continuous_integration: "[ci]"
 usage:
+  configuration.headers.all.len: 1
+  configuration.headers.all.request.array.len: 3
   configuration.headers.all.request.insert.len: 1
   configuration.headers.all.request.insert.name.<redacted>: 1
+  configuration.headers.all.request.insert.name.len: 1
   configuration.headers.all.request.insert.value.<redacted>: 1
+  configuration.headers.all.request.insert.value.len: 1
+  configuration.headers.all.request.len: 1
   configuration.headers.all.request.propagate.len: 2
   configuration.headers.all.request.propagate.named.<redacted>: 2
+  configuration.headers.all.request.propagate.named.len: 2
+  configuration.headers.subgraphs.<redacted>.len: 1
+  configuration.headers.subgraphs.<redacted>.request.array.len: 2
   configuration.headers.subgraphs.<redacted>.request.insert.len: 1
   configuration.headers.subgraphs.<redacted>.request.insert.name.<redacted>: 1
+  configuration.headers.subgraphs.<redacted>.request.insert.name.len: 1
   configuration.headers.subgraphs.<redacted>.request.insert.value.<redacted>: 1
+  configuration.headers.subgraphs.<redacted>.request.insert.value.len: 1
+  configuration.headers.subgraphs.<redacted>.request.len: 1
   configuration.headers.subgraphs.<redacted>.request.remove.len: 1
   configuration.headers.subgraphs.<redacted>.request.remove.named.<redacted>: 1
-  configuration.override_subgraph_url.len: 1
+  configuration.headers.subgraphs.<redacted>.request.remove.named.len: 1
+  configuration.headers.subgraphs.len: 1
+  configuration.override_subgraph_url.<redacted>.<redacted>: 1
+  configuration.override_subgraph_url.<redacted>.len: 1
   configuration.plugins.len: 0
+  configuration.telemetry.apollo.len: 1
+  configuration.telemetry.apollo.send_headers.except.<redacted>: 2
+  configuration.telemetry.apollo.send_headers.except.array.len: 2
+  configuration.telemetry.apollo.send_headers.except.len: 1
   configuration.telemetry.apollo.send_headers.len: 1
+  configuration.telemetry.exporters.len: 1
+  configuration.telemetry.exporters.tracing.len: 1
+  configuration.telemetry.exporters.tracing.otlp.enabled.len: 1
   configuration.telemetry.exporters.tracing.otlp.enabled.true: 1
   configuration.telemetry.exporters.tracing.otlp.endpoint.<redacted>: 1
-  configuration.telemetry.exporters.tracing.otlp.grpc.metadata.len: 2
+  configuration.telemetry.exporters.tracing.otlp.endpoint.len: 1
+  configuration.telemetry.exporters.tracing.otlp.grpc.len: 1
+  configuration.telemetry.exporters.tracing.otlp.grpc.metadata.<redacted>.<redacted>: 2
+  configuration.telemetry.exporters.tracing.otlp.grpc.metadata.<redacted>.len: 2
+  configuration.telemetry.exporters.tracing.otlp.grpc.metadata.len: 1
+  configuration.telemetry.exporters.tracing.otlp.len: 1
   configuration.telemetry.exporters.tracing.otlp.protocol.<redacted>: 1
-
+  configuration.telemetry.exporters.tracing.otlp.protocol.len: 1

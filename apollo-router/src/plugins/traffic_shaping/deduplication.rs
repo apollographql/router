@@ -15,6 +15,7 @@ use tower::BoxError;
 use tower::Layer;
 use tower::ServiceExt;
 
+use crate::batching::BatchQuery;
 use crate::graphql::Request;
 use crate::http_ext;
 use crate::plugins::authorization::CacheKeyMetadata;
@@ -47,6 +48,7 @@ impl Clone for CloneSubgraphResponse {
         Self(SubgraphResponse {
             response: http_ext::Response::from(&self.0.response).inner,
             context: self.0.context.clone(),
+            subgraph_name: self.0.subgraph_name.clone(),
         })
     }
 }
@@ -73,6 +75,17 @@ where
         wait_map: WaitMap,
         request: SubgraphRequest,
     ) -> Result<SubgraphResponse, BoxError> {
+        // Check if the request is part of a batch. If it is, completely bypass dedup since it
+        // will break any request batches which this request is part of.
+        // This check is what enables Batching and Dedup to work together, so be very careful
+        // before making any changes to it.
+        if request
+            .context
+            .extensions()
+            .with_lock(|lock| lock.contains_key::<BatchQuery>())
+        {
+            return service.ready_oneshot().await?.call(request).await;
+        }
         loop {
             let mut locked_wait_map = wait_map.lock().await;
             let authorization_cache_key = request.authorization.clone();
@@ -91,6 +104,7 @@ where
                                     SubgraphResponse::new_from_response(
                                         response.0.response,
                                         request.context,
+                                        request.subgraph_name.unwrap_or_default(),
                                     )
                                 })
                                 .map_err(|e| e.into())
@@ -128,6 +142,9 @@ where
                     };
 
                     // Let our waiters know
+
+                    // Clippy is wrong, the suggestion adds a useless clone of the error
+                    #[allow(clippy::useless_asref)]
                     let broadcast_value = res
                         .as_ref()
                         .map(|response| response.clone())
@@ -141,7 +158,11 @@ where
                     .expect("can only fail if the task is aborted or if the internal code panics, neither is possible here; qed");
 
                     return res.map(|response| {
-                        SubgraphResponse::new_from_response(response.0.response, context)
+                        SubgraphResponse::new_from_response(
+                            response.0.response,
+                            context,
+                            response.0.subgraph_name.unwrap_or_default(),
+                        )
                     });
                 }
             }

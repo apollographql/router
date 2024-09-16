@@ -39,6 +39,9 @@ pub(crate) mod test {
     use serde_json::Value;
     use tracing_core::LevelFilter;
     use tracing_core::Subscriber;
+    use tracing_subscriber::layer::SubscriberExt;
+
+    use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
 
     pub(crate) struct SnapshotSubscriber {
         buffer: Arc<Mutex<Vec<u8>>>,
@@ -99,15 +102,18 @@ pub(crate) mod test {
                 assertion,
             };
 
-            tracing_subscriber::fmt()
-                .json()
-                .with_max_level(level)
-                .without_time()
-                .with_target(false)
-                .with_file(false)
-                .with_line_number(false)
-                .with_writer(Mutex::new(collector))
-                .finish()
+            tracing_subscriber::registry::Registry::default()
+                .with(level)
+                .with(DynAttributeLayer::new())
+                .with(
+                    tracing_subscriber::fmt::Layer::default()
+                        .json()
+                        .without_time()
+                        .with_target(false)
+                        .with_file(false)
+                        .with_line_number(false)
+                        .with_writer(Mutex::new(collector)),
+                )
         }
     }
 }

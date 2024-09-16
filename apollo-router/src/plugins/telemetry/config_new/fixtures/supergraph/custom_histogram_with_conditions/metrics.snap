@@ -1,0 +1,33 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
+description: Custom counter with conditions
+expression: "&metrics.all()"
+info:
+  telemetry:
+    instrumentation:
+      instruments:
+        default_requirement_level: none
+        supergraph:
+          custom.histogram:
+            description: histogram of requests
+            type: histogram
+            unit: unit
+            value: unit
+            attributes:
+              graphql.document: true
+              custom_attribute:
+                request_header: custom_header
+            condition:
+              eq:
+                - request_header: custom_header
+                - allowed
+---
+- name: custom.histogram
+  description: histogram of requests
+  unit: unit
+  data:
+    datapoints:
+      - sum: 1
+        attributes:
+          custom_attribute: allowed
+          graphql.document: "query { hello }"

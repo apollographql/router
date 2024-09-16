@@ -2,6 +2,5 @@
 source: apollo-router/src/plugins/telemetry/fmt_layer.rs
 expression: buff.to_string()
 ---
-[2m[timestamp][0m [31mERROR[0m [2mnested_test{graphql.operation.kind=Subscription,inner=-42,two=two,} [0m[2mtest{another=2,custom_dyn=test,first=one,} [0m[2m[0m Hello from nested test http.method="GET"
-[2m[timestamp][0m [32mINFO[0m [2mtest{another=2,custom_dyn=test,first=one,} [0m[2m[0m Hello from test event_attr="foo"
-
+[2m[timestamp][0m [31mERROR[0m [2mnested_test{graphql.operation.kind=Subscription,inner=-42,two=two,} [0m[2mtest{another=2,custom_dyn=test,first=one,} [0m[2m[0m Hello from nested test [3mhttp.method[0m[2m=[0m"GET"
+[2m[timestamp][0m [32mINFO[0m [2mtest{another=2,custom_dyn=test,first=one,} [0m[2m[0m Hello from test [3mevent_attr[0m[2m=[0m"foo"

@@ -1,0 +1,6 @@
+[alias]
+cli = "run -p apollo-federation-cli --"
+
+# circle seems to install cargo packages via ssh:// rather than https://
+[net]
+git-fetch-with-cli = true

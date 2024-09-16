@@ -17,6 +17,7 @@ Sequence {
                 id: None,
                 input_rewrites: None,
                 output_rewrites: None,
+                context_rewrites: None,
                 schema_aware_hash: QueryHash(
                     "",
                 ),
@@ -37,8 +38,11 @@ Sequence {
                                     [
                                         Key(
                                             "topProducts",
+                                            None,
                                         ),
-                                        Flatten,
+                                        Flatten(
+                                            None,
+                                        ),
                                     ],
                                 ),
                                 node: Fetch(
@@ -78,6 +82,7 @@ Sequence {
                                         id: None,
                                         input_rewrites: None,
                                         output_rewrites: None,
+                                        context_rewrites: None,
                                         schema_aware_hash: QueryHash(
                                             "",
                                         ),
@@ -96,8 +101,11 @@ Sequence {
                                     [
                                         Key(
                                             "topProducts",
+                                            None,
                                         ),
-                                        Flatten,
+                                        Flatten(
+                                            None,
+                                        ),
                                     ],
                                 ),
                                 node: Fetch(
@@ -149,6 +157,7 @@ Sequence {
                                         id: None,
                                         input_rewrites: None,
                                         output_rewrites: None,
+                                        context_rewrites: None,
                                         schema_aware_hash: QueryHash(
                                             "",
                                         ),
@@ -171,6 +180,7 @@ Sequence {
                                     [
                                         Key(
                                             "product",
+                                            None,
                                         ),
                                     ],
                                 ),
@@ -209,6 +219,7 @@ Sequence {
                                         id: None,
                                         input_rewrites: None,
                                         output_rewrites: None,
+                                        context_rewrites: None,
                                         schema_aware_hash: QueryHash(
                                             "",
                                         ),
@@ -227,6 +238,7 @@ Sequence {
                                     [
                                         Key(
                                             "product",
+                                            None,
                                         ),
                                     ],
                                 ),
@@ -279,6 +291,7 @@ Sequence {
                                         id: None,
                                         input_rewrites: None,
                                         output_rewrites: None,
+                                        context_rewrites: None,
                                         schema_aware_hash: QueryHash(
                                             "",
                                         ),

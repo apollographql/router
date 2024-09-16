@@ -4,13 +4,21 @@ use std::net::SocketAddr;
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use buildstructor::buildstructor;
+use fred::clients::RedisClient;
+use fred::interfaces::ClientLike;
+use fred::interfaces::KeysInterface;
+use fred::prelude::RedisConfig;
+use fred::types::ScanType;
+use fred::types::Scanner;
+use futures::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use http::HeaderValue;
-use jsonpath_lib::Selector;
 use mediatype::names::BOUNDARY;
 use mediatype::names::FORM_DATA;
 use mediatype::names::MULTIPART;
@@ -25,6 +33,7 @@ use opentelemetry::sdk::trace::TracerProvider;
 use opentelemetry::sdk::Resource;
 use opentelemetry::testing::trace::NoopSpanExporter;
 use opentelemetry::trace::TraceContextExt;
+use opentelemetry_api::trace::TraceId;
 use opentelemetry_api::trace::TracerProvider as OtherTracerProvider;
 use opentelemetry_api::Context;
 use opentelemetry_api::KeyValue;
@@ -33,6 +42,7 @@ use opentelemetry_otlp::Protocol;
 use opentelemetry_otlp::SpanExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
+use regex::Regex;
 use reqwest::Request;
 use serde_json::json;
 use serde_json::Value;
@@ -43,7 +53,6 @@ use tokio::process::Child;
 use tokio::process::Command;
 use tokio::task;
 use tokio::time::Instant;
-use tower::BoxError;
 use tracing::info_span;
 use tracing_core::Dispatch;
 use tracing_core::LevelFilter;
@@ -63,21 +72,31 @@ use wiremock::ResponseTemplate;
 pub struct IntegrationTest {
     router: Option<Child>,
     test_config_location: PathBuf,
+    test_schema_location: PathBuf,
     router_location: PathBuf,
     stdio_tx: tokio::sync::mpsc::Sender<String>,
     stdio_rx: tokio::sync::mpsc::Receiver<String>,
     collect_stdio: Option<(tokio::sync::oneshot::Sender<String>, regex::Regex)>,
-    supergraph: PathBuf,
     _subgraphs: wiremock::MockServer,
     telemetry: Telemetry,
 
-    // Don't remove these, there is a weak reference to the tracer provider from a tracer and if the provider is dropped then no export will happen.
     pub _tracer_provider_client: TracerProvider,
     pub _tracer_provider_subgraph: TracerProvider,
     subscriber_client: Dispatch,
 
     _subgraph_overrides: HashMap<String, String>,
-    pub bind_address: SocketAddr,
+    bind_address: Arc<Mutex<Option<SocketAddr>>>,
+    redis_namespace: String,
+    log: String,
+}
+
+impl IntegrationTest {
+    pub(crate) fn bind_address(&self) -> SocketAddr {
+        self.bind_address
+            .lock()
+            .expect("lock poisoned")
+            .expect("no bind address set, router must be started first.")
+    }
 }
 
 struct TracedResponder {
@@ -155,6 +174,7 @@ impl Telemetry {
                 .with_span_processor(
                     BatchSpanProcessor::builder(
                         opentelemetry_datadog::new_pipeline()
+                            .with_service_name(service_name)
                             .build_exporter()
                             .expect("datadog pipeline failed"),
                         opentelemetry::runtime::Tokio,
@@ -259,7 +279,9 @@ impl IntegrationTest {
         collect_stdio: Option<tokio::sync::oneshot::Sender<String>>,
         supergraph: Option<PathBuf>,
         mut subgraph_overrides: HashMap<String, String>,
+        log: Option<String>,
     ) -> Self {
+        let redis_namespace = Uuid::new_v4().to_string();
         let telemetry = telemetry.unwrap_or_default();
         let tracer_provider_client = telemetry.tracer_provider("client");
         let subscriber_client = Self::dispatch(&tracer_provider_client);
@@ -272,18 +294,8 @@ impl IntegrationTest {
         // Add a default override for products, if not specified
         subgraph_overrides.entry("products".into()).or_insert(url);
 
-        // Bind to a random port
-        // Note: This might still fail if a different process binds to the port found here
-        // before the router is started.
-        // Note: We need the nested scope so that the listener gets dropped once its address
-        // is resolved.
-        let bind_address = {
-            let bound = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
-            bound.local_addr().unwrap()
-        };
-
         // Insert the overrides into the config
-        let config_str = merge_overrides(&config, &subgraph_overrides, &bind_address);
+        let config_str = merge_overrides(&config, &subgraph_overrides, None, &redis_namespace);
 
         let supergraph = supergraph.unwrap_or(PathBuf::from_iter([
             "..",
@@ -306,10 +318,13 @@ impl IntegrationTest {
             .await;
 
         let mut test_config_location = std::env::temp_dir();
+        let mut test_schema_location = test_config_location.clone();
         let location = format!("apollo-router-test-{}.yaml", Uuid::new_v4());
         test_config_location.push(location);
+        test_schema_location.push(format!("apollo-router-test-{}.graphql", Uuid::new_v4()));
 
         fs::write(&test_config_location, &config_str).expect("could not write config");
+        fs::copy(&supergraph, &test_schema_location).expect("could not write schema");
 
         let (stdio_tx, stdio_rx) = tokio::sync::mpsc::channel(2000);
         let collect_stdio = collect_stdio.map(|sender| {
@@ -321,17 +336,19 @@ impl IntegrationTest {
             router: None,
             router_location: Self::router_location(),
             test_config_location,
+            test_schema_location,
             stdio_tx,
             stdio_rx,
             collect_stdio,
-            supergraph,
             _subgraphs: subgraphs,
             _subgraph_overrides: subgraph_overrides,
-            bind_address,
+            bind_address: Default::default(),
             _tracer_provider_client: tracer_provider_client,
             subscriber_client,
             _tracer_provider_subgraph: tracer_provider_subgraph,
             telemetry,
+            redis_namespace,
+            log: log.unwrap_or_else(|| "error,apollo_router=info".to_owned()),
         }
     }
 
@@ -366,27 +383,38 @@ impl IntegrationTest {
         }
 
         router
-            .args([
+            .args(dbg!([
                 "--hr",
                 "--config",
                 &self.test_config_location.to_string_lossy(),
                 "--supergraph",
-                &self.supergraph.to_string_lossy(),
+                &self.test_schema_location.to_string_lossy(),
                 "--log",
-                "error,apollo_router=info",
-            ])
+                &self.log,
+            ]))
             .stdout(Stdio::piped());
 
         let mut router = router.spawn().expect("router should start");
         let reader = BufReader::new(router.stdout.take().expect("out"));
         let stdio_tx = self.stdio_tx.clone();
         let collect_stdio = self.collect_stdio.take();
+        let bind_address = self.bind_address.clone();
+        let bind_address_regex =
+            Regex::new(r".*GraphQL endpoint exposed at http://(?<address>[^/]+).*").unwrap();
         // We need to read from stdout otherwise we will hang
         task::spawn(async move {
             let mut collected = Vec::new();
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 println!("{line}");
+
+                // Extract the bind address from a log line that looks like this: GraphQL endpoint exposed at http://127.0.0.1:51087/
+                if let Some(captures) = bind_address_regex.captures(&line) {
+                    let address = captures.name("address").unwrap().as_str();
+                    let mut bind_address = bind_address.lock().unwrap();
+                    *bind_address = Some(address.parse().unwrap());
+                }
+
                 if let Some((_sender, version_line_re)) = &collect_stdio {
                     #[derive(serde::Deserialize)]
                     struct Log {
@@ -443,18 +471,29 @@ impl IntegrationTest {
     pub async fn update_config(&self, yaml: &str) {
         tokio::fs::write(
             &self.test_config_location,
-            &merge_overrides(yaml, &self._subgraph_overrides, &self.bind_address),
+            &merge_overrides(
+                yaml,
+                &self._subgraph_overrides,
+                Some(self.bind_address()),
+                &self.redis_namespace,
+            ),
         )
         .await
         .expect("must be able to write config");
     }
 
     #[allow(dead_code)]
+    pub async fn update_schema(&self, supergraph_path: &PathBuf) {
+        fs::copy(supergraph_path, &self.test_schema_location).expect("could not write schema");
+    }
+
+    #[allow(dead_code)]
     pub fn execute_default_query(
         &self,
-    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
+    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
         self.execute_query_internal(
             &json!({"query":"query {topProducts{name}}","variables":{}}),
+            None,
             None,
         )
     }
@@ -463,36 +502,46 @@ impl IntegrationTest {
     pub fn execute_query(
         &self,
         query: &Value,
-    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
-        self.execute_query_internal(query, None)
+    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
+        self.execute_query_internal(query, None, None)
     }
 
     #[allow(dead_code)]
     pub fn execute_bad_query(
         &self,
-    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
-        self.execute_query_internal(&json!({"garbage":{}}), None)
+    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
+        self.execute_query_internal(&json!({"garbage":{}}), None, None)
     }
 
     #[allow(dead_code)]
     pub fn execute_huge_query(
         &self,
-    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
-        self.execute_query_internal(&json!({"query":"query {topProducts{name, name, name, name, name, name, name, name, name, name}}","variables":{}}), None)
+    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
+        self.execute_query_internal(&json!({"query":"query {topProducts{name, name, name, name, name, name, name, name, name, name}}","variables":{}}), None, None)
     }
 
     #[allow(dead_code)]
     pub fn execute_bad_content_type(
         &self,
-    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
-        self.execute_query_internal(&json!({"garbage":{}}), Some("garbage"))
+    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
+        self.execute_query_internal(&json!({"garbage":{}}), Some("garbage"), None)
+    }
+
+    #[allow(dead_code)]
+    pub fn execute_query_with_headers(
+        &self,
+        query: &Value,
+        headers: HashMap<String, String>,
+    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
+        self.execute_query_internal(query, None, Some(headers))
     }
 
     fn execute_query_internal(
         &self,
         query: &Value,
         content_type: Option<&'static str>,
-    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
+        headers: Option<HashMap<String, String>>,
+    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
         assert!(
             self.router.is_some(),
             "router was not started, call `router.start().await; router.assert_started().await`"
@@ -500,16 +549,15 @@ impl IntegrationTest {
         let telemetry = self.telemetry.clone();
 
         let query = query.clone();
-        let url = format!("http://{}", self.bind_address);
+        let url = format!("http://{}", self.bind_address());
 
         async move {
             let span = info_span!("client_request");
-            let span_id = span.context().span().span_context().trace_id().to_string();
-
+            let span_id = span.context().span().span_context().trace_id();
             async move {
                 let client = reqwest::Client::new();
 
-                let mut request = client
+                let mut builder = client
                     .post(url)
                     .header(
                         CONTENT_TYPE,
@@ -518,9 +566,15 @@ impl IntegrationTest {
                     .header("apollographql-client-name", "custom_name")
                     .header("apollographql-client-version", "1.0")
                     .header("x-my-header", "test")
-                    .json(&query)
-                    .build()
-                    .unwrap();
+                    .header("head", "test");
+
+                if let Some(headers) = headers {
+                    for (name, value) in headers {
+                        builder = builder.header(name, value);
+                    }
+                }
+
+                let mut request = builder.json(&query).build().unwrap();
                 telemetry.inject_context(&mut request);
                 request.headers_mut().remove(ACCEPT);
                 match client.execute(request).await {
@@ -540,13 +594,13 @@ impl IntegrationTest {
     pub fn execute_untraced_query(
         &self,
         query: &Value,
-    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
+    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
         assert!(
             self.router.is_some(),
             "router was not started, call `router.start().await; router.assert_started().await`"
         );
         let query = query.clone();
-        let url = format!("http://{}", self.bind_address);
+        let url = format!("http://{}", self.bind_address());
 
         async move {
             let client = reqwest::Client::new();
@@ -563,14 +617,16 @@ impl IntegrationTest {
             request.headers_mut().remove(ACCEPT);
             match client.execute(request).await {
                 Ok(response) => (
-                    response
-                        .headers()
-                        .get("apollo-custom-trace-id")
-                        .cloned()
-                        .unwrap_or(HeaderValue::from_static("no-trace-id"))
-                        .to_str()
-                        .unwrap_or_default()
-                        .to_string(),
+                    TraceId::from_hex(
+                        response
+                            .headers()
+                            .get("apollo-custom-trace-id")
+                            .cloned()
+                            .unwrap_or(HeaderValue::from_static("no-trace-id"))
+                            .to_str()
+                            .unwrap_or_default(),
+                    )
+                    .unwrap_or(TraceId::INVALID),
                     response,
                 ),
                 Err(err) => {
@@ -593,7 +649,7 @@ impl IntegrationTest {
             "router was not started, call `router.start().await; router.assert_started().await`"
         );
 
-        let url = format!("http://{}", self.bind_address);
+        let url = format!("http://{}", self.bind_address());
         async move {
             let span = info_span!("client_raw_request");
             let span_id = span.context().span().span_context().trace_id().to_string();
@@ -652,7 +708,7 @@ impl IntegrationTest {
         let _span_guard = span.enter();
 
         let mut request = client
-            .post(format!("http://{}", self.bind_address))
+            .post(format!("http://{}", self.bind_address()))
             .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
             .header(ACCEPT, "multipart/mixed;subscriptionSpec=1.0")
             .header("apollographql-client-name", "custom_name")
@@ -681,7 +737,7 @@ impl IntegrationTest {
         let client = reqwest::Client::new();
 
         let request = client
-            .get(format!("http://{}/metrics", self.bind_address))
+            .get(format!("http://{}/metrics", self.bind_address()))
             .header("apollographql-client-name", "custom_name")
             .header("apollographql-client-version", "1.0")
             .build()
@@ -794,6 +850,40 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
+    pub async fn assert_metrics_contains_multiple(
+        &self,
+        mut texts: Vec<&str>,
+        duration: Option<Duration>,
+    ) {
+        let now = Instant::now();
+        let mut last_metrics = String::new();
+        while now.elapsed() < duration.unwrap_or_else(|| Duration::from_secs(15)) {
+            if let Ok(metrics) = self
+                .get_metrics_response()
+                .await
+                .expect("failed to fetch metrics")
+                .text()
+                .await
+            {
+                let mut v = vec![];
+                for text in &texts {
+                    if !metrics.contains(text) {
+                        v.push(*text);
+                    }
+                }
+                if v.len() == texts.len() {
+                    return;
+                } else {
+                    texts = v;
+                }
+                last_metrics = metrics;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("'{texts:?}' not detected in metrics\n{last_metrics}");
+    }
+
+    #[allow(dead_code)]
     pub async fn assert_metrics_does_not_contain(&self, text: &str) {
         if let Ok(metrics) = self
             .get_metrics_response()
@@ -880,6 +970,76 @@ impl IntegrationTest {
             }
         }
     }
+
+    #[allow(dead_code)]
+    pub async fn clear_redis_cache(&self) {
+        let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
+
+        let client = RedisClient::new(config, None, None, None);
+        let connection_task = client.connect();
+        client
+            .wait_for_connect()
+            .await
+            .expect("could not connect to redis");
+        let namespace = &self.redis_namespace;
+        let mut scan = client.scan(format!("{namespace}:*"), None, Some(ScanType::String));
+        while let Some(result) = scan.next().await {
+            if let Some(page) = result.expect("could not scan redis").take_results() {
+                for key in page {
+                    let key = key.as_str().expect("key should be a string");
+                    if key.starts_with(&self.redis_namespace) {
+                        client
+                            .del::<usize, _>(key)
+                            .await
+                            .expect("could not delete key");
+                    }
+                }
+            }
+        }
+
+        client.quit().await.expect("could not quit redis");
+        // calling quit ends the connection and event listener tasks
+        let _ = connection_task.await;
+    }
+
+    #[allow(dead_code)]
+    pub async fn assert_redis_cache_contains(&self, key: &str, ignore: Option<&str>) -> String {
+        let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
+        let client = RedisClient::new(config, None, None, None);
+        let connection_task = client.connect();
+        client.wait_for_connect().await.unwrap();
+        let redis_namespace = &self.redis_namespace;
+        let namespaced_key = format!("{redis_namespace}:{key}");
+        let s = match client.get(&namespaced_key).await {
+            Ok(s) => s,
+            Err(e) => {
+                println!("non-ignored keys in the same namespace in Redis:");
+
+                let mut scan = client.scan(
+                    format!("{redis_namespace}:*"),
+                    Some(u32::MAX),
+                    Some(ScanType::String),
+                );
+
+                while let Some(result) = scan.next().await {
+                    let keys = result.as_ref().unwrap().results().as_ref().unwrap();
+                    for key in keys {
+                        let key = key.as_str().expect("key should be a string");
+                        let unnamespaced_key = key.replace(&format!("{redis_namespace}:"), "");
+                        if Some(unnamespaced_key.as_str()) != ignore {
+                            println!("\t{unnamespaced_key}");
+                        }
+                    }
+                }
+                panic!("key {key} not found: {e}\n This may be caused by a number of things including federation version changes");
+            }
+        };
+
+        client.quit().await.unwrap();
+        // calling quit ends the connection and event listener tasks
+        let _ = connection_task.await;
+        s
+    }
 }
 
 impl Drop for IntegrationTest {
@@ -890,20 +1050,6 @@ impl Drop for IntegrationTest {
     }
 }
 
-pub trait ValueExt {
-    fn select_path<'a>(&'a self, path: &str) -> Result<Vec<&'a Value>, BoxError>;
-    fn as_string(&self) -> Option<String>;
-}
-
-impl ValueExt for Value {
-    fn select_path<'a>(&'a self, path: &str) -> Result<Vec<&'a Value>, BoxError> {
-        Ok(Selector::new().str_path(path)?.value(self).select()?)
-    }
-    fn as_string(&self) -> Option<String> {
-        self.as_str().map(|s| s.to_string())
-    }
-}
-
 /// Merge in overrides to a yaml config.
 ///
 /// The test harness needs some options to be present for it to work, so this
@@ -911,8 +1057,12 @@ impl ValueExt for Value {
 fn merge_overrides(
     yaml: &str,
     subgraph_overrides: &HashMap<String, String>,
-    bind_addr: &SocketAddr,
+    bind_addr: Option<SocketAddr>,
+    redis_namespace: &str,
 ) -> String {
+    let bind_addr = bind_addr
+        .map(|a| a.to_string())
+        .unwrap_or_else(|| "127.0.0.1:0".into());
     // Parse the config as yaml
     let mut config: Value = serde_yaml::from_str(yaml).unwrap();
 
@@ -988,5 +1138,31 @@ fn merge_overrides(
             json!({"listen": bind_addr.to_string()}),
         );
 
+    // Set query plan redis namespace
+    if let Some(query_plan) = config
+        .as_object_mut()
+        .and_then(|o| o.get_mut("supergraph"))
+        .and_then(|o| o.as_object_mut())
+        .and_then(|o| o.get_mut("query_planning"))
+        .and_then(|o| o.as_object_mut())
+        .and_then(|o| o.get_mut("cache"))
+        .and_then(|o| o.as_object_mut())
+        .and_then(|o| o.get_mut("redis"))
+        .and_then(|o| o.as_object_mut())
+    {
+        query_plan.insert("namespace".to_string(), redis_namespace.into());
+    }
+
     serde_yaml::to_string(&config).unwrap()
+}
+
+#[allow(dead_code)]
+pub fn graph_os_enabled() -> bool {
+    matches!(
+        (
+            std::env::var("TEST_APOLLO_KEY"),
+            std::env::var("TEST_APOLLO_GRAPH_REF"),
+        ),
+        (Ok(_), Ok(_))
+    )
 }

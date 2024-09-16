@@ -1,0 +1,7 @@
+[alias]
+xtask = "run --locked --package xtask --manifest-path xtask/Cargo.toml --"
+fed = "run -p apollo-federation-cli --"
+
+[profile.profiling]
+inherits = "release"
+debug = true

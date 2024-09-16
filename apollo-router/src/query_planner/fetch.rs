@@ -1,6 +1,8 @@
+use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Arc;
 
+use apollo_compiler::ast;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use indexmap::IndexSet;
@@ -14,8 +16,12 @@ use super::execution::ExecutionParameters;
 use super::rewrites;
 use super::selection::execute_selection_set;
 use super::selection::Selection;
+use super::subgraph_context::build_operation_with_aliasing;
+use super::subgraph_context::ContextualArguments;
+use super::subgraph_context::SubgraphContext;
 use crate::error::Error;
 use crate::error::FetchError;
+use crate::error::ValidationErrors;
 use crate::graphql;
 use crate::graphql::Request;
 use crate::http_ext;
@@ -34,6 +40,7 @@ use crate::spec::Schema;
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 pub enum OperationKind {
     #[default]
     Query,
@@ -43,12 +50,12 @@ pub enum OperationKind {
 
 impl Display for OperationKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_str())
+        write!(f, "{}", self.default_type_name())
     }
 }
 
 impl OperationKind {
-    pub(crate) const fn as_str(&self) -> &'static str {
+    pub(crate) const fn default_type_name(&self) -> &'static str {
         match self {
             OperationKind::Query => "Query",
             OperationKind::Mutation => "Mutation",
@@ -66,32 +73,34 @@ impl OperationKind {
     }
 }
 
-impl From<OperationKind> for apollo_compiler::ast::OperationType {
+impl From<OperationKind> for ast::OperationType {
     fn from(value: OperationKind) -> Self {
         match value {
-            OperationKind::Query => apollo_compiler::ast::OperationType::Query,
-            OperationKind::Mutation => apollo_compiler::ast::OperationType::Mutation,
-            OperationKind::Subscription => apollo_compiler::ast::OperationType::Subscription,
+            OperationKind::Query => ast::OperationType::Query,
+            OperationKind::Mutation => ast::OperationType::Mutation,
+            OperationKind::Subscription => ast::OperationType::Subscription,
         }
     }
 }
 
-impl From<apollo_compiler::ast::OperationType> for OperationKind {
-    fn from(value: apollo_compiler::ast::OperationType) -> Self {
+impl From<ast::OperationType> for OperationKind {
+    fn from(value: ast::OperationType) -> Self {
         match value {
-            apollo_compiler::ast::OperationType::Query => OperationKind::Query,
-            apollo_compiler::ast::OperationType::Mutation => OperationKind::Mutation,
-            apollo_compiler::ast::OperationType::Subscription => OperationKind::Subscription,
+            ast::OperationType::Query => OperationKind::Query,
+            ast::OperationType::Mutation => OperationKind::Mutation,
+            ast::OperationType::Subscription => OperationKind::Subscription,
         }
     }
 }
+
+pub(crate) type SubgraphSchemas = HashMap<String, Arc<Valid<apollo_compiler::Schema>>>;
 
 /// A fetch node.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct FetchNode {
     /// The name of the service or subgraph that the fetch is querying.
-    pub(crate) service_name: String,
+    pub(crate) service_name: Arc<str>,
 
     /// The data that is required for the subgraph fetch.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -99,13 +108,13 @@ pub(crate) struct FetchNode {
     pub(crate) requires: Vec<Selection>,
 
     /// The variables that are used for the subgraph fetch.
-    pub(crate) variable_usages: Vec<String>,
+    pub(crate) variable_usages: Vec<Arc<str>>,
 
     /// The GraphQL subquery that is used for the fetch.
-    pub(crate) operation: String,
+    pub(crate) operation: SubgraphOperation,
 
     /// The GraphQL subquery operation name.
-    pub(crate) operation_name: Option<String>,
+    pub(crate) operation_name: Option<Arc<str>>,
 
     /// The GraphQL operation kind that is used for the fetch.
     pub(crate) operation_kind: OperationKind,
@@ -119,6 +128,9 @@ pub(crate) struct FetchNode {
     // Optionally describes a number of "rewrites" to apply to the data that received from a fetch (and before it is applied to the current in-memory results).
     pub(crate) output_rewrites: Option<Vec<rewrites::DataRewrite>>,
 
+    // Optionally describes a number of "rewrites" to apply to the data that has already been received further up the tree
+    pub(crate) context_rewrites: Option<Vec<rewrites::DataRewrite>>,
+
     // hash for the query and relevant parts of the schema. if two different schemas provide the exact same types, fields and directives
     // affecting the query, then they will have the same hash
     #[serde(default)]
@@ -127,6 +139,111 @@ pub(crate) struct FetchNode {
     // authorization metadata for the subgraph query
     #[serde(default)]
     pub(crate) authorization: Arc<CacheKeyMetadata>,
+}
+
+#[derive(Clone)]
+pub(crate) struct SubgraphOperation {
+    serialized: String,
+    /// Ideally this would be always present, but we don’t have access to the subgraph schemas
+    /// during `Deserialize`.
+    parsed: Option<Arc<Valid<ExecutableDocument>>>,
+}
+
+impl SubgraphOperation {
+    pub(crate) fn from_string(serialized: impl Into<String>) -> Self {
+        Self {
+            serialized: serialized.into(),
+            parsed: None,
+        }
+    }
+
+    pub(crate) fn from_parsed(parsed: impl Into<Arc<Valid<ExecutableDocument>>>) -> Self {
+        let parsed = parsed.into();
+        Self {
+            serialized: parsed.serialize().no_indent().to_string(),
+            parsed: Some(parsed),
+        }
+    }
+
+    pub(crate) fn as_serialized(&self) -> &str {
+        &self.serialized
+    }
+
+    pub(crate) fn init_parsed(
+        &mut self,
+        subgraph_schema: &Valid<apollo_compiler::Schema>,
+    ) -> Result<&Arc<Valid<ExecutableDocument>>, ValidationErrors> {
+        match &mut self.parsed {
+            Some(parsed) => Ok(parsed),
+            option => {
+                let parsed = Arc::new(ExecutableDocument::parse_and_validate(
+                    subgraph_schema,
+                    &self.serialized,
+                    "operation.graphql",
+                )?);
+                Ok(option.insert(parsed))
+            }
+        }
+    }
+
+    pub(crate) fn as_parsed(
+        &self,
+    ) -> Result<&Arc<Valid<ExecutableDocument>>, SubgraphOperationNotInitialized> {
+        self.parsed.as_ref().ok_or(SubgraphOperationNotInitialized)
+    }
+}
+
+/// Failed to call `SubgraphOperation::init_parsed` after creating a query plan
+#[derive(Debug, displaydoc::Display, thiserror::Error)]
+pub(crate) struct SubgraphOperationNotInitialized;
+
+impl SubgraphOperationNotInitialized {
+    pub(crate) fn into_graphql_errors(self) -> Vec<Error> {
+        vec![graphql::Error::builder()
+            .extension_code(self.code())
+            .message(self.to_string())
+            .build()]
+    }
+
+    pub(crate) fn code(&self) -> &'static str {
+        "SUBGRAPH_OPERATION_NOT_INITIALIZED"
+    }
+}
+
+impl Serialize for SubgraphOperation {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.as_serialized().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for SubgraphOperation {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(Self::from_string(String::deserialize(deserializer)?))
+    }
+}
+
+impl PartialEq for SubgraphOperation {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_serialized() == other.as_serialized()
+    }
+}
+
+impl std::fmt::Debug for SubgraphOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(self.as_serialized(), f)
+    }
+}
+
+impl std::fmt::Display for SubgraphOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(self.as_serialized(), f)
+    }
 }
 
 #[derive(Clone, Default, Hash, PartialEq, Eq, Deserialize, Serialize)]
@@ -149,6 +266,7 @@ impl Display for QueryHash {
 pub(crate) struct Variables {
     pub(crate) variables: Object,
     pub(crate) inverted_paths: Vec<Vec<Path>>,
+    pub(crate) contextual_arguments: Option<ContextualArguments>,
 }
 
 impl Variables {
@@ -156,27 +274,33 @@ impl Variables {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         requires: &[Selection],
-        variable_usages: &[String],
+        variable_usages: &[Arc<str>],
         data: &Value,
         current_dir: &Path,
         request: &Arc<http::Request<Request>>,
         schema: &Schema,
         input_rewrites: &Option<Vec<rewrites::DataRewrite>>,
+        context_rewrites: &Option<Vec<rewrites::DataRewrite>>,
     ) -> Option<Variables> {
         let body = request.body();
+        let mut subgraph_context = SubgraphContext::new(data, schema, context_rewrites);
         if !requires.is_empty() {
             let mut variables = Object::with_capacity(1 + variable_usages.len());
 
             variables.extend(variable_usages.iter().filter_map(|key| {
                 body.variables
-                    .get_key_value(key.as_str())
+                    .get_key_value(key.as_ref())
                     .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
             }));
 
             let mut inverted_paths: Vec<Vec<Path>> = Vec::new();
-            let mut values: IndexSet<Value> = IndexSet::new();
-
+            let mut values: IndexSet<Value> = IndexSet::default();
             data.select_values_and_paths(schema, current_dir, |path, value| {
+                // first get contextual values that are required
+                if let Some(context) = subgraph_context.as_mut() {
+                    context.execute_on_path(path);
+                }
+
                 let mut value = execute_selection_set(value, requires, schema, None);
                 if value.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
                     rewrites::apply_rewrites(schema, &mut value, input_rewrites);
@@ -198,12 +322,16 @@ impl Variables {
             }
 
             let representations = Value::Array(Vec::from_iter(values));
+            let contextual_arguments = match subgraph_context.as_mut() {
+                Some(context) => context.add_variables_and_get_args(&mut variables),
+                None => None,
+            };
 
             variables.insert("representations", representations);
-
             Some(Variables {
                 variables,
                 inverted_paths,
+                contextual_arguments,
             })
         } else {
             // with nested operations (Query or Mutation has an operation returning a Query or Mutation),
@@ -225,11 +353,12 @@ impl Variables {
                     .iter()
                     .filter_map(|key| {
                         body.variables
-                            .get_key_value(key.as_str())
+                            .get_key_value(key.as_ref())
                             .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
                     })
                     .collect::<Object>(),
                 inverted_paths: Vec::new(),
+                contextual_arguments: None,
             })
         }
     }
@@ -254,20 +383,51 @@ impl FetchNode {
         let Variables {
             variables,
             inverted_paths: paths,
+            contextual_arguments,
         } = match Variables::new(
             &self.requires,
-            self.variable_usages.as_ref(),
+            &self.variable_usages,
             data,
             current_dir,
             // Needs the original request here
             parameters.supergraph_request,
             parameters.schema,
             &self.input_rewrites,
+            &self.context_rewrites,
         ) {
             Some(variables) => variables,
             None => {
                 return (Value::Object(Object::default()), Vec::new());
             }
+        };
+
+        let alias_query_string; // this exists outside the if block to allow the as_str() to be longer lived
+        let aliased_operation = if let Some(ctx_arg) = contextual_arguments {
+            if let Some(subgraph_schema) =
+                parameters.subgraph_schemas.get(&service_name.to_string())
+            {
+                match build_operation_with_aliasing(operation, &ctx_arg, subgraph_schema) {
+                    Ok(op) => {
+                        alias_query_string = op.serialize().no_indent().to_string();
+                        alias_query_string.as_str()
+                    }
+                    Err(errors) => {
+                        tracing::debug!(
+                            "couldn't generate a valid executable document? {:?}",
+                            errors
+                        );
+                        operation.as_serialized()
+                    }
+                }
+            } else {
+                tracing::debug!(
+                    "couldn't find a subgraph schema for service {:?}",
+                    &service_name
+                );
+                operation.as_serialized()
+            }
+        } else {
+            operation.as_serialized()
         };
 
         let mut subgraph_request = SubgraphRequest::builder()
@@ -288,15 +448,15 @@ impl FetchNode {
                     )
                     .body(
                         Request::builder()
-                            .query(operation)
-                            .and_operation_name(operation_name.clone())
+                            .query(aliased_operation)
+                            .and_operation_name(operation_name.as_ref().map(|n| n.to_string()))
                             .variables(variables.clone())
                             .build(),
                     )
                     .build()
                     .expect("it won't fail because the url is correct and already checked; qed"),
             )
-            .subgraph_name(self.service_name.clone())
+            .subgraph_name(self.service_name.to_string())
             .operation_kind(*operation_kind)
             .context(parameters.context.clone())
             .build();
@@ -340,13 +500,18 @@ impl FetchNode {
             Ok(res) => res.response.into_parts(),
         };
 
-        super::log::trace_subfetch(service_name, operation, &variables, &response);
+        super::log::trace_subfetch(
+            service_name,
+            operation.as_serialized(),
+            &variables,
+            &response,
+        );
 
         if !response.is_primary() {
             return (
                 Value::default(),
                 vec![FetchError::SubrequestUnexpectedPatchResponse {
-                    service: service_name.to_owned(),
+                    service: service_name.to_string(),
                 }
                 .to_graphql_error(Some(current_dir.to_owned()))],
             );
@@ -374,7 +539,10 @@ impl FetchNode {
         response: graphql::Response,
     ) -> (Value, Vec<Error>) {
         if !self.requires.is_empty() {
-            let entities_path = Path(vec![json_ext::PathElement::Key("_entities".to_string())]);
+            let entities_path = Path(vec![json_ext::PathElement::Key(
+                "_entities".to_string(),
+                None,
+            )]);
 
             let mut errors: Vec<Error> = vec![];
             for mut error in response.errors {
@@ -414,6 +582,7 @@ impl FetchNode {
                         errors.push(error);
                     }
                 } else {
+                    error.path = Some(current_dir.clone());
                     errors.push(error);
                 }
             }
@@ -460,23 +629,28 @@ impl FetchNode {
 
             (Value::Null, errors)
         } else {
-            let current_slice = if current_dir.last() == Some(&json_ext::PathElement::Flatten) {
-                &current_dir.0[..current_dir.0.len() - 1]
-            } else {
-                &current_dir.0[..]
-            };
+            let current_slice =
+                if matches!(current_dir.last(), Some(&json_ext::PathElement::Flatten(_))) {
+                    &current_dir.0[..current_dir.0.len() - 1]
+                } else {
+                    &current_dir.0[..]
+                };
 
             let errors: Vec<Error> = response
                 .errors
                 .into_iter()
                 .map(|error| {
-                    let path = error.path.as_ref().map(|path| {
-                        Path::from_iter(current_slice.iter().chain(path.iter()).cloned())
-                    });
+                    let path = error
+                        .path
+                        .as_ref()
+                        .map(|path| {
+                            Path::from_iter(current_slice.iter().chain(path.iter()).cloned())
+                        })
+                        .unwrap_or_else(|| current_dir.clone());
 
                     Error {
                         locations: error.locations,
-                        path,
+                        path: Some(path),
                         message: error.message,
                         extensions: error.extensions,
                     }
@@ -497,24 +671,42 @@ impl FetchNode {
         &self.operation_kind
     }
 
-    pub(crate) fn hash_subquery(&mut self, schema: &Valid<apollo_compiler::Schema>) {
-        let doc = ExecutableDocument::parse(schema, &self.operation, "query.graphql")
-            .expect("subgraph queries should be valid");
+    pub(crate) fn init_parsed_operation(
+        &mut self,
+        subgraph_schemas: &SubgraphSchemas,
+    ) -> Result<(), ValidationErrors> {
+        let schema = &subgraph_schemas[self.service_name.as_ref()];
+        self.operation.init_parsed(schema)?;
+        Ok(())
+    }
 
-        if let Ok(hash) = QueryHashVisitor::hash_query(schema, &doc, self.operation_name.as_deref())
-        {
+    pub(crate) fn init_parsed_operation_and_hash_subquery(
+        &mut self,
+        subgraph_schemas: &SubgraphSchemas,
+        supergraph_schema_hash: &str,
+    ) -> Result<(), ValidationErrors> {
+        let schema = &subgraph_schemas[self.service_name.as_ref()];
+        let doc = self.operation.init_parsed(schema)?;
+
+        if let Ok(hash) = QueryHashVisitor::hash_query(
+            schema,
+            supergraph_schema_hash,
+            doc,
+            self.operation_name.as_deref(),
+        ) {
             self.schema_aware_hash = Arc::new(QueryHash(hash));
         }
+        Ok(())
     }
 
     pub(crate) fn extract_authorization_metadata(
         &mut self,
-        schema: &apollo_compiler::Schema,
+        schema: &Valid<apollo_compiler::Schema>,
         global_authorisation_cache_key: &CacheKeyMetadata,
     ) {
         let doc = ExecutableDocument::parse(
-            Valid::assume_valid_ref(schema),
-            &self.operation,
+            schema,
+            self.operation.as_serialized().to_string(),
             "query.graphql",
         )
         // Assume query planing creates a valid document: ignore parse errors
