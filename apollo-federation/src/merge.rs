@@ -1,3 +1,5 @@
+mod fields;
+
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::iter;
@@ -12,12 +14,14 @@ use apollo_compiler::ast::EnumValueDefinition;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::ast::Value;
+use apollo_compiler::collections::HashMap;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::EnumType;
 use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::Implementers;
 use apollo_compiler::schema::InputObjectType;
 use apollo_compiler::schema::InputValueDefinition;
 use apollo_compiler::schema::InterfaceType;
@@ -51,6 +55,7 @@ use crate::link::spec::Identity;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::LinksMetadata;
+use crate::query_plan::query_planner::JOIN_FIELD;
 use crate::schema::ValidFederationSchema;
 use crate::subgraph::ValidSubgraph;
 use crate::ValidFederationSubgraph;
@@ -63,6 +68,7 @@ struct Merger {
     errors: Vec<MergeError>,
     composition_hints: Vec<MergeWarning>,
     needs_inaccessible: bool,
+    interface_objects: IndexSet<Name>,
 }
 
 pub struct MergeSuccess {
@@ -125,6 +131,7 @@ impl Merger {
             composition_hints: Vec::new(),
             errors: Vec::new(),
             needs_inaccessible: false,
+            interface_objects: IndexSet::default(),
         }
     }
 
@@ -234,6 +241,9 @@ impl Merger {
             }
         }
 
+        let implementers_map = supergraph.implementers_map();
+        self.add_interface_object_fields(&mut supergraph.types, implementers_map)?;
+
         if self.needs_inaccessible {
             add_core_feature_inaccessible(&mut supergraph);
         }
@@ -252,6 +262,62 @@ impl Merger {
                 errors: self.errors.to_owned(),
             })
         }
+    }
+
+    fn add_interface_object_fields(
+        &mut self,
+        types: &mut IndexMap<NamedType, ExtendedType>,
+        implementers_map: HashMap<Name, Implementers>,
+    ) -> Result<(), MergeFailure> {
+        for interface_object_name in self.interface_objects.iter() {
+            let Some(ExtendedType::Interface(intf_def)) = types.get(interface_object_name) else {
+                return Err(MergeFailure {
+                    schema: None,
+                    composition_hints: self.composition_hints.to_owned(),
+                    errors: vec![format!("Interface {} not found", interface_object_name)],
+                });
+            };
+            let fields = intf_def.fields.clone();
+
+            let Some(implementers) = implementers_map.get(interface_object_name) else {
+                return Err(MergeFailure {
+                    schema: None,
+                    composition_hints: self.composition_hints.to_owned(),
+                    errors: vec![format!(
+                        "Implementers for interface object {} not found",
+                        interface_object_name
+                    )],
+                });
+            };
+
+            for implementer in implementers.iter() {
+                types.entry(implementer.clone()).and_modify(|f| {
+                    if let ExtendedType::Object(obj) = f {
+                        let obj = obj.make_mut();
+                        for (field_name, field_def) in fields.iter() {
+                            let mut field_def = field_def.clone();
+                            let field_def = field_def.make_mut();
+                            field_def.directives = field_def
+                                .directives
+                                .iter()
+                                .filter(|d| d.name != JOIN_FIELD)
+                                .cloned()
+                                .collect();
+                            field_def.directives.push(Node::new(Directive {
+                                name: Name::new_unchecked(JOIN_FIELD),
+                                arguments: vec![],
+                            }));
+
+                            obj.fields
+                                .entry(field_name.clone())
+                                .or_insert(field_def.clone().into());
+                        }
+                    }
+                });
+            }
+        }
+
+        Ok(())
     }
 
     fn merge_descriptions<T: Eq + Clone>(&mut self, merged: &mut Option<T>, new: &Option<T>) {
@@ -426,30 +492,50 @@ impl Merger {
 
             for (field_name, field) in interface.fields.iter() {
                 let existing_field = mutable_intf.fields.entry(field_name.clone());
-                match existing_field {
-                    Vacant(i) => {
-                        // TODO warning mismatch missing fields
-                        let f = i.insert(Component::new(FieldDefinition {
-                            name: field.name.clone(),
-                            description: field.description.clone(),
-                            arguments: vec![],
-                            ty: field.ty.clone(),
-                            directives: Default::default(),
-                        }));
-
-                        self.add_inaccessible(
-                            directive_names,
-                            &mut f.make_mut().directives,
-                            &field.directives,
-                        );
-                    }
-                    Occupied(_i) => {
+                let supergraph_field = match existing_field {
+                    Occupied(f) => {
+                        f.into_mut()
                         // TODO check description
                         // TODO check type
                         // TODO check default value
                         // TODO process directives
                     }
-                }
+                    Vacant(f) => {
+                        // TODO warning mismatch missing fields
+                        f.insert(Component::new(FieldDefinition {
+                            name: field.name.clone(),
+                            description: field.description.clone(),
+                            arguments: vec![],
+                            ty: field.ty.clone(),
+                            directives: Default::default(),
+                        }))
+                    }
+                };
+
+                fields::merge_arguments(
+                    field.arguments.iter(),
+                    &mut supergraph_field.make_mut().arguments,
+                    self,
+                    directive_names,
+                );
+                self.merge_descriptions(
+                    &mut supergraph_field.make_mut().description,
+                    &field.description,
+                );
+
+                self.add_inaccessible(
+                    directive_names,
+                    &mut supergraph_field.make_mut().directives,
+                    &field.directives,
+                );
+
+                let join_field_directive =
+                    join_field_applied_directive(subgraph_name, None, None, false, None);
+
+                supergraph_field
+                    .make_mut()
+                    .directives
+                    .push(Node::new(join_field_directive));
             }
         } else {
             // TODO conflict on type
@@ -528,35 +614,12 @@ impl Merger {
                     &field.directives,
                 );
 
-                for arg in field.arguments.iter() {
-                    let arguments_to_merge = &mut supergraph_field.make_mut().arguments;
-                    let argument_to_merge = arguments_to_merge
-                        .iter_mut()
-                        .find_map(|a| (a.name == arg.name).then(|| a.make_mut()));
-
-                    if let Some(argument) = argument_to_merge {
-                        self.add_inaccessible(
-                            directive_names,
-                            &mut argument.directives,
-                            &arg.directives,
-                        );
-                    } else {
-                        let mut argument = InputValueDefinition {
-                            name: arg.name.clone(),
-                            description: arg.description.clone(),
-                            directives: Default::default(),
-                            ty: arg.ty.clone(),
-                            default_value: arg.default_value.clone(),
-                        };
-
-                        self.add_inaccessible(
-                            directive_names,
-                            &mut argument.directives,
-                            &arg.directives,
-                        );
-                        arguments_to_merge.push(argument.into());
-                    };
-                }
+                fields::merge_arguments(
+                    field.arguments.iter(),
+                    &mut supergraph_field.make_mut().arguments,
+                    self,
+                    directive_names,
+                );
 
                 let requires_directive_option = field
                     .directives
@@ -605,11 +668,105 @@ impl Merger {
                 // https://github.com/apollographql/federation/blob/0d8a88585d901dff6844fdce1146a4539dec48df/composition-js/src/merging/merge.ts#L1648
             }
         } else if let ExtendedType::Interface(intf) = existing_type {
-            // TODO support interface object
+            self.interface_objects.insert(intf.name.clone());
+
             let key_directives = object.directives.get_all(&directive_names.key);
             let join_type_directives =
                 join_type_applied_directive(subgraph_name.clone(), key_directives, true);
-            intf.make_mut().directives.extend(join_type_directives);
+            let mutable_object = intf.make_mut();
+            mutable_object.directives.extend(join_type_directives);
+            self.merge_descriptions(&mut mutable_object.description, &object.description);
+            self.add_inaccessible(
+                directive_names,
+                &mut mutable_object.directives,
+                &object.directives,
+            );
+
+            for (field_name, field) in object.fields.iter() {
+                // skip federation built-in queries
+                if field_name == "_service" || field_name == "_entities" {
+                    continue;
+                }
+
+                let existing_field = mutable_object.fields.entry(field_name.clone());
+                let supergraph_field = match existing_field {
+                    Occupied(f) => {
+                        // check description
+                        // check type
+                        // check args
+                        f.into_mut()
+                    }
+                    Vacant(f) => f.insert(Component::new(FieldDefinition {
+                        name: field.name.clone(),
+                        description: field.description.clone(),
+                        arguments: vec![],
+                        directives: Default::default(),
+                        ty: field.ty.clone(),
+                    })),
+                };
+                self.merge_descriptions(
+                    &mut supergraph_field.make_mut().description,
+                    &field.description,
+                );
+
+                self.add_inaccessible(
+                    directive_names,
+                    &mut supergraph_field.make_mut().directives,
+                    &field.directives,
+                );
+
+                fields::merge_arguments(
+                    field.arguments.iter(),
+                    &mut supergraph_field.make_mut().arguments,
+                    self,
+                    directive_names,
+                );
+                let requires_directive_option = field
+                    .directives
+                    .get_all(&directive_names.requires)
+                    .next()
+                    .and_then(|p| directive_string_arg_value(p, &FEDERATION_FIELDS_ARGUMENT_NAME));
+
+                let provides_directive_option = field
+                    .directives
+                    .get_all(&directive_names.provides)
+                    .next()
+                    .and_then(|p| directive_string_arg_value(p, &FEDERATION_FIELDS_ARGUMENT_NAME));
+
+                let overrides_directive_option = field
+                    .directives
+                    .get_all(&directive_names.r#override)
+                    .next()
+                    .and_then(|p| {
+                        let overrides_from =
+                            directive_string_arg_value(p, &FEDERATION_FROM_ARGUMENT_NAME);
+                        let overrides_label =
+                            directive_string_arg_value(p, &FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME);
+                        overrides_from.map(|from| (from, overrides_label))
+                    });
+
+                let external_field = field
+                    .directives
+                    .get_all(&directive_names.external)
+                    .next()
+                    .is_some();
+
+                let join_field_directive = join_field_applied_directive(
+                    subgraph_name,
+                    requires_directive_option,
+                    provides_directive_option,
+                    external_field,
+                    overrides_directive_option,
+                );
+
+                supergraph_field
+                    .make_mut()
+                    .directives
+                    .push(Node::new(join_field_directive));
+
+                // TODO: implement needsJoinField to avoid adding join__field when unnecessary
+                // https://github.com/apollographql/federation/blob/0d8a88585d901dff6844fdce1146a4539dec48df/composition-js/src/merging/merge.ts#L1648
+            }
         };
         // TODO merge fields
     }
@@ -1862,6 +2019,53 @@ mod tests {
                 url: "".to_string(),
                 schema: ValidFederationSchema::new(
                     Schema::parse_and_validate(two_sdl, "./inaccessible_2.graphql").unwrap(),
+                )
+                .unwrap(),
+            })
+            .unwrap();
+
+        let result = merge_federation_subgraphs(subgraphs).unwrap();
+
+        let schema = result.schema.into_inner();
+        let validation = schema.clone().validate();
+        assert!(validation.is_ok(), "{:?}", validation);
+
+        assert_snapshot!(schema.serialize());
+    }
+
+    #[test]
+    fn test_interface_object() {
+        let one_sdl = include_str!("./sources/connect/expand/merge/interface_object_1.graphql");
+        let two_sdl = include_str!("./sources/connect/expand/merge/interface_object_2.graphql");
+        let three_sdl = include_str!("./sources/connect/expand/merge/interface_object_3.graphql");
+
+        let mut subgraphs = ValidFederationSubgraphs::new();
+        subgraphs
+            .add(ValidFederationSubgraph {
+                name: "interface_object_1".to_string(),
+                url: "".to_string(),
+                schema: ValidFederationSchema::new(
+                    Schema::parse_and_validate(one_sdl, "./interface_object_1.graphql").unwrap(),
+                )
+                .unwrap(),
+            })
+            .unwrap();
+        subgraphs
+            .add(ValidFederationSubgraph {
+                name: "interface_object_2".to_string(),
+                url: "".to_string(),
+                schema: ValidFederationSchema::new(
+                    Schema::parse_and_validate(two_sdl, "./interface_object_2.graphql").unwrap(),
+                )
+                .unwrap(),
+            })
+            .unwrap();
+        subgraphs
+            .add(ValidFederationSubgraph {
+                name: "interface_object_3".to_string(),
+                url: "".to_string(),
+                schema: ValidFederationSchema::new(
+                    Schema::parse_and_validate(three_sdl, "./interface_object_3.graphql").unwrap(),
                 )
                 .unwrap(),
             })

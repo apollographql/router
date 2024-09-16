@@ -1,4 +1,4 @@
-# rover supergraph compose --config apollo-federation/src/sources/connect/expand/tests/schemas/directives.yaml > apollo-federation/src/sources/connect/expand/tests/schemas/directives.graphql
+# rover supergraph compose --config apollo-federation/src/sources/connect/expand/tests/schemas/ignore/directives.yaml > apollo-federation/src/sources/connect/expand/tests/schemas/ignore/directives.graphql
 federation_version: =2.8.1
 subgraphs:
   one:
@@ -12,24 +12,39 @@ subgraphs:
               "@composeDirective"
             ]
           )
-          @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom"])
-          @composeDirective(name: "@custom")
-        directive @custom on OBJECT | FIELD_DEFINITION
+          @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom1", "@custom2", "@custom3"])
+          @composeDirective(name: "@custom1")
+          @composeDirective(name: "@custom2")
+          @composeDirective(name: "@custom3")
+        directive @custom1 on OBJECT | FIELD_DEFINITION
+        directive @custom2 on OBJECT | FIELD_DEFINITION
+        directive @custom3 on OBJECT | FIELD_DEFINITION
         type Query {
           tagged: String @tag(name: "tag")
           hidden: String @inaccessible
-          custom: String @custom
+          custom: T @custom1
           authenticated: String @authenticated
           requiresScopes: String @requiresScopes(scopes: ["scope"])
           policy: String @policy(policies: [["admin"]])
           overridden: String @override(from: "two", label: "label")
+        }
+
+        type T @custom2 {
+          field: String @custom3
         }
   two:
     routing_url: none
     schema:
       sdl: |
         extend schema
-          @link(url: "https://specs.apollo.dev/federation/v2.8")
+          @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@composeDirective"])
+          @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom1", "@custom2", "@custom3"])
+          @composeDirective(name: "@custom1")
+
+        directive @custom1 on OBJECT | FIELD_DEFINITION
+        directive @custom2 on OBJECT | FIELD_DEFINITION
+        directive @custom3 on OBJECT | FIELD_DEFINITION
         type Query {
           overridden: String
+          customAgain: String @custom1
         }

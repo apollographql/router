@@ -600,6 +600,11 @@ mod helpers {
                         ))
                     }
                 }?;
+            } else {
+                // TODO: if the type has @interfaceObject and it doesn't have a key at this point
+                // we'll need to add a key — this is a requirement for using @interfaceObject.
+                // most likely we'll just copy over keys from the original supergraph, but we
+                // need to think through the implications of that.
             }
 
             Ok(())
