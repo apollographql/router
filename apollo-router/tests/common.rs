@@ -87,6 +87,7 @@ pub struct IntegrationTest {
     _subgraph_overrides: HashMap<String, String>,
     bind_address: Arc<Mutex<Option<SocketAddr>>>,
     redis_namespace: String,
+    log: String,
 }
 
 impl IntegrationTest {
@@ -102,6 +103,7 @@ struct TracedResponder {
     response_template: ResponseTemplate,
     telemetry: Telemetry,
     subscriber_subgraph: Dispatch,
+    subgraph_callback: Option<Box<dyn Fn() + Send + Sync>>,
 }
 
 impl Respond for TracedResponder {
@@ -111,6 +113,9 @@ impl Respond for TracedResponder {
             let _context_guard = context.attach();
             let span = info_span!("subgraph server");
             let _span_guard = span.enter();
+            if let Some(callback) = &self.subgraph_callback {
+                callback();
+            }
             self.response_template.clone()
         })
     }
@@ -278,6 +283,8 @@ impl IntegrationTest {
         collect_stdio: Option<tokio::sync::oneshot::Sender<String>>,
         supergraph: Option<PathBuf>,
         mut subgraph_overrides: HashMap<String, String>,
+        log: Option<String>,
+        subgraph_callback: Option<Box<dyn Fn() + Send + Sync>>,
     ) -> Self {
         let redis_namespace = Uuid::new_v4().to_string();
         let telemetry = telemetry.unwrap_or_default();
@@ -311,6 +318,7 @@ impl IntegrationTest {
                 ResponseTemplate::new(200).set_body_json(json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}))),
                 telemetry: telemetry.clone(),
                 subscriber_subgraph: Self::dispatch(&tracer_provider_subgraph),
+                subgraph_callback
             })
             .mount(&subgraphs)
             .await;
@@ -346,6 +354,7 @@ impl IntegrationTest {
             _tracer_provider_subgraph: tracer_provider_subgraph,
             telemetry,
             redis_namespace,
+            log: log.unwrap_or_else(|| "error,apollo_router=info".to_owned()),
         }
     }
 
@@ -380,15 +389,15 @@ impl IntegrationTest {
         }
 
         router
-            .args([
+            .args(dbg!([
                 "--hr",
                 "--config",
                 &self.test_config_location.to_string_lossy(),
                 "--supergraph",
                 &self.test_schema_location.to_string_lossy(),
                 "--log",
-                "error,apollo_router=info",
-            ])
+                &self.log,
+            ]))
             .stdout(Stdio::piped());
 
         let mut router = router.spawn().expect("router should start");
