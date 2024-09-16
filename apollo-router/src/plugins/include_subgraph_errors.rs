@@ -104,7 +104,7 @@ mod test {
     use crate::Configuration;
 
     static UNREDACTED_PRODUCT_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
-        Bytes::from_static(r#"{"data":{"topProducts":null},"errors":[{"message":"couldn't find mock for query {\"query\":\"query ErrorTopProducts__products__0($first:Int){topProducts(first:$first){__typename upc name}}\",\"operationName\":\"ErrorTopProducts__products__0\",\"variables\":{\"first\":2}}","path":[],"extensions":{"test":"value","code":"FETCH_ERROR"}}]}"#.as_bytes())
+        Bytes::from_static(r#"{"data":{"topProducts":null},"errors":[{"message":"couldn't find mock for query {\"query\":\"query($first: Int) { topProducts(first: $first) { __typename upc } }\",\"variables\":{\"first\":2}}","path":[],"extensions":{"test":"value","code":"FETCH_ERROR"}}]}"#.as_bytes())
     });
 
     static REDACTED_PRODUCT_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
@@ -127,7 +127,7 @@ mod test {
 
     static VALID_QUERY: &str = r#"query TopProducts($first: Int) { topProducts(first: $first) { upc name reviews { id product { name } author { id name } } } }"#;
 
-    static ERROR_PRODUCT_QUERY: &str = r#"query ErrorTopProducts($first: Int) { topProducts(first: $first) { upc name reviews { id product { name } author { id name } } } }"#;
+    static ERROR_PRODUCT_QUERY: &str = r#"query ErrorTopProducts($first: Int) { topProducts(first: $first) { upc reviews { id product { name } author { id name } } } }"#;
 
     static ERROR_ACCOUNT_QUERY: &str = r#"query Query { me { name }}"#;
 

@@ -361,12 +361,23 @@ mod tests {
             "{}\n{}",
             r#"
         schema
-            @core(feature: "https://specs.apollo.dev/core/v0.1")
-            @core(feature: "https://specs.apollo.dev/join/v0.1") {
+            @link(url: "https://specs.apollo.dev/link/v1.0")
+            @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+        {
             query: Query
         }
-        directive @core(feature: String!) repeatable on SCHEMA
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+        directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
         directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+        scalar link__Import
+        scalar join__FieldSet
+
+        enum link__Purpose {
+          SECURITY
+          EXECUTION
+        }
+
         enum join__Graph {
             TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
         }
@@ -457,27 +468,7 @@ mod tests {
 
     #[test]
     fn routing_urls() {
-        let schema = r#"
-        schema
-          @core(feature: "https://specs.apollo.dev/core/v0.1"),
-          @core(feature: "https://specs.apollo.dev/join/v0.1")
-        {
-          query: Query
-        }
-        type Query {
-          me: String
-        }
-        directive @core(feature: String!) repeatable on SCHEMA
-        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-
-        enum join__Graph {
-            ACCOUNTS @join__graph(name:"accounts" url: "http://localhost:4001/graphql")
-            INVENTORY
-              @join__graph(name: "inventory", url: "http://localhost:4004/graphql")
-            PRODUCTS
-            @join__graph(name: "products" url: "http://localhost:4003/graphql")
-            REVIEWS @join__graph(name: "reviews" url: "http://localhost:4002/graphql")
-        }"#;
+        let schema = include_str!("../testdata/minimal_local_inventory_supergraph.graphql");
         let schema = Schema::parse(schema, &Default::default()).unwrap();
 
         assert_eq!(schema.subgraphs.len(), 4);
@@ -497,7 +488,7 @@ mod tests {
                 .get("inventory")
                 .map(|s| s.to_string())
                 .as_deref(),
-            Some("http://localhost:4004/graphql"),
+            Some("http://localhost:4002/graphql"),
             "Incorrect url for inventory"
         );
 
@@ -517,7 +508,7 @@ mod tests {
                 .get("reviews")
                 .map(|s| s.to_string())
                 .as_deref(),
-            Some("http://localhost:4002/graphql"),
+            Some("http://localhost:4004/graphql"),
             "Incorrect url for reviews"
         );
 
@@ -543,7 +534,7 @@ mod tests {
     fn federation_version() {
         // @core directive
         let schema = Schema::parse(
-            include_str!("../testdata/minimal_supergraph.graphql"),
+            include_str!("../testdata/minimal_fed1_supergraph.graphql"),
             &Default::default(),
         )
         .unwrap();
@@ -551,7 +542,7 @@ mod tests {
 
         // @link directive
         let schema = Schema::parse(
-            include_str!("../testdata/minimal_fed2_supergraph.graphql"),
+            include_str!("../testdata/minimal_supergraph.graphql"),
             &Default::default(),
         )
         .unwrap();
@@ -567,7 +558,7 @@ mod tests {
 
             assert_eq!(
                 Schema::schema_id(&schema.raw_sdl),
-                "8e2021d131b23684671c3b85f82dfca836908c6a541bbd5c3772c66e7f8429d8".to_string()
+                "23bcf0ea13a4e0429c942bba59573ba70b8d6970d73ad00c5230d08788bb1ba2".to_string()
             );
         }
     }

@@ -9,6 +9,7 @@ use tower::BoxError;
 use super::instruments::CustomCounter;
 use super::instruments::CustomInstruments;
 use crate::graphql::ResponseVisitor;
+use crate::json_ext::Object;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes;
@@ -136,7 +137,13 @@ impl Instrumented for GraphQLInstruments {
                     ctx,
                     instruments: self,
                 }
-                .visit(&executable_document, response);
+                .visit(
+                    &executable_document,
+                    response,
+                    &ctx.get_demand_control_context()
+                        .map(|c| c.variables)
+                        .unwrap_or_default(),
+                );
             }
         }
     }
@@ -161,6 +168,7 @@ impl<'a> ResponseVisitor for GraphQLInstrumentsVisitor<'a> {
     fn visit_field(
         &mut self,
         request: &ExecutableDocument,
+        variables: &Object,
         ty: &NamedType,
         field: &Field,
         value: &Value,
@@ -171,11 +179,17 @@ impl<'a> ResponseVisitor for GraphQLInstrumentsVisitor<'a> {
         match value {
             Value::Array(items) => {
                 for item in items {
-                    self.visit_list_item(request, field.ty().inner_named_type(), field, item);
+                    self.visit_list_item(
+                        request,
+                        variables,
+                        field.ty().inner_named_type(),
+                        field,
+                        item,
+                    );
                 }
             }
             Value::Object(children) => {
-                self.visit_selections(request, &field.selection_set, children);
+                self.visit_selections(request, variables, &field.selection_set, children);
             }
             _ => {}
         }

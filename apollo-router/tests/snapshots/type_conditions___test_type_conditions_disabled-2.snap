@@ -72,14 +72,14 @@ expression: response
               "kind": "Fetch",
               "serviceName": "searchSubgraph",
               "variableUsages": [],
-              "operation": "query Search__searchSubgraph__0{search{__typename ...on MovieResult{sections{__typename ...on EntityCollectionSection{__typename id}...on GallerySection{__typename id}}id}...on ArticleResult{id sections{__typename ...on GallerySection{__typename id}...on EntityCollectionSection{__typename id}}}}}",
+              "operation": "query Search__searchSubgraph__0 { search { __typename ... on MovieResult { sections { __typename ... on EntityCollectionSection { __typename id } ... on GallerySection { __typename id } } id } ... on ArticleResult { id sections { __typename ... on GallerySection { __typename id } ... on EntityCollectionSection { __typename id } } } } }",
               "operationName": "Search__searchSubgraph__0",
               "operationKind": "query",
               "id": null,
               "inputRewrites": null,
               "outputRewrites": null,
               "contextRewrites": null,
-              "schemaAwareHash": "5201830580c9c5fadd9c59aea072878f84465c1ae9d905207fa281aa7c1d5340",
+              "schemaAwareHash": "587c887350ef75eaf4b647be94fd682616bcd33909e15fb797cee226e95fa36a",
               "authorization": {
                 "is_authenticated": false,
                 "scopes": [],
@@ -130,14 +130,14 @@ expression: response
                 "variableUsages": [
                   "movieResultParam"
                 ],
-                "operation": "query Search__artworkSubgraph__1($representations:[_Any!]!$movieResultParam:String){_entities(representations:$representations){...on EntityCollectionSection{title artwork(params:$movieResultParam)}...on GallerySection{artwork(params:$movieResultParam)}}}",
+                "operation": "query Search__artworkSubgraph__1($representations: [_Any!]!, $movieResultParam: String) { _entities(representations: $representations) { ... on EntityCollectionSection { title artwork(params: $movieResultParam) } ... on GallerySection { artwork(params: $movieResultParam) } } }",
                 "operationName": "Search__artworkSubgraph__1",
                 "operationKind": "query",
                 "id": null,
                 "inputRewrites": null,
                 "outputRewrites": null,
                 "contextRewrites": null,
-                "schemaAwareHash": "62ff891f6971184d3e42b98f8166be72027b5479f9ec098af460a48ea6f6cbf4",
+                "schemaAwareHash": "622eb49d4e52ff2636348e103f941d04b783fec97de59d0ae6635d9272f97ad8",
                 "authorization": {
                   "is_authenticated": false,
                   "scopes": [],
