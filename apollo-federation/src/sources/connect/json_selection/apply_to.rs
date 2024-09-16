@@ -326,7 +326,7 @@ impl ApplyToInternal for WithRange<PathList> {
                     None
                 }
             }
-            PathList::Expr(expr, tail) => {
+            PathList::Expr(_mode, expr, tail) => {
                 let value = expr.apply_to_path(data, vars, input_path, errors);
                 if let Some(value) = value {
                     tail.apply_to_path(&value, vars, input_path, errors)
@@ -1563,12 +1563,21 @@ mod tests {
             selection!(
                 r#"
                 $({
-                    string: $("string")->slice(1, 4),
-                    array: $([1, 2, 3])->map(@->add(10)),
-                    object: $({ "key": "value" })->get("key"),
-                    path: nested.path->slice($("nested ")->size),
-                    needlessParens: $("oyez"),
+                    string: ("string")->slice(1, 4),
+                    array: ([1, 2, 3])->map(@->add(10)),
+                    object: ({ "key": "value" })->get("key"),
+                    path: nested.path->slice(("nested ")->size),
+                    needlessParens: ("oyez"),
                     withoutParens: "oyez",
+
+                    # If a nested SubSelection appears within a LitExpr, the
+                    # PathParsingMode switches back to Normal, requiring the
+                    # $(...) wrapper instead of just (...).
+                    nestedDollarSubSelection: $ { expr: $(1234) },
+
+                    # Once we're back inside the $(...) wrapper, we can/must
+                    # use just (...) again, if we need to wrap a literal.
+                    nestedAtSubSelection: @ { expr: $((5678)->add(1111)) },
                 })
             "#
             )
@@ -1585,6 +1594,12 @@ mod tests {
                     "path": "path value",
                     "needlessParens": "oyez",
                     "withoutParens": "oyez",
+                    "nestedDollarSubSelection": {
+                        "expr": 1234,
+                    },
+                    "nestedAtSubSelection": {
+                        "expr": 6789,
+                    },
                 })),
                 vec![],
             ),
@@ -1596,7 +1611,7 @@ mod tests {
                 string: $("string")->slice(1, 4)
                 array: $([1, 2, 3])->map(@->add(10))
                 object: $({ "key": "value" })->get("key")
-                path: nested.path->slice($("nested ")->size)
+                path: nested.path->slice(("nested ")->size)
             "#
             )
             .apply_to(&json!({

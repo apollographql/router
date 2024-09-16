@@ -278,7 +278,15 @@ impl Ranged<PathSelection> for PathSelection {
 
 impl PathSelection {
     pub fn parse(input: Span) -> IResult<Span, Self> {
-        PathList::parse(input).map(|(input, path)| (input, Self { path }))
+        Self::parse_as(input, PathParsingMode::Normal)
+    }
+
+    pub fn parse_as_lit_expr(input: Span) -> IResult<Span, Self> {
+        Self::parse_as(input, PathParsingMode::LitExpr)
+    }
+
+    pub(super) fn parse_as(input: Span, mode: PathParsingMode) -> IResult<Span, Self> {
+        PathList::parse_as(input, mode).map(|(input, path)| (input, Self { path }))
     }
 
     pub(crate) fn var_name_and_nested_keys(&self) -> Option<(&KnownVariable, Vec<&str>)> {
@@ -351,9 +359,18 @@ pub(super) enum PathList {
     // middle/tail of a PathList.
     Key(WithRange<Key>, WithRange<PathList>),
 
-    // An ExprPath, which begins with a LitExpr enclosed in parentheses. Must
-    // appear only at the beginning of a PathSelection, like PathList::Var.
-    Expr(WithRange<LitExpr>, WithRange<PathList>),
+    // An ExprPath, which begins with a LitExpr enclosed in $(...). Must appear
+    // only at the beginning of a PathSelection, like PathList::Var.
+    Expr(
+        // The PathParsingMode determines whether the LitExpr needs to be
+        // wrapped with $(...) or (...): PathParsingMode::Normal requires
+        // $(...), whereas PathParsingMode::LitExpr requires (...) (without the
+        // $) if you want to apply a .key or ->method to the literal (otherwise
+        // the parens are optional).
+        PathParsingMode,
+        WithRange<LitExpr>,
+        WithRange<PathList>,
+    ),
 
     // A PathList::Method is a PathStep item that may appear only in the
     // middle/tail (not the beginning) of a PathSelection.
@@ -369,9 +386,27 @@ pub(super) enum PathList {
     Empty,
 }
 
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub(super) enum PathParsingMode {
+    // In Normal mode (when not already parsing a larger LitExpr), LitExpr
+    // values must be enclosed in $(...). In other words, $(...) is the syntax
+    // for switching into LitExpr parsing mode when you're not already in it.
+    Normal,
+
+    // In LitExpr mode, since we're already parsing an expression, LitExpr
+    // values may be enclosed in (...) (without the $) if you need to apply a
+    // .key or ->method to them (otherwise the parens are optional). Note that
+    // the mode resets to Normal inside any SubSelection block.
+    LitExpr,
+}
+
 impl PathList {
     pub fn parse(input: Span) -> IResult<Span, WithRange<Self>> {
-        match Self::parse_with_depth(input, 0) {
+        Self::parse_as(input, PathParsingMode::Normal)
+    }
+
+    pub(super) fn parse_as(input: Span, mode: PathParsingMode) -> IResult<Span, WithRange<Self>> {
+        match Self::parse_with_depth(input, mode, 0) {
             Ok((remainder, parsed)) if matches!(*parsed, Self::Empty) => Err(nom::Err::Error(
                 nom::error::Error::new(remainder, nom::error::ErrorKind::IsNot),
             )),
@@ -383,7 +418,11 @@ impl PathList {
         WithRange::new(self, None)
     }
 
-    fn parse_with_depth(input: Span, depth: usize) -> IResult<Span, WithRange<Self>> {
+    fn parse_with_depth(
+        input: Span,
+        mode: PathParsingMode,
+        depth: usize,
+    ) -> IResult<Span, WithRange<Self>> {
         // If the input is empty (i.e. this method will end up returning
         // PathList::Empty), we want the OffsetRange to be an empty range at the
         // end of the previously parsed PathList elements, not separated from
@@ -404,20 +443,25 @@ impl PathList {
             // case needs to come before the $ (and $var) case, because $( looks
             // like the $ variable followed by a parse error in the variable
             // case, unless we add some complicated lookahead logic there.
-            if let Ok((suffix, (_, dollar_open_paren, expr, close_paren, _))) = tuple((
+            if let Ok((suffix, (_, opener, expr, close_paren, _))) = tuple((
                 spaces_or_comments,
-                ranged_span("$("),
+                match mode {
+                    // No spaces or comments are allowed between the $ and the (
+                    // in PathParsingMode::Normal mode.
+                    PathParsingMode::Normal => ranged_span("$("),
+                    PathParsingMode::LitExpr => ranged_span("("),
+                },
                 LitExpr::parse,
                 spaces_or_comments,
                 ranged_span(")"),
             ))(input)
             {
-                let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
-                let expr_range = merge_ranges(dollar_open_paren.range(), close_paren.range());
+                let (remainder, rest) = Self::parse_with_depth(suffix, mode, depth + 1)?;
+                let expr_range = merge_ranges(opener.range(), close_paren.range());
                 let full_range = merge_ranges(expr_range, rest.range());
                 return Ok((
                     remainder,
-                    WithRange::new(Self::Expr(expr, rest), full_range),
+                    WithRange::new(Self::Expr(mode, expr, rest), full_range),
                 ));
             }
 
@@ -425,7 +469,7 @@ impl PathList {
                 tuple((ranged_span("$"), opt(parse_identifier_no_space)))(input)
             {
                 let dollar_range = dollar.range();
-                let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
+                let (remainder, rest) = Self::parse_with_depth(suffix, mode, depth + 1)?;
                 let full_range = merge_ranges(dollar_range.clone(), rest.range());
                 return if let Some(var) = opt_var {
                     let full_name = format!("{}{}", dollar.as_ref(), var.as_str());
@@ -455,7 +499,7 @@ impl PathList {
             }
 
             if let Ok((suffix, at)) = ranged_span("@")(input) {
-                let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
+                let (remainder, rest) = Self::parse_with_depth(suffix, mode, depth + 1)?;
                 let full_range = merge_ranges(at.range(), rest.range());
                 return Ok((
                     remainder,
@@ -467,7 +511,7 @@ impl PathList {
             }
 
             if let Ok((suffix, key)) = Key::parse(input) {
-                let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
+                let (remainder, rest) = Self::parse_with_depth(suffix, mode, depth + 1)?;
                 return match rest.as_ref() {
                     Self::Empty | Self::Selection(_) => Err(nom::Err::Error(
                         nom::error::Error::new(remainder, nom::error::ErrorKind::IsNot),
@@ -483,10 +527,14 @@ impl PathList {
         // The .key case is applicable at any depth. If it comes first in the
         // path selection, $.key is implied, but the distinction is preserved
         // (using Self::Path rather than Self::Var) for accurate reprintability.
+        //
+        // TODO We could make the leading . optional for single-key paths when
+        // mode == PathParsingMode::LitExpr, since there is no ambiguity with
+        // field selections in that context.
         if let Ok((suffix, (dot, _, key))) =
             tuple((ranged_span("."), spaces_or_comments, Key::parse))(input)
         {
-            let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
+            let (remainder, rest) = Self::parse_with_depth(suffix, mode, depth + 1)?;
             let dot_key_range = merge_ranges(dot.range(), key.range());
             let full_range = merge_ranges(dot_key_range, rest.range());
             return Ok((remainder, WithRange::new(Self::Key(key, rest), full_range)));
@@ -510,7 +558,7 @@ impl PathList {
             opt(MethodArgs::parse),
         ))(input)
         {
-            let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
+            let (remainder, rest) = Self::parse_with_depth(suffix, mode, depth + 1)?;
             let full_range = merge_ranges(arrow.range(), rest.range());
             return Ok((
                 remainder,
@@ -566,7 +614,7 @@ impl PathList {
         match self {
             Self::Var(_, tail) => tail.next_subselection(),
             Self::Key(_, tail) => tail.next_subselection(),
-            Self::Expr(_, tail) => tail.next_subselection(),
+            Self::Expr(_, _, tail) => tail.next_subselection(),
             Self::Method(_, _, tail) => tail.next_subselection(),
             Self::Selection(sub) => Some(sub),
             Self::Empty => None,
@@ -578,7 +626,7 @@ impl PathList {
         match self {
             Self::Var(_, tail) => tail.next_mut_subselection(),
             Self::Key(_, tail) => tail.next_mut_subselection(),
-            Self::Expr(_, tail) => tail.next_mut_subselection(),
+            Self::Expr(_, _, tail) => tail.next_mut_subselection(),
             Self::Method(_, _, tail) => tail.next_mut_subselection(),
             Self::Selection(sub) => Some(sub),
             Self::Empty => None,
@@ -599,7 +647,7 @@ impl ExternalVarPaths for PathList {
             PathList::Var(_, rest) | PathList::Key(_, rest) => {
                 paths.extend(rest.external_var_paths());
             }
-            PathList::Expr(expr, rest) => {
+            PathList::Expr(_mode, expr, rest) => {
                 paths.extend(expr.external_var_paths());
                 paths.extend(rest.external_var_paths());
             }
@@ -2102,6 +2150,7 @@ mod tests {
                 input,
                 PathSelection {
                     path: PathList::Expr(
+                        PathParsingMode::Normal,
                         expected.into_with_range(),
                         PathList::Empty.into_with_range(),
                     )
@@ -2169,7 +2218,7 @@ mod tests {
         assert_debug_snapshot!(
             // Using extra spaces here to make sure the ranges don't
             // accidentally include leading/trailing spaces.
-            selection!(" suffix : results -> slice ( $( - 1 ) -> mul ( $args . suffixLength ) ) ")
+            selection!(" suffix : results -> slice ( ( - 1 ) -> mul ( $args . suffixLength ) ) ")
         );
     }
 

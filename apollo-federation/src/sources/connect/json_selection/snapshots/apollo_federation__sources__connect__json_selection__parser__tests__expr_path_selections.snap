@@ -1,6 +1,6 @@
 ---
 source: apollo-federation/src/sources/connect/json_selection/parser.rs
-expression: "selection!(\" suffix : results -> slice ( $( - 1 ) -> mul ( $args . suffixLength ) ) \")"
+expression: "selection!(\" suffix : results -> slice ( ( - 1 ) -> mul ( $args . suffixLength ) ) \")"
 ---
 Named(
     SubSelection {
@@ -46,12 +46,13 @@ Named(
                                                         PathSelection {
                                                             path: WithRange {
                                                                 node: Expr(
+                                                                    LitExpr,
                                                                     WithRange {
                                                                         node: Number(
                                                                             Number(-1),
                                                                         ),
                                                                         range: Some(
-                                                                            32..35,
+                                                                            31..34,
                                                                         ),
                                                                     },
                                                                     WithRange {
@@ -59,7 +60,7 @@ Named(
                                                                             WithRange {
                                                                                 node: "mul",
                                                                                 range: Some(
-                                                                                    41..44,
+                                                                                    40..43,
                                                                                 ),
                                                                             },
                                                                             Some(
@@ -73,7 +74,7 @@ Named(
                                                                                                             WithRange {
                                                                                                                 node: $args,
                                                                                                                 range: Some(
-                                                                                                                    47..52,
+                                                                                                                    46..51,
                                                                                                                 ),
                                                                                                             },
                                                                                                             WithRange {
@@ -83,79 +84,79 @@ Named(
                                                                                                                             "suffixLength",
                                                                                                                         ),
                                                                                                                         range: Some(
-                                                                                                                            55..67,
+                                                                                                                            54..66,
                                                                                                                         ),
                                                                                                                     },
                                                                                                                     WithRange {
                                                                                                                         node: Empty,
                                                                                                                         range: Some(
-                                                                                                                            67..67,
+                                                                                                                            66..66,
                                                                                                                         ),
                                                                                                                     },
                                                                                                                 ),
                                                                                                                 range: Some(
-                                                                                                                    53..67,
+                                                                                                                    52..66,
                                                                                                                 ),
                                                                                                             },
                                                                                                         ),
                                                                                                         range: Some(
-                                                                                                            47..67,
+                                                                                                            46..66,
                                                                                                         ),
                                                                                                     },
                                                                                                 },
                                                                                             ),
                                                                                             range: Some(
-                                                                                                47..67,
+                                                                                                46..66,
                                                                                             ),
                                                                                         },
                                                                                     ],
                                                                                     range: Some(
-                                                                                        45..69,
+                                                                                        44..68,
                                                                                     ),
                                                                                 },
                                                                             ),
                                                                             WithRange {
                                                                                 node: Empty,
                                                                                 range: Some(
-                                                                                    69..69,
+                                                                                    68..68,
                                                                                 ),
                                                                             },
                                                                         ),
                                                                         range: Some(
-                                                                            38..69,
+                                                                            37..68,
                                                                         ),
                                                                     },
                                                                 ),
                                                                 range: Some(
-                                                                    29..69,
+                                                                    29..68,
                                                                 ),
                                                             },
                                                         },
                                                     ),
                                                     range: Some(
-                                                        29..69,
+                                                        29..68,
                                                     ),
                                                 },
                                             ],
                                             range: Some(
-                                                27..71,
+                                                27..70,
                                             ),
                                         },
                                     ),
                                     WithRange {
                                         node: Empty,
                                         range: Some(
-                                            71..71,
+                                            70..70,
                                         ),
                                     },
                                 ),
                                 range: Some(
-                                    18..71,
+                                    18..70,
                                 ),
                             },
                         ),
                         range: Some(
-                            10..71,
+                            10..70,
                         ),
                     },
                 },
@@ -163,7 +164,7 @@ Named(
         ],
         star: None,
         range: Some(
-            1..71,
+            1..70,
         ),
     },
 )

@@ -8,6 +8,7 @@
 use itertools::Itertools;
 
 use super::lit_expr::LitExpr;
+use super::PathParsingMode;
 use crate::sources::connect::json_selection::JSONSelection;
 use crate::sources::connect::json_selection::MethodArgs;
 use crate::sources::connect::json_selection::NamedSelection;
@@ -131,9 +132,13 @@ impl PrettyPrintable for PathList {
                 result.push_str(key.dotted().as_str());
                 result.push_str(rest.as_str());
             }
-            Self::Expr(expr, tail) => {
+            Self::Expr(mode, expr, tail) => {
                 let rest = tail.pretty_print_with_indentation(true, indentation);
-                result.push_str("$(");
+                result.push_str(match mode {
+                    PathParsingMode::Normal => "$(",
+                    // When we're already inside a LitExpr, the $( is not needed.
+                    PathParsingMode::LitExpr => "(",
+                });
                 result.push_str(
                     expr.pretty_print_with_indentation(true, indentation)
                         .as_str(),
@@ -426,11 +431,11 @@ mod tests {
             "a.b.c.d.e",
             "one.two.three {\n  a\n  b\n}",
             ".single {\n  x\n}",
-            "results->slice($(-1)->mul($args.suffixLength))",
-            "$(1234)->add($(5678)->mul(2))",
-            "$(true)->and($(false)->not)",
+            "results->slice((-1)->mul($args.suffixLength))",
+            "$(1234)->add((5678)->mul(2))",
+            "$(true)->and((false)->not)",
             "$(12345678987654321)->div(111111111)->eq(111111111)",
-            "$(\"Product\")->slice(0, $(4)->mul(-1))->eq(\"Pro\")",
+            "$(\"Product\")->slice(0, (4)->mul(-1))->eq(\"Pro\")",
             "$($args.unnecessary.parens)->eq(42)",
         ];
         for path in paths {

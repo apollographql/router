@@ -60,7 +60,7 @@ impl LitExpr {
                 }),
                 Self::parse_object,
                 Self::parse_array,
-                map(PathSelection::parse, |p| {
+                map(PathSelection::parse_as_lit_expr, |p| {
                     let range = p.range();
                     WithRange::new(Self::Path(p), range)
                 }),

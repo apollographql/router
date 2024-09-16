@@ -90,15 +90,17 @@ NamedFieldSelection  ::= Alias? Key SubSelection?
 NamedGroupSelection  ::= Alias SubSelection
 Alias                ::= Key ":"
 PathSelection        ::= (VarPath | KeyPath | AtPath | ExprPath) SubSelection?
+PathSelectionInExpr  ::= (VarPath | KeyPath | AtPath | ExprPathInExpr) SubSelection?
 VarPath              ::= "$" (NO_SPACE Identifier)? PathStep*
 KeyPath              ::= Key PathStep+
 AtPath               ::= "@" PathStep*
 ExprPath             ::= "$(" LitExpr ")" PathStep*
+ExprPathInExpr       ::= "(" LitExpr ")" PathStep*
 PathStep             ::= "." Key | "->" Identifier MethodArgs?
 Key                  ::= Identifier | LitString
 Identifier           ::= [a-zA-Z_] NO_SPACE [0-9a-zA-Z_]*
 MethodArgs           ::= "(" (LitExpr ("," LitExpr)* ","?)? ")"
-LitExpr              ::= LitPrimitive | LitObject | LitArray | PathSelection
+LitExpr              ::= LitPrimitive | LitObject | LitArray | PathSelectionInExpr
 LitPrimitive         ::= LitString | LitNumber | "true" | "false" | "null"
 LitString            ::= "'" ("\\'" | [^'])* "'" | '"' ('\\"' | [^"])* '"'
 LitNumber            ::= "-"? ([0-9]+ ("." [0-9]*)? | "." [0-9]+)
@@ -430,6 +432,14 @@ type Query {
 }
 ```
 
+### `PathSelectionInExpr ::=`
+
+![PathSelectionInExpr](./grammar/PathSelectionInExpr.svg)
+
+`PathSelectionInExpr` is a `PathSelection` that appears within a `LitExpr`, and
+is identical to a `PathSelection` except that it uses `ExprPathInExpr` rather
+than `ExprPath`.
+
 ### `VarPath ::=`
 
 ![VarPath](./grammar/VarPath.svg)
@@ -666,6 +676,28 @@ forcing `LitExpr` parsing, much like the new `ExprPath` syntax.
 When you don't need to apply a `.key` or `->method` to a literal value within a
 `LitExpr`, you do not need to wrap it with `$(...)`, so the `ExprPath` syntax is
 relatively uncommon within `LitExpr` expressions.
+
+### `ExprPathInExpr ::=`
+
+![ExprPathInExpr](./grammar/ExprPathInExpr.svg)
+
+The `ExprPathInExpr` rule is a variant of `ExprPath` that applies when the
+expression path appears within a larger `LitExpr`.
+
+The crucial difference is that `ExprPath` requires its expression to be enclosed
+in `$(...)`, whereas `ExprPathInExpr` requires only `(...)`. In other words,
+`$(...)` is the syntax for entering `LitExpr` parsing mode, but once you're
+already parsing a `LitExpr`, you only need parentheses, without the `$`.
+
+Although you typically do not need `ExprPath` within a `LitExpr`, since nested
+literal subexpressions may be written without parentheses, the `(...)` syntax
+can be useful when you want to apply nested `.key` or `->method` to the literal
+value (relatively uncommon):
+
+```graphql
+# Here (-1) needs to be parenthesized to apply the ->mul method
+suffix: results.slice((-1)->mul($args.suffixLength))
+```
 
 ### `PathStep ::=`
 
