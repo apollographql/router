@@ -446,7 +446,12 @@ impl TestExecution {
             f
         })?;
         let graphql_response: Value = serde_json::from_slice(&body).map_err(|e| {
-            writeln!(out, "could not deserialize graphql response data: {e}").unwrap();
+            writeln!(
+                out,
+                "could not deserialize graphql response data: {e}\nfrom:\n{}",
+                std::str::from_utf8(&body).unwrap()
+            )
+            .unwrap();
             let f: Failed = out.clone().into();
             f
         })?;

@@ -1,0 +1,53 @@
+{
+    "actions": [
+        {
+            "type": "Start",
+            "schema_path": "./supergraph.graphql",
+            "configuration_path": "./configuration.yaml",
+            "subgraphs": {
+                "accounts": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "{me{name}}"
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "me": {
+                                            "name": "test"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                },
+                "reviews": {
+                    "requests": []
+                }
+            }
+        },
+        {
+            "type": "Request",
+            "headers": {
+                "Accept": "multipart/mixed;deferSpec=20220824"
+            },
+            "request": {
+                "query": "{ me { name ... @defer { reviews { body } } } }"
+            },
+            "expected_response": {
+                "data": {
+                    "me": {
+                        "name": "Ada Lovelace"
+                    }
+                }
+            }
+        },
+        {
+            "type": "Stop"
+        }
+    ]
+}

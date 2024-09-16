@@ -582,7 +582,6 @@ impl IntegrationTest {
 
                 let mut request = builder.json(&query).build().unwrap();
                 telemetry.inject_context(&mut request);
-                request.headers_mut().remove(ACCEPT);
                 match client.execute(request).await {
                     Ok(response) => (span_id, response),
                     Err(err) => {
