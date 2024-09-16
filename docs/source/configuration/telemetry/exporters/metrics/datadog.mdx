@@ -8,12 +8,46 @@ Enable and configure the [OTLP exporter](./otlp) for metrics in the GraphOS Rout
 
 For general tracing configuration, refer to [Router Metrics Configuration](./overview).
 
-## Datadog configuration
+## Configuration 
 
-To export metrics to Datadog, you must both: 
+To export metrics to Datadog, you must configure both the router to send traces to the Datadog agent and the Datadog agent to accept OpenTelemetry Protocol (OTLP) metrics.
 
-- Configure the Datadog agent to accept OpenTelemetry Protocol (OTLP) metrics, and
-- Configure the router to send traces to the Datadog agent.
+### Router configuration
+
+The router should set attributes that Datadog uses to organize its APM view and other UI:
+
+- `otel.name`: span name that's fixed for Datadog
+- `resource.name`: Datadog resource name that's displayed in traces
+- `operation.name`: Datadog operation name that populates a dropdown menu in the Datadog service page
+
+You should add these attributes to your `router.yaml` configuration file. The example below sets these attributes for the `router`, `supergraph`, and `subgraph` stages of the router's request lifecycle:
+
+```title="router.yaml"
+telemetry:
+  instrumentation:
+    spans:
+      mode: spec_compliant
+      router:
+        attributes:
+          otel.name: router
+          operation.name: "router"
+          resource.name:
+            request_method: true
+
+      supergraph:
+        attributes:
+          otel.name: supergraph
+          operation.name: "supergraph"
+          resource.name:
+            operation_name: string
+
+      subgraph:
+        attributes:
+          otel.name: subgraph
+          operation.name: "subgraph"
+          resource.name:
+            subgraph_operation_name: string
+```
 
 ### Datadog agent configuration
 
