@@ -234,15 +234,15 @@ fn validate_field(
             return errors;
         };
 
-        let http_method = match method::validate(
+        let url_template = match method::validate(
             http_arg,
             ConnectHTTPCoordinate::from(coordinate),
             http_arg_node,
             source_map,
         ) {
             Ok(method) => Some(method),
-            Err(err) => {
-                errors.push(err);
+            Err(errs) => {
+                errors.extend(errs);
                 None
             }
         };
@@ -273,48 +273,28 @@ fn validate_field(
                 &connect_directive.name,
             ));
 
-            if let Some((http_method, url)) = http_method {
-                let coordinate = HttpMethodCoordinate {
-                    connect: coordinate,
-                    http_method,
-                };
-                if let Err(err) = url::validate_template(url, coordinate, source_map).and_then(|template| {
+            if let Some((template, node)) = url_template {
                 if template.base.is_some() {
-                    Err(Message {
-                        code: Code::AbsoluteConnectUrlWithSource,
-                        message: format!(
-                            "{coordinate} contains the absolute URL {url} while also specifying a `{CONNECT_SOURCE_ARGUMENT_NAME}`. Either remove the `{CONNECT_SOURCE_ARGUMENT_NAME}` argument or change the URL to a path.",
-                        ),
-                        locations: url.line_column_range(source_map)
-                            .into_iter()
-                            .collect(),
-                    })
-                } else {
-                    Ok(())
-                }
-            }) {
-                errors.push(err);
+                    errors.push(Message {
+                                code: Code::AbsoluteConnectUrlWithSource,
+                                message: format!(
+                                    "{coordinate} contains the absolute URL {template} while also specifying a `{CONNECT_SOURCE_ARGUMENT_NAME}`. Either remove the `{CONNECT_SOURCE_ARGUMENT_NAME}` argument or change the URL to a path.",
+                                ),
+                                locations: node.line_column_range(source_map)
+                                    .into_iter()
+                                    .collect(),
+                            })
                 }
             }
-        } else if let Some((http_method, url)) = http_method {
-            let coordinate = HttpMethodCoordinate {
-                connect: coordinate,
-                http_method,
-            };
-            if let Err(err) = url::validate_template(url, coordinate, source_map).and_then(|template| {
-                if template.base.is_none() {
-                Err(Message {
+        } else if let Some((template, node)) = url_template {
+            if template.base.is_none() {
+                errors.push(Message {
                         code: Code::RelativeConnectUrlWithoutSource,
                         message: format!(
-                            "{coordinate} specifies the relative URL {url}, but no `{CONNECT_SOURCE_ARGUMENT_NAME}` is defined. Either use an absolute URL including scheme (http://), or add a `@{source_directive_name}`."),
-                        locations: url.line_column_range(source_map).into_iter().collect()
+                            "{coordinate} specifies the relative URL {template}, but no `{CONNECT_SOURCE_ARGUMENT_NAME}` is defined. Either use an absolute URL including scheme (http://), or add a `@{source_directive_name}`."),
+                        locations: node.line_column_range(source_map).into_iter().collect()
                     })
-                } else {
-                    Ok(())
             }
-        }) {
-            errors.push(err);
-        }
         }
 
         errors.extend(

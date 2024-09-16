@@ -356,8 +356,11 @@ fn parse_url<Coordinate: Display + Copy>(
         message: format!("The value {value} for {coordinate} is not a valid URL: {inner}."),
         locations: value.line_column_range(sources).into_iter().collect(),
     })?;
-    http::url::validate_base_url(&url, coordinate, value, sources)?;
-    Ok(url)
+    if let Some(err) = http::url::validate_base_url(&url, coordinate, value, str_value, sources) {
+        Err(err)
+    } else {
+        Ok(url)
+    }
 }
 
 fn require_value_is_str<'a, Coordinate: Display>(

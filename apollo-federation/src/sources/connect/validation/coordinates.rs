@@ -40,7 +40,7 @@ impl Display for ConnectDirectiveCoordinate<'_> {
 
 /// The coordinate of an `HTTP` arg within a connect directive.
 pub(super) struct ConnectHTTPCoordinate<'a> {
-    connect_directive_coordinate: ConnectDirectiveCoordinate<'a>,
+    pub(crate) connect_directive_coordinate: ConnectDirectiveCoordinate<'a>,
 }
 
 impl Display for ConnectHTTPCoordinate<'_> {
