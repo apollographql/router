@@ -28,12 +28,16 @@ use std::ops::Range;
 use apollo_compiler::ast::OperationType;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexSet;
+use apollo_compiler::executable::FieldSet;
 use apollo_compiler::name;
 use apollo_compiler::parser::LineColumn;
+use apollo_compiler::parser::Parser;
 use apollo_compiler::parser::SourceMap;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::ObjectType;
+use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
@@ -43,6 +47,9 @@ use itertools::Itertools;
 use source_name::SourceName;
 use url::Url;
 
+use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
+use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_RESOLVABLE_ARGUMENT_NAME;
 use crate::link::spec::Identity;
 use crate::link::Import;
 use crate::link::Link;
@@ -370,6 +377,42 @@ fn require_value_is_str<'a, Coordinate: Display>(
         message: format!("The value for {coordinate} must be a string."),
         locations: value.line_column_range(sources).into_iter().collect(),
     })
+}
+
+fn resolvable_key_fields<'a>(
+    object: &'a Node<ObjectType>,
+    schema: &'a Schema,
+) -> impl Iterator<Item = FieldSet> + 'a {
+    object
+        .directives
+        .iter()
+        .filter(|directive| directive.name == FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC)
+        .filter(|directive| {
+            directive
+                .arguments
+                .iter()
+                .find(|arg| arg.name == FEDERATION_RESOLVABLE_ARGUMENT_NAME)
+                .and_then(|arg| arg.value.to_bool())
+                .unwrap_or(true)
+        })
+        .filter_map(|directive| {
+            directive
+                .arguments
+                .iter()
+                .find(|arg| arg.name == FEDERATION_FIELDS_ARGUMENT_NAME)
+        })
+        .map(|fields| &*fields.value)
+        .filter_map(|key_fields| key_fields.as_str())
+        .filter_map(|fields| {
+            Parser::new()
+                .parse_field_set(
+                    Valid::assume_valid_ref(schema),
+                    object.name.clone(),
+                    fields.to_string(),
+                    "",
+                )
+                .ok()
+        })
 }
 
 type DirectiveName = Name;

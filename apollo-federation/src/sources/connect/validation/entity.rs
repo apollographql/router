@@ -4,14 +4,12 @@ use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::ast::Value;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
-use apollo_compiler::parser::Parser;
 use apollo_compiler::parser::SourceMap;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::InputObjectType;
 use apollo_compiler::schema::ObjectType;
-use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
@@ -19,11 +17,9 @@ use apollo_compiler::Schema;
 use super::coordinates::connect_directive_entity_argument_coordinate;
 use super::coordinates::field_with_connect_directive_entity_true_coordinate;
 use super::extended_type::ObjectCategory;
+use super::resolvable_key_fields;
 use super::Code;
 use super::Message;
-use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
-use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
-use crate::link::federation_spec_definition::FEDERATION_RESOLVABLE_ARGUMENT_NAME;
 use crate::sources::connect::expand::visitors::FieldVisitor;
 use crate::sources::connect::expand::visitors::GroupVisitor;
 use crate::sources::connect::spec::schema::CONNECT_ENTITY_ARGUMENT_NAME;
@@ -104,37 +100,7 @@ pub(super) fn validate_entity_arg(
                             .collect(),
                     });
                 } else if let Some(object_type) = schema.get_object(field.ty.inner_named_type()) {
-                    let key_fields = object_type
-                        .directives
-                        .iter()
-                        .filter(|directive| directive.name == FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC)
-                        .filter(|directive| {
-                            directive
-                                .arguments
-                                .iter()
-                                .find(|arg| arg.name == FEDERATION_RESOLVABLE_ARGUMENT_NAME)
-                                .and_then(|arg| arg.value.to_bool())
-                                .unwrap_or(true)
-                        })
-                        .filter_map(|directive| {
-                            directive
-                                .arguments
-                                .iter()
-                                .find(|arg| arg.name == FEDERATION_FIELDS_ARGUMENT_NAME)
-                        })
-                        .map(|fields| &*fields.value)
-                        .filter_map(|key_fields| key_fields.as_str())
-                        .filter_map(|fields| {
-                            Parser::new()
-                                .parse_field_set(
-                                    Valid::assume_valid_ref(schema),
-                                    object_type.name.clone(),
-                                    fields.to_string(),
-                                    "",
-                                )
-                                .ok()
-                        })
-                        .collect();
+                    let key_fields = resolvable_key_fields(object_type, schema).collect();
 
                     if let Some(message) = (ArgumentVisitor {
                         schema,
