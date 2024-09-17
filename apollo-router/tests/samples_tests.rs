@@ -455,20 +455,18 @@ impl TestExecution {
             .unwrap();
         let mut is_multipart = false;
         let mut boundary = None;
-        for result in MediaTypeList::new(content_type) {
-            if let Ok(mime) = result {
-                if mime.ty == mediatype::names::MULTIPART && mime.subty == mediatype::names::MIXED {
-                    is_multipart = true;
-                    boundary = mime.get_param(mediatype::names::BOUNDARY).map(|v| {
-                        // multer does not strip quotes from the boundary: https://github.com/rwf2/multer/issues/64
-                        let mut s = v.as_str();
-                        if s.starts_with("\"") && s.ends_with("\"") {
-                            s = &s[1..s.len() - 1];
-                        }
+        for mime in MediaTypeList::new(content_type).flatten() {
+            if mime.ty == mediatype::names::MULTIPART && mime.subty == mediatype::names::MIXED {
+                is_multipart = true;
+                boundary = mime.get_param(mediatype::names::BOUNDARY).map(|v| {
+                    // multer does not strip quotes from the boundary: https://github.com/rwf2/multer/issues/64
+                    let mut s = v.as_str();
+                    if s.starts_with('\"') && s.ends_with('\"') {
+                        s = &s[1..s.len() - 1];
+                    }
 
-                        s.to_string()
-                    });
-                }
+                    s.to_string()
+                });
             }
         }
 
