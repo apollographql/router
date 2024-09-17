@@ -3,6 +3,7 @@ use std::fmt::Formatter;
 use std::hash::Hash;
 use std::sync::Arc;
 
+use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::NamedType;
@@ -147,6 +148,22 @@ pub(crate) struct QueryGraphEdge {
     ///
     /// Outside of keys, @requires edges also rely on conditions.
     pub(crate) conditions: Option<Arc<SelectionSet>>,
+    /// Edges can require that an override condition (provided during query
+    /// planning) be met in order to be taken. This is used for progressive
+    /// @override, where (at least) 2 subgraphs can resolve the same field, but
+    /// one of them has an @override with a label. If the override condition
+    /// matches the query plan parameters, this edge can be taken.
+    pub(crate) override_condition: Option<OverrideCondition>,
+}
+
+impl QueryGraphEdge {
+    fn satisifies_override_conditions(&self, conditions_to_check: &HashSet<String>) -> bool {
+        if let Some(override_condition) = &self.override_condition {
+            conditions_to_check.contains(&override_condition.label)
+        } else {
+            true
+        }
+    }
 }
 
 impl Display for QueryGraphEdge {
@@ -158,11 +175,30 @@ impl Display for QueryGraphEdge {
         {
             return Ok(());
         }
-        if let Some(conditions) = &self.conditions {
-            write!(f, "{} ⊢ {}", conditions, self.transition)
-        } else {
-            self.transition.fmt(f)
+
+        match (&self.override_condition, &self.conditions) {
+            (Some(override_condition), Some(conditions)) => write!(
+                f,
+                "{}, {} ⊢ {}",
+                conditions, override_condition, self.transition
+            ),
+            (Some(override_condition), None) => {
+                write!(f, "{} ⊢ {}", override_condition, self.transition)
+            }
+            (None, Some(conditions)) => write!(f, "{} ⊢ {}", conditions, self.transition),
+            _ => self.transition.fmt(f),
         }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct OverrideCondition {
+    pub(crate) label: String,
+    pub(crate) condition: bool,
+}
+
+impl Display for OverrideCondition {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} = {}", self.label, self.condition)
     }
 }
 
@@ -639,7 +675,12 @@ impl QueryGraph {
             .find_ok(|selection| !external_metadata.selects_any_external_field(selection))
     }
 
-    pub(crate) fn edge_for_field(&self, node: NodeIndex, field: &Field) -> Option<EdgeIndex> {
+    pub(crate) fn edge_for_field(
+        &self,
+        node: NodeIndex,
+        field: &Field,
+        override_conditions: &HashSet<String>,
+    ) -> Option<EdgeIndex> {
         let mut candidates = self.out_edges(node).into_iter().filter_map(|edge_ref| {
             let edge_weight = edge_ref.weight();
             let QueryGraphEdgeTransition::FieldCollection {
@@ -649,6 +690,11 @@ impl QueryGraph {
             else {
                 return None;
             };
+
+            if !edge_weight.satisifies_override_conditions(override_conditions) {
+                return None;
+            }
+
             // We explicitly avoid comparing parent type's here, to allow interface object
             // fields to match operation fields with the same name but differing types.
             if field.field_position.field_name() == field_definition_position.field_name() {
@@ -715,12 +761,15 @@ impl QueryGraph {
         &self,
         node: NodeIndex,
         op_graph_path_trigger: &OpGraphPathTrigger,
+        override_conditions: &HashSet<String>,
     ) -> Option<Option<EdgeIndex>> {
         let OpGraphPathTrigger::OpPathElement(op_path_element) = op_graph_path_trigger else {
             return None;
         };
         match op_path_element {
-            OpPathElement::Field(field) => self.edge_for_field(node, field).map(Some),
+            OpPathElement::Field(field) => self
+                .edge_for_field(node, field, override_conditions)
+                .map(Some),
             OpPathElement::InlineFragment(inline_fragment) => {
                 if inline_fragment.type_condition_position.is_some() {
                     self.edge_for_inline_fragment(node, inline_fragment)

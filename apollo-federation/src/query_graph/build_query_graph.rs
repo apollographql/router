@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use apollo_compiler::collections::HashMap;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::DirectiveList as ComponentDirectiveList;
@@ -21,6 +22,7 @@ use crate::link::federation_spec_definition::KeyDirectiveArguments;
 use crate::operation::merge_selection_sets;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
+use crate::query_graph::OverrideCondition;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphEdge;
 use crate::query_graph::QueryGraphEdgeTransition;
@@ -67,6 +69,7 @@ pub fn build_federated_query_graph(
         root_kinds_to_nodes_by_source: Default::default(),
         non_trivial_followup_edges: Default::default(),
     };
+    // TODO populate override_labels_by_coordinate: Option<HashMap<String, String>> to be passed to the schema query graph builders
     let subgraphs =
         extract_subgraphs_from_supergraph(&supergraph_schema, validate_extracted_subgraphs)?;
     for (subgraph_name, subgraph) in subgraphs {
@@ -76,6 +79,7 @@ pub fn build_federated_query_graph(
             subgraph.schema,
             Some(api_schema.clone()),
             for_query_planning,
+            None,
         )?;
         query_graph = builder.build()?;
     }
@@ -90,6 +94,7 @@ pub fn build_federated_query_graph(
 pub fn build_query_graph(
     name: Arc<str>,
     schema: ValidFederationSchema,
+    override_labels_by_coordinate: Option<HashMap<String, String>>,
 ) -> Result<QueryGraph, FederationError> {
     let mut query_graph = QueryGraph {
         // Note this name is a dummy initial name that gets overridden as we build the query graph.
@@ -101,7 +106,14 @@ pub fn build_query_graph(
         root_kinds_to_nodes_by_source: Default::default(),
         non_trivial_followup_edges: Default::default(),
     };
-    let builder = SchemaQueryGraphBuilder::new(query_graph, name, schema, None, false)?;
+    let builder = SchemaQueryGraphBuilder::new(
+        query_graph,
+        name,
+        schema,
+        None,
+        false,
+        override_labels_by_coordinate,
+    )?;
     query_graph = builder.build()?;
     Ok(query_graph)
 }
@@ -133,6 +145,7 @@ impl BaseQueryGraphBuilder {
         tail: NodeIndex,
         transition: QueryGraphEdgeTransition,
         conditions: Option<Arc<SelectionSet>>,
+        override_condition: Option<OverrideCondition>,
     ) -> Result<(), FederationError> {
         self.query_graph.graph.add_edge(
             head,
@@ -140,6 +153,7 @@ impl BaseQueryGraphBuilder {
             QueryGraphEdge {
                 transition,
                 conditions,
+                override_condition,
             },
         );
         let head_weight = self.query_graph.node_weight(head)?;
@@ -229,6 +243,7 @@ struct SchemaQueryGraphBuilder {
     base: BaseQueryGraphBuilder,
     subgraph: Option<SchemaQueryGraphBuilderSubgraphData>,
     for_query_planning: bool,
+    override_labels_by_coordinate: HashMap<String, String>,
 }
 
 struct SchemaQueryGraphBuilderSubgraphData {
@@ -245,6 +260,7 @@ impl SchemaQueryGraphBuilder {
         schema: ValidFederationSchema,
         api_schema: Option<ValidFederationSchema>,
         for_query_planning: bool,
+        override_labels_by_coordinate: Option<HashMap<String, String>>,
     ) -> Result<Self, FederationError> {
         let subgraph = if let Some(api_schema) = api_schema {
             let federation_spec_definition = get_federation_spec_definition_from_subgraph(&schema)?;
@@ -260,6 +276,7 @@ impl SchemaQueryGraphBuilder {
             base,
             subgraph,
             for_query_planning,
+            override_labels_by_coordinate: override_labels_by_coordinate.unwrap_or_default(),
         })
     }
 
@@ -463,10 +480,36 @@ impl SchemaQueryGraphBuilder {
         if !skip_edge {
             let transition = QueryGraphEdgeTransition::FieldCollection {
                 source: self.base.query_graph.current_source.clone(),
-                field_definition_position,
+                field_definition_position: field_definition_position.clone(),
                 is_part_of_provides: false,
             };
-            self.base.add_edge(head, tail, transition, None)?;
+            if let Some(override_label) = self
+                .override_labels_by_coordinate
+                .get(&field_definition_position.to_string())
+            {
+                self.base.add_edge(
+                    head,
+                    tail,
+                    transition.clone(),
+                    None,
+                    Some(OverrideCondition {
+                        label: override_label.clone(),
+                        condition: true,
+                    }),
+                )?;
+                self.base.add_edge(
+                    head,
+                    tail,
+                    transition.clone(),
+                    None,
+                    Some(OverrideCondition {
+                        label: override_label.clone(),
+                        condition: false,
+                    }),
+                )?;
+            } else {
+                self.base.add_edge(head, tail, transition, None, None)?;
+            }
         }
         Ok(())
     }
@@ -607,7 +650,7 @@ impl SchemaQueryGraphBuilder {
                 from_type_position: abstract_type_definition_position.clone().into(),
                 to_type_position: pos.into(),
             };
-            self.base.add_edge(head, tail, transition, None)?;
+            self.base.add_edge(head, tail, transition, None, None)?;
         }
         Ok(())
     }
@@ -847,7 +890,8 @@ impl SchemaQueryGraphBuilder {
                             from_type_position: t1.abstract_type_definition_position.clone().into(),
                             to_type_position: t2.abstract_type_definition_position.clone().into(),
                         };
-                        self.base.add_edge(t1_node, t2_node, transition, None)?;
+                        self.base
+                            .add_edge(t1_node, t2_node, transition, None, None)?;
                     }
                     if add_t2_to_t1 {
                         let transition = QueryGraphEdgeTransition::Downcast {
@@ -855,7 +899,8 @@ impl SchemaQueryGraphBuilder {
                             from_type_position: t2.abstract_type_definition_position.clone().into(),
                             to_type_position: t1.abstract_type_definition_position.clone().into(),
                         };
-                        self.base.add_edge(t2_node, t1_node, transition, None)?;
+                        self.base
+                            .add_edge(t2_node, t1_node, transition, None, None)?;
                     }
                 }
             }
@@ -935,8 +980,13 @@ impl SchemaQueryGraphBuilder {
                 .into(),
                 to_type_position: interface_type_definition_position.into(),
             };
-            self.base
-                .add_edge(entity_type_node, interface_type_node, transition, None)?;
+            self.base.add_edge(
+                entity_type_node,
+                interface_type_node,
+                transition,
+                None,
+                None,
+            )?;
         }
 
         Ok(())
@@ -982,6 +1032,7 @@ impl FederatedQueryGraphBuilder {
         self.add_root_edges()?;
         self.handle_key()?;
         self.handle_requires()?;
+        self.handle_progressive_overrides()?;
         // Note that @provides must be handled last when building since it requires copying nodes
         // and their edges, and it's easier to reason about this if we know previous
         self.handle_provides()?;
@@ -1374,6 +1425,92 @@ impl FederatedQueryGraphBuilder {
         Ok(())
     }
 
+    /// Handling progressive overrides here. For each progressive @override
+    /// application (with a label), we want to update the edges to the overridden
+    /// field within the "to" and "from" subgraphs with their respective override
+    /// condition (the label and a T/F value). The "from" subgraph will have an
+    /// override condition of `false`, whereas the "to" subgraph will have an
+    /// override condition of `true`.
+    fn handle_progressive_overrides(&mut self) -> Result<(), FederationError> {
+        let mut overriden_to_edges: Vec<(EdgeIndex, String)> = vec![];
+        let mut overriden_from_edges: Vec<(EdgeIndex, String)> = vec![];
+        for to_edge in self.base.query_graph.graph.edge_indices() {
+            let to_edge_weight = self.base.query_graph.edge_weight(to_edge)?;
+            let QueryGraphEdgeTransition::FieldCollection {
+                source: to_source,
+                field_definition_position: to_field_definition_position,
+                ..
+            } = &to_edge_weight.transition
+            else {
+                continue;
+            };
+            if *to_source == self.base.query_graph.current_source {
+                continue;
+            }
+            let to_source = to_source.clone();
+            let to_schema = self.base.query_graph.schema_by_source(&to_source)?;
+            let to_subgraph_data = self.subgraphs.get(&to_source)?;
+            let to_field = to_field_definition_position.get(to_schema.schema())?;
+            for directive in to_field
+                .directives
+                .get_all(&to_subgraph_data.overrides_directive_definition_name)
+            {
+                let application = to_subgraph_data
+                    .federation_spec_definition
+                    .override_directive_arguments(directive)?;
+                if let Some(label) = application.label {
+                    // found overridden field
+                    overriden_to_edges.push((to_edge.clone(), label.to_string()));
+
+                    // need to find the corresponding field in the "from" subgraph
+                    let from_subgraph_nodes = self
+                        .base
+                        .query_graph
+                        .types_to_nodes_by_source
+                        .get(application.from)
+                        .unwrap();
+                    let from_parent_node = from_subgraph_nodes
+                        .get(to_field_definition_position.type_name())
+                        .unwrap()
+                        .first()
+                        .unwrap();
+                    for from_edge in self.base.query_graph.out_edges(from_parent_node.clone()) {
+                        let from_edge_weight = self.base.query_graph.edge_weight(from_edge.id())?;
+                        let QueryGraphEdgeTransition::FieldCollection {
+                            field_definition_position: from_field_definition_position,
+                            ..
+                        } = &from_edge_weight.transition
+                        else {
+                            continue;
+                        };
+
+                        if from_field_definition_position == to_field_definition_position {
+                            overriden_from_edges.push((from_edge.id(), label.to_string()));
+                        }
+                    }
+                } else {
+                    continue;
+                }
+            }
+        }
+
+        for (to_edge_id, to_label) in overriden_to_edges {
+            let to_edge = self.base.query_graph.edge_weight_mut(to_edge_id)?;
+            to_edge.override_condition = Some(OverrideCondition {
+                label: to_label.clone(),
+                condition: true,
+            });
+        }
+        for (from_edge_id, from_label) in overriden_from_edges {
+            let from_edge = self.base.query_graph.edge_weight_mut(from_edge_id)?;
+            from_edge.override_condition = Some(OverrideCondition {
+                label: from_label.clone(),
+                condition: false,
+            });
+        }
+        Ok(())
+    }
+
     /// Handle @provides by copying the appropriate nodes/edges.
     fn handle_provides(&mut self) -> Result<(), FederationError> {
         let mut provide_id = 0;
@@ -1566,10 +1703,10 @@ impl FederatedQueryGraphBuilder {
                             };
                             if let Some(selections) = &field_selection.selection_set {
                                 let new_tail = Self::copy_for_provides(base, tail, provide_id)?;
-                                base.add_edge(node, new_tail, transition, None)?;
+                                base.add_edge(node, new_tail, transition, None, None)?;
                                 stack.push((new_tail, selections))
                             } else {
-                                base.add_edge(node, tail, transition, None)?;
+                                base.add_edge(node, tail, transition, None, None)?;
                             }
                         }
                     }
@@ -1987,6 +2124,10 @@ impl FederatedQueryGraphBuilderSubgraphs {
                         ),
                     }
                 })?;
+            let overrides_directive_definition_name = federation_spec_definition
+                .override_directive_definition(schema)?
+                .name
+                .clone();
             subgraphs.map.insert(
                 source.clone(),
                 FederatedQueryGraphBuilderSubgraphData {
@@ -1995,6 +2136,7 @@ impl FederatedQueryGraphBuilderSubgraphs {
                     requires_directive_definition_name,
                     provides_directive_definition_name,
                     interface_object_directive_definition_name,
+                    overrides_directive_definition_name,
                 },
             );
         }
@@ -2020,6 +2162,7 @@ struct FederatedQueryGraphBuilderSubgraphData {
     requires_directive_definition_name: Name,
     provides_directive_definition_name: Name,
     interface_object_directive_definition_name: Name,
+    overrides_directive_definition_name: Name,
 }
 
 #[derive(Debug)]
@@ -2032,7 +2175,7 @@ struct QueryGraphEdgeData {
 
 impl QueryGraphEdgeData {
     fn add_to(self, builder: &mut BaseQueryGraphBuilder) -> Result<(), FederationError> {
-        builder.add_edge(self.head, self.tail, self.transition, self.conditions)
+        builder.add_edge(self.head, self.tail, self.transition, self.conditions, None)
     }
 }
 
@@ -2082,7 +2225,7 @@ mod tests {
     fn test_query_graph_from_schema_sdl(sdl: &str) -> Result<QueryGraph, FederationError> {
         let schema =
             ValidFederationSchema::new(Schema::parse_and_validate(sdl, "schema.graphql")?)?;
-        build_query_graph(SCHEMA_NAME.into(), schema)
+        build_query_graph(SCHEMA_NAME.into(), schema, None)
     }
 
     fn assert_node_type(

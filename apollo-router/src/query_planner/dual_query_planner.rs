@@ -87,8 +87,11 @@ impl BothModeComparisonJob {
 
             let start = Instant::now();
 
+            // TODO pass conditions
             // No question mark operator or macro from here …
-            let result = self.rust_planner.build_query_plan(&self.document, name);
+            let result = self
+                .rust_planner
+                .build_query_plan(&self.document, name, None);
 
             let elapsed = start.elapsed().as_secs_f64();
             metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);

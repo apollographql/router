@@ -227,7 +227,7 @@ fn cmd_query_graph(file_paths: &[PathBuf]) -> Result<(), FederationError> {
         "supergraph"
     };
     let query_graph =
-        query_graph::build_query_graph::build_query_graph(name.into(), supergraph.schema)?;
+        query_graph::build_query_graph::build_query_graph(name.into(), supergraph.schema, None)?;
     println!("{}", query_graph::output::to_dot(&query_graph));
     Ok(())
 }
@@ -254,7 +254,7 @@ fn cmd_plan(
 
     let query_doc =
         ExecutableDocument::parse_and_validate(planner.api_schema().schema(), query, query_path)?;
-    print!("{}", planner.build_query_plan(&query_doc, None)?);
+    print!("{}", planner.build_query_plan(&query_doc, None, None)?);
     Ok(())
 }
 

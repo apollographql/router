@@ -582,7 +582,7 @@ mod tests {
         let (op_name, operation) = executable_document.operations.named.first_mut().unwrap();
 
         let query_graph =
-            Arc::new(build_query_graph(op_name.to_string().into(), schema.clone()).unwrap());
+            Arc::new(build_query_graph(op_name.to_string().into(), schema.clone(), None).unwrap());
 
         let path1 =
             build_graph_path(&query_graph, SchemaRootDefinitionKind::Query, &["t", "id"]).unwrap();

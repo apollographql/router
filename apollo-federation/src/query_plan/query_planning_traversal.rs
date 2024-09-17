@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexSet;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
@@ -72,6 +73,7 @@ pub(crate) struct QueryPlanningParameters<'a> {
     /// The configuration for the query planner.
     pub(crate) config: QueryPlannerConfig,
     pub(crate) statistics: &'a QueryPlanningStatistics,
+    pub(crate) override_conditions: HashSet<String>,
 }
 
 pub(crate) struct QueryPlanningTraversal<'a, 'b> {
@@ -247,6 +249,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             &mut traversal,
             excluded_destinations,
             excluded_conditions,
+            &parameters.override_conditions,
         )?;
 
         traversal.open_branches = map_options_to_selections(selection_set, initial_options);
@@ -337,6 +340,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 self.parameters.supergraph_schema.clone(),
                 &operation_element,
                 /*resolver*/ self,
+                &self.parameters.override_conditions,
             )?;
             let Some(followups_for_option) = followups_for_option else {
                 // There is no valid way to advance the current operation element from this option
@@ -404,7 +408,9 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                     let mut new_simultaneous_paths = vec![];
                     for simultaneous_path in &option.paths.0 {
                         new_simultaneous_paths.push(Arc::new(
-                            simultaneous_path.terminate_with_non_requested_typename_field()?,
+                            simultaneous_path.terminate_with_non_requested_typename_field(
+                                &self.parameters.override_conditions,
+                            )?,
                         ));
                     }
                     closed_paths.push(Arc::new(ClosedPath {
@@ -1054,6 +1060,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 .clone(),
             config: self.parameters.config.clone(),
             statistics: self.parameters.statistics,
+            override_conditions: self.parameters.override_conditions.clone(),
         };
         let best_plan_opt = QueryPlanningTraversal::new_inner(
             &parameters,

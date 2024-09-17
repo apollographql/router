@@ -54,7 +54,7 @@ pub(crate) fn run_bench(
             }
         };
         let now = Instant::now();
-        let plan = planner.build_query_plan(&document, None);
+        let plan = planner.build_query_plan(&document, None, None);
         let elapsed = now.elapsed().as_secs_f64() * 1000.0;
         let mut eval_plans = None;
         let mut error = None;

@@ -7,12 +7,13 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use apollo_compiler::ast;
+use apollo_compiler::collections::HashSet;
 use apollo_compiler::execution::InputCoercionError;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_federation::error::FederationError;
 use apollo_federation::error::SingleFederationError;
-use apollo_federation::query_plan::query_planner::QueryPlanner;
+use apollo_federation::query_plan::query_planner::{QueryPlanner, QueryPlanOptions};
 use futures::future::BoxFuture;
 use opentelemetry_api::metrics::MeterProvider as _;
 use opentelemetry_api::metrics::ObservableGauge;
@@ -186,9 +187,9 @@ impl PlannerMode {
             subgraph_graphql_validation: false,
             generate_query_fragments: configuration.supergraph.generate_query_fragments,
             incremental_delivery:
-                apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig {
-                    enable_defer: configuration.supergraph.defer_support,
-                },
+            apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig {
+                enable_defer: configuration.supergraph.defer_support,
+            },
             type_conditioned_fetching: configuration.experimental_type_conditioned_fetching,
             debug: Default::default(),
         };
@@ -196,9 +197,9 @@ impl PlannerMode {
 
         match &result {
             Err(FederationError::SingleFederationError {
-                inner: error,
-                trace: _,
-            }) => match error {
+                    inner: error,
+                    trace: _,
+                }) => match error {
                 SingleFederationError::UnsupportedFederationVersion { .. } => {
                     metric_rust_qp_init(Some(UNSUPPORTED_FED1));
                 }
@@ -298,12 +299,16 @@ impl PlannerMode {
                 let (plan, mut root_node) = tokio::task::spawn_blocking(move || {
                     let start = Instant::now();
 
+                    let query_plan_options = QueryPlanOptions {
+                        override_conditions: HashSet::from_iter(plan_options.override_conditions)
+                    };
+
                     let result = operation
                         .as_deref()
                         .map(|n| Name::new(n).map_err(FederationError::from))
                         .transpose()
                         .and_then(|operation| {
-                            rust_planner.build_query_plan(&doc.executable, operation)
+                            rust_planner.build_query_plan(&doc.executable, operation, Some(query_plan_options))
                         })
                         .map_err(|e| QueryPlannerError::FederationError(e.to_string()));
 
@@ -315,8 +320,8 @@ impl PlannerMode {
                         (plan, root_node)
                     })
                 })
-                .await
-                .expect("query planner panicked")?;
+                    .await
+                    .expect("query planner panicked")?;
                 if let Some(node) = &mut root_node {
                     init_query_plan_root_node(node)?;
                 }
@@ -376,7 +381,7 @@ impl PlannerMode {
                         .map(|success| success.data.clone())
                         .map_err(|e| e.errors.clone()),
                 }
-                .schedule();
+                    .schedule();
 
                 Ok(js_result?)
             }
@@ -669,11 +674,11 @@ impl BridgeQueryPlanner {
         match plan_success {
             PlanSuccess {
                 data:
-                    QueryPlanResult {
-                        query_plan: QueryPlan { node: Some(node) },
-                        formatted_query_plan,
-                        evaluated_plan_count,
-                    },
+                QueryPlanResult {
+                    query_plan: QueryPlan { node: Some(node) },
+                    formatted_query_plan,
+                    evaluated_plan_count,
+                },
                 mut usage_reporting,
             } => {
                 // If the query is filtered, we want to generate the signature using the original query and generate the
@@ -685,7 +690,7 @@ impl BridgeQueryPlanner {
                         &self.schema,
                         &self.configuration,
                     )
-                    .unwrap_or(doc.clone())
+                        .unwrap_or(doc.clone())
                 } else {
                     doc.clone()
                 };
@@ -723,10 +728,10 @@ impl BridgeQueryPlanner {
             #[cfg_attr(feature = "failfast", allow(unused_variables))]
             PlanSuccess {
                 data:
-                    QueryPlanResult {
-                        query_plan: QueryPlan { node: None },
-                        ..
-                    },
+                QueryPlanResult {
+                    query_plan: QueryPlan { node: None },
+                    ..
+                },
                 usage_reporting,
             } => {
                 failfast_debug!("empty query plan");
@@ -788,7 +793,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                         &executable_document,
                         operation_name.as_deref(),
                     )
-                    .map_err(|e| SpecError::QueryHashing(e.to_string()))?;
+                        .map_err(|e| SpecError::QueryHashing(e.to_string()))?;
                     doc = Arc::new(ParsedDocumentInner {
                         executable: Arc::new(executable_document),
                         ast: modified_query,
@@ -941,9 +946,9 @@ impl BridgeQueryPlanner {
             if has_schema_introspection {
                 if has_other_root_fields {
                     let error = graphql::Error::builder()
-                    .message("Mixed queries with both schema introspection and concrete fields are not supported")
-                    .extension_code("MIXED_INTROSPECTION")
-                    .build();
+                        .message("Mixed queries with both schema introspection and concrete fields are not supported")
+                        .extension_code("MIXED_INTROSPECTION")
+                        .build();
                     return Ok(QueryPlannerContent::Response {
                         response: Box::new(graphql::Response::builder().error(error).build()),
                     });
@@ -991,7 +996,7 @@ impl BridgeQueryPlanner {
                 &executable_document,
                 key.operation_name.as_deref(),
             )
-            .map_err(|e| SpecError::QueryHashing(e.to_string()))?;
+                .map_err(|e| SpecError::QueryHashing(e.to_string()))?;
             doc = Arc::new(ParsedDocumentInner {
                 executable: Arc::new(executable_document),
                 ast: new_doc,
@@ -1023,7 +1028,7 @@ impl BridgeQueryPlanner {
             &doc,
             query_metrics,
         )
-        .await
+            .await
     }
 }
 
@@ -1135,8 +1140,8 @@ mod tests {
             None,
             PlanOptions::default(),
         )
-        .await
-        .unwrap();
+            .await
+            .unwrap();
 
         if let QueryPlannerContent::Plan { plan, .. } = result {
             insta::with_settings!({sort_maps => true}, {
@@ -1169,8 +1174,8 @@ mod tests {
                 None,
                 default_cache_storage().await,
             )
-            .await
-            .unwrap();
+                .await
+                .unwrap();
 
             assert_gauge!(
                 "apollo.router.supergraph.federation",
@@ -1178,8 +1183,8 @@ mod tests {
                 federation.version = 1
             );
         }
-        .with_metrics()
-        .await;
+            .with_metrics()
+            .await;
 
         async {
             let sdl = include_str!("../testdata/minimal_supergraph.graphql");
@@ -1192,8 +1197,8 @@ mod tests {
                 None,
                 default_cache_storage().await,
             )
-            .await
-            .unwrap();
+                .await
+                .unwrap();
 
             assert_gauge!(
                 "apollo.router.supergraph.federation",
@@ -1201,8 +1206,8 @@ mod tests {
                 federation.version = 2
             );
         }
-        .with_metrics()
-        .await;
+            .with_metrics()
+            .await;
     }
 
     #[test(tokio::test)]
@@ -1217,8 +1222,8 @@ mod tests {
             None,
             default_cache_storage().await,
         )
-        .await
-        .unwrap();
+            .await
+            .unwrap();
 
         let doc = Query::parse_document(query, None, &schema, &Configuration::default()).unwrap();
 
@@ -1242,8 +1247,8 @@ mod tests {
                 &doc,
                 query_metrics
             )
-            .await
-            .unwrap_err();
+                .await
+                .unwrap_err();
 
         match err {
             QueryPlannerError::EmptyPlan(usage_reporting) => {
@@ -1276,8 +1281,8 @@ mod tests {
             None,
             PlanOptions::default(),
         )
-        .await
-        .unwrap();
+            .await
+            .unwrap();
         if let QueryPlannerContent::Response { response } = result {
             assert_eq!(
                 r#"{"data":{"x":"Query"}}"#,
@@ -1297,8 +1302,8 @@ mod tests {
             None,
             PlanOptions::default(),
         )
-        .await
-        .unwrap();
+            .await
+            .unwrap();
         if let QueryPlannerContent::Response { response } = result {
             assert_eq!(
                 r#"{"data":{"x":"Query","__typename":"Query"}}"#,
@@ -1323,8 +1328,8 @@ mod tests {
             None,
             default_cache_storage().await,
         )
-        .await
-        .unwrap();
+            .await
+            .unwrap();
 
         macro_rules! s {
             ($query: expr) => {
@@ -1347,7 +1352,7 @@ mod tests {
             }
         }}"#);
         // Aliases
-        // FIXME: uncomment myName alias when this is fixed:
+        // FIXME: uncomment myName alias when this is fixed:
         // https://github.com/apollographql/router/issues/3263
         s!(r#"query Q { me {
             username
@@ -1637,8 +1642,8 @@ mod tests {
             None,
             default_cache_storage().await,
         )
-        .await
-        .unwrap();
+            .await
+            .unwrap();
 
         let doc = Query::parse_document(
             original_query,
@@ -1646,7 +1651,7 @@ mod tests {
             &planner.schema(),
             &configuration,
         )
-        .unwrap();
+            .unwrap();
 
         planner
             .get(
@@ -1668,7 +1673,7 @@ mod tests {
             &fs::read_to_string(PathBuf::from(&env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"))
                 .expect("could not read Cargo.toml"),
         )
-        .expect("could not parse Cargo.toml");
+            .expect("could not parse Cargo.toml");
         let router_bridge_version = cargo_manifest
             .get("dependencies")
             .expect("Cargo.toml does not contain dependencies")
@@ -1740,7 +1745,7 @@ mod tests {
                             .build())
                     }
                 })
-                .boxed()
+                    .boxed()
             })
             .build_supergraph()
             .await
@@ -1830,12 +1835,12 @@ mod tests {
                 None,
                 PlanOptions::default(),
             )
-            .await
-            .unwrap();
+                .await
+                .unwrap();
 
             assert_histogram_exists!("apollo.router.query_planning.plan.evaluated_plans", u64);
         }
-        .with_metrics()
-        .await;
+            .with_metrics()
+            .await;
     }
 }
