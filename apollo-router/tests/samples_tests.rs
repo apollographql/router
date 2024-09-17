@@ -161,7 +161,13 @@ impl TestExecution {
             Action::ReloadSchema { schema_path } => {
                 self.reload_schema(schema_path, path, out).await
             }
-            Action::ReloadSubgraphs { subgraphs } => self.reload_subgraphs(subgraphs, out).await,
+            Action::ReloadSubgraphs {
+                subgraphs,
+                update_overrides,
+            } => {
+                self.reload_subgraphs(subgraphs, *update_overrides, out)
+                    .await
+            }
             Action::Request {
                 request,
                 query_path,
@@ -193,41 +199,11 @@ impl TestExecution {
         path: &Path,
         out: &mut String,
     ) -> Result<(), Failed> {
-        let (subgraphs_server, url) = self.start_subgraphs(out).await;
+        self.subgraphs = subgraphs.clone();
+        let (mut subgraphs_server, url) = self.start_subgraphs(out).await;
 
-        let mut subgraph_overrides = HashMap::new();
-
-        for (name, subgraph) in subgraphs {
-            for SubgraphRequestMock { request, response } in &subgraph.requests {
-                let mut builder = Mock::given(body_partial_json(&request.body));
-
-                if let Some(s) = request.method.as_deref() {
-                    builder = builder.and(method(s));
-                }
-
-                if let Some(s) = request.path.as_deref() {
-                    builder = builder.and(wiremock::matchers::path(s));
-                }
-
-                for (header_name, header_value) in &request.headers {
-                    builder = builder.and(header(header_name.as_str(), header_value.as_str()));
-                }
-
-                let mut res = ResponseTemplate::new(response.status.unwrap_or(200));
-                for (header_name, header_value) in &response.headers {
-                    res = res.append_header(header_name.as_str(), header_value.as_str());
-                }
-                builder
-                    .respond_with(res.set_body_json(&response.body))
-                    .mount(&subgraphs_server)
-                    .await;
-            }
-
-            // Add a default override for products, if not specified
-            subgraph_overrides
-                .entry(name.to_string())
-                .or_insert(url.clone());
-        }
+        let subgraph_overrides = self.load_subgraph_mocks(&mut subgraphs_server, &url).await;
+        writeln!(out, "got subgraph mocks: {subgraph_overrides:?}").unwrap();
 
         let config = open_file(&path.join(configuration_path), out)?;
         let schema_path = path.join(schema_path);
@@ -244,7 +220,6 @@ impl TestExecution {
 
         self.router = Some(router);
         self.subgraphs_server = Some(subgraphs_server);
-        self.subgraphs = subgraphs.clone();
         self.configuration_path = Some(configuration_path.to_string());
 
         Ok(())
@@ -256,6 +231,21 @@ impl TestExecution {
         path: &Path,
         out: &mut String,
     ) -> Result<(), Failed> {
+        let mut subgraphs_server = match self.subgraphs_server.take() {
+            Some(subgraphs_server) => subgraphs_server,
+            None => self.start_subgraphs(out).await.0,
+        };
+        subgraphs_server.reset().await;
+
+        let subgraph_url = Self::subgraph_url(&subgraphs_server);
+        let subgraph_overrides = self
+            .load_subgraph_mocks(&mut subgraphs_server, &subgraph_url)
+            .await;
+
+        let config = open_file(&path.join(configuration_path), out)?;
+        self.configuration_path = Some(configuration_path.to_string());
+        self.subgraphs_server = Some(subgraphs_server);
+
         let router = match self.router.as_mut() {
             None => {
                 writeln!(
@@ -268,8 +258,37 @@ impl TestExecution {
             Some(router) => router,
         };
 
-        let (subgraphs_server, url) = self.start_subgraphs(out).await;
+        router.update_subgraph_overrides(subgraph_overrides);
+        router.update_config(&config).await;
+        router.assert_reloaded().await;
 
+        Ok(())
+    }
+
+    async fn start_subgraphs(&mut self, out: &mut String) -> (MockServer, String) {
+        let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+        let address = listener.local_addr().unwrap();
+        let url = format!("http://{address}/");
+
+        let subgraphs_server = wiremock::MockServer::builder()
+            .listener(listener)
+            .start()
+            .await;
+
+        writeln!(out, "subgraphs listening on {url}").unwrap();
+
+        (subgraphs_server, url)
+    }
+
+    fn subgraph_url(server: &MockServer) -> String {
+        format!("http://{}/", server.address())
+    }
+
+    async fn load_subgraph_mocks(
+        &mut self,
+        subgraphs_server: &mut MockServer,
+        url: &String,
+    ) -> HashMap<String, String> {
         let mut subgraph_overrides = HashMap::new();
 
         for (name, subgraph) in &self.subgraphs {
@@ -304,66 +323,47 @@ impl TestExecution {
                 .or_insert(url.clone());
         }
 
-        let config = open_file(&path.join(configuration_path), out)?;
-        self.configuration_path = Some(configuration_path.to_string());
-        self.subgraphs_server = Some(subgraphs_server);
-
-        router.update_config(&config).await;
-        router.assert_reloaded().await;
-
-        Ok(())
-    }
-
-    async fn start_subgraphs(&mut self, out: &mut String) -> (MockServer, String) {
-        let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
-        let address = listener.local_addr().unwrap();
-        let url = format!("http://{address}/");
-
-        let subgraphs_server = wiremock::MockServer::builder()
-            .listener(listener)
-            .start()
-            .await;
-
-        writeln!(out, "subgraphs listening on {url}").unwrap();
-
-        (subgraphs_server, url)
+        subgraph_overrides
     }
 
     async fn reload_subgraphs(
         &mut self,
         subgraphs: &HashMap<String, Subgraph>,
+        update_overrides: bool,
         out: &mut String,
     ) -> Result<(), Failed> {
         writeln!(out, "reloading subgraphs with: {subgraphs:?}").unwrap();
 
-        let subgraphs_server = self.subgraphs_server.as_mut().unwrap();
+        let mut subgraphs_server = match self.subgraphs_server.take() {
+            Some(subgraphs_server) => subgraphs_server,
+            None => self.start_subgraphs(out).await.0,
+        };
         subgraphs_server.reset().await;
 
-        for subgraph in subgraphs.values() {
-            for SubgraphRequestMock { request, response } in &subgraph.requests {
-                let mut builder = Mock::given(body_partial_json(&request.body));
+        self.subgraphs = subgraphs.clone();
 
-                if let Some(s) = request.method.as_deref() {
-                    builder = builder.and(method(s));
-                }
+        let subgraph_url = Self::subgraph_url(&subgraphs_server);
+        let subgraph_overrides = self
+            .load_subgraph_mocks(&mut subgraphs_server, &subgraph_url)
+            .await;
+        self.subgraphs_server = Some(subgraphs_server);
 
-                if let Some(s) = request.path.as_deref() {
-                    builder = builder.and(wiremock::matchers::path(s));
-                }
-
-                for (header_name, header_value) in &request.headers {
-                    builder = builder.and(header(header_name.as_str(), header_value.as_str()));
-                }
-
-                let mut res = ResponseTemplate::new(response.status.unwrap_or(200));
-                for (header_name, header_value) in &response.headers {
-                    res = res.append_header(header_name.as_str(), header_value.as_str());
-                }
-                builder
-                    .respond_with(res.set_body_json(&response.body))
-                    .mount(subgraphs_server)
-                    .await;
+        let router = match self.router.as_mut() {
+            None => {
+                writeln!(
+                    out,
+                    "cannot reload subgraph overrides: router was not started"
+                )
+                .unwrap();
+                return Err(out.into());
             }
+            Some(router) => router,
+        };
+
+        if update_overrides {
+            router.update_subgraph_overrides(subgraph_overrides);
+            router.touch_config().await;
+            router.assert_reloaded().await;
         }
 
         Ok(())
@@ -573,6 +573,9 @@ enum Action {
     },
     ReloadSubgraphs {
         subgraphs: HashMap<String, Subgraph>,
+        // set to true if subgraph URL overrides should be updated (ex: a new subgraph is added)
+        #[serde(default)]
+        update_overrides: bool,
     },
     Request {
         request: Value,
