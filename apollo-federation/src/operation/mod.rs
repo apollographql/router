@@ -24,7 +24,9 @@ use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
+use apollo_compiler::executable::Argument;
 use apollo_compiler::name;
+use apollo_compiler::schema::Directive;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
@@ -35,6 +37,7 @@ use crate::compat::coerce_executable_values;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::error::SingleFederationError::Internal;
+use crate::link::graphql_definition::BooleanOrVariable;
 use crate::query_graph::graph_path::OpPathElement;
 use crate::query_plan::conditions::Conditions;
 use crate::query_plan::FetchDataKeyRenamer;
@@ -256,7 +259,7 @@ impl Operation {
     // PORT_NOTE(@goto-bus-stop): It might make sense for the returned data structure to *be* the
     // `DeferNormalizer` from the JS side
     #[allow(clippy::unnecessary_fold)]
-    pub(crate) fn with_normalized_defer(self) -> NormalizedDefer {
+    pub(crate) fn with_normalized_defer(mut self) -> NormalizedDefer {
         if self.has_defer() {
             // PORT_NOTE:
             // TODO: Can this set use &str instead of strings?
@@ -278,9 +281,9 @@ impl Operation {
                 }
                 selection
                     .selection_set()
-                    .iter()
-                    .flat_map(|set| set.iter())
-                    .fold(false, |acc, op| acc || collect_labels(labels, op))
+                    .into_iter()
+                    .flatten()
+                    .fold(false, |acc, (_, op)| acc || collect_labels(labels, op))
             }
             let mut labels = HashSet::default();
             let must_normalize_defers = self
@@ -288,14 +291,16 @@ impl Operation {
                 .iter()
                 // Yes, this looks like an `any`, but we specifically don't want to short circuit.
                 .fold(false, |acc, sel| acc || collect_labels(&mut labels, sel));
+            println!("Before normalization: {}", self.selection_set);
             if must_normalize_defers {
-                self.selection_set.normalize_defers(&labels);
+                self.selection_set = self.selection_set.normalize_defer(&labels);
             }
+            println!("After normalization: {}", self.selection_set);
             NormalizedDefer {
                 operation: self,
                 has_defers: true,
-                assigned_defer_labels: todo!(), // IndexSet::default(),
-                defer_conditions: todo!(),      // IndexMap::default(),
+                assigned_defer_labels: IndexSet::default(),
+                defer_conditions: IndexMap::default(),
             }
         } else {
             NormalizedDefer {
@@ -730,6 +735,15 @@ mod selection_map {
             <IndexMap<SelectionKey, Selection> as IntoIterator>::into_iter(self.0)
         }
     }
+
+    impl<'a> IntoIterator for &'a SelectionMap {
+        type Item = <&'a IndexMap<SelectionKey, Selection> as IntoIterator>::Item;
+        type IntoIter = <&'a IndexMap<SelectionKey, Selection> as IntoIterator>::IntoIter;
+
+        fn into_iter(self) -> Self::IntoIter {
+            self.0.iter()
+        }
+    }
 }
 
 pub(crate) use selection_map::FieldSelectionValue;
@@ -986,6 +1000,15 @@ impl Selection {
             Selection::InlineFragment(inline_fragment_selection) => {
                 inline_fragment_selection.has_defer()
             }
+        }
+    }
+
+    fn normalize_defer(self, labels: &HashSet<String>) -> Self {
+        match self {
+            Selection::InlineFragment(inline) => Selection::InlineFragment(Arc::new(
+                Arc::unwrap_or_clone(inline).normalize_defer(labels),
+            )),
+            value => value,
         }
     }
 
@@ -2788,6 +2811,25 @@ impl SelectionSet {
         self.selections.values().any(|s| s.has_defer())
     }
 
+    fn normalize_defer(self, labels: &HashSet<String>) -> Self {
+        let Self {
+            schema,
+            type_position,
+            selections,
+        } = self;
+        Self {
+            schema,
+            type_position,
+            selections: Arc::new(
+                selections
+                    .values()
+                    .cloned()
+                    .map(|selection| selection.normalize_defer(labels))
+                    .collect(),
+            ),
+        }
+    }
+
     // - `self` must be fragment-spread-free.
     pub(crate) fn add_aliases_for_non_merging_fields(
         &self,
@@ -3030,6 +3072,15 @@ impl IntoIterator for SelectionSet {
 
     fn into_iter(self) -> Self::IntoIter {
         Arc::unwrap_or_clone(self.selections).into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a SelectionSet {
+    type Item = <&'a IndexMap<SelectionKey, Selection> as IntoIterator>::Item;
+    type IntoIter = <&'a IndexMap<SelectionKey, Selection> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.selections.as_ref().into_iter()
     }
 }
 
@@ -3501,6 +3552,78 @@ impl InlineFragmentSelection {
                 .selections
                 .values()
                 .any(|s| s.has_defer())
+    }
+
+    fn normalize_defer(self, labels: &HashSet<String>) -> Self {
+        let Some(args) = self.inline_fragment.defer_directive_arguments().unwrap() else {
+            return self;
+        };
+
+        let mut args_copy = args.clone();
+        if let Some(cond) = &args.if_ {
+            if let BooleanOrVariable::Boolean(b) = cond {
+                if *b {
+                    args_copy.if_ = None;
+                } else {
+                    todo!()
+                    // return self.without_defer()
+                }
+            }
+        }
+
+        if args_copy.label.is_none() {
+            args_copy.label = Some(format!("NEW LABEL: {}", labels.len()));
+        }
+        if args_copy == args {
+            self
+        } else {
+            /*
+            const deferDirective = this.schema().deferDirective();
+            const updatedDirectives = this.appliedDirectives
+              .filter((d) => d.name !== deferDirective.name)
+              .concat(new Directive<FragmentElement>(deferDirective.name, newDeferArgs));
+
+            const updated = new FragmentElement(this.sourceType, this.typeCondition, updatedDirectives);
+            this.copyAttachementsTo(updated);
+            return updated;
+            */
+            let directives: DirectiveList = self
+                .inline_fragment
+                .directives
+                .iter()
+                .map(|dir| {
+                    if dir.name != "defer" {
+                        let mut dir: Directive = (**dir).clone();
+                        dir.arguments
+                            .retain(|arg| !["label", "if"].contains(&&*arg.name));
+                        let arg = Node::new(Argument {
+                            name: name!("label"),
+                            value: Node::new(apollo_compiler::ast::Value::String(
+                                args_copy.label.clone().unwrap(),
+                            )),
+                        });
+                        if let Some(cond) = args_copy.if_.clone() {
+                            let name = name!("if");
+                            let value = match cond {
+                                BooleanOrVariable::Boolean(b) => {
+                                    Node::new(apollo_compiler::ast::Value::Boolean(b))
+                                }
+                                BooleanOrVariable::Variable(var) => {
+                                    Node::new(apollo_compiler::ast::Value::Variable(var))
+                                }
+                            };
+                            let arg = Node::new(Argument { value, name });
+                            dir.arguments.push(arg);
+                        }
+                        dir.arguments.push(arg);
+                        Node::new(dir)
+                    } else {
+                        dir.clone()
+                    }
+                })
+                .collect();
+            self.with_updated_directives(directives)
+        }
     }
 
     /// Returns true if this inline fragment selection is "unnecessary" and should be inlined.
