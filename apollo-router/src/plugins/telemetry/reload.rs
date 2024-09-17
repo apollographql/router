@@ -35,7 +35,6 @@ use crate::plugins::telemetry::formatters::FilteringFormatter;
 use crate::plugins::telemetry::otel;
 use crate::plugins::telemetry::otel::OpenTelemetryLayer;
 use crate::plugins::telemetry::otel::PreSampledTracer;
-use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
 use crate::plugins::telemetry::tracing::reload::ReloadTracer;
 use crate::tracer::TraceId;
 
@@ -141,9 +140,7 @@ pub(crate) fn prepare_context(context: Context) -> Context {
                 tracer.new_span_id(),
                 TraceFlags::default(),
                 false,
-                TraceState::default()
-                    .with_measuring(true)
-                    .with_priority_sampling(true),
+                TraceState::default(),
             );
             return context.with_remote_span_context(span_context);
         }

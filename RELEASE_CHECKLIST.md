@@ -189,13 +189,7 @@ Start following the steps below to start a release PR.  The process is **not ful
     git commit -m "prep release: v${APOLLO_ROUTER_RELEASE_VERSION}${APOLLO_ROUTER_PRERELEASE_SUFFIX}"
     ```
 
-9. Push this commit up to the existing release PR:
-
-    ```
-    git push "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "${APOLLO_ROUTER_RELEASE_VERSION}"
-    ```
-
-10. Git tag the current commit and & push the branch and the pre-release tag simultaneously:
+9. Git tag the current commit and & push the branch and the pre-release tag simultaneously:
 
     This process will kick off the bulk of the release process on CircleCI, including building each architecture on its own infrastructure and notarizing the macOS binary.
 
@@ -204,7 +198,7 @@ Start following the steps below to start a release PR.  The process is **not ful
       git push "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "${APOLLO_ROUTER_RELEASE_VERSION}" "v${APOLLO_ROUTER_RELEASE_VERSION}${APOLLO_ROUTER_PRERELEASE_SUFFIX}"
     ```
 
-11. Finally, publish the Crates from your local computer (this also needs to be moved to CI, but requires changing the release containers to be Rust-enabled and to restore the caches):
+10. Finally, publish the Crates from your local computer (this also needs to be moved to CI, but requires changing the release containers to be Rust-enabled and to restore the caches):
 
     > Note: This command may appear unnecessarily specific, but it will help avoid publishing a version to Crates.io that doesn't match what you're currently releasing. (e.g., in the event that you've changed branches in another window) 
 

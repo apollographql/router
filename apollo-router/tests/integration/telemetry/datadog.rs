@@ -2,13 +2,18 @@ extern crate core;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use opentelemetry_api::trace::TraceContextExt;
 use opentelemetry_api::trace::TraceId;
 use serde_json::json;
 use serde_json::Value;
 use tower::BoxError;
+use tracing::Span;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
+use wiremock::ResponseTemplate;
 
 use crate::integration::common::graph_os_enabled;
 use crate::integration::common::Telemetry;
@@ -23,6 +28,38 @@ struct TraceSpec {
     span_names: HashSet<&'static str>,
     measured_spans: HashSet<&'static str>,
     unmeasured_spans: HashSet<&'static str>,
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_no_sample() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let subgraph_was_sampled = std::sync::Arc::new(AtomicBool::new(false));
+    let subgraph_was_sampled_callback = subgraph_was_sampled.clone();
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Datadog)
+        .config(include_str!("fixtures/datadog_no_sample.router.yaml"))
+        .responder(ResponseTemplate::new(200).set_body_json(
+            json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}),
+        ))
+        .subgraph_callback(Box::new(move || {
+            let sampled = Span::current().context().span().span_context().is_sampled();
+            subgraph_was_sampled_callback.store(sampled, std::sync::atomic::Ordering::SeqCst);
+        }))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
+    let (_id, result) = router.execute_untraced_query(&query).await;
+    router.graceful_shutdown().await;
+    assert!(result.status().is_success());
+    assert!(!subgraph_was_sampled.load(std::sync::atomic::Ordering::SeqCst));
+
+    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread")]
