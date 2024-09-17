@@ -518,9 +518,15 @@ impl BridgeQueryPlanner {
         match &self.introspection {
             IntrospectionMode::Disabled => return Ok(QueryPlannerContent::IntrospectionDisabled),
             IntrospectionMode::Rust => {
-                return Ok(QueryPlannerContent::Response {
-                    response: Box::new(self.rust_introspection(&key, &doc)?),
-                });
+                let schema = self.schema.clone();
+                let response = Box::new(
+                    tokio::task::spawn_blocking(move || {
+                        Self::rust_introspection(&schema, &key, &doc)
+                    })
+                    .await
+                    .expect("Introspection panicked")?,
+                );
+                return Ok(QueryPlannerContent::Response { response });
             }
             IntrospectionMode::Js(_) | IntrospectionMode::Both(_) => {}
         }
@@ -546,30 +552,36 @@ impl BridgeQueryPlanner {
                 .await
                 .map_err(QueryPlannerError::Introspection)?,
             IntrospectionMode::Both(js) => {
-                let rust_result = match self.rust_introspection(&key, &doc) {
-                    Ok(response) => {
-                        if response.errors.is_empty() {
-                            Ok(response)
-                        } else {
-                            Err(QueryPlannerError::Introspection(IntrospectionError {
-                                message: Some(
-                                    response
-                                        .errors
-                                        .into_iter()
-                                        .map(|e| e.to_string())
-                                        .collect::<Vec<_>>()
-                                        .join(", "),
-                                ),
-                            }))
-                        }
-                    }
-                    Err(e) => Err(e),
-                };
                 let js_result = js
-                    .execute(key.filtered_query)
+                    .execute(key.filtered_query.clone())
                     .await
                     .map_err(QueryPlannerError::Introspection);
-                self.compare_introspection_responses(js_result.clone(), rust_result);
+                let schema = self.schema.clone();
+                let js_result_clone = js_result.clone();
+                tokio::task::spawn_blocking(move || {
+                    let rust_result = match Self::rust_introspection(&schema, &key, &doc) {
+                        Ok(response) => {
+                            if response.errors.is_empty() {
+                                Ok(response)
+                            } else {
+                                Err(QueryPlannerError::Introspection(IntrospectionError {
+                                    message: Some(
+                                        response
+                                            .errors
+                                            .into_iter()
+                                            .map(|e| e.to_string())
+                                            .collect::<Vec<_>>()
+                                            .join(", "),
+                                    ),
+                                }))
+                            }
+                        }
+                        Err(e) => Err(e),
+                    };
+                    Self::compare_introspection_responses(js_result_clone, rust_result);
+                })
+                .await
+                .expect("Introspection comparison panicked");
                 js_result?
             }
         };
@@ -579,11 +591,11 @@ impl BridgeQueryPlanner {
     }
 
     fn rust_introspection(
-        &self,
+        schema: &Schema,
         key: &QueryKey,
         doc: &ParsedDocument,
     ) -> Result<graphql::Response, QueryPlannerError> {
-        let schema = self.schema.api_schema();
+        let schema = schema.api_schema();
         let operation = doc.get_operation(key.operation_name.as_deref())?;
         let variable_values = Default::default();
         let variable_values =
@@ -607,7 +619,6 @@ impl BridgeQueryPlanner {
     }
 
     fn compare_introspection_responses(
-        &self,
         mut js_result: Result<graphql::Response, QueryPlannerError>,
         mut rust_result: Result<graphql::Response, QueryPlannerError>,
     ) {
