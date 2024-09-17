@@ -193,16 +193,7 @@ impl TestExecution {
         path: &Path,
         out: &mut String,
     ) -> Result<(), Failed> {
-        let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
-        let address = listener.local_addr().unwrap();
-        let url = format!("http://{address}/");
-
-        let subgraphs_server = wiremock::MockServer::builder()
-            .listener(listener)
-            .start()
-            .await;
-
-        writeln!(out, "subgraphs listening on {url}").unwrap();
+        let (subgraphs_server, url) = self.start_subgraphs(out).await;
 
         let mut subgraph_overrides = HashMap::new();
 
@@ -277,16 +268,7 @@ impl TestExecution {
             Some(router) => router,
         };
 
-        let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
-        let address = listener.local_addr().unwrap();
-        let url = format!("http://{address}/");
-
-        let subgraphs_server = wiremock::MockServer::builder()
-            .listener(listener)
-            .start()
-            .await;
-
-        writeln!(out, "subgraphs listening on {url}").unwrap();
+        let (subgraphs_server, url) = self.start_subgraphs(out).await;
 
         let mut subgraph_overrides = HashMap::new();
 
@@ -330,6 +312,21 @@ impl TestExecution {
         router.assert_reloaded().await;
 
         Ok(())
+    }
+
+    async fn start_subgraphs(&mut self, out: &mut String) -> (MockServer, String) {
+        let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+        let address = listener.local_addr().unwrap();
+        let url = format!("http://{address}/");
+
+        let subgraphs_server = wiremock::MockServer::builder()
+            .listener(listener)
+            .start()
+            .await;
+
+        writeln!(out, "subgraphs listening on {url}").unwrap();
+
+        (subgraphs_server, url)
     }
 
     async fn reload_subgraphs(
