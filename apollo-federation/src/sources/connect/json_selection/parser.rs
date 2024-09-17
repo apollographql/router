@@ -494,7 +494,7 @@ impl PathList {
 
         if depth == 0 {
             // If the PathSelection does not start with a $var (or $ or @), a
-            // key. (or .key), or (expr), it is not a valid PathSelection.
+            // key. (or .key), or $(expr), it is not a valid PathSelection.
             return Err(nom::Err::Error(nom::error::Error::new(
                 input,
                 nom::error::ErrorKind::IsNot,
