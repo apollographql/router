@@ -293,31 +293,40 @@ impl PlannerMode {
                 }
                 Ok(success)
             }
-            PlannerMode::Rust(rust) => {
-                let start = Instant::now();
+            PlannerMode::Rust(rust_planner) => {
+                let doc = doc.clone();
+                let rust_planner = rust_planner.clone();
+                let (plan, mut root_node) = tokio::task::spawn_blocking(move || {
+                    let start = Instant::now();
 
-                let result = operation
-                    .as_deref()
-                    .map(|n| Name::new(n).map_err(FederationError::from))
-                    .transpose()
-                    .and_then(|operation| rust.build_query_plan(&doc.executable, operation))
-                    .map_err(|e| QueryPlannerError::FederationError(e.to_string()));
+                    let result = operation
+                        .as_deref()
+                        .map(|n| Name::new(n).map_err(FederationError::from))
+                        .transpose()
+                        .and_then(|operation| {
+                            rust_planner.build_query_plan(&doc.executable, operation)
+                        })
+                        .map_err(|e| QueryPlannerError::FederationError(e.to_string()));
 
-                let elapsed = start.elapsed().as_secs_f64();
-                metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
+                    let elapsed = start.elapsed().as_secs_f64();
+                    metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
 
-                let plan = result?;
+                    result.map(|plan| {
+                        let root_node = convert_root_query_plan_node(&plan);
+                        (plan, root_node)
+                    })
+                })
+                .await
+                .expect("query planner panicked")?;
+                if let Some(node) = &mut root_node {
+                    init_query_plan_root_node(node)?;
+                }
 
                 // Dummy value overwritten below in `BrigeQueryPlanner::plan`
                 let usage_reporting = UsageReporting {
                     stats_report_key: Default::default(),
                     referenced_fields_by_type: Default::default(),
                 };
-
-                let mut root_node = convert_root_query_plan_node(&plan);
-                if let Some(node) = &mut root_node {
-                    init_query_plan_root_node(node)?;
-                }
 
                 Ok(PlanSuccess {
                     usage_reporting,
