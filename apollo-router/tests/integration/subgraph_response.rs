@@ -35,14 +35,14 @@ async fn test_subgraph_returning_different_typename_on_query_root() -> Result<()
     let mut router = IntegrationTest::builder()
         .config(CONFIG)
         .responder(ResponseTemplate::new(200).set_body_json(json!({
-            "data": {
-                "topProducts": null,
-                "__typename": "SomeQueryRoot",
-                "aliased": "SomeQueryRoot",
-                "inside_fragment": "SomeQueryRoot",
-                "inside_inline_fragment": "SomeQueryRoot"
-            }
-         })))
+           "data": {
+               "topProducts": null,
+               "__typename": "SomeQueryRoot",
+               "aliased": "SomeQueryRoot",
+               "inside_fragment": "SomeQueryRoot",
+               "inside_inline_fragment": "SomeQueryRoot"
+           }
+        })))
         .build()
         .await;
 

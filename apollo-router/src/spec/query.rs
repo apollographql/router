@@ -21,6 +21,7 @@ use self::change::QueryHashVisitor;
 use self::subselections::BooleanValues;
 use self::subselections::SubSelectionKey;
 use self::subselections::SubSelectionValue;
+use super::Fragment;
 use crate::error::FetchError;
 use crate::graphql::Error;
 use crate::graphql::Request;
@@ -42,8 +43,6 @@ use crate::spec::Schema;
 use crate::spec::Selection;
 use crate::spec::SpecError;
 use crate::Configuration;
-
-use super::Fragment;
 
 pub(crate) mod change;
 pub(crate) mod subselections;
@@ -628,7 +627,7 @@ impl Query {
                             .schema
                             .get_object(current_type.inner_named_type())
                             .or_else(|| {
-                                let input_value = input.get(field_name.as_str())?.as_str()?; 
+                                let input_value = input.get(field_name.as_str())?.as_str()?;
                                 parameters.schema.get_object(input_value)
                             });
 
@@ -740,7 +739,7 @@ impl Query {
                         let is_apply = current_type.inner_named_type().as_str()
                             == type_condition.as_str()
                             || parameters.schema.is_subtype(
-                                &type_condition,
+                                type_condition,
                                 current_type.inner_named_type().as_str(),
                             );
 
@@ -753,7 +752,7 @@ impl Query {
                             }
 
                             self.apply_selection_set(
-                                &selection_set,
+                                selection_set,
                                 parameters,
                                 input,
                                 output,
@@ -854,9 +853,7 @@ impl Query {
                     // check if the fragment matches the input type directly, and if not, check if the
                     // input type is a subtype of the fragment's type condition (interface, union)
                     let is_apply = (root_type_name == type_condition.as_str())
-                        || parameters
-                            .schema
-                            .is_subtype(&type_condition, root_type_name);
+                        || parameters.schema.is_subtype(type_condition, root_type_name);
 
                     if is_apply {
                         self.apply_root_selection_set(
@@ -888,14 +885,12 @@ impl Query {
                         // check if the fragment matches the input type directly, and if not, check if the
                         // input type is a subtype of the fragment's type condition (interface, union)
                         let is_apply = (root_type_name == type_condition.as_str())
-                            || parameters
-                                .schema
-                                .is_subtype(&type_condition, root_type_name);
+                            || parameters.schema.is_subtype(type_condition, root_type_name);
 
                         if is_apply {
                             self.apply_root_selection_set(
                                 root_type_name,
-                                &selection_set,
+                                selection_set,
                                 parameters,
                                 input,
                                 output,
@@ -913,7 +908,7 @@ impl Query {
         Ok(())
     }
 
-    fn has_only_typename_field(&self, selection_set: &Vec<Selection>, variables: &Object) -> bool {
+    fn has_only_typename_field(&self, selection_set: &[Selection], variables: &Object) -> bool {
         selection_set.iter().all(|s| match s {
             Selection::Field { name, .. } => name.as_str() == TYPENAME,
             Selection::InlineFragment {
