@@ -71,6 +71,72 @@ async fn aliased() {
     "###);
 }
 
+/* FIXME: should be fixed in query planner, failing with:
+   > value retrieval failed: empty query plan. This behavior is unexpected and we suggest opening an issue to apollographql/router with a reproduction.
+
+#[tokio::test]
+async fn inside_inline_fragment() {
+    let request = Request::fake_builder()
+        .query("{ ... { __typename } }")
+        .build()
+        .unwrap();
+    let response = make_request(request).await;
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "n": "MyQuery"
+      }
+    }
+    "###);
+}
+
+#[tokio::test]
+async fn inside_fragment() {
+    let query = r#"
+       { ...SomeFragment }
+
+       fragment SomeFragment on MyQuery {
+         __typename
+       }
+    "#;
+    let request = Request::fake_builder().query(query).build().unwrap();
+    let response = make_request(request).await;
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "n": "MyQuery"
+      }
+    }
+    "###);
+}
+
+#[tokio::test]
+async fn deeply_nested_inside_fragments() {
+    let query = r#"
+       { ...SomeFragment }
+
+       fragment SomeFragment on MyQuery {
+         ... {
+           ...AnotherFragment
+         }
+       }
+
+       fragment AnotherFragment on MyQuery {
+         __typename
+       }
+    "#;
+    let request = Request::fake_builder().query(query).build().unwrap();
+    let response = make_request(request).await;
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "n": "MyQuery"
+      }
+    }
+    "###);
+}
+*/
+
 #[tokio::test]
 async fn mutation() {
     let request = Request::fake_builder()

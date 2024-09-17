@@ -11,7 +11,6 @@ use crate::spec::query::DeferStats;
 use crate::spec::FieldType;
 use crate::spec::Schema;
 use crate::spec::SpecError;
-use crate::spec::TYPENAME;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) enum Selection {
@@ -188,10 +187,6 @@ impl Selection {
                 })
             }
         })
-    }
-
-    pub(crate) fn is_typename_field(&self) -> bool {
-        matches!(self, Selection::Field {name, ..} if name.as_str() == TYPENAME)
     }
 
     pub(crate) fn contains_error_path(&self, path: &[PathElement], fragments: &Fragments) -> bool {

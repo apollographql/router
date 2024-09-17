@@ -1154,13 +1154,31 @@ async fn root_typename_with_defer_and_empty_first_response() {
         .await
         .unwrap();
 
+    let query = r#"
+        query {
+            ...OnlyTypename
+            ... @defer {
+                currentUser {
+                    activeOrganization {
+                        id
+                        suborga {
+                            id
+                            name
+                        }
+                    }
+                }
+            }
+        }
+
+        fragment OnlyTypename on Query {
+          __typename
+        }
+    "#;
     let request = supergraph::Request::fake_builder()
-            .context(defer_context())
-            .query(
-                "query { __typename ... @defer { currentUser { activeOrganization { id  suborga { id name } } } } }",
-            )
-            .build()
-            .unwrap();
+        .context(defer_context())
+        .query(query)
+        .build()
+        .unwrap();
 
     let mut stream = service.oneshot(request).await.unwrap();
     let res = stream.next_response().await.unwrap();

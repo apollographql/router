@@ -43,6 +43,8 @@ use crate::spec::Selection;
 use crate::spec::SpecError;
 use crate::Configuration;
 
+use super::Fragment;
+
 pub(crate) mod change;
 pub(crate) mod subselections;
 pub(crate) mod transform;
@@ -146,18 +148,6 @@ impl Query {
                                 errors: Vec::new(),
                                 nullified: Vec::new(),
                             };
-                            // Detect if root __typename is asked in the original query (the qp doesn't put root __typename in subselections)
-                            // cf https://github.com/apollographql/router/issues/1677
-                            let operation_kind_if_root_typename =
-                                original_operation.and_then(|op| {
-                                    op.selection_set
-                                        .iter()
-                                        .any(|f| f.is_typename_field())
-                                        .then(|| *op.kind())
-                                });
-                            if let Some(operation_kind) = operation_kind_if_root_typename {
-                                output.insert(TYPENAME, operation_kind.default_type_name().into());
-                            }
 
                             response.data = Some(
                                 match self.apply_root_selection_set(
@@ -239,23 +229,23 @@ impl Query {
                 }
             }
             Some(Value::Null) => {
-                // Detect if root __typename is asked in the original query (the qp doesn't put root __typename in subselections)
-                // cf https://github.com/apollographql/router/issues/1677
-                let operation_kind_if_root_typename = original_operation.and_then(|op| {
-                    op.selection_set
-                        .iter()
-                        .any(|f| f.is_typename_field())
-                        .then(|| *op.kind())
-                });
-                response.data = match operation_kind_if_root_typename {
-                    Some(operation_kind) => {
-                        let mut output = Object::default();
-                        output.insert(TYPENAME, operation_kind.default_type_name().into());
-                        Some(output.into())
-                    }
-                    None => Some(Value::default()),
-                };
+                if let Some(operation) = original_operation {
+                    // Detect if root __typename is asked in the original query (the qp doesn't put root __typename in subselections)
+                    // cf https://github.com/apollographql/router/issues/1677
+                    if self.has_only_typename_field(&operation.selection_set, &variables) {
+                        let operation_type_name = schema
+                            .root_operation(operation.kind.into())
+                            .map(|name| name.as_str())
+                            .unwrap_or(operation.kind.default_type_name());
 
+                        let mut output = Object::default();
+                        output.insert(TYPENAME, operation_type_name.into());
+                        response.data = Some(output.into());
+                        return vec![];
+                    }
+                }
+
+                response.data = Some(Value::Null);
                 return vec![];
             }
             _ => {
@@ -263,7 +253,7 @@ impl Query {
             }
         }
 
-        response.data = Some(Value::default());
+        response.data = Some(Value::Null);
 
         vec![]
     }
@@ -571,19 +561,13 @@ impl Query {
                             .and_then(|s| apollo_compiler::ast::NamedType::new(s).ok())
                             .map(apollo_compiler::ast::Type::Named);
 
-                        let current_type = if parameters
-                            .schema
-                            .get_interface(field_type.inner_named_type())
-                            .is_some()
-                            || parameters
-                                .schema
-                                .get_union(field_type.inner_named_type())
-                                .is_some()
-                        {
-                            typename.as_ref().unwrap_or(field_type)
-                        } else {
-                            field_type
-                        };
+                        let current_type =
+                            match parameters.schema.types.get(field_type.inner_named_type()) {
+                                Some(ExtendedType::Interface(..) | ExtendedType::Union(..)) => {
+                                    typename.as_ref().unwrap_or(field_type)
+                                }
+                                _ => field_type,
+                            };
 
                         if self
                             .apply_selection_set(
@@ -640,21 +624,11 @@ impl Query {
                     }
 
                     if name.as_str() == TYPENAME {
-                        let input_value = input
-                            .get(field_name.as_str())
-                            .cloned()
-                            .filter(|v| v.is_string())
-                            .unwrap_or_else(|| {
-                                Value::String(ByteString::from(
-                                    current_type.inner_named_type().as_str().to_owned(),
-                                ))
-                            });
-                        if let Some(input_str) = input_value.as_str() {
-                            if parameters.schema.get_object(input_str).is_some() {
-                                output.insert((*field_name).clone(), input_value);
-                            } else {
-                                return Err(InvalidValue);
-                            }
+                        let typename = current_type.inner_named_type();
+                        if parameters.schema.get_object(typename).is_some() {
+                            output.insert((*field_name).clone(), typename.as_str().into());
+                        } else {
+                            return Err(InvalidValue);
                         }
                         continue;
                     }
@@ -751,11 +725,15 @@ impl Query {
                         continue;
                     }
 
-                    if let Some(fragment) = self.fragments.get(name) {
+                    if let Some(Fragment {
+                        type_condition,
+                        selection_set,
+                    }) = self.fragments.get(name)
+                    {
                         let is_apply = current_type.inner_named_type().as_str()
-                            == fragment.type_condition.as_str()
+                            == type_condition.as_str()
                             || parameters.schema.is_subtype(
-                                &fragment.type_condition,
+                                &type_condition,
                                 current_type.inner_named_type().as_str(),
                             );
 
@@ -768,7 +746,7 @@ impl Query {
                             }
 
                             self.apply_selection_set(
-                                &fragment.selection_set,
+                                &selection_set,
                                 parameters,
                                 input,
                                 output,
@@ -811,7 +789,12 @@ impl Query {
 
                     let field_name = alias.as_ref().unwrap_or(name);
                     let field_name_str = field_name.as_str();
-                    if let Some(input_value) = input.get_mut(field_name_str) {
+
+                    if name.as_str() == TYPENAME {
+                        if !output.contains_key(field_name_str) {
+                            output.insert(field_name.clone(), Value::String(root_type_name.into()));
+                        }
+                    } else if let Some(input_value) = input.get_mut(field_name_str) {
                         // if there's already a value for that key in the output it means either:
                         // - the value is a scalar and was moved into output using take(), replacing
                         // the input value with Null
@@ -837,10 +820,6 @@ impl Query {
                         );
                         path.pop();
                         res?
-                    } else if name.as_str() == TYPENAME {
-                        if !output.contains_key(field_name_str) {
-                            output.insert(field_name.clone(), Value::String(root_type_name.into()));
-                        }
                     } else if field_type.is_non_null() {
                         parameters.errors.push(Error {
                             message: format!(
@@ -861,25 +840,27 @@ impl Query {
                     include_skip,
                     ..
                 } => {
-                    // top level objects will not provide a __typename field
-                    if type_condition.as_str() != root_type_name {
-                        return Err(InvalidValue);
-                    }
-
                     if include_skip.should_skip(parameters.variables) {
                         continue;
                     }
 
-                    self.apply_selection_set(
-                        selection_set,
-                        parameters,
-                        input,
-                        output,
-                        path,
-                        // FIXME: use `ast::Name` everywhere so fallible conversion isn’t needed
-                        #[allow(clippy::unwrap_used)]
-                        &FieldType::new_named(type_condition.try_into().unwrap()).0,
-                    )?;
+                    // check if the fragment matches the input type directly, and if not, check if the
+                    // input type is a subtype of the fragment's type condition (interface, union)
+                    let is_apply = (root_type_name == type_condition.as_str())
+                        || parameters
+                            .schema
+                            .is_subtype(&type_condition, root_type_name);
+
+                    if is_apply {
+                        self.apply_root_selection_set(
+                            root_type_name,
+                            selection_set,
+                            parameters,
+                            input,
+                            output,
+                            path,
+                        )?;
+                    }
                 }
                 Selection::FragmentSpread {
                     name,
@@ -892,30 +873,28 @@ impl Query {
                         continue;
                     }
 
-                    if let Some(fragment) = self.fragments.get(name) {
-                        let is_apply = {
-                            // check if the fragment matches the input type directly, and if not, check if the
-                            // input type is a subtype of the fragment's type condition (interface, union)
-                            root_type_name == fragment.type_condition.as_str()
-                                || parameters
-                                    .schema
-                                    .is_subtype(&fragment.type_condition, root_type_name)
-                        };
+                    if let Some(Fragment {
+                        type_condition,
+                        selection_set,
+                    }) = self.fragments.get(name)
+                    {
+                        // check if the fragment matches the input type directly, and if not, check if the
+                        // input type is a subtype of the fragment's type condition (interface, union)
+                        let is_apply = (root_type_name == type_condition.as_str())
+                            || parameters
+                                .schema
+                                .is_subtype(&type_condition, root_type_name);
 
-                        if !is_apply {
-                            return Err(InvalidValue);
+                        if is_apply {
+                            self.apply_root_selection_set(
+                                root_type_name,
+                                &selection_set,
+                                parameters,
+                                input,
+                                output,
+                                path,
+                            )?;
                         }
-
-                        self.apply_selection_set(
-                            &fragment.selection_set,
-                            parameters,
-                            input,
-                            output,
-                            path,
-                            // FIXME: use `ast::Name` everywhere so fallible conversion isn’t needed
-                            #[allow(clippy::unwrap_used)]
-                            &FieldType::new_named(root_type_name.try_into().unwrap()).0,
-                        )?;
                     } else {
                         // the fragment should have been already checked with the schema
                         failfast_debug!("missing fragment named: {}", name);
@@ -925,6 +904,36 @@ impl Query {
         }
 
         Ok(())
+    }
+
+    fn has_only_typename_field(&self, selection_set: &Vec<Selection>, variables: &Object) -> bool {
+        selection_set.iter().all(|s| match s {
+            Selection::Field { name, .. } => name.as_str() == TYPENAME,
+            Selection::InlineFragment {
+                selection_set,
+                include_skip,
+                defer,
+                ..
+            } => {
+                defer.eval(variables).unwrap_or(true)
+                    || include_skip.should_skip(variables)
+                    || self.has_only_typename_field(selection_set, variables)
+            }
+            Selection::FragmentSpread {
+                name,
+                include_skip,
+                defer,
+                ..
+            } => {
+                defer.eval(variables).unwrap_or(true)
+                    || include_skip.should_skip(variables)
+                    || if let Some(fragment) = self.fragments.get(name) {
+                        self.has_only_typename_field(&fragment.selection_set, variables)
+                    } else {
+                        false
+                    }
+            }
+        })
     }
 
     /// Validate a [`Request`]'s variables against this [`Query`] using a provided [`Schema`].
