@@ -176,7 +176,11 @@ impl ApplyToResultMethods for (Option<JSON>, Vec<ApplyToError>) {
             self
         } else {
             let (value_opt, apply_errors) = self;
-            (value_opt, [errors, apply_errors.as_slice()].concat())
+            if apply_errors.is_empty() {
+                (value_opt, errors.to_vec())
+            } else {
+                (value_opt, [errors, apply_errors.as_slice()].concat())
+            }
         }
     }
 
