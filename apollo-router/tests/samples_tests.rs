@@ -170,12 +170,14 @@ impl TestExecution {
                 query_path,
                 headers,
                 expected_response,
+                expected_headers,
             } => {
                 self.request(
                     request.clone(),
                     query_path.as_deref(),
                     headers,
                     expected_response,
+                    expected_headers,
                     path,
                     out,
                 )
@@ -417,6 +419,7 @@ impl TestExecution {
         query_path: Option<&str>,
         headers: &HashMap<String, String>,
         expected_response: &Value,
+        expected_headers: &HashMap<String, String>,
         path: &Path,
         out: &mut String,
     ) -> Result<(), Failed> {
@@ -446,6 +449,28 @@ impl TestExecution {
             .execute_query_with_headers(&request, headers.clone())
             .await;
         writeln!(out, "response headers: {:?}", response.headers()).unwrap();
+
+        let mut failed = false;
+        for (key, value) in expected_headers {
+            if !response.headers().contains_key(key) {
+                failed = true;
+                writeln!(out, "expected header {} to be present", key).unwrap();
+            } else if response.headers().get(key).unwrap() != value {
+                failed = true;
+                writeln!(
+                    out,
+                    "expected header {} to be {}, got {:?}",
+                    key,
+                    value,
+                    response.headers().get(key).unwrap()
+                )
+                .unwrap();
+            }
+        }
+        if failed {
+            let f: Failed = out.clone().into();
+            return Err(f);
+        }
 
         let content_type = response
             .headers()
@@ -652,6 +677,8 @@ enum Action {
         #[serde(default)]
         headers: HashMap<String, String>,
         expected_response: Value,
+        #[serde(default)]
+        expected_headers: HashMap<String, String>,
     },
     EndpointRequest {
         url: url::Url,
