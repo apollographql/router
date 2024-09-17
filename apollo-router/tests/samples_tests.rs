@@ -459,9 +459,15 @@ impl TestExecution {
             if let Ok(mime) = result {
                 if mime.ty == mediatype::names::MULTIPART && mime.subty == mediatype::names::MIXED {
                     is_multipart = true;
-                    boundary = mime
-                        .get_param(mediatype::names::BOUNDARY)
-                        .map(|v| v.as_str().to_string());
+                    boundary = mime.get_param(mediatype::names::BOUNDARY).map(|v| {
+                        // multer does not strip quotes from the boundary: https://github.com/rwf2/multer/issues/64
+                        let mut s = v.as_str();
+                        if s.starts_with("\"") && s.ends_with("\"") {
+                            s = &s[1..s.len() - 1];
+                        }
+
+                        s.to_string()
+                    });
                 }
             }
         }
@@ -483,14 +489,6 @@ impl TestExecution {
                 f
             })?
         } else {
-            writeln!(out, "is_multipart, boundary={boundary:?}").unwrap();
-            /*writeln!(
-                out,
-                "entire response:\n{}",
-                std::str::from_utf8(&response.bytes().await.unwrap()).unwrap()
-            )
-            .unwrap();*/
-
             let mut chunks = Vec::new();
 
             let mut multipart = Multipart::new(response.bytes_stream(), boundary.unwrap());
@@ -501,12 +499,6 @@ impl TestExecution {
                 let f: Failed = out.clone().into();
                 f
             })? {
-                writeln!(out, "multipart field: {:?}\n", field).unwrap();
-
-                let name = field.name();
-                // Get the field's filename if provided in "Content-Disposition" header.
-                let file_name = field.file_name();
-
                 while let Some(chunk) = field.chunk().await.map_err(|e| {
                     writeln!(out, "could not get next chunk from multipart body: {e}",).unwrap();
                     let f: Failed = out.clone().into();

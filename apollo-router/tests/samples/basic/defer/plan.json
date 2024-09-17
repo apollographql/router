@@ -10,14 +10,16 @@
                         {
                             "request": {
                                 "body": {
-                                    "query": "{me{name}}"
+                                    "query": "{me{__typename name id}}"
                                 }
                             },
                             "response": {
                                 "body": {
                                     "data": {
                                         "me": {
-                                            "name": "test"
+                                            "__typename": "User",
+                                            "name": "test",
+                                            "id": "1"
                                         }
                                     }
                                 }
@@ -26,7 +28,38 @@
                     ]
                 },
                 "reviews": {
-                    "requests": []
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{reviews{body}}}}",
+                                    "variables": {
+                                        "representations": [
+                                            {
+                                                "__typename": "User",
+                                                "id": "1"
+                                            }
+                                        ]
+                                    }
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "_entities": [
+                                            {
+                                                "reviews": [
+                                                    {
+                                                        "body": "Test"
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    ]
                 }
             }
         },
@@ -38,13 +71,33 @@
             "request": {
                 "query": "{ me { name ... @defer { reviews { body } } } }"
             },
-            "expected_response": {
-                "data": {
-                    "me": {
-                        "name": "Ada Lovelace"
-                    }
+            "expected_response": [
+                {
+                    "data": {
+                        "me": {
+                            "name": "test"
+                        }
+                    },
+                    "hasNext": true
+                },
+                {
+                    "hasNext": false,
+                    "incremental": [
+                        {
+                            "data": {
+                                "reviews": [
+                                    {
+                                        "body": "Test"
+                                    }
+                                ]
+                            },
+                            "path": [
+                                "me"
+                            ]
+                        }
+                    ]
                 }
-            }
+            ]
         },
         {
             "type": "Stop"
