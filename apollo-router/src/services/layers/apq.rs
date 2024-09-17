@@ -55,6 +55,14 @@ pub(crate) struct APQLayer {
 }
 
 impl APQLayer {
+    pub(crate) fn activate(&self) {
+        if let Some(cache) = &self.cache {
+            cache.activate();
+        }
+    }
+}
+
+impl APQLayer {
     pub(crate) fn with_cache(cache: DeduplicatingCache<String, String>) -> Self {
         Self { cache: Some(cache) }
     }
