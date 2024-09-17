@@ -889,7 +889,8 @@ impl Telemetry {
 
             Self::checked_global_tracer_shutdown(last_provider);
 
-            opentelemetry::global::set_text_map_propagator(Self::create_propagator(&self.config));
+            let propagator = Self::create_propagator(&self.config);
+            opentelemetry::global::set_text_map_propagator(propagator);
         }
 
         activation.reload_metrics();
@@ -934,6 +935,7 @@ impl Telemetry {
         if propagation.zipkin || tracing.zipkin.enabled {
             propagators.push(Box::<opentelemetry_zipkin::Propagator>::default());
         }
+        // TODO: put it at the end and add a comment saying IT MUST BE THE LAST ONE
         if propagation.datadog || tracing.datadog.enabled() {
             propagators.push(Box::<tracing::datadog_exporter::DatadogPropagator>::default());
         }

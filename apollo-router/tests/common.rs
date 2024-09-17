@@ -4,6 +4,7 @@ use std::net::SocketAddr;
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -18,6 +19,7 @@ use fred::types::Scanner;
 use futures::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
+use http::HeaderName;
 use http::HeaderValue;
 use mediatype::names::BOUNDARY;
 use mediatype::names::FORM_DATA;
@@ -33,6 +35,7 @@ use opentelemetry::sdk::trace::TracerProvider;
 use opentelemetry::sdk::Resource;
 use opentelemetry::testing::trace::NoopSpanExporter;
 use opentelemetry::trace::TraceContextExt;
+use opentelemetry_api::trace::SpanContext;
 use opentelemetry_api::trace::TraceId;
 use opentelemetry_api::trace::TracerProvider as OtherTracerProvider;
 use opentelemetry_api::Context;
@@ -126,7 +129,7 @@ impl Respond for TracedResponder {
 pub enum Telemetry {
     Jaeger,
     Otlp {
-        endpoint: String,
+        endpoint: Option<String>,
     },
     Datadog,
     Zipkin,
@@ -156,7 +159,9 @@ impl Telemetry {
                     .build(),
                 )
                 .build(),
-            Telemetry::Otlp { endpoint } => TracerProvider::builder()
+            Telemetry::Otlp {
+                endpoint: Some(endpoint),
+            } => TracerProvider::builder()
                 .with_config(config)
                 .with_span_processor(
                     BatchSpanProcessor::builder(
@@ -201,7 +206,7 @@ impl Telemetry {
                     .build(),
                 )
                 .build(),
-            Telemetry::None => TracerProvider::builder()
+            Telemetry::None | Telemetry::Otlp { endpoint: None } => TracerProvider::builder()
                 .with_config(config)
                 .with_simple_exporter(NoopSpanExporter::default())
                 .build(),
@@ -258,7 +263,29 @@ impl Telemetry {
             }
             Telemetry::Datadog => {
                 let propagator = opentelemetry_datadog::DatadogPropagator::new();
-                propagator.extract(&headers)
+                let mut context = propagator.extract(&headers);
+                // We're going to override the sampled so that we can test sampling priority
+                if let Some(psr) = headers.get("x-datadog-sampling-priority") {
+                    let state = context
+                        .span()
+                        .span_context()
+                        .trace_state()
+                        .insert("psr", psr.to_string())
+                        .expect("psr");
+                    context = context.with_remote_span_context(SpanContext::new(
+                        context.span().span_context().trace_id(),
+                        context.span().span_context().span_id(),
+                        context
+                            .span()
+                            .span_context()
+                            .trace_flags()
+                            .with_sampled(true),
+                        true,
+                        state,
+                    ));
+                }
+
+                context
             }
             Telemetry::Otlp { .. } => {
                 let propagator = opentelemetry::sdk::propagation::TraceContextPropagator::default();
@@ -563,7 +590,7 @@ impl IntegrationTest {
             async move {
                 let client = reqwest::Client::new();
 
-                let mut builder = client
+                let builder = client
                     .post(url)
                     .header(
                         CONTENT_TYPE,
@@ -574,14 +601,19 @@ impl IntegrationTest {
                     .header("x-my-header", "test")
                     .header("head", "test");
 
+                let mut request = builder.json(&query).build().unwrap();
+                telemetry.inject_context(&mut request);
+
                 if let Some(headers) = headers {
                     for (name, value) in headers {
-                        builder = builder.header(name, value);
+                        request.headers_mut().remove(&name);
+                        request.headers_mut().append(
+                            HeaderName::from_str(&name).expect("header was invalid"),
+                            value.try_into().expect("header was invalid"),
+                        );
                     }
                 }
 
-                let mut request = builder.json(&query).build().unwrap();
-                telemetry.inject_context(&mut request);
                 request.headers_mut().remove(ACCEPT);
                 match client.execute(request).await {
                     Ok(response) => (span_id, response),

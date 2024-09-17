@@ -39,3 +39,12 @@ impl ValueExt for Value {
         self.as_str().map(|s| s.to_string())
     }
 }
+
+impl ValueExt for &Value {
+    fn select_path<'a>(&'a self, path: &str) -> Result<Vec<&'a Value>, BoxError> {
+        Ok(Selector::new().str_path(path)?.value(self).select()?)
+    }
+    fn as_string(&self) -> Option<String> {
+        self.as_str().map(|s| s.to_string())
+    }
+}

@@ -7266,6 +7266,11 @@ expression: "&schema"
     "TracingCommon": {
       "additionalProperties": false,
       "properties": {
+        "datadog_agent_sampling": {
+          "default": false,
+          "description": "Use datadog agent sampling. This means that all spans will be sent to the Datadog agent and the `sampling.priority` attribute will be used to control if the span will then be sent to Datadog.",
+          "type": "boolean"
+        },
         "max_attributes_per_event": {
           "default": 128,
           "description": "The maximum attributes per event before discarding",
