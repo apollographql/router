@@ -1175,18 +1175,27 @@ example:
 
 ### Fragment reuse and generation
 
-By default, the router will attempt to reuse fragments from the original query while forming subgraph requests. This behavior can be disabled by setting the option to `false`:
+By default, the router will _generate_ fragments for subgraph requests,
+extracting _inline fragments only_ into fragment definitions before sending
+queries to subgraphs. In very many cases this significantly reduces the size of
+the query sent to subgraphs, but may increase the time it takes for planning.
+Note that this option and `experimental_reuse_query_fragments` are mutually
+exclusive; if both are explicitly set to `true`, `generate_query_fragments` will
+take precedence. This behaviour can be disabled by setting the option to `false`:
 
 ```yaml
 supergraph:
-  experimental_reuse_query_fragments: false
+  generate_query_fragments: false 
 ```
 
-Alternatively, the router can be configured to _generate_ fragments for subgraph requests. When set to `true`, the router will extract _inline fragments only_ into fragment definitions before sending queries to subgraphs. This can significantly reduce the size of the query sent to subgraphs, but may increase the time it takes for planning. Note that this option and `experimental_reuse_query_fragments` are mutually exclusive; if both are explicitly set to `true`, `generate_query_fragments` will take precedence.
+Alternatively, the router can attempt to reuse fragments from the original query
+while forming subgraph requests. This often results in largers queries sent to
+subgraphs, but it may be decrease planning times. This behavior can be enabled
+by setting the option to `true`:
 
 ```yaml
 supergraph:
-  generate_query_fragments: true
+  experimental_reuse_query_fragments: true 
 ```
 
 ### Reusing configuration
