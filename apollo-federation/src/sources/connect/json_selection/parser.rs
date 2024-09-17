@@ -254,11 +254,11 @@ impl ExternalVarPaths for NamedSelection {
     }
 }
 
-// PathSelection ::= (VarPath | KeyPath | AtPath) SubSelection?
+// PathSelection ::= (VarPath | KeyPath | AtPath | ExprPath) SubSelection?
 // VarPath       ::= "$" (NO_SPACE Identifier)? PathStep*
 // KeyPath       ::= Key PathStep+
 // AtPath        ::= "@" PathStep*
-// ExprPath      ::= "(" LitExpr ")" PathStep*
+// ExprPath      ::= "$(" LitExpr ")" PathStep*
 // PathStep      ::= "." Key | "->" Identifier MethodArgs?
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -351,8 +351,8 @@ pub(super) enum PathList {
     // middle/tail of a PathList.
     Key(WithRange<Key>, WithRange<PathList>),
 
-    // An ExprPath, which begins with a LitExpr enclosed in parentheses. Must
-    // appear only at the beginning of a PathSelection, like PathList::Var.
+    // An ExprPath, which begins with a LitExpr enclosed by $(...). Must appear
+    // only at the beginning of a PathSelection, like PathList::Var.
     Expr(WithRange<LitExpr>, WithRange<PathList>),
 
     // A PathList::Method is a PathStep item that may appear only in the
