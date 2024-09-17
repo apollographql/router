@@ -1,9 +1,10 @@
-use apollo_compiler::collections::IndexSet;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JSONMap;
 use serde_json_bytes::Value as JSON;
 
+use crate::sources::connect::json_selection::apply_to::ApplyToResultMethods;
 use crate::sources::connect::json_selection::helpers::json_type_name;
+use crate::sources::connect::json_selection::helpers::vec_push;
 use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::lit_expr::LitExpr;
 use crate::sources::connect::json_selection::location::merge_ranges;
@@ -22,21 +23,22 @@ pub(super) fn echo_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
     tail: &WithRange<PathList>,
-    errors: &mut IndexSet<ApplyToError>,
-) -> Option<JSON> {
-    if let Some(method_args) = method_args {
-        if let Some(arg) = method_args.args.first() {
+) -> (Option<JSON>, Vec<ApplyToError>) {
+    if let Some(MethodArgs { args, .. }) = method_args {
+        if let Some(arg) = args.first() {
             return arg
-                .apply_to_path(data, vars, input_path, errors)
-                .and_then(|value| tail.apply_to_path(&value, vars, input_path, errors));
+                .apply_to_path(data, vars, input_path)
+                .and_then_collecting_errors(|value| tail.apply_to_path(value, vars, input_path));
         }
     }
-    errors.insert(ApplyToError::new(
-        format!("Method ->{} requires one argument", method_name.as_ref()),
-        input_path.to_vec(),
-        method_name.range(),
-    ));
-    None
+    (
+        None,
+        vec![ApplyToError::new(
+            format!("Method ->{} requires one argument", method_name.as_ref()),
+            input_path.to_vec(),
+            method_name.range(),
+        )],
+    )
 }
 
 pub(super) fn map_method(
@@ -46,20 +48,23 @@ pub(super) fn map_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
     tail: &WithRange<PathList>,
-    errors: &mut IndexSet<ApplyToError>,
-) -> Option<JSON> {
+) -> (Option<JSON>, Vec<ApplyToError>) {
     if let Some(args) = method_args {
         if let Some(first_arg) = args.args.first() {
             if let JSON::Array(array) = data {
                 let mut output = Vec::with_capacity(array.len());
+                let mut errors = Vec::new();
 
                 for (i, element) in array.iter().enumerate() {
                     let input_path = input_path.append(JSON::Number(i.into()));
-                    if let Some(applied) =
-                        first_arg.apply_to_path(element, vars, &input_path, errors)
-                    {
-                        if let Some(value) = tail.apply_to_path(&applied, vars, &input_path, errors)
-                        {
+                    let (applied_opt, arg_errors) =
+                        first_arg.apply_to_path(element, vars, &input_path);
+                    errors.extend(arg_errors);
+                    if let Some(applied) = applied_opt {
+                        let (value_opt, apply_errors) =
+                            tail.apply_to_path(&applied, vars, &input_path);
+                        errors.extend(apply_errors);
+                        if let Some(value) = value_opt {
                             output.push(value);
                             continue;
                         }
@@ -67,25 +72,29 @@ pub(super) fn map_method(
                     output.push(JSON::Null);
                 }
 
-                Some(JSON::Array(output))
+                (Some(JSON::Array(output)), errors)
             } else {
-                first_arg.apply_to_path(data, vars, input_path, errors)
+                first_arg.apply_to_path(data, vars, input_path)
             }
         } else {
-            errors.insert(ApplyToError::new(
+            (
+                None,
+                vec![ApplyToError::new(
+                    format!("Method ->{} requires one argument", method_name.as_ref()),
+                    input_path.to_vec(),
+                    method_name.range(),
+                )],
+            )
+        }
+    } else {
+        (
+            None,
+            vec![ApplyToError::new(
                 format!("Method ->{} requires one argument", method_name.as_ref()),
                 input_path.to_vec(),
                 method_name.range(),
-            ));
-            None
-        }
-    } else {
-        errors.insert(ApplyToError::new(
-            format!("Method ->{} requires one argument", method_name.as_ref()),
-            input_path.to_vec(),
-            method_name.range(),
-        ));
-        None
+            )],
+        )
     }
 }
 
@@ -96,41 +105,53 @@ pub(super) fn match_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
     tail: &WithRange<PathList>,
-    errors: &mut IndexSet<ApplyToError>,
-) -> Option<JSON> {
+) -> (Option<JSON>, Vec<ApplyToError>) {
     // Takes any number of pairs [key, value], and returns value for the first
     // key that equals the data. If none of the pairs match, returns None.
     // Typically, the final pair will use @ as its key to ensure some default
     // value is returned.
-    if let Some(method_args) = method_args {
-        for pair in &method_args.args {
+    let mut errors = Vec::new();
+
+    if let Some(MethodArgs { args, .. }) = method_args {
+        for pair in args {
             if let LitExpr::Array(pair) = pair.as_ref() {
                 if pair.len() == 2 {
-                    if let Some(candidate) = pair[0].apply_to_path(data, vars, input_path, errors) {
+                    let (candidate_opt, candidate_errors) =
+                        pair[0].apply_to_path(data, vars, input_path);
+                    errors.extend(candidate_errors);
+
+                    if let Some(candidate) = candidate_opt {
                         if candidate == *data {
                             return pair[1]
-                                .apply_to_path(data, vars, input_path, errors)
-                                .and_then(|value| {
-                                    tail.apply_to_path(&value, vars, input_path, errors)
-                                });
+                                .apply_to_path(data, vars, input_path)
+                                .and_then_collecting_errors(|value| {
+                                    tail.apply_to_path(value, vars, input_path)
+                                })
+                                .prepend_errors(errors);
                         }
                     };
                 }
             }
         }
     }
-    errors.insert(ApplyToError::new(
-        format!(
-            "Method ->{} did not match any [candidate, value] pair",
-            method_name.as_ref(),
+
+    (
+        None,
+        vec_push(
+            errors,
+            ApplyToError::new(
+                format!(
+                    "Method ->{} did not match any [candidate, value] pair",
+                    method_name.as_ref(),
+                ),
+                input_path.to_vec(),
+                merge_ranges(
+                    method_name.range(),
+                    method_args.and_then(|args| args.range()),
+                ),
+            ),
         ),
-        input_path.to_vec(),
-        merge_ranges(
-            method_name.range(),
-            method_args.and_then(|args| args.range()),
-        ),
-    ));
-    None
+    )
 }
 
 pub(super) fn first_method(
@@ -140,33 +161,39 @@ pub(super) fn first_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
     tail: &WithRange<PathList>,
-    errors: &mut IndexSet<ApplyToError>,
-) -> Option<JSON> {
+) -> (Option<JSON>, Vec<ApplyToError>) {
     if method_args.is_some() {
-        errors.insert(ApplyToError::new(
-            format!(
-                "Method ->{} does not take any arguments",
-                method_name.as_ref()
-            ),
-            input_path.to_vec(),
-            method_name.range(),
-        ));
-        return None;
+        return (
+            None,
+            vec![ApplyToError::new(
+                format!(
+                    "Method ->{} does not take any arguments",
+                    method_name.as_ref()
+                ),
+                input_path.to_vec(),
+                method_name.range(),
+            )],
+        );
     }
 
     match data {
-        JSON::Array(array) => array
-            .first()
-            .and_then(|first| tail.apply_to_path(first, vars, input_path, errors)),
-        JSON::String(s) => s.as_str().chars().next().and_then(|first| {
-            tail.apply_to_path(
-                &JSON::String(first.to_string().into()),
-                vars,
-                input_path,
-                errors,
-            )
-        }),
-        _ => tail.apply_to_path(data, vars, input_path, errors),
+        JSON::Array(array) => {
+            if let Some(first) = array.first() {
+                tail.apply_to_path(first, vars, input_path)
+            } else {
+                (None, vec![])
+            }
+        }
+
+        JSON::String(s) => {
+            if let Some(first) = s.as_str().chars().next() {
+                tail.apply_to_path(&JSON::String(first.to_string().into()), vars, input_path)
+            } else {
+                (None, vec![])
+            }
+        }
+
+        _ => tail.apply_to_path(data, vars, input_path),
     }
 }
 
@@ -177,33 +204,39 @@ pub(super) fn last_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
     tail: &WithRange<PathList>,
-    errors: &mut IndexSet<ApplyToError>,
-) -> Option<JSON> {
+) -> (Option<JSON>, Vec<ApplyToError>) {
     if method_args.is_some() {
-        errors.insert(ApplyToError::new(
-            format!(
-                "Method ->{} does not take any arguments",
-                method_name.as_ref()
-            ),
-            input_path.to_vec(),
-            method_name.range(),
-        ));
-        return None;
+        return (
+            None,
+            vec![ApplyToError::new(
+                format!(
+                    "Method ->{} does not take any arguments",
+                    method_name.as_ref()
+                ),
+                input_path.to_vec(),
+                method_name.range(),
+            )],
+        );
     }
 
     match data {
-        JSON::Array(array) => array
-            .last()
-            .and_then(|last| tail.apply_to_path(last, vars, input_path, errors)),
-        JSON::String(s) => s.as_str().chars().last().and_then(|last| {
-            tail.apply_to_path(
-                &JSON::String(last.to_string().into()),
-                vars,
-                input_path,
-                errors,
-            )
-        }),
-        _ => tail.apply_to_path(data, vars, input_path, errors),
+        JSON::Array(array) => {
+            if let Some(last) = array.last() {
+                tail.apply_to_path(last, vars, input_path)
+            } else {
+                (None, vec![])
+            }
+        }
+
+        JSON::String(s) => {
+            if let Some(last) = s.as_str().chars().last() {
+                tail.apply_to_path(&JSON::String(last.to_string().into()), vars, input_path)
+            } else {
+                (None, vec![])
+            }
+        }
+
+        _ => tail.apply_to_path(data, vars, input_path),
     }
 }
 
@@ -214,37 +247,47 @@ pub(super) fn slice_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
     tail: &WithRange<PathList>,
-    errors: &mut IndexSet<ApplyToError>,
-) -> Option<JSON> {
+) -> (Option<JSON>, Vec<ApplyToError>) {
     let length = if let JSON::Array(array) = data {
         array.len() as i64
     } else if let JSON::String(s) = data {
         s.as_str().len() as i64
     } else {
-        errors.insert(ApplyToError::new(
-            format!(
-                "Method ->{} requires an array or string input",
-                method_name.as_ref()
-            ),
-            input_path.to_vec(),
-            method_name.range(),
-        ));
-        return None;
+        return (
+            None,
+            vec![ApplyToError::new(
+                format!(
+                    "Method ->{} requires an array or string input",
+                    method_name.as_ref()
+                ),
+                input_path.to_vec(),
+                method_name.range(),
+            )],
+        );
     };
 
-    if let Some(method_args) = method_args {
-        let start = method_args
-            .args
+    if let Some(MethodArgs { args, .. }) = method_args {
+        let mut errors = Vec::new();
+
+        let start = args
             .first()
-            .and_then(|arg| arg.apply_to_path(data, vars, input_path, errors))
+            .and_then(|arg| {
+                let (value_opt, apply_errors) = arg.apply_to_path(data, vars, input_path);
+                errors.extend(apply_errors);
+                value_opt
+            })
             .and_then(|n| n.as_i64())
             .unwrap_or(0)
             .max(0)
             .min(length) as usize;
-        let end = method_args
-            .args
+
+        let end = args
             .get(1)
-            .and_then(|arg| arg.apply_to_path(data, vars, input_path, errors))
+            .and_then(|arg| {
+                let (value_opt, apply_errors) = arg.apply_to_path(data, vars, input_path);
+                errors.extend(apply_errors);
+                value_opt
+            })
             .and_then(|n| n.as_i64())
             .unwrap_or(length)
             .max(0)
@@ -265,6 +308,7 @@ pub(super) fn slice_method(
                     JSON::Array(vec![])
                 }
             }
+
             JSON::String(s) => {
                 if end - start > 0 {
                     JSON::String(s.as_str()[start..end].to_string().into())
@@ -272,12 +316,17 @@ pub(super) fn slice_method(
                     JSON::String("".to_string().into())
                 }
             }
+
             _ => unreachable!(),
         };
 
-        tail.apply_to_path(&array, vars, input_path, errors)
+        tail.apply_to_path(&array, vars, input_path)
+            .prepend_errors(errors)
     } else {
-        Some(data.clone())
+        // TODO Should calling ->slice or ->slice() without arguments be an
+        // error? In JavaScript, array->slice() copies the array, but that's not
+        // so useful in an immutable value-typed language like JSONSelection.
+        (Some(data.clone()), vec![])
     }
 }
 
@@ -288,37 +337,39 @@ pub(super) fn size_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
     tail: &WithRange<PathList>,
-    errors: &mut IndexSet<ApplyToError>,
-) -> Option<JSON> {
+) -> (Option<JSON>, Vec<ApplyToError>) {
     if method_args.is_some() {
-        errors.insert(ApplyToError::new(
-            format!(
-                "Method ->{} does not take any arguments",
-                method_name.as_ref()
-            ),
-            input_path.to_vec(),
-            method_name.range(),
-        ));
-        return None;
+        return (
+            None,
+            vec![ApplyToError::new(
+                format!(
+                    "Method ->{} does not take any arguments",
+                    method_name.as_ref()
+                ),
+                input_path.to_vec(),
+                method_name.range(),
+            )],
+        );
     }
 
     match data {
         JSON::Array(array) => {
             let size = array.len() as i64;
-            tail.apply_to_path(&JSON::Number(size.into()), vars, input_path, errors)
+            tail.apply_to_path(&JSON::Number(size.into()), vars, input_path)
         }
         JSON::String(s) => {
             let size = s.as_str().len() as i64;
-            tail.apply_to_path(&JSON::Number(size.into()), vars, input_path, errors)
+            tail.apply_to_path(&JSON::Number(size.into()), vars, input_path)
         }
         // Though we can't ask for ->first or ->last or ->at(n) on an object, we
         // can safely return how many properties the object has for ->size.
         JSON::Object(map) => {
             let size = map.len() as i64;
-            tail.apply_to_path(&JSON::Number(size.into()), vars, input_path, errors)
+            tail.apply_to_path(&JSON::Number(size.into()), vars, input_path)
         }
-        _ => {
-            errors.insert(ApplyToError::new(
+        _ => (
+            None,
+            vec![ApplyToError::new(
                 format!(
                     "Method ->{} requires an array, string, or object input, not {}",
                     method_name.as_ref(),
@@ -326,9 +377,8 @@ pub(super) fn size_method(
                 ),
                 input_path.to_vec(),
                 method_name.range(),
-            ));
-            None
-        }
+            )],
+        ),
     }
 }
 
@@ -343,18 +393,19 @@ pub(super) fn entries_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
     tail: &WithRange<PathList>,
-    errors: &mut IndexSet<ApplyToError>,
-) -> Option<JSON> {
+) -> (Option<JSON>, Vec<ApplyToError>) {
     if method_args.is_some() {
-        errors.insert(ApplyToError::new(
-            format!(
-                "Method ->{} does not take any arguments",
-                method_name.as_ref()
-            ),
-            input_path.to_vec(),
-            method_name.range(),
-        ));
-        return None;
+        return (
+            None,
+            vec![ApplyToError::new(
+                format!(
+                    "Method ->{} does not take any arguments",
+                    method_name.as_ref()
+                ),
+                input_path.to_vec(),
+                method_name.range(),
+            )],
+        );
     }
 
     match data {
@@ -368,10 +419,11 @@ pub(super) fn entries_method(
                     JSON::Object(key_value_pair)
                 })
                 .collect();
-            tail.apply_to_path(&JSON::Array(entries), vars, input_path, errors)
+            tail.apply_to_path(&JSON::Array(entries), vars, input_path)
         }
-        _ => {
-            errors.insert(ApplyToError::new(
+        _ => (
+            None,
+            vec![ApplyToError::new(
                 format!(
                     "Method ->{} requires an object input, not {}",
                     method_name.as_ref(),
@@ -379,8 +431,7 @@ pub(super) fn entries_method(
                 ),
                 input_path.to_vec(),
                 method_name.range(),
-            ));
-            None
-        }
+            )],
+        ),
     }
 }
