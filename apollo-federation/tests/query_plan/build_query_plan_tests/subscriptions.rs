@@ -135,12 +135,7 @@ fn basic_subscription_with_single_subgraph() {
     );
 }
 
-// TODO(@TylerBloom): Currently, all defer directives are stripped out, so this does not panic
-// quite as expected. Instead, it panics because the snapshots doesn't match. Once this behavior is
-// changed, this should panic with an error along the lines of "@defer can't be used with
-// subscriptions".
 #[test]
-#[should_panic(expected = "snapshot assertion")]
 // TODO: Subscription handling
 fn trying_to_use_defer_with_a_subcription_results_in_an_error() {
     let config = QueryPlannerConfig {
