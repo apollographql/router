@@ -1175,10 +1175,9 @@ example:
 
 ### Fragment reuse and generation
 
-By default, the router will _generate_ fragments for subgraph requests,
-extracting _inline fragments only_ into fragment definitions before sending
-queries to subgraphs. In very many cases this significantly reduces the size of
-the query sent to subgraphs, but may increase the time it takes for planning.
+By default, the router will compress subgraph requests by generating fragment
+definitions based on the shape of the subgraph operation. In many cases this
+significantly reduces the size of the query sent to subgraphs.
 Note that this option and `experimental_reuse_query_fragments` are mutually
 exclusive; if both are explicitly set to `true`, `generate_query_fragments` will
 take precedence. This behaviour can be disabled by setting the option to `false`:
