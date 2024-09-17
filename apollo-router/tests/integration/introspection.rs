@@ -249,8 +249,6 @@ async fn both_mode_integration() {
             "query": include_str!("../fixtures/introspect_full_schema.graphql"),
         }))
         .await;
-    // TODO: should be a match after https://apollographql.atlassian.net/browse/ROUTER-703
-    // router.assert_log_contains("Introspection match! 🎉").await;
-    router.assert_log_contains("Introspection mismatch").await;
+    router.assert_log_contains("Introspection match! 🎉").await;
     router.graceful_shutdown().await;
 }
