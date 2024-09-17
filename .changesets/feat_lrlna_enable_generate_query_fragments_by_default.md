@@ -3,7 +3,7 @@
 The router previously had `experimental_reuse_query_fragments` enabled by
 default when trying to optimize fragments before sending operations to subgraphs.
 While on occasion this algorithm can be more performant, we found that in vast
-majority of cases the query planner can be just as performant using
+majority of cases the query planner can be just as, and very often more, performant using
 `generate_query_fragments` query plan option, which also significantly reduces
 query size being sent to subgraphs. While the two options will produce correct
 responses, the queries produced internally by the query planner will differ.
