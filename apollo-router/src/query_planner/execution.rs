@@ -311,6 +311,8 @@ impl PlanNode {
                             let _ = primary_sender.send((value.clone(), errors.clone()));
                         } else {
                             let _ = primary_sender.send((value.clone(), errors.clone()));
+                            // primary response should be an empty object
+                            value.deep_merge(Value::Object(Default::default()));
                         }
                     }
                     .instrument(tracing::info_span!(

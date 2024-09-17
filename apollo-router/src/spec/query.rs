@@ -228,22 +228,6 @@ impl Query {
                 }
             }
             Some(Value::Null) => {
-                if let Some(operation) = original_operation {
-                    // Detect if root __typename is asked in the original query (the qp doesn't put root __typename in subselections)
-                    // cf https://github.com/apollographql/router/issues/1677
-                    if self.has_only_typename_field(&operation.selection_set, &variables) {
-                        let operation_type_name = schema
-                            .root_operation(operation.kind.into())
-                            .map(|name| name.as_str())
-                            .unwrap_or(operation.kind.default_type_name());
-
-                        let mut output = Object::default();
-                        output.insert(TYPENAME, operation_type_name.into());
-                        response.data = Some(output.into());
-                        return vec![];
-                    }
-                }
-
                 response.data = Some(Value::Null);
                 return vec![];
             }
@@ -906,38 +890,6 @@ impl Query {
         }
 
         Ok(())
-    }
-
-    fn has_only_typename_field(&self, selection_set: &[Selection], variables: &Object) -> bool {
-        selection_set.iter().all(|s| match s {
-            Selection::Field { name, .. } => name.as_str() == TYPENAME,
-            Selection::InlineFragment {
-                selection_set,
-                include_skip,
-                defer,
-                ..
-            } => {
-                defer.eval(variables).unwrap_or(true)
-                    || include_skip.should_skip(variables)
-                    || self.has_only_typename_field(selection_set, variables)
-            }
-            Selection::FragmentSpread {
-                name,
-                include_skip,
-                defer,
-                ..
-            } => {
-                defer.eval(variables).unwrap_or(true)
-                    || include_skip.should_skip(variables)
-                    || self
-                        .fragments
-                        .get(name)
-                        .map(|fragment| {
-                            self.has_only_typename_field(&fragment.selection_set, variables)
-                        })
-                        .unwrap_or(true)
-            }
-        })
     }
 
     /// Validate a [`Request`]'s variables against this [`Query`] using a provided [`Schema`].
