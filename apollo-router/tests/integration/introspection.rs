@@ -233,7 +233,7 @@ async fn both_mode_integration() {
     let mut router = IntegrationTest::builder()
         .config(
             "
-                experimental_introspection_mode: both
+                # `experimental_introspection_mode` now defaults to `both`
                 supergraph:
                     introspection: true
             ",
