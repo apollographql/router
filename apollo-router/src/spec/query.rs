@@ -927,11 +927,9 @@ impl Query {
             } => {
                 defer.eval(variables).unwrap_or(true)
                     || include_skip.should_skip(variables)
-                    || if let Some(fragment) = self.fragments.get(name) {
+                    || self.fragments.get(name).map(|fragment| {
                         self.has_only_typename_field(&fragment.selection_set, variables)
-                    } else {
-                        false
-                    }
+                    }).unwrap_or(true)
             }
         })
     }

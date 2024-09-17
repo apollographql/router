@@ -10,32 +10,24 @@ include_subgraph_errors:
 "#;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_different_typename_on_query_root() -> Result<(), BoxError> {
+async fn test_subgraph_returning_data_null() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
         .config(CONFIG)
-        .responder(ResponseTemplate::new(200).set_body_json(json!({
-            "data": null,
-        })))
+        .responder(ResponseTemplate::new(200).set_body_json(json!({ "data": null })))
         .build()
         .await;
 
     router.start().await;
     router.assert_started().await;
 
-    async fn check_query(router: &IntegrationTest, query: &str) -> Result<(), BoxError> {
-        let (_trace_id, response) = router.execute_query(&json!({ "query":  query })).await;
-        // assert_eq!(response.status(), 200);
-        assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&response.text().await?)?,
-            json!({
-                "data": { "__typename": "Query" }
-            })
-        );
-        Ok(())
-    }
-
-    check_query(&router, "{ __typename }").await?;
-    check_query(&router, "{ ...{ __typename } }").await
+    let query = "{ __typename topProducts { name } }";
+    let (_trace_id, response) = router.execute_query(&json!({ "query":  query })).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&response.text().await?)?,
+        json!({ "data": null })
+    );
+    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread")]
