@@ -844,7 +844,7 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             result: doc,
             paths
