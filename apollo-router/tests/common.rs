@@ -523,7 +523,7 @@ impl IntegrationTest {
     pub fn execute_huge_query(
         &self,
     ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
-        self.execute_query_internal(&json!({"query":"query {topProducts{name, name, name, name, name, name, name, name, name, name}}","variables":{}}), None, None)
+        self.execute_query_internal(&json!({"query":"query {topProducts{name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name}}","variables":{}}), None, None)
     }
 
     #[allow(dead_code)]
