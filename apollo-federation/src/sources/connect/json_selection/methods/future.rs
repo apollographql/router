@@ -63,7 +63,7 @@ pub(super) fn eq_method(
             };
             return tail
                 .apply_to_path(&JSON::Bool(matches), vars, input_path)
-                .prepend_errors(&arg_errors);
+                .prepend_errors(arg_errors);
         }
     }
     (
@@ -108,7 +108,7 @@ pub(super) fn match_if_method(
                             .and_then_collecting_errors(|value| {
                                 tail.apply_to_path(value, vars, input_path)
                             })
-                            .prepend_errors(&errors);
+                            .prepend_errors(errors);
                     };
                 }
             }
@@ -117,7 +117,7 @@ pub(super) fn match_if_method(
     (
         None,
         immutable_vec_push(
-            &errors,
+            errors,
             ApplyToError::new(
                 format!(
                     "Method ->{} did not match any [condition, value] pair",
@@ -155,7 +155,7 @@ pub(super) fn arithmetic_method(
                         return (
                             None,
                             immutable_vec_push(
-                                &errors,
+                                errors,
                                 ApplyToError::new(
                                     format!(
                                         "Method ->{} failed on argument {}",
@@ -172,7 +172,7 @@ pub(super) fn arithmetic_method(
                     return (
                         None,
                         immutable_vec_push(
-                            &errors,
+                            errors,
                             ApplyToError::new(
                                 format!(
                                     "Method ->{} requires numeric arguments",
@@ -264,42 +264,44 @@ pub(super) fn has_method(
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     if let Some(MethodArgs { args, .. }) = method_args {
         match args.first() {
-            Some(arg) => match &arg.apply_to_path(data, vars, input_path) {
-                (Some(json_index @ JSON::Number(n)), arg_errors) => match (data, n.as_i64()) {
-                    (JSON::Array(array), Some(index)) => {
-                        let ilen = array.len() as i64;
-                        // Negative indices count from the end of the array
-                        let index = if index < 0 { ilen + index } else { index };
-                        tail.apply_to_path(
-                            &JSON::Bool(index >= 0 && index < ilen),
-                            vars,
-                            &input_path.append(json_index.clone()),
-                        )
-                        .prepend_errors(arg_errors)
+            Some(arg) => match arg.apply_to_path(data, vars, input_path) {
+                (Some(ref json_index @ JSON::Number(ref n)), arg_errors) => {
+                    match (data, n.as_i64()) {
+                        (JSON::Array(array), Some(index)) => {
+                            let ilen = array.len() as i64;
+                            // Negative indices count from the end of the array
+                            let index = if index < 0 { ilen + index } else { index };
+                            tail.apply_to_path(
+                                &JSON::Bool(index >= 0 && index < ilen),
+                                vars,
+                                &input_path.append(json_index.clone()),
+                            )
+                            .prepend_errors(arg_errors)
+                        }
+
+                        (json_key @ JSON::String(s), Some(index)) => {
+                            let ilen = s.as_str().len() as i64;
+                            // Negative indices count from the end of the array
+                            let index = if index < 0 { ilen + index } else { index };
+                            tail.apply_to_path(
+                                &JSON::Bool(index >= 0 && index < ilen),
+                                vars,
+                                &input_path.append(json_key.clone()),
+                            )
+                            .prepend_errors(arg_errors)
+                        }
+
+                        _ => tail
+                            .apply_to_path(
+                                &JSON::Bool(false),
+                                vars,
+                                &input_path.append(json_index.clone()),
+                            )
+                            .prepend_errors(arg_errors),
                     }
+                }
 
-                    (json_key @ JSON::String(s), Some(index)) => {
-                        let ilen = s.as_str().len() as i64;
-                        // Negative indices count from the end of the array
-                        let index = if index < 0 { ilen + index } else { index };
-                        tail.apply_to_path(
-                            &JSON::Bool(index >= 0 && index < ilen),
-                            vars,
-                            &input_path.append(json_key.clone()),
-                        )
-                        .prepend_errors(arg_errors)
-                    }
-
-                    _ => tail
-                        .apply_to_path(
-                            &JSON::Bool(false),
-                            vars,
-                            &input_path.append(json_index.clone()),
-                        )
-                        .prepend_errors(arg_errors),
-                },
-
-                (Some(json_key @ JSON::String(s)), arg_errors) => match data {
+                (Some(ref json_key @ JSON::String(ref s)), arg_errors) => match data {
                     JSON::Object(map) => tail
                         .apply_to_path(
                             &JSON::Bool(map.contains_key(s.as_str())),
@@ -358,7 +360,7 @@ pub(super) fn get_method(
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     if let Some(MethodArgs { args, .. }) = method_args {
         if let Some(index_literal) = args.first() {
-            match &index_literal.apply_to_path(data, vars, input_path) {
+            match index_literal.apply_to_path(data, vars, input_path) {
                 (Some(JSON::Number(n)), index_errors) => match (data, n.as_i64()) {
                     (JSON::Array(array), Some(i)) => {
                         // Negative indices count from the end of the array
@@ -451,7 +453,7 @@ pub(super) fn get_method(
                         ),
                     ),
                 },
-                (Some(key @ JSON::String(s)), index_errors) => match data {
+                (Some(ref key @ JSON::String(ref s)), index_errors) => match data {
                     JSON::Object(map) => {
                         if let Some(value) = map.get(s.as_str()) {
                             tail.apply_to_path(value, vars, input_path)
@@ -686,7 +688,7 @@ pub(super) fn or_method(
         }
 
         tail.apply_to_path(&JSON::Bool(result), vars, input_path)
-            .prepend_errors(&errors)
+            .prepend_errors(errors)
     } else {
         (
             None,
@@ -721,7 +723,7 @@ pub(super) fn and_method(
         }
 
         tail.apply_to_path(&JSON::Bool(result), vars, input_path)
-            .prepend_errors(&errors)
+            .prepend_errors(errors)
     } else {
         (
             None,

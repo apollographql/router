@@ -127,7 +127,7 @@ pub(super) fn match_method(
                                 .and_then_collecting_errors(|value| {
                                     tail.apply_to_path(value, vars, input_path)
                                 })
-                                .prepend_errors(&errors);
+                                .prepend_errors(errors);
                         }
                     };
                 }
@@ -138,7 +138,7 @@ pub(super) fn match_method(
     (
         None,
         immutable_vec_push(
-            &errors,
+            errors,
             ApplyToError::new(
                 format!(
                     "Method ->{} did not match any [candidate, value] pair",
@@ -321,7 +321,7 @@ pub(super) fn slice_method(
         };
 
         tail.apply_to_path(&array, vars, input_path)
-            .prepend_errors(&errors)
+            .prepend_errors(errors)
     } else {
         // TODO Should calling ->slice or ->slice() without arguments be an
         // error? In JavaScript, array->slice() copies the array, but that's not

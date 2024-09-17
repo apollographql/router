@@ -159,10 +159,10 @@ impl ApplyToError {
 // (Option<JSON>, Vec<ApplyToError>), so we define a trait to provide the
 // methods we need, and implement the trait for the tuple in question.
 pub(super) trait ApplyToResultMethods {
-    fn prepend_errors(self, errors: &[ApplyToError]) -> Self;
+    fn prepend_errors(self, errors: Vec<ApplyToError>) -> Self;
 
     fn and_then_collecting_errors(
-        &self,
+        self,
         f: impl FnOnce(&JSON) -> (Option<JSON>, Vec<ApplyToError>),
     ) -> (Option<JSON>, Vec<ApplyToError>);
 }
@@ -171,28 +171,25 @@ impl ApplyToResultMethods for (Option<JSON>, Vec<ApplyToError>) {
     // Intentionally taking ownership of self to avoid cloning, since we pretty
     // much always use this method to replace the previous (value, errors) tuple
     // before returning.
-    fn prepend_errors(self, errors: &[ApplyToError]) -> Self {
+    fn prepend_errors(self, mut errors: Vec<ApplyToError>) -> Self {
         if errors.is_empty() {
             self
         } else {
             let (value_opt, apply_errors) = self;
-            if apply_errors.is_empty() {
-                (value_opt, errors.to_vec())
-            } else {
-                (value_opt, [errors, apply_errors.as_slice()].concat())
-            }
+            errors.extend(apply_errors);
+            (value_opt, errors)
         }
     }
 
     // A substitute for Option<_>::and_then that accumulates errors behind the
     // scenes. I'm no Haskell programmer, but this feels monadic? ¯\_(ツ)_/¯
     fn and_then_collecting_errors(
-        &self,
+        self,
         f: impl FnOnce(&JSON) -> (Option<JSON>, Vec<ApplyToError>),
     ) -> (Option<JSON>, Vec<ApplyToError>) {
         match self {
-            (Some(data), errors) => f(data).prepend_errors(errors),
-            (None, errors) => (None, errors.clone()),
+            (Some(data), errors) => f(&data).prepend_errors(errors),
+            (None, errors) => (None, errors),
         }
     }
 }
