@@ -624,9 +624,16 @@ impl Query {
                     }
 
                     if name.as_str() == TYPENAME {
-                        let typename = current_type.inner_named_type();
-                        if parameters.schema.get_object(typename).is_some() {
-                            output.insert((*field_name).clone(), typename.as_str().into());
+                        let object_type = parameters
+                            .schema
+                            .get_object(current_type.inner_named_type())
+                            .or_else(|| {
+                                let input_value = input.get(field_name.as_str())?.as_str()?; 
+                                parameters.schema.get_object(input_value)
+                            });
+
+                        if let Some(object_type) = object_type {
+                            output.insert((*field_name).clone(), object_type.name.as_str().into());
                         } else {
                             return Err(InvalidValue);
                         }
@@ -927,9 +934,13 @@ impl Query {
             } => {
                 defer.eval(variables).unwrap_or(true)
                     || include_skip.should_skip(variables)
-                    || self.fragments.get(name).map(|fragment| {
-                        self.has_only_typename_field(&fragment.selection_set, variables)
-                    }).unwrap_or(true)
+                    || self
+                        .fragments
+                        .get(name)
+                        .map(|fragment| {
+                            self.has_only_typename_field(&fragment.selection_set, variables)
+                        })
+                        .unwrap_or(true)
             }
         })
     }
