@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use apollo_compiler::collections::HashMap;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::DirectiveList as ComponentDirectiveList;
@@ -69,7 +68,6 @@ pub fn build_federated_query_graph(
         root_kinds_to_nodes_by_source: Default::default(),
         non_trivial_followup_edges: Default::default(),
     };
-    // TODO populate override_labels_by_coordinate: Option<HashMap<String, String>> to be passed to the schema query graph builders
     let subgraphs =
         extract_subgraphs_from_supergraph(&supergraph_schema, validate_extracted_subgraphs)?;
     for (subgraph_name, subgraph) in subgraphs {
@@ -79,7 +77,6 @@ pub fn build_federated_query_graph(
             subgraph.schema,
             Some(api_schema.clone()),
             for_query_planning,
-            None,
         )?;
         query_graph = builder.build()?;
     }
@@ -94,7 +91,6 @@ pub fn build_federated_query_graph(
 pub fn build_query_graph(
     name: Arc<str>,
     schema: ValidFederationSchema,
-    override_labels_by_coordinate: Option<HashMap<String, String>>,
 ) -> Result<QueryGraph, FederationError> {
     let mut query_graph = QueryGraph {
         // Note this name is a dummy initial name that gets overridden as we build the query graph.
@@ -112,7 +108,6 @@ pub fn build_query_graph(
         schema,
         None,
         false,
-        override_labels_by_coordinate,
     )?;
     query_graph = builder.build()?;
     Ok(query_graph)
@@ -243,7 +238,6 @@ struct SchemaQueryGraphBuilder {
     base: BaseQueryGraphBuilder,
     subgraph: Option<SchemaQueryGraphBuilderSubgraphData>,
     for_query_planning: bool,
-    override_labels_by_coordinate: HashMap<String, String>,
 }
 
 struct SchemaQueryGraphBuilderSubgraphData {
@@ -260,7 +254,6 @@ impl SchemaQueryGraphBuilder {
         schema: ValidFederationSchema,
         api_schema: Option<ValidFederationSchema>,
         for_query_planning: bool,
-        override_labels_by_coordinate: Option<HashMap<String, String>>,
     ) -> Result<Self, FederationError> {
         let subgraph = if let Some(api_schema) = api_schema {
             let federation_spec_definition = get_federation_spec_definition_from_subgraph(&schema)?;
@@ -276,7 +269,6 @@ impl SchemaQueryGraphBuilder {
             base,
             subgraph,
             for_query_planning,
-            override_labels_by_coordinate: override_labels_by_coordinate.unwrap_or_default(),
         })
     }
 
@@ -483,33 +475,7 @@ impl SchemaQueryGraphBuilder {
                 field_definition_position: field_definition_position.clone(),
                 is_part_of_provides: false,
             };
-            if let Some(override_label) = self
-                .override_labels_by_coordinate
-                .get(&field_definition_position.to_string())
-            {
-                self.base.add_edge(
-                    head,
-                    tail,
-                    transition.clone(),
-                    None,
-                    Some(OverrideCondition {
-                        label: override_label.clone(),
-                        condition: true,
-                    }),
-                )?;
-                self.base.add_edge(
-                    head,
-                    tail,
-                    transition.clone(),
-                    None,
-                    Some(OverrideCondition {
-                        label: override_label.clone(),
-                        condition: false,
-                    }),
-                )?;
-            } else {
-                self.base.add_edge(head, tail, transition, None, None)?;
-            }
+            self.base.add_edge(head, tail, transition, None, None)?;
         }
         Ok(())
     }
