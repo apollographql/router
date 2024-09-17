@@ -242,20 +242,60 @@ impl Operation {
         })
     }
 
+    /// Returns this operation but modified to "normalize" all the @defer applications.
+    ///
+    /// "Normalized" in this context means that all the `@defer` application in the resulting
+    /// operation will:
+    ///  - have a (unique) label. Which implies that this method generates a label for any `@defer`
+    ///    not having a label.
+    ///  - have a non-trivial `if` condition, if any. By non-trivial, we mean that the condition
+    ///    will be a variable and not an hard-coded `true` or `false`. To do this, this method will
+    ///    remove the condition of any `@defer` that has `if: true`, and will completely remove any
+    ///    `@defer` application that has `if: false`.
     // PORT_NOTE(@goto-bus-stop): It might make sense for the returned data structure to *be* the
     // `DeferNormalizer` from the JS side
+    #[allow(clippy::unnecessary_fold)]
     pub(crate) fn with_normalized_defer(self) -> NormalizedDefer {
-        NormalizedDefer {
-            operation: self,
-            has_defers: false,
-            assigned_defer_labels: IndexSet::default(),
-            defer_conditions: IndexMap::default(),
-        }
-        // TODO(@TylerBloom): Once defer is implement, the above statement needs to be replaced
-        // with the commented-out one below. This is part of FED-95
-        /*
         if self.has_defer() {
-            todo!("@defer not implemented");
+            // PORT_NOTE:
+            // TODO: Can this set use &str instead of strings?
+            fn collect_labels(labels: &mut HashSet<String>, selection: &Selection) -> bool {
+                // TODO: Does this need to be checking FragmentSpread + InlineFragment or just
+                // spreads? The JS code checks "FragmentSelection"
+                if let Selection::InlineFragment(inline) = selection {
+                    if let Some(label) = inline
+                        .inline_fragment
+                        .data()
+                        .defer_directive_arguments()
+                        // TODO: Ideally, a version of this method exists that doesn't return a
+                        // Result...
+                        .unwrap()
+                        .and_then(|dirs| dirs.label)
+                    {
+                        labels.insert(label.clone());
+                    }
+                }
+                selection
+                    .selection_set()
+                    .iter()
+                    .flat_map(|set| set.iter())
+                    .fold(false, |acc, op| acc || collect_labels(labels, op))
+            }
+            let mut labels = HashSet::default();
+            let must_normalize_defers = self
+                .selection_set
+                .iter()
+                // Yes, this looks like an `any`, but we specifically don't want to short circuit.
+                .fold(false, |acc, sel| acc || collect_labels(&mut labels, sel));
+            if must_normalize_defers {
+                self.selection_set.normalize_defers(&labels);
+            }
+            NormalizedDefer {
+                operation: self,
+                has_defers: true,
+                assigned_defer_labels: todo!(), // IndexSet::default(),
+                defer_conditions: todo!(),      // IndexMap::default(),
+            }
         } else {
             NormalizedDefer {
                 operation: self,
@@ -264,7 +304,6 @@ impl Operation {
                 defer_conditions: IndexMap::default(),
             }
         }
-        */
     }
 
     fn has_defer(&self) -> bool {
