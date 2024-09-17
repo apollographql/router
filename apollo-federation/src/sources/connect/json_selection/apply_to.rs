@@ -326,6 +326,14 @@ impl ApplyToInternal for WithRange<PathList> {
                     None
                 }
             }
+            PathList::Expr(expr, tail) => {
+                let value = expr.apply_to_path(data, vars, input_path, errors);
+                if let Some(value) = value {
+                    tail.apply_to_path(&value, vars, input_path, errors)
+                } else {
+                    None
+                }
+            }
             PathList::Method(method_name, method_args, tail) => {
                 if let Some(method) = lookup_arrow_method(method_name) {
                     method(
@@ -1377,6 +1385,234 @@ mod tests {
                 Some(json!({"__typename": "Product", "reviews": [{ "__typename": "Review" }] })),
                 vec![]
             )
+        );
+    }
+
+    #[test]
+    fn test_literal_expressions_in_parentheses() {
+        assert_eq!(
+            selection!("__typename: $('Product')").apply_to(&json!({})),
+            (Some(json!({"__typename": "Product"})), vec![]),
+        );
+
+        assert_eq!(
+            selection!(" __typename : 'Product' ").apply_to(&json!({})),
+            (
+                Some(json!({})),
+                vec![ApplyToError::new(
+                    "Property .\"Product\" not found in object".to_string(),
+                    vec![json!("Product")],
+                    Some(14..23),
+                )],
+            ),
+        );
+
+        assert_eq!(
+            selection!(
+                r#"
+                one: $(1)
+                two: $(2)
+                negativeThree: $(-  3)
+                true: $(true  )
+                false: $(  false)
+                null: $(null)
+                string: $("string")
+                array: $( [ 1 , 2 , 3 ] )
+                object: $( { "key" : "value" } )
+                path: $(nested.path)
+            "#
+            )
+            .apply_to(&json!({
+                "nested": {
+                    "path": "nested path value"
+                }
+            })),
+            (
+                Some(json!({
+                    "one": 1,
+                    "two": 2,
+                    "negativeThree": -3,
+                    "true": true,
+                    "false": false,
+                    "null": null,
+                    "string": "string",
+                    "array": [1, 2, 3],
+                    "object": { "key": "value" },
+                    "path": "nested path value",
+                })),
+                vec![],
+            ),
+        );
+
+        assert_eq!(
+            selection!(
+                r#"
+                one: $(1)->typeof
+                two: $(2)->typeof
+                negativeThree: $(-3)->typeof
+                true: $(true)->typeof
+                false: $(false)->typeof
+                null: $(null)->typeof
+                string: $("string")->typeof
+                array: $([1, 2, 3])->typeof
+                object: $({ "key": "value" })->typeof
+                path: $(nested.path)->typeof
+            "#
+            )
+            .apply_to(&json!({
+                "nested": {
+                    "path": 12345
+                }
+            })),
+            (
+                Some(json!({
+                    "one": "number",
+                    "two": "number",
+                    "negativeThree": "number",
+                    "true": "boolean",
+                    "false": "boolean",
+                    "null": "null",
+                    "string": "string",
+                    "array": "array",
+                    "object": "object",
+                    "path": "number",
+                })),
+                vec![],
+            ),
+        );
+
+        assert_eq!(
+            selection!(
+                r#"
+                items: $([
+                    1,
+                    -2.0,
+                    true,
+                    false,
+                    null,
+                    "string",
+                    [1, 2, 3],
+                    { "key": "value" },
+                    nested.path,
+                ])->map(@->typeof)
+            "#
+            )
+            .apply_to(&json!({
+                "nested": {
+                    "path": { "deeply": "nested" }
+                }
+            })),
+            (
+                Some(json!({
+                    "items": [
+                        "number",
+                        "number",
+                        "boolean",
+                        "boolean",
+                        "null",
+                        "string",
+                        "array",
+                        "object",
+                        "object",
+                    ],
+                })),
+                vec![],
+            ),
+        );
+
+        assert_eq!(
+            selection!(
+                r#"
+                $({
+                    one: 1,
+                    two: 2,
+                    negativeThree: -3,
+                    true: true,
+                    false: false,
+                    null: null,
+                    string: "string",
+                    array: [1, 2, 3],
+                    object: { "key": "value" },
+                    path: $ . nested . path ,
+                })->entries
+            "#
+            )
+            .apply_to(&json!({
+                "nested": {
+                    "path": "nested path value"
+                }
+            })),
+            (
+                Some(json!([
+                    { "key": "one", "value": 1 },
+                    { "key": "two", "value": 2 },
+                    { "key": "negativeThree", "value": -3 },
+                    { "key": "true", "value": true },
+                    { "key": "false", "value": false },
+                    { "key": "null", "value": null },
+                    { "key": "string", "value": "string" },
+                    { "key": "array", "value": [1, 2, 3] },
+                    { "key": "object", "value": { "key": "value" } },
+                    { "key": "path", "value": "nested path value" },
+                ])),
+                vec![],
+            ),
+        );
+
+        assert_eq!(
+            selection!(
+                r#"
+                $({
+                    string: $("string")->slice(1, 4),
+                    array: $([1, 2, 3])->map(@->add(10)),
+                    object: $({ "key": "value" })->get("key"),
+                    path: nested.path->slice($("nested ")->size),
+                    needlessParens: $("oyez"),
+                    withoutParens: "oyez",
+                })
+            "#
+            )
+            .apply_to(&json!({
+                "nested": {
+                    "path": "nested path value"
+                }
+            })),
+            (
+                Some(json!({
+                    "string": "tri",
+                    "array": [11, 12, 13],
+                    "object": "value",
+                    "path": "path value",
+                    "needlessParens": "oyez",
+                    "withoutParens": "oyez",
+                })),
+                vec![],
+            ),
+        );
+
+        assert_eq!(
+            selection!(
+                r#"
+                string: $("string")->slice(1, 4)
+                array: $([1, 2, 3])->map(@->add(10))
+                object: $({ "key": "value" })->get("key")
+                path: nested.path->slice($("nested ")->size)
+            "#
+            )
+            .apply_to(&json!({
+                "nested": {
+                    "path": "nested path value"
+                }
+            })),
+            (
+                Some(json!({
+                    "string": "tri",
+                    "array": [11, 12, 13],
+                    "object": "value",
+                    "path": "path value",
+                })),
+                vec![],
+            ),
         );
     }
 
