@@ -30,6 +30,7 @@ use tower::Service;
 use super::PlanNode;
 use super::QueryKey;
 use crate::apollo_studio_interop::generate_usage_reporting;
+use crate::cache::storage::CacheStorage;
 use crate::configuration::IntrospectionMode as IntrospectionConfig;
 use crate::configuration::QueryPlannerMode;
 use crate::error::PlanErrors;
@@ -38,6 +39,7 @@ use crate::error::SchemaError;
 use crate::error::ServiceBuildError;
 use crate::error::ValidationErrors;
 use crate::graphql;
+use crate::graphql::Response;
 use crate::introspection::Introspection;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
@@ -243,6 +245,7 @@ impl PlannerMode {
         sdl: &str,
         configuration: &Configuration,
         old_js_planner: &Option<Arc<Planner<QueryPlanResult>>>,
+        cache: CacheStorage<String, Response>,
     ) -> Result<Arc<Introspection>, ServiceBuildError> {
         let js_planner = match self {
             Self::Js(js) => js.clone(),
@@ -253,7 +256,9 @@ impl PlannerMode {
                 Self::js_planner(sdl, configuration, old_js_planner).await?
             }
         };
-        Ok(Arc::new(Introspection::new(js_planner).await?))
+        Ok(Arc::new(
+            Introspection::with_cache(js_planner, cache).await?,
+        ))
     }
 
     async fn plan(
@@ -402,6 +407,7 @@ impl BridgeQueryPlanner {
         configuration: Arc<Configuration>,
         old_js_planner: Option<Arc<Planner<QueryPlanResult>>>,
         rust_planner: Option<Arc<QueryPlanner>>,
+        cache: CacheStorage<String, Response>,
     ) -> Result<Self, ServiceBuildError> {
         let planner =
             PlannerMode::new(&schema, &configuration, &old_js_planner, rust_planner).await?;
@@ -413,12 +419,12 @@ impl BridgeQueryPlanner {
                 IntrospectionConfig::New => IntrospectionMode::Rust,
                 IntrospectionConfig::Legacy => IntrospectionMode::Js(
                     planner
-                        .js_introspection(&schema.raw_sdl, &configuration, &old_js_planner)
+                        .js_introspection(&schema.raw_sdl, &configuration, &old_js_planner, cache)
                         .await?,
                 ),
                 IntrospectionConfig::Both => IntrospectionMode::Both(
                     planner
-                        .js_introspection(&schema.raw_sdl, &configuration, &old_js_planner)
+                        .js_introspection(&schema.raw_sdl, &configuration, &old_js_planner, cache)
                         .await?,
                 ),
             }
@@ -1219,6 +1225,7 @@ mod tests {
     use tower::ServiceExt;
 
     use super::*;
+    use crate::introspection::default_cache_storage;
     use crate::metrics::FutureMetricsExt as _;
     use crate::services::subgraph;
     use crate::services::supergraph;
@@ -1263,9 +1270,15 @@ mod tests {
             let sdl = include_str!("../testdata/minimal_fed1_supergraph.graphql");
             let config = Arc::default();
             let schema = Schema::parse(sdl, &config).unwrap();
-            let _planner = BridgeQueryPlanner::new(schema.into(), config, None, None)
-                .await
-                .unwrap();
+            let _planner = BridgeQueryPlanner::new(
+                schema.into(),
+                config,
+                None,
+                None,
+                default_cache_storage().await,
+            )
+            .await
+            .unwrap();
 
             assert_gauge!(
                 "apollo.router.supergraph.federation",
@@ -1280,9 +1293,15 @@ mod tests {
             let sdl = include_str!("../testdata/minimal_supergraph.graphql");
             let config = Arc::default();
             let schema = Schema::parse(sdl, &config).unwrap();
-            let _planner = BridgeQueryPlanner::new(schema.into(), config, None, None)
-                .await
-                .unwrap();
+            let _planner = BridgeQueryPlanner::new(
+                schema.into(),
+                config,
+                None,
+                None,
+                default_cache_storage().await,
+            )
+            .await
+            .unwrap();
 
             assert_gauge!(
                 "apollo.router.supergraph.federation",
@@ -1299,9 +1318,15 @@ mod tests {
         let schema = Arc::new(Schema::parse(EXAMPLE_SCHEMA, &Default::default()).unwrap());
         let query = include_str!("testdata/unknown_introspection_query.graphql");
 
-        let planner = BridgeQueryPlanner::new(schema.clone(), Default::default(), None, None)
-            .await
-            .unwrap();
+        let planner = BridgeQueryPlanner::new(
+            schema.clone(),
+            Default::default(),
+            None,
+            None,
+            default_cache_storage().await,
+        )
+        .await
+        .unwrap();
 
         let doc = Query::parse_document(query, None, &schema, &Configuration::default()).unwrap();
 
@@ -1399,9 +1424,15 @@ mod tests {
         let configuration = Arc::new(configuration);
 
         let schema = Schema::parse(EXAMPLE_SCHEMA, &configuration).unwrap();
-        let planner = BridgeQueryPlanner::new(schema.into(), configuration.clone(), None, None)
-            .await
-            .unwrap();
+        let planner = BridgeQueryPlanner::new(
+            schema.into(),
+            configuration.clone(),
+            None,
+            None,
+            default_cache_storage().await,
+        )
+        .await
+        .unwrap();
 
         macro_rules! s {
             ($query: expr) => {
@@ -1707,9 +1738,15 @@ mod tests {
         let configuration = Arc::new(configuration);
 
         let schema = Schema::parse(schema, &configuration).unwrap();
-        let planner = BridgeQueryPlanner::new(schema.into(), configuration.clone(), None, None)
-            .await
-            .unwrap();
+        let planner = BridgeQueryPlanner::new(
+            schema.into(),
+            configuration.clone(),
+            None,
+            None,
+            default_cache_storage().await,
+        )
+        .await
+        .unwrap();
 
         let doc = Query::parse_document(
             original_query,
