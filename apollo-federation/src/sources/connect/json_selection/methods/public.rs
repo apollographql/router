@@ -3,8 +3,8 @@ use serde_json_bytes::Map as JSONMap;
 use serde_json_bytes::Value as JSON;
 
 use crate::sources::connect::json_selection::apply_to::ApplyToResultMethods;
-use crate::sources::connect::json_selection::helpers::immutable_vec_push;
 use crate::sources::connect::json_selection::helpers::json_type_name;
+use crate::sources::connect::json_selection::helpers::vec_push;
 use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::lit_expr::LitExpr;
 use crate::sources::connect::json_selection::location::merge_ranges;
@@ -137,7 +137,7 @@ pub(super) fn match_method(
 
     (
         None,
-        immutable_vec_push(
+        vec_push(
             errors,
             ApplyToError::new(
                 format!(

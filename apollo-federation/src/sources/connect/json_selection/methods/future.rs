@@ -6,8 +6,8 @@ use serde_json::Number;
 use serde_json_bytes::Value as JSON;
 
 use crate::sources::connect::json_selection::apply_to::ApplyToResultMethods;
-use crate::sources::connect::json_selection::helpers::immutable_vec_push;
 use crate::sources::connect::json_selection::helpers::json_type_name;
+use crate::sources::connect::json_selection::helpers::vec_push;
 use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::lit_expr::LitExpr;
 use crate::sources::connect::json_selection::location::merge_ranges;
@@ -116,7 +116,7 @@ pub(super) fn match_if_method(
     }
     (
         None,
-        immutable_vec_push(
+        vec_push(
             errors,
             ApplyToError::new(
                 format!(
@@ -154,7 +154,7 @@ pub(super) fn arithmetic_method(
                     } else {
                         return (
                             None,
-                            immutable_vec_push(
+                            vec_push(
                                 errors,
                                 ApplyToError::new(
                                     format!(
@@ -171,7 +171,7 @@ pub(super) fn arithmetic_method(
                 } else {
                     return (
                         None,
-                        immutable_vec_push(
+                        vec_push(
                             errors,
                             ApplyToError::new(
                                 format!(
@@ -374,7 +374,7 @@ pub(super) fn get_method(
                         } else {
                             (
                                 None,
-                                immutable_vec_push(
+                                vec_push(
                                     index_errors,
                                     ApplyToError::new(
                                         format!(
@@ -407,7 +407,7 @@ pub(super) fn get_method(
                         } else {
                             (
                                 None,
-                                immutable_vec_push(
+                                vec_push(
                                     index_errors,
                                     ApplyToError::new(
                                         format!(
@@ -425,7 +425,7 @@ pub(super) fn get_method(
 
                     (_, None) => (
                         None,
-                        immutable_vec_push(
+                        vec_push(
                             index_errors,
                             ApplyToError::new(
                                 format!(
@@ -439,7 +439,7 @@ pub(super) fn get_method(
                     ),
                     _ => (
                         None,
-                        immutable_vec_push(
+                        vec_push(
                             index_errors,
                             ApplyToError::new(
                                 format!(
@@ -461,7 +461,7 @@ pub(super) fn get_method(
                         } else {
                             (
                                 None,
-                                immutable_vec_push(
+                                vec_push(
                                     index_errors,
                                     ApplyToError::new(
                                         format!(
@@ -478,7 +478,7 @@ pub(super) fn get_method(
                     }
                     _ => (
                         None,
-                        immutable_vec_push(
+                        vec_push(
                             index_errors,
                             ApplyToError::new(
                                 format!(
@@ -497,7 +497,7 @@ pub(super) fn get_method(
                 },
                 (Some(value), index_errors) => (
                     None,
-                    immutable_vec_push(
+                    vec_push(
                         index_errors,
                         ApplyToError::new(
                             format!(
@@ -512,7 +512,7 @@ pub(super) fn get_method(
                 ),
                 (None, index_errors) => (
                     None,
-                    immutable_vec_push(
+                    vec_push(
                         index_errors,
                         ApplyToError::new(
                             format!(
