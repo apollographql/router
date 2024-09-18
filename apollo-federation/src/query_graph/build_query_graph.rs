@@ -135,7 +135,6 @@ impl BaseQueryGraphBuilder {
         tail: NodeIndex,
         transition: QueryGraphEdgeTransition,
         conditions: Option<Arc<SelectionSet>>,
-        override_condition: Option<OverrideCondition>,
     ) -> Result<(), FederationError> {
         self.query_graph.graph.add_edge(
             head,
@@ -143,7 +142,7 @@ impl BaseQueryGraphBuilder {
             QueryGraphEdge {
                 transition,
                 conditions,
-                override_condition,
+                override_condition: None,
             },
         );
         let head_weight = self.query_graph.node_weight(head)?;
@@ -467,10 +466,10 @@ impl SchemaQueryGraphBuilder {
         if !skip_edge {
             let transition = QueryGraphEdgeTransition::FieldCollection {
                 source: self.base.query_graph.current_source.clone(),
-                field_definition_position: field_definition_position.clone(),
+                field_definition_position,
                 is_part_of_provides: false,
             };
-            self.base.add_edge(head, tail, transition, None, None)?;
+            self.base.add_edge(head, tail, transition, None)?;
         }
         Ok(())
     }
@@ -611,7 +610,7 @@ impl SchemaQueryGraphBuilder {
                 from_type_position: abstract_type_definition_position.clone().into(),
                 to_type_position: pos.into(),
             };
-            self.base.add_edge(head, tail, transition, None, None)?;
+            self.base.add_edge(head, tail, transition, None)?;
         }
         Ok(())
     }
@@ -851,8 +850,7 @@ impl SchemaQueryGraphBuilder {
                             from_type_position: t1.abstract_type_definition_position.clone().into(),
                             to_type_position: t2.abstract_type_definition_position.clone().into(),
                         };
-                        self.base
-                            .add_edge(t1_node, t2_node, transition, None, None)?;
+                        self.base.add_edge(t1_node, t2_node, transition, None)?;
                     }
                     if add_t2_to_t1 {
                         let transition = QueryGraphEdgeTransition::Downcast {
@@ -860,8 +858,7 @@ impl SchemaQueryGraphBuilder {
                             from_type_position: t2.abstract_type_definition_position.clone().into(),
                             to_type_position: t1.abstract_type_definition_position.clone().into(),
                         };
-                        self.base
-                            .add_edge(t2_node, t1_node, transition, None, None)?;
+                        self.base.add_edge(t2_node, t1_node, transition, None)?;
                     }
                 }
             }
@@ -941,13 +938,8 @@ impl SchemaQueryGraphBuilder {
                 .into(),
                 to_type_position: interface_type_definition_position.into(),
             };
-            self.base.add_edge(
-                entity_type_node,
-                interface_type_node,
-                transition,
-                None,
-                None,
-            )?;
+            self.base
+                .add_edge(entity_type_node, interface_type_node, transition, None)?;
         }
 
         Ok(())
@@ -1674,10 +1666,10 @@ impl FederatedQueryGraphBuilder {
                             };
                             if let Some(selections) = &field_selection.selection_set {
                                 let new_tail = Self::copy_for_provides(base, tail, provide_id)?;
-                                base.add_edge(node, new_tail, transition, None, None)?;
+                                base.add_edge(node, new_tail, transition, None)?;
                                 stack.push((new_tail, selections))
                             } else {
-                                base.add_edge(node, tail, transition, None, None)?;
+                                base.add_edge(node, tail, transition, None)?;
                             }
                         }
                     }
@@ -2146,7 +2138,7 @@ struct QueryGraphEdgeData {
 
 impl QueryGraphEdgeData {
     fn add_to(self, builder: &mut BaseQueryGraphBuilder) -> Result<(), FederationError> {
-        builder.add_edge(self.head, self.tail, self.transition, self.conditions, None)
+        builder.add_edge(self.head, self.tail, self.transition, self.conditions)
     }
 }
 
