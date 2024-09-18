@@ -364,7 +364,6 @@ dependencies = [
  "sys-info",
  "tempfile",
  "test-log",
- "test-span",
  "thiserror",
  "tikv-jemallocator",
  "time",
@@ -1987,16 +1986,6 @@ checksum = "6d2301688392eb071b0bf1a37be05c469d3cc4dbbd95df672fe28ab021e6a096"
 dependencies = [
  "quote",
  "syn 1.0.109",
-]
-
-[[package]]
-name = "daggy"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91a9304e55e9d601a39ae4deaba85406d5c0980e106f65afcf0460e9af1e7602"
-dependencies = [
- "petgraph",
- "serde",
 ]
 
 [[package]]
@@ -3979,9 +3968,6 @@ name = "linked-hash-map"
 version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0717cef1bc8b636c6e1c1bbdefc09e6322da8a9321966e8928ef80d20f7f770f"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "linkme"
@@ -6517,38 +6503,6 @@ name = "test-log-macros"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5999e24eaa32083191ba4e425deb75cdf25efefabe5aaccb7446dd0d4122a3f5"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.76",
-]
-
-[[package]]
-name = "test-span"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39ada8d8deb7460522e606aa5a66568a7ef9f61dfeee8a3c563c69f4d43b1c96"
-dependencies = [
- "daggy",
- "derivative",
- "indexmap 2.2.6",
- "linked-hash-map",
- "once_cell",
- "serde",
- "serde_json",
- "test-span-macro",
- "tokio",
- "tracing",
- "tracing-core",
- "tracing-futures",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "test-span-macro"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a30d7cc64c67cb4ac13f4eeb08252f1ae9f1558cd30a336380da6a0a9cf0aef"
 dependencies = [
  "proc-macro2",
  "quote",
