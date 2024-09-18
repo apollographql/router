@@ -3917,7 +3917,7 @@ mod tests {
         let schema = Schema::parse_and_validate(src, "./").unwrap();
         let schema = ValidFederationSchema::new(schema).unwrap();
         let name = "S1".into();
-        let graph = build_query_graph(name, schema.clone(), None).unwrap();
+        let graph = build_query_graph(name, schema.clone()).unwrap();
         let path = OpGraphPath::new(Arc::new(graph), NodeIndex::new(0)).unwrap();
         // NOTE: in general GraphPath would be used against a federated supergraph which would have
         // a root node [query](_)* followed by a Query(S1) node

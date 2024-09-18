@@ -2188,7 +2188,7 @@ mod tests {
     fn test_query_graph_from_schema_sdl(sdl: &str) -> Result<QueryGraph, FederationError> {
         let schema =
             ValidFederationSchema::new(Schema::parse_and_validate(sdl, "schema.graphql")?)?;
-        build_query_graph(SCHEMA_NAME.into(), schema, None)
+        build_query_graph(SCHEMA_NAME.into(), schema)
     }
 
     fn assert_node_type(
