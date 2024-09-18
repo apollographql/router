@@ -1,4 +1,3 @@
-use apollo_compiler::collections::HashSet;
 use apollo_federation::query_plan::query_planner::QueryPlanOptions;
 
 const S1: &str = r#"
@@ -46,7 +45,7 @@ fn it_overrides_to_s2_when_label_is_provided() {
           }
         "#,
         QueryPlanOptions {
-            override_conditions: HashSet::from_iter(["test".to_string()])
+            override_conditions: vec!["test".to_string()]
         },
         @r###"
           QueryPlan {
@@ -158,7 +157,7 @@ fn it_overrides_f1_to_s3_when_label_is_provided() {
           }
         "#,
         QueryPlanOptions {
-            override_conditions: HashSet::from_iter(["test".to_string()])
+            override_conditions: vec!["test".to_string()]
         },
         @r###"
           QueryPlan {

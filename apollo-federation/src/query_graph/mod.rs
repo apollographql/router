@@ -693,7 +693,7 @@ impl QueryGraph {
                 return None;
             };
 
-            if !edge_weight.satisifies_override_conditions(override_conditions) {
+            if !edge_weight.satisfies_override_conditions(override_conditions) {
                 return None;
             }
 

@@ -1,4 +1,3 @@
-use apollo_compiler::collections::HashSet;
 use apollo_federation::query_plan::query_planner::QueryPlanOptions;
 
 mod shareable;
@@ -25,7 +24,7 @@ fn it_handles_progressive_override_on_root_fields() {
           }
         "#,
         QueryPlanOptions {
-            override_conditions: HashSet::from_iter(["test".to_string()])
+            override_conditions: vec!["test".to_string()]
         },
         @r###"
         QueryPlan {
@@ -118,7 +117,7 @@ fn it_handles_progressive_override_on_entity_fields() {
           }
         "#,
         QueryPlanOptions {
-            override_conditions: HashSet::from_iter(["test".to_string()])
+            override_conditions: vec!["test".to_string()]
         },
         @r###"
           QueryPlan {
@@ -277,7 +276,7 @@ fn it_handles_progressive_override_on_nested_entity_fields() {
           }
         "#,
         QueryPlanOptions {
-            override_conditions: HashSet::from_iter(["test".to_string()])
+            override_conditions: vec!["test".to_string()]
         },
         @r###"
           QueryPlan {

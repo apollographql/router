@@ -67,7 +67,7 @@ macro_rules! assert_plan {
             "operation.graphql",
         )
         .unwrap();
-        let plan = planner.build_query_plan(&document, None, Some($options)).unwrap();
+        let plan = planner.build_query_plan(&document, None, $options).unwrap();
         insta::assert_snapshot!(plan, @$expected);
         plan
     }};
@@ -79,7 +79,7 @@ macro_rules! assert_plan {
             "operation.graphql",
         )
         .unwrap();
-        let plan = planner.build_query_plan(&document, None, None).unwrap();
+        let plan = planner.build_query_plan(&document, None, Default::default()).unwrap();
         insta::assert_snapshot!(plan, @$expected);
         plan
     }};

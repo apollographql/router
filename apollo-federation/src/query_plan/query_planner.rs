@@ -202,8 +202,8 @@ pub struct QueryPlanOptions {
     /// Edges with override conditions require their label to be present or absent
     /// from this set in order to be traversable. These labels enable the
     /// progressive @override feature.
-    // PORT_NOTE: In JS implementation this was a HashMap
-    pub override_conditions: HashSet<String>,
+    // PORT_NOTE: In JS implementation this was a Map
+    pub override_conditions: Vec<String>,
 }
 
 pub struct QueryPlanner {
@@ -488,8 +488,7 @@ impl QueryPlanner {
                 .clone()
                 .into(),
             config: self.config.clone(),
-            override_conditions: options
-                .map_or(Default::default(), |opts| opts.override_conditions),
+            override_conditions: HashSet::from_iter(options.override_conditions),
         };
 
         let root_node = match defer_conditions {
