@@ -206,9 +206,7 @@ async fn progressive_override_with_legacy_qp_change_to_new_qp_updates_config() {
     router.execute_default_query().await;
     let config = format!("{PROMETHEUS_METRICS_CONFIG}\n{NEW_QP}");
     router.update_config(&config).await;
-    router
-        .assert_log_contains("reload complete")
-        .await;
+    router.assert_log_contains("reload complete").await;
     router.execute_default_query().await;
     router.graceful_shutdown().await;
 }
@@ -230,9 +228,7 @@ async fn progressive_override_with_legacy_qp_reload_to_both_best_effort_updates_
 
     let config = format!("{PROMETHEUS_METRICS_CONFIG}\n{BOTH_BEST_EFFORT_QP}");
     router.update_config(&config).await;
-    router
-        .assert_log_contains("reload complete")
-        .await;
+    router.assert_log_contains("reload complete").await;
     router.execute_default_query().await;
     router.graceful_shutdown().await;
 }
