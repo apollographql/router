@@ -1,7 +1,7 @@
 use apollo_compiler::ast::Value;
-use apollo_compiler::parser::SourceMap;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::Schema;
 
 use super::url::validate_template;
 use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_DELETE_METHOD_NAME;
@@ -19,8 +19,9 @@ pub(crate) fn validate<'schema>(
     http_arg: &'schema [(Name, Node<Value>)],
     coordinate: ConnectHTTPCoordinate<'schema>,
     http_arg_node: &Node<Value>,
-    source_map: &SourceMap,
+    schema: &Schema,
 ) -> Result<(URLTemplate, HttpMethodCoordinate<'schema>), Vec<Message>> {
+    let source_map = &schema.sources;
     let mut methods = http_arg
         .iter()
         .filter(|(method, _)| {
@@ -65,5 +66,5 @@ pub(crate) fn validate<'schema>(
         node: method_value,
     };
 
-    validate_template(coordinate, source_map).map(|template| (template, coordinate))
+    validate_template(coordinate, schema).map(|template| (template, coordinate))
 }

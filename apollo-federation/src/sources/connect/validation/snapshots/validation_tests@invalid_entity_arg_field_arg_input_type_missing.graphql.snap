@@ -1,6 +1,0 @@
----
-source: apollo-federation/src/sources/connect/validation/mod.rs
-expression: "format!(\"{:#?}\", errors)"
-input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_entity_arg_field_arg_input_type_missing.graphql
----
-[]

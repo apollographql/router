@@ -265,7 +265,7 @@ fn validate_field(
             http_arg,
             ConnectHTTPCoordinate::from(connect_coordinate),
             http_arg_node,
-            source_map,
+            schema,
         ) {
             Ok(method) => Some(method),
             Err(errs) => {

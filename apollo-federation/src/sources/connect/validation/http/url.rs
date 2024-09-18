@@ -2,10 +2,15 @@ use std::fmt::Display;
 use std::ops::Range;
 use std::str::FromStr;
 
+use apollo_compiler::ast::FieldDefinition;
+use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
 use apollo_compiler::parser::LineColumn;
 use apollo_compiler::parser::SourceMap;
+use apollo_compiler::schema::Component;
+use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::Node;
+use apollo_compiler::Schema;
 use url::Url;
 
 use crate::sources::connect::url_template;
@@ -19,37 +24,39 @@ use crate::sources::connect::Variable;
 
 pub(crate) fn validate_template(
     coordinate: HttpMethodCoordinate,
-    sources: &SourceMap,
+    schema: &Schema,
 ) -> Result<URLTemplate, Vec<Message>> {
-    let (template, str_value) = match parse_template(coordinate, sources) {
+    let (template, str_value) = match parse_template(coordinate, &schema.sources) {
         Ok(tuple) => tuple,
         Err(message) => return Err(vec![message]),
     };
     let mut messages = Vec::new();
     if let Some(base) = template.base.as_ref() {
-        messages.extend(validate_base_url(
-            base,
-            coordinate,
-            coordinate.node,
-            str_value,
-            sources,
-        ));
+        messages.extend(
+            validate_base_url(
+                base,
+                coordinate,
+                coordinate.node,
+                str_value,
+                &schema.sources,
+            )
+            .err(),
+        );
     }
 
     for variable in template.path_variables() {
-        if let Err(err) = validate_variable(variable, str_value, coordinate, sources) {
+        if let Err(err) = validate_variable(variable, str_value, coordinate, schema) {
             messages.push(err);
         }
     }
 
     for variable in template.query_variables() {
-        if let Err(err) = validate_variable(variable, str_value, coordinate, sources) {
+        if let Err(err) = validate_variable(variable, str_value, coordinate, schema) {
             messages.push(err);
         }
     }
 
     // TODO: What happens with `?{$this.blah}`?
-    // TODO: handle complex types of arguments/paths
     // TODO: hint at nullability requirements for path parameters
 
     if messages.is_empty() {
@@ -85,11 +92,11 @@ pub(crate) fn validate_base_url(
     value: &Node<Value>,
     str_value: &str,
     sources: &SourceMap,
-) -> Option<Message> {
+) -> Result<(), Message> {
     let scheme = url.scheme();
     if scheme != "http" && scheme != "https" {
         let scheme_location = Some(0..scheme.len());
-        Some(Message {
+        Err(Message {
             code: Code::InvalidUrlScheme,
             message: format!(
                 "The value {value} for {coordinate} must be http or https, got {scheme}.",
@@ -101,7 +108,7 @@ pub(crate) fn validate_base_url(
             ),
         })
     } else {
-        None
+        Ok(())
     }
 }
 
@@ -133,45 +140,102 @@ fn validate_variable(
     variable: &Variable,
     url_value: &str,
     coordinate: HttpMethodCoordinate,
-    sources: &SourceMap,
+    schema: &Schema,
 ) -> Result<(), Message> {
     let field_coordinate = coordinate.connect.field_coordinate;
     let field = field_coordinate.field;
-    match variable.var_type {
-        VariableType::Config => {} // We don't validate Router config yet
+    let mut path = variable.path.split('.');
+    let path_root = path.next().unwrap_or(&variable.path);
+    let mut variable_type = match variable.var_type {
+        VariableType::Config => {
+            return Ok(()); // We don't validate Router config yet
+        }
         VariableType::Args => {
-            let arg_name = variable.path.split('.').next().unwrap_or(&variable.path);
-            if !field.arguments.iter().any(|arg| arg.name == arg_name) {
-                return Err(Message {
+            field.arguments.iter().find(|arg| arg.name == path_root).ok_or_else( || {
+                Message {
                     code: Code::UndefinedArgument,
                     message: format!(
-                        "{coordinate} contains `{{{variable}}}`, but {field_coordinate} does not have an argument named `{arg_name}`.",
+                        "{coordinate} contains `{{{variable}}}`, but {field_coordinate} does not have an argument named `{path_root}`.",
                     ),
                     locations: select_substring_location(
-                        coordinate.node.line_column_range(sources),
+                        coordinate.node.line_column_range(&schema.sources),
                         url_value,
                         Some(variable.location.clone()),
                     )
-                });
-            }
+                }
+            }).map(|arg| &arg.ty)?
         }
         VariableType::This => {
-            let field_name = variable.path.split('.').next().unwrap_or(&variable.path);
-            if !field_coordinate.object.fields.contains_key(field_name) {
-                return Err(Message {
+            field_coordinate.object.fields.get(path_root).ok_or_else(||Message {
                     code: Code::UndefinedField,
                     message: format!(
-                        "{coordinate} contains `{{{variable}}}`, but {object} does not have a field named `{field_name}`.",
+                        "{coordinate} contains `{{{variable}}}`, but {object} does not have a field named `{path_root}`.",
                         object = field_coordinate.object.name,
                     ),
                     locations: select_substring_location(
-                        coordinate.node.line_column_range(sources),
+                        coordinate.node.line_column_range(&schema.sources),
                         url_value,
                         Some(variable.location.clone()),
                     )
-                });
-            }
+                }).map(|field| &field.ty)?
         }
+    };
+
+    for nested_field_name in path {
+        // TODO: point at the particular piece of the path in errors
+        variable_type = resolve_type(schema, variable_type, field_coordinate.field)
+            .and_then(|extended_type| {
+                match extended_type {
+                    ExtendedType::Enum(_) | ExtendedType::Scalar(_) => None,
+                    ExtendedType::Object(object) => object.fields.get(nested_field_name).map(|field| &field.ty),
+                    ExtendedType::InputObject(input_object) => input_object.fields.get(nested_field_name).map(|field| field.ty.as_ref()),
+                    // TODO: at the time of writing, you can't declare interfaces or unions in connectors schemas at all, so these aren't tested
+                    ExtendedType::Interface(interface) => interface.fields.get(nested_field_name).map(|field| &field.ty),
+                    ExtendedType::Union(_) => {
+                        return Err(Message {
+                            code: Code::UnsupportedVariableType,
+                            message: format!(
+                                "The type {variable_type} is a union, which is not supported in variables yet.",
+                            ),
+                            locations: field_coordinate
+                                .field
+                                .line_column_range(&schema.sources)
+                                .into_iter()
+                                .collect(),
+                        })
+                    },
+                }
+                    .ok_or_else(|| Message {
+                        code: Code::UndefinedField,
+                        message: format!(
+                            "{coordinate} contains `{{{variable}}}`, but `{variable_type}` does not have a field named `{nested_field_name}`.",
+                        ),
+                        locations: select_substring_location(
+                            coordinate.node.line_column_range(&schema.sources),
+                            url_value,
+                            Some(variable.location.clone()),
+                        )
+                    })
+            })?;
     }
+
     Ok(())
+}
+
+fn resolve_type<'schema>(
+    schema: &'schema Schema,
+    ty: &Type,
+    definition: &Component<FieldDefinition>,
+) -> Result<&'schema ExtendedType, Message> {
+    schema
+        .types
+        .get(ty.inner_named_type())
+        .ok_or_else(|| Message {
+            code: Code::GraphQLError,
+            message: format!("The type {ty} is referenced but not defined in the schema.",),
+            locations: definition
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
+        })
 }

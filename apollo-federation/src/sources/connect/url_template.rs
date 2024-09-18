@@ -88,30 +88,34 @@ impl FromStr for URLTemplate {
 
     /// Top-level parsing entry point for URLTemplate syntax.
     fn from_str(input: &str) -> Result<Self, Self::Err> {
-        let (base, path) = if let Some((scheme, rest)) = input.split_once("://") {
-            if let Some((host, path)) = rest.split_once('/') {
-                (
-                    Some(
-                        Url::parse(&format!("{}://{}", scheme, host)).map_err(|err| Error {
-                            message: err.to_string(),
-                            location: Some(0..(input.len() - path.len())),
-                        })?,
-                    ),
-                    path,
-                )
+        let (raw_base, rest) = if let Some(end_of_scheme) = input.find("://") {
+            let start_of_authority = end_of_scheme + 3;
+            let rest_of_uri = &input[start_of_authority..];
+            let end_of_authority = rest_of_uri
+                .find('/')
+                .or_else(|| rest_of_uri.find('?'))
+                .or_else(|| rest_of_uri.find('#'))
+                .unwrap_or(rest_of_uri.len())
+                + start_of_authority;
+            let authority = Some(&input[..end_of_authority]);
+            if end_of_authority < input.len() {
+                (authority, Some(&input[end_of_authority..]))
             } else {
-                (
-                    Some(Url::parse(input).map_err(|err| Error {
-                        message: err.to_string(),
-                        location: None,
-                    })?),
-                    "",
-                )
+                (authority, None)
             }
         } else {
-            (None, input)
+            (None, Some(input))
         };
-        let mut prefix_suffix = path.splitn(2, '?');
+        let base = raw_base
+            .map(|raw_base| {
+                Url::parse(raw_base).map_err(|err| Error {
+                    message: err.to_string(),
+                    location: Some(0..raw_base.len()),
+                })
+            })
+            .transpose()?;
+
+        let mut prefix_suffix = rest.into_iter().flat_map(|rest| rest.splitn(2, '?'));
         let path_prefix = prefix_suffix.next();
         let query_suffix = prefix_suffix.next();
 
@@ -420,6 +424,12 @@ impl Variable {
                 location: Some(location),
             });
         }
+        if path.ends_with('.') {
+            return Err(Error {
+                message: format!("Variable expression {input} must not end with a period",),
+                location: Some(location),
+            });
+        }
 
         Ok(Self {
             var_type,
@@ -497,6 +507,31 @@ mod test_parse {
             "Variable type must be one of $args, $this, $config, got $blah"
         );
         assert_eq!(err.location, Some(12..23));
+    }
+
+    #[test]
+    fn basic_absolute_url() {
+        assert_debug_snapshot!(URLTemplate::from_str("http://example.com"));
+    }
+
+    #[test]
+    fn absolute_url_with_path() {
+        assert_debug_snapshot!(URLTemplate::from_str("http://example.com/abc/def"));
+    }
+
+    #[test]
+    fn absolute_url_with_path_variable() {
+        assert_debug_snapshot!(URLTemplate::from_str("http://example.com/{$args.abc}/def"));
+    }
+
+    #[test]
+    fn absolute_url_with_query() {
+        assert_debug_snapshot!(URLTemplate::from_str("http://example.com?abc=def"));
+    }
+
+    #[test]
+    fn absolute_url_with_query_variable() {
+        assert_debug_snapshot!(URLTemplate::from_str("http://example.com?abc={$args.abc}"));
     }
 }
 
