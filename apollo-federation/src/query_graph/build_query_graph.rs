@@ -1387,7 +1387,7 @@ impl FederatedQueryGraphBuilder {
     fn handle_progressive_overrides(&mut self) -> Result<(), FederationError> {
         let mut edge_to_conditions: HashMap<EdgeIndex, OverrideCondition> = Default::default();
 
-        fn collect_edge_label(
+        fn collect_edge_condition(
             query_graph: &QueryGraph,
             target_graph: &str,
             target_field: &ObjectFieldDefinitionPosition,
@@ -1445,7 +1445,7 @@ impl FederatedQueryGraphBuilder {
                             .federation_spec_definition
                             .override_directive_arguments(directive)?;
                         if let Some(label) = application.label {
-                            collect_edge_label(
+                            collect_edge_condition(
                                 &self.base.query_graph,
                                 to_subgraph_name,
                                 field_definition_position,
@@ -1453,7 +1453,7 @@ impl FederatedQueryGraphBuilder {
                                 true,
                                 &mut edge_to_conditions,
                             )?;
-                            collect_edge_label(
+                            collect_edge_condition(
                                 &self.base.query_graph,
                                 application.from,
                                 field_definition_position,
