@@ -12,6 +12,7 @@ use apollo_compiler::ast;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
+use apollo_federation::query_plan::query_planner::QueryPlanOptions;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use apollo_federation::query_plan::QueryPlan;
 
@@ -43,6 +44,7 @@ pub(crate) struct BothModeComparisonJob {
     pub(crate) document: Arc<Valid<ExecutableDocument>>,
     pub(crate) operation_name: Option<String>,
     pub(crate) js_result: Result<QueryPlanResult, Arc<Vec<router_bridge::planner::PlanError>>>,
+    pub(crate) plan_options: QueryPlanOptions,
 }
 
 type Queue = crossbeam_channel::Sender<BothModeComparisonJob>;
@@ -88,7 +90,9 @@ impl BothModeComparisonJob {
             let start = Instant::now();
 
             // No question mark operator or macro from here …
-            let result = self.rust_planner.build_query_plan(&self.document, name);
+            let result =
+                self.rust_planner
+                    .build_query_plan(&self.document, name, self.plan_options);
 
             let elapsed = start.elapsed().as_secs_f64();
             metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);

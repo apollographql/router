@@ -59,6 +59,18 @@ macro_rules! subgraph_name {
 /// formatted query plan string.
 /// Run `cargo insta review` to diff and accept changes to the generated query plan.
 macro_rules! assert_plan {
+    ($api_schema_and_planner: expr, $operation: expr, $options: expr, @$expected: literal) => {{
+        let (api_schema, planner) = $api_schema_and_planner;
+        let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+            api_schema.schema(),
+            $operation,
+            "operation.graphql",
+        )
+        .unwrap();
+        let plan = planner.build_query_plan(&document, None, $options).unwrap();
+        insta::assert_snapshot!(plan, @$expected);
+        plan
+    }};
     ($api_schema_and_planner: expr, $operation: expr, @$expected: literal) => {{
         let (api_schema, planner) = $api_schema_and_planner;
         let document = apollo_compiler::ExecutableDocument::parse_and_validate(
@@ -67,7 +79,7 @@ macro_rules! assert_plan {
             "operation.graphql",
         )
         .unwrap();
-        let plan = planner.build_query_plan(&document, None).unwrap();
+        let plan = planner.build_query_plan(&document, None, Default::default()).unwrap();
         insta::assert_snapshot!(plan, @$expected);
         plan
     }};
