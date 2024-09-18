@@ -251,6 +251,12 @@ pub(crate) fn operation(
         return Ok(None);
     };
 
+    for directive in def.directives.iter() {
+        for argument in directive.arguments.iter() {
+            used_variables_from_value(visitor, &argument.value);
+        }
+    }
+
     Ok(Some(ast::OperationDefinition {
         name: def.name.clone(),
         operation_type: def.operation_type,
@@ -271,6 +277,13 @@ pub(crate) fn fragment_definition(
     else {
         return Ok(None);
     };
+
+    for directive in def.directives.iter() {
+        for argument in directive.arguments.iter() {
+            used_variables_from_value(visitor, &argument.value);
+        }
+    }
+
     Ok(Some(ast::FragmentDefinition {
         name: def.name.clone(),
         type_condition: def.type_condition.clone(),
@@ -871,13 +884,18 @@ fragment F on Query {
 
         // test removed field with variable in directive on operation and fragment
         let query = r#"
-            query Test($a: String, $b: String) @hasArg(arg: $a) {
+            query Test($a: String, $b: String, $c: String) @hasArg(arg: $a) {
                 ...TestFragment
+                ...TestFragment2
                 c
             }
 
             fragment TestFragment on Query @hasArg(arg: $b) {
                 __typename @remove
+            }
+
+            fragment TestFragment2 on Query @hasArg(arg: $c) {
+                __typename
             }
             "#;
         let doc = ast::Document::parse(query, "query.graphql").unwrap();
