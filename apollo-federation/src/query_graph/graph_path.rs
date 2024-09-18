@@ -775,7 +775,6 @@ enum UnadvanceableReason {
     NoMatchingTransition,
     UnreachableType,
     IgnoredIndirectPath,
-    UnsatisfiableOverrideCondition,
 }
 
 /// One of the options for a `ClosedBranch` (see the documentation of that struct for details). Note
