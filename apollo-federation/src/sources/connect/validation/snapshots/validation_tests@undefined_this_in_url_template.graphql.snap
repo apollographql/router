@@ -17,4 +17,17 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/undefined
             },
         ],
     },
+    Message {
+        code: UndefinedField,
+        message: "`GET` in `@connect(http:)` on `Query.resources` contains `{$this.something}`, but Query does not have a field named `something`.",
+        locations: [
+            LineColumn {
+                line: 10,
+                column: 62,
+            }..LineColumn {
+                line: 10,
+                column: 77,
+            },
+        ],
+    },
 ]

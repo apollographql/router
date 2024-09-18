@@ -17,4 +17,17 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/undefined
             },
         ],
     },
+    Message {
+        code: UndefinedArgument,
+        message: "`GET` in `@connect(http:)` on `Query.resources` contains `{$args.something}`, but `Query.resources` does not have an argument named `something`.",
+        locations: [
+            LineColumn {
+                line: 10,
+                column: 62,
+            }..LineColumn {
+                line: 10,
+                column: 77,
+            },
+        ],
+    },
 ]

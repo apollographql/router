@@ -7,7 +7,7 @@ extend schema
 type Query {
   resources: [String!]!
     @connect(
-      http: { GET: "http://127.0.0.1/{$args.blah}" }
+      http: { GET: "http://127.0.0.1/{$args.blah}?something={$args.something}" }
       selection: "$"
     )
 }

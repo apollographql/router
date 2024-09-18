@@ -15,6 +15,7 @@ use crate::sources::connect::validation::require_value_is_str;
 use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
 use crate::sources::connect::URLTemplate;
+use crate::sources::connect::Variable;
 
 pub(crate) fn validate_template(
     coordinate: HttpMethodCoordinate,
@@ -35,50 +36,20 @@ pub(crate) fn validate_template(
         ));
     }
 
-    let field_coordinate = coordinate.connect.field_coordinate;
-    let field = field_coordinate.field;
-
     for variable in template.path_variables() {
-        match variable.var_type {
-            VariableType::Config => {} // We don't validate Router config yet
-            VariableType::Args => {
-                let arg_name = variable.path.split('.').next().unwrap_or(&variable.path);
-                if !field.arguments.iter().any(|arg| arg.name == arg_name) {
-                    messages.push(Message {
-                        code: Code::UndefinedArgument,
-                        message: format!(
-                            "{coordinate} contains `{{{variable}}}`, but {field_coordinate} does not have an argument named `{arg_name}`.",
-                        ),
-                        locations: select_substring_location(
-                            coordinate.node.line_column_range(sources),
-                            str_value,
-                            Some(variable.location.clone()),
-                        )
-                    });
-                }
-            }
-            VariableType::This => {
-                let field_name = variable.path.split('.').next().unwrap_or(&variable.path);
-                if !field_coordinate.object.fields.contains_key(field_name) {
-                    messages.push(Message {
-                        code: Code::UndefinedField,
-                        message: format!(
-                            "{coordinate} contains `{{{variable}}}`, but {object} does not have a field named `{field_name}`.",
-                            object = field_coordinate.object.name,
-                        ),
-                        locations: select_substring_location(
-                            coordinate.node.line_column_range(sources),
-                            str_value,
-                            Some(variable.location.clone()),
-                        )
-                    });
-                }
-            }
+        if let Err(err) = validate_variable(variable, str_value, coordinate, sources) {
+            messages.push(err);
         }
     }
 
+    for variable in template.query_variables() {
+        if let Err(err) = validate_variable(variable, str_value, coordinate, sources) {
+            messages.push(err);
+        }
+    }
+
+    // TODO: What happens with `?{$this.blah}`?
     // TODO: handle complex types of arguments/paths
-    // TODO: validate query parameters
     // TODO: hint at nullability requirements for path parameters
 
     if messages.is_empty() {
@@ -88,7 +59,7 @@ pub(crate) fn validate_template(
     }
 }
 
-pub(crate) fn parse_template<'schema>(
+fn parse_template<'schema>(
     coordinate: HttpMethodCoordinate<'schema>,
     sources: &SourceMap,
 ) -> Result<(URLTemplate, &'schema str), Message> {
@@ -156,4 +127,51 @@ fn select_substring_location(
         })
         .into_iter()
         .collect()
+}
+
+fn validate_variable(
+    variable: &Variable,
+    url_value: &str,
+    coordinate: HttpMethodCoordinate,
+    sources: &SourceMap,
+) -> Result<(), Message> {
+    let field_coordinate = coordinate.connect.field_coordinate;
+    let field = field_coordinate.field;
+    match variable.var_type {
+        VariableType::Config => {} // We don't validate Router config yet
+        VariableType::Args => {
+            let arg_name = variable.path.split('.').next().unwrap_or(&variable.path);
+            if !field.arguments.iter().any(|arg| arg.name == arg_name) {
+                return Err(Message {
+                    code: Code::UndefinedArgument,
+                    message: format!(
+                        "{coordinate} contains `{{{variable}}}`, but {field_coordinate} does not have an argument named `{arg_name}`.",
+                    ),
+                    locations: select_substring_location(
+                        coordinate.node.line_column_range(sources),
+                        url_value,
+                        Some(variable.location.clone()),
+                    )
+                });
+            }
+        }
+        VariableType::This => {
+            let field_name = variable.path.split('.').next().unwrap_or(&variable.path);
+            if !field_coordinate.object.fields.contains_key(field_name) {
+                return Err(Message {
+                    code: Code::UndefinedField,
+                    message: format!(
+                        "{coordinate} contains `{{{variable}}}`, but {object} does not have a field named `{field_name}`.",
+                        object = field_coordinate.object.name,
+                    ),
+                    locations: select_substring_location(
+                        coordinate.node.line_column_range(sources),
+                        url_value,
+                        Some(variable.location.clone()),
+                    )
+                });
+            }
+        }
+    }
+    Ok(())
 }
