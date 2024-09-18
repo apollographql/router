@@ -159,9 +159,7 @@ pub(crate) struct QueryGraphEdge {
 impl QueryGraphEdge {
     fn satisfies_override_conditions(&self, conditions_to_check: &HashSet<String>) -> bool {
         if let Some(override_condition) = &self.override_condition {
-            // we need both condition and check to be the same hence we negate XOR value
-            !(override_condition.condition
-                ^ conditions_to_check.contains(&override_condition.label))
+            override_condition.condition == conditions_to_check.contains(&override_condition.label)
         } else {
             true
         }
