@@ -1,5 +1,6 @@
 use std::cell::Cell;
 use std::num::NonZeroU32;
+use std::ops::Deref;
 use std::sync::Arc;
 
 use apollo_compiler::collections::HashSet;
@@ -204,6 +205,17 @@ pub struct QueryPlanOptions {
     /// progressive @override feature.
     // PORT_NOTE: In JS implementation this was a Map
     pub override_conditions: Vec<String>,
+}
+
+#[derive(Debug, Default, Clone)]
+pub(crate) struct EnabledOverrideConditions(HashSet<String>);
+
+impl Deref for EnabledOverrideConditions {
+    type Target = HashSet<String>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 pub struct QueryPlanner {
@@ -488,7 +500,7 @@ impl QueryPlanner {
                 .clone()
                 .into(),
             config: self.config.clone(),
-            override_conditions: HashSet::from_iter(options.override_conditions),
+            override_conditions: EnabledOverrideConditions(HashSet::from_iter(options.override_conditions)),
         };
 
         let root_node = match defer_conditions {

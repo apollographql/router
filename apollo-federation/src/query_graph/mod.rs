@@ -3,7 +3,6 @@ use std::fmt::Formatter;
 use std::hash::Hash;
 use std::sync::Arc;
 
-use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::NamedType;
@@ -45,6 +44,7 @@ use crate::query_graph::graph_path::ExcludedDestinations;
 use crate::query_graph::graph_path::OpGraphPathContext;
 use crate::query_graph::graph_path::OpGraphPathTrigger;
 use crate::query_graph::graph_path::OpPathElement;
+use crate::query_plan::query_planner::EnabledOverrideConditions;
 use crate::query_plan::QueryPlanCost;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -157,7 +157,7 @@ pub(crate) struct QueryGraphEdge {
 }
 
 impl QueryGraphEdge {
-    fn satisfies_override_conditions(&self, conditions_to_check: &HashSet<String>) -> bool {
+    fn satisfies_override_conditions(&self, conditions_to_check: &EnabledOverrideConditions) -> bool {
         if let Some(override_condition) = &self.override_condition {
             override_condition.condition == conditions_to_check.contains(&override_condition.label)
         } else {
@@ -679,7 +679,7 @@ impl QueryGraph {
         &self,
         node: NodeIndex,
         field: &Field,
-        override_conditions: &HashSet<String>,
+        override_conditions: &EnabledOverrideConditions,
     ) -> Option<EdgeIndex> {
         let mut candidates = self.out_edges(node).into_iter().filter_map(|edge_ref| {
             let edge_weight = edge_ref.weight();
@@ -761,7 +761,7 @@ impl QueryGraph {
         &self,
         node: NodeIndex,
         op_graph_path_trigger: &OpGraphPathTrigger,
-        override_conditions: &HashSet<String>,
+        override_conditions: &EnabledOverrideConditions,
     ) -> Option<Option<EdgeIndex>> {
         let OpGraphPathTrigger::OpPathElement(op_path_element) = op_graph_path_trigger else {
             return None;

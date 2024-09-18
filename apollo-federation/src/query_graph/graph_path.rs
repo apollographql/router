@@ -9,7 +9,6 @@ use std::sync::atomic;
 use std::sync::Arc;
 
 use apollo_compiler::ast::Value;
-use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use itertools::Itertools;
@@ -48,6 +47,7 @@ use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphEdgeTransition;
 use crate::query_graph::QueryGraphNodeType;
 use crate::query_plan::FetchDataPathElement;
+use crate::query_plan::query_planner::EnabledOverrideConditions;
 use crate::query_plan::QueryPathElement;
 use crate::query_plan::QueryPlanCost;
 use crate::schema::position::AbstractTypeDefinitionPosition;
@@ -1414,7 +1414,7 @@ where
         condition_resolver: &mut impl ConditionResolver,
         excluded_destinations: &ExcludedDestinations,
         excluded_conditions: &ExcludedConditions,
-        override_conditions: &HashSet<String>,
+        override_conditions: &EnabledOverrideConditions,
         transition_and_context_to_trigger: impl Fn(
             &QueryGraphEdgeTransition,
             &OpGraphPathContext,
@@ -1423,7 +1423,7 @@ where
             &Arc<QueryGraph>,
             NodeIndex,
             &Arc<TTrigger>,
-            &HashSet<String>,
+            &EnabledOverrideConditions,
         ) -> Option<TEdge>,
     ) -> Result<IndirectPaths<TTrigger, TEdge>, FederationError> {
         // If we're asked for indirect paths after an "@interfaceObject fake down cast" but that
@@ -1810,9 +1810,9 @@ where
             &Arc<QueryGraph>,
             NodeIndex,
             &Arc<TTrigger>,
-            &HashSet<String>,
+            &EnabledOverrideConditions,
         ) -> Option<TEdge>,
-        override_conditions: &HashSet<String>,
+        override_conditions: &EnabledOverrideConditions,
     ) -> Result<Option<NodeIndex>, FederationError> {
         let mut current_node = start_node;
         for index in start_index..self.edges.len() {
@@ -1912,7 +1912,7 @@ impl OpGraphPath {
     fn next_edge_for_field(
         &self,
         field: &Field,
-        override_conditions: &HashSet<String>,
+        override_conditions: &EnabledOverrideConditions,
     ) -> Option<EdgeIndex> {
         self.graph
             .edge_for_field(self.tail, field, override_conditions)
@@ -2049,7 +2049,7 @@ impl OpGraphPath {
 
     pub(crate) fn terminate_with_non_requested_typename_field(
         &self,
-        override_conditions: &HashSet<String>,
+        override_conditions: &EnabledOverrideConditions,
     ) -> Result<OpGraphPath, FederationError> {
         // If the last step of the path was a fragment/type-condition, we want to remove it before
         // we get __typename. The reason is that this avoid cases where this method would make us
@@ -2427,7 +2427,7 @@ impl OpGraphPath {
         operation_element: &OpPathElement,
         context: &OpGraphPathContext,
         condition_resolver: &mut impl ConditionResolver,
-        override_conditions: &HashSet<String>,
+        override_conditions: &EnabledOverrideConditions,
     ) -> Result<(Option<Vec<SimultaneousPaths>>, Option<bool>), FederationError> {
         let span = debug_span!("Trying to advance {self} directly with {operation_element}");
         let _guard = span.enter();
@@ -3311,7 +3311,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
         updated_context: &OpGraphPathContext,
         path_index: usize,
         condition_resolver: &mut impl ConditionResolver,
-        override_conditions: &HashSet<String>,
+        override_conditions: &EnabledOverrideConditions,
     ) -> Result<OpIndirectPaths, FederationError> {
         // Note that the provided context will usually be one we had during construction (the
         // `updated_context` will be `self.context` updated by whichever operation we're looking at,
@@ -3335,7 +3335,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
         &self,
         path_index: usize,
         condition_resolver: &mut impl ConditionResolver,
-        overridden_conditions: &HashSet<String>,
+        overridden_conditions: &EnabledOverrideConditions,
     ) -> Result<OpIndirectPaths, FederationError> {
         self.paths.0[path_index].advance_with_non_collecting_and_type_preserving_transitions(
             &self.context,
@@ -3385,7 +3385,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
         supergraph_schema: ValidFederationSchema,
         operation_element: &OpPathElement,
         condition_resolver: &mut impl ConditionResolver,
-        override_conditions: &HashSet<String>,
+        override_conditions: &EnabledOverrideConditions,
     ) -> Result<Option<Vec<SimultaneousPathsWithLazyIndirectPaths>>, FederationError> {
         debug!(
             "Trying to advance paths for operation: path = {}, operation = {operation_element}",
@@ -3608,7 +3608,7 @@ pub fn create_initial_options(
     condition_resolver: &mut impl ConditionResolver,
     excluded_edges: ExcludedDestinations,
     excluded_conditions: ExcludedConditions,
-    override_conditions: &HashSet<String>,
+    override_conditions: &EnabledOverrideConditions,
 ) -> Result<Vec<SimultaneousPathsWithLazyIndirectPaths>, FederationError> {
     let initial_paths = SimultaneousPaths::from(initial_path);
     let mut lazy_initial_path = SimultaneousPathsWithLazyIndirectPaths::new(

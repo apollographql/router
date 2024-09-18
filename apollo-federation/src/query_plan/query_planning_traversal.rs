@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexSet;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
@@ -36,7 +35,7 @@ use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphPro
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToCostProcessor;
 use crate::query_plan::generate::generate_all_plans_and_find_best;
 use crate::query_plan::generate::PlanBuilder;
-use crate::query_plan::query_planner::compute_root_fetch_groups;
+use crate::query_plan::query_planner::{compute_root_fetch_groups, EnabledOverrideConditions};
 use crate::query_plan::query_planner::QueryPlannerConfig;
 use crate::query_plan::query_planner::QueryPlanningStatistics;
 use crate::query_plan::QueryPlanCost;
@@ -73,7 +72,7 @@ pub(crate) struct QueryPlanningParameters<'a> {
     /// The configuration for the query planner.
     pub(crate) config: QueryPlannerConfig,
     pub(crate) statistics: &'a QueryPlanningStatistics,
-    pub(crate) override_conditions: HashSet<String>,
+    pub(crate) override_conditions: EnabledOverrideConditions,
 }
 
 pub(crate) struct QueryPlanningTraversal<'a, 'b> {
