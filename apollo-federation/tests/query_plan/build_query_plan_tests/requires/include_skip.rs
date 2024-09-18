@@ -178,64 +178,66 @@ fn it_handles_an_at_requires_where_multiple_conditional_are_involved() {
             }
           "#,
         @r###"
-          QueryPlan {
-            Include(if: $test1) {
-              Sequence {
-                Fetch(service: "Subgraph1") {
+    QueryPlan {
+      Include(if: $test1) {
+        Sequence {
+          Fetch(service: "Subgraph1") {
+            {
+              a {
+                __typename
+                idA
+              }
+            }
+          },
+          Include(if: $test2) {
+            Sequence {
+              Flatten(path: "a") {
+                Fetch(service: "Subgraph2") {
                   {
-                    a {
+                    ... on A {
                       __typename
                       idA
                     }
+                  } =>
+                  {
+                    ... on A {
+                      b {
+                        __typename
+                        idB
+                        ... on B {
+                          required
+                        }
+                      }
+                    }
                   }
                 },
-                Include(if: $test2) {
-                  Sequence {
-                    Flatten(path: "a") {
-                      Fetch(service: "Subgraph2") {
-                        {
-                          ... on A {
-                            __typename
-                            idA
-                          }
-                        } =>
-                        {
-                          ... on A {
-                            b {
-                              __typename
-                              idB
-                              required
-                            }
-                          }
-                        }
-                      },
-                    },
-                    Flatten(path: "a.b.@") {
-                      Fetch(service: "Subgraph3") {
-                        {
-                          ... on B {
-                            ... on B {
-                              __typename
-                              idB
-                              required
-                            }
-                          }
-                        } =>
-                        {
-                          ... on B {
-                            ... on B {
-                              c
-                            }
-                          }
-                        }
-                      },
-                    },
+              },
+              Flatten(path: "a.b.@") {
+                Fetch(service: "Subgraph3") {
+                  {
+                    ... on B {
+                      ... on B {
+                        __typename
+                        idB
+                        required
+                      }
+                    }
+                  } =>
+                  {
+                    ... on B {
+                      ... on B {
+                        c
+                      }
+                    }
                   }
                 },
-              }
+              },
             },
-          }
-        "###
+          },
+        },
+      },
+    }
+    "###
     );
 }
 

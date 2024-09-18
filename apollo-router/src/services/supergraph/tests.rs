@@ -1101,12 +1101,12 @@ async fn subscription_without_header() {
 async fn root_typename_with_defer_and_empty_first_response() {
     let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
-                serde_json::json!{{"query":"{currentUser{activeOrganization{__typename id}}}"}},
+                serde_json::json!{{"query":"{... on Query{currentUser{activeOrganization{__typename id}}}}"}},
                 serde_json::json!{{"data": {"currentUser": { "activeOrganization": { "__typename": "Organization", "id": "0" } }}}}
             ).build()),
         ("orga", MockSubgraph::builder().with_json(
             serde_json::json!{{
-                "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{suborga{__typename id}}}}",
+                "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{suborga{id name}}}}",
                 "variables": {
                     "representations":[{"__typename": "Organization", "id":"0"}]
                 }
@@ -1115,33 +1115,11 @@ async fn root_typename_with_defer_and_empty_first_response() {
                 "data": {
                     "_entities": [{ "suborga": [
                     { "__typename": "Organization", "id": "1"},
-                    { "__typename": "Organization", "id": "2"},
+                    { "__typename": "Organization", "id": "2", "name": "A"},
                     { "__typename": "Organization", "id": "3"},
                     ] }]
                 },
-                }}
-        )
-        .with_json(
-            serde_json::json!{{
-                "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{name}}}",
-                "variables": {
-                    "representations":[
-                        {"__typename": "Organization", "id":"1"},
-                        {"__typename": "Organization", "id":"2"},
-                        {"__typename": "Organization", "id":"3"}
-
-                        ]
-                }
-            }},
-            serde_json::json!{{
-                "data": {
-                    "_entities": [
-                    { "__typename": "Organization", "id": "1"},
-                    { "__typename": "Organization", "id": "2", "name": "A"},
-                    { "__typename": "Organization", "id": "3"},
-                    ]
-                }
-                }}
+            }}
         ).build())
     ].into_iter().collect());
 
@@ -1182,13 +1160,49 @@ async fn root_typename_with_defer_and_empty_first_response() {
 
     let mut stream = service.oneshot(request).await.unwrap();
     let res = stream.next_response().await.unwrap();
-    assert_eq!(
-        res.data.as_ref().unwrap().get("__typename"),
-        Some(&serde_json_bytes::Value::String("Query".into()))
-    );
+
+    insta::assert_json_snapshot!(res, @r###"
+    {
+      "data": {
+        "__typename": "Query"
+      },
+      "hasNext": true
+    }
+    "###);
 
     // Must have 2 chunks
-    let _ = stream.next_response().await.unwrap();
+    let res = stream.next_response().await.unwrap();
+    insta::assert_json_snapshot!(res, @r###"
+    {
+      "hasNext": false,
+      "incremental": [
+        {
+          "data": {
+            "currentUser": {
+              "activeOrganization": {
+                "id": "0",
+                "suborga": [
+                  {
+                    "id": "1",
+                    "name": null
+                  },
+                  {
+                    "id": "2",
+                    "name": "A"
+                  },
+                  {
+                    "id": "3",
+                    "name": null
+                  }
+                ]
+              }
+            }
+          },
+          "path": []
+        }
+      ]
+    }
+    "###);
 }
 
 #[tokio::test]
