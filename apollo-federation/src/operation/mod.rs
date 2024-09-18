@@ -38,6 +38,7 @@ use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::error::SingleFederationError::Internal;
 use crate::link::graphql_definition::BooleanOrVariable;
+use crate::link::graphql_definition::DeferDirectiveArguments;
 use crate::query_graph::graph_path::OpPathElement;
 use crate::query_plan::conditions::Conditions;
 use crate::query_plan::FetchDataKeyRenamer;
@@ -207,6 +208,70 @@ pub(crate) struct NormalizedDefer {
     pub defer_conditions: IndexMap<String, IndexSet<String>>,
 }
 
+struct DeferNormalizer {
+    used_labels: HashSet<String>,
+    problems: HashSet<SelectionKey>,
+    label_offset: usize,
+}
+
+impl DeferNormalizer {
+    fn new(selection_set: &SelectionSet) -> Self {
+        fn collect_labels(normalizer: &mut DeferNormalizer, selection: &Selection) {
+            // TODO: Does this need to be checking FragmentSpread + InlineFragment or just
+            // spreads? The JS code checks "FragmentSelection"
+            if let Selection::InlineFragment(inline) = selection {
+                if let Some(args) = inline
+                    .inline_fragment
+                    .data()
+                    .defer_directive_arguments()
+                    // TODO: Ideally, a version of this method exists that doesn't return a
+                    // Result...
+                    .unwrap()
+                {
+                    let DeferDirectiveArguments { label, if_ } = args;
+                    if let Some(label) = label {
+                        normalizer.used_labels.insert(label);
+                    } else {
+                        normalizer.problems.insert(inline.key());
+                    }
+                    if matches!(if_, Some(BooleanOrVariable::Boolean(_))) {
+                        normalizer.problems.insert(inline.key());
+                    }
+                }
+            }
+            selection
+                .selection_set()
+                .into_iter()
+                .flatten()
+                .for_each(|(_, op)| collect_labels(normalizer, op))
+        }
+        let mut digest = Self {
+            used_labels: HashSet::default(),
+            problems: HashSet::default(),
+            label_offset: 0,
+        };
+        selection_set
+            .iter()
+            .for_each(|sel| collect_labels(&mut digest, sel));
+        digest
+    }
+
+    fn is_problem(&self, key: &SelectionKey) -> bool {
+        self.problems.contains(key)
+    }
+
+    fn get_label(&mut self) -> String {
+        loop {
+            let digest = format!("qp__{}", self.label_offset);
+            if self.used_labels.contains(&digest) {
+                self.label_offset += 1;
+            } else {
+                return digest;
+            }
+        }
+    }
+}
+
 impl Operation {
     /// Parse an operation from a source string.
     #[cfg(any(test, doc))]
@@ -263,37 +328,11 @@ impl Operation {
         if self.has_defer() {
             // PORT_NOTE:
             // TODO: Can this set use &str instead of strings?
-            fn collect_labels(labels: &mut HashSet<String>, selection: &Selection) -> bool {
-                // TODO: Does this need to be checking FragmentSpread + InlineFragment or just
-                // spreads? The JS code checks "FragmentSelection"
-                if let Selection::InlineFragment(inline) = selection {
-                    if let Some(label) = inline
-                        .inline_fragment
-                        .data()
-                        .defer_directive_arguments()
-                        // TODO: Ideally, a version of this method exists that doesn't return a
-                        // Result...
-                        .unwrap()
-                        .and_then(|dirs| dirs.label)
-                    {
-                        labels.insert(label.clone());
-                    }
-                }
-                selection
-                    .selection_set()
-                    .into_iter()
-                    .flatten()
-                    .fold(false, |acc, (_, op)| acc || collect_labels(labels, op))
-            }
-            let mut labels = HashSet::default();
-            let must_normalize_defers = self
-                .selection_set
-                .iter()
-                // Yes, this looks like an `any`, but we specifically don't want to short circuit.
-                .fold(false, |acc, sel| acc || collect_labels(&mut labels, sel));
+            let mut normalizer = DeferNormalizer::new(&self.selection_set);
             println!("Before normalization: {}", self.selection_set);
-            if must_normalize_defers {
-                self.selection_set = self.selection_set.normalize_defer(&labels);
+            if !normalizer.problems.is_empty() {
+                println!("Normalizing defer...");
+                self.selection_set.normalize_defer(&mut normalizer);
             }
             println!("After normalization: {}", self.selection_set);
             NormalizedDefer {
@@ -448,6 +487,40 @@ mod selection_map {
         pub(crate) fn extend_ref(&mut self, other: &SelectionMap) {
             self.0
                 .extend(other.iter().map(|(k, v)| (k.clone(), v.clone())))
+        }
+
+        /// Iterates over the inner map, passing each selection through the mapper. If the mapper
+        /// returns `Some`, the current selection is removed from the map and returned selection is
+        /// inserted in its place. This method is intented from sparce updates to selections which
+        /// update their keys (such as defer normalization). As such, update selections will hold
+        /// the same position as the former selection.
+        ///
+        /// NOTE: The given `mapper` function is given a mutable reference so that the `Selection`
+        /// can recurse if needed. Should any other change be needed, the mapper should clone the
+        /// `Selection` and return the updated copy.
+        pub(crate) fn update_and_reinsert<F>(&mut self, mut mapper: F)
+        where
+            F: FnMut(SelectionValue<'_>) -> Option<Selection>,
+        {
+            let buffer = self
+                .iter_mut()
+                .filter_map(|(key, sel)| mapper(sel).map(|new| (key.clone(), new)))
+                .collect::<Vec<_>>();
+            print!("Found these updated selection: [");
+            for (key, sel) in &buffer {
+                print!("{key:?} -> {sel}, ");
+            }
+            println!("]");
+            for (old_key, new_selection) in buffer {
+                if old_key == new_selection.key() {
+                    // This unwrap is safe because we just checked that the keys match and the old
+                    // key exists in the map already.
+                    *self.0.get_mut(&old_key).unwrap() = new_selection;
+                } else {
+                    self.insert(new_selection);
+                    self.0.swap_remove(&old_key);
+                }
+            }
         }
 
         /// Returns the selection set resulting from "recursively" filtering any selection
@@ -1000,15 +1073,6 @@ impl Selection {
             Selection::InlineFragment(inline_fragment_selection) => {
                 inline_fragment_selection.has_defer()
             }
-        }
-    }
-
-    fn normalize_defer(self, labels: &HashSet<String>) -> Self {
-        match self {
-            Selection::InlineFragment(inline) => Selection::InlineFragment(Arc::new(
-                Arc::unwrap_or_clone(inline).normalize_defer(labels),
-            )),
-            value => value,
         }
     }
 
@@ -2811,23 +2875,27 @@ impl SelectionSet {
         self.selections.values().any(|s| s.has_defer())
     }
 
-    fn normalize_defer(self, labels: &HashSet<String>) -> Self {
-        let Self {
-            schema,
-            type_position,
-            selections,
-        } = self;
-        Self {
-            schema,
-            type_position,
-            selections: Arc::new(
-                selections
-                    .values()
-                    .cloned()
-                    .map(|selection| selection.normalize_defer(labels))
-                    .collect(),
-            ),
+    fn normalize_defer(&mut self, normalizer: &mut DeferNormalizer) {
+        fn selection_normalize_defer(
+            mut selection: SelectionValue,
+            normalizer: &mut DeferNormalizer,
+        ) -> Option<Selection> {
+            if let Some(selection_set) = selection.get_selection_set_mut() {
+                selection_set.normalize_defer(normalizer);
+            }
+            match selection {
+                SelectionValue::InlineFragment(inline)
+                    if normalizer.is_problem(&inline.get().key()) =>
+                {
+                    let mut new_inline = inline.get().clone();
+                    Arc::make_mut(&mut new_inline).normalize_defer(normalizer);
+                    Some(Selection::InlineFragment(new_inline))
+                }
+                _ => None,
+            }
         }
+        Arc::make_mut(&mut self.selections)
+            .update_and_reinsert(|sel| selection_normalize_defer(sel, normalizer))
     }
 
     // - `self` must be fragment-spread-free.
@@ -3554,29 +3622,41 @@ impl InlineFragmentSelection {
                 .any(|s| s.has_defer())
     }
 
-    fn normalize_defer(self, labels: &HashSet<String>) -> Self {
+    fn normalize_defer(&mut self, normalizer: &mut DeferNormalizer) {
+        if !normalizer.is_problem(&self.key()) {
+            return;
+        }
+
+        // This should always be `Some`
         let Some(args) = self.inline_fragment.defer_directive_arguments().unwrap() else {
-            return self;
+            return;
         };
 
+        println!("Normalizing: {args:?}");
+
+        let mut remove_defer = false;
         let mut args_copy = args.clone();
-        if let Some(cond) = &args.if_ {
-            if let BooleanOrVariable::Boolean(b) = cond {
-                if *b {
-                    args_copy.if_ = None;
-                } else {
-                    todo!()
-                    // return self.without_defer()
-                }
+        if let Some(BooleanOrVariable::Boolean(b)) = &args.if_ {
+            if *b {
+                args_copy.if_ = None;
+            } else {
+                remove_defer = true;
             }
         }
 
         if args_copy.label.is_none() {
-            args_copy.label = Some(format!("NEW LABEL: {}", labels.len()));
+            args_copy.label = Some(normalizer.get_label());
         }
+
+        if remove_defer {
+            todo!();
+            // return;
+        }
+
         if args_copy == args {
-            self
+            println!("args are the same...");
         } else {
+            println!("args are the different...");
             /*
             const deferDirective = this.schema().deferDirective();
             const updatedDirectives = this.appliedDirectives
@@ -3592,7 +3672,8 @@ impl InlineFragmentSelection {
                 .directives
                 .iter()
                 .map(|dir| {
-                    if dir.name != "defer" {
+                    println!("Directive: {dir}");
+                    if dir.name == "defer" {
                         let mut dir: Directive = (**dir).clone();
                         dir.arguments
                             .retain(|arg| !["label", "if"].contains(&&*arg.name));
@@ -3602,6 +3683,7 @@ impl InlineFragmentSelection {
                                 args_copy.label.clone().unwrap(),
                             )),
                         });
+                        dir.arguments.push(arg);
                         if let Some(cond) = args_copy.if_.clone() {
                             let name = name!("if");
                             let value = match cond {
@@ -3615,14 +3697,17 @@ impl InlineFragmentSelection {
                             let arg = Node::new(Argument { value, name });
                             dir.arguments.push(arg);
                         }
-                        dir.arguments.push(arg);
+                        println!("New 'defer' directive: {dir}");
                         Node::new(dir)
                     } else {
+                        println!("Directive {:?} is not 'defer', passing through", dir.name);
                         dir.clone()
                     }
                 })
                 .collect();
-            self.with_updated_directives(directives)
+            let new = self.with_updated_directives(directives);
+            println!("Updated InlineFragment: {new}");
+            *self = new;
         }
     }
 
