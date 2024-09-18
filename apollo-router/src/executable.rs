@@ -4,6 +4,8 @@ use std::cell::Cell;
 use std::env;
 use std::fmt::Debug;
 use std::net::SocketAddr;
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -212,6 +214,7 @@ pub struct Opt {
     apollo_key: Option<String>,
 
     /// Key file location relative to the current directory.
+    #[cfg(unix)]
     #[clap(long = "apollo-key-path", env = "APOLLO_KEY_PATH")]
     apollo_key_path: Option<PathBuf>,
 
@@ -517,7 +520,13 @@ impl Executable {
         // 2. Env APOLLO_ROUTER_SUPERGRAPH_PATH
         // 3. Env APOLLO_ROUTER_SUPERGRAPH_URLS
         // 4. Env APOLLO_KEY and APOLLO_GRAPH_REF
-        let schema_source = match (schema, &opt.supergraph_path, &opt.supergraph_urls, &opt.apollo_key, &opt.apollo_key_path) {
+        #[cfg(unix)]
+        let akp = &opt.apollo_key_path;
+        #[cfg(not(unix))]
+        let akp: &Option<PathBuf> = &None;
+
+
+        let schema_source = match (schema, &opt.supergraph_path, &opt.supergraph_urls, &opt.apollo_key, akp) {
             (Some(_), Some(_), _, _, _) | (Some(_), _, Some(_), _, _) => {
                 return Err(anyhow!(
                     "--supergraph and APOLLO_ROUTER_SUPERGRAPH_PATH cannot be used when a custom schema source is in use"
@@ -566,7 +575,35 @@ impl Executable {
                         apollo_key_path.to_string_lossy()
                     ));
                 } else {
-                    //The schema file exists try and load it
+                    // On unix systems, Check that the executing user is the only user who may
+                    // read the key file.
+                    // Note: We could, in future, add support for Windows.
+                    #[cfg(unix)]
+                    {
+                        let meta = std::fs::metadata(apollo_key_path.clone()).map_err(|err|
+                                anyhow!(
+                                    "Failed to read Apollo key file: {}",
+                                    err
+                                ))?;
+                        let mode = meta.mode();
+                        // If our mode isn't "safe", fail...
+                        // safe == none of the "group" or "other" bits set.
+                        if mode & 0o077 != 0 { 
+                            return Err(
+                                anyhow!(
+                                    "Apollo key file permissions ({:#o}) are too permissive", mode & 0o000777
+                                ));
+                        }
+                        let euid = unsafe { libc::geteuid() };
+                        let owner = meta.uid();
+                        if euid != owner {
+                            return Err(
+                                anyhow!(
+                                    "Apollo key file owner id ({owner}) does not match effective user id ({euid})"
+                                ));
+                        }
+                    }
+                    //The key file exists try and load it
                     match std::fs::read_to_string(&apollo_key_path) {
                         Ok(apollo_key) => {
                             opt.apollo_key = Some(apollo_key.trim().to_string());
