@@ -20,6 +20,7 @@ use crate::error::FederationError;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::sources::connect::json_selection::NamedSelection;
+use crate::sources::connect::Key;
 use crate::sources::connect::SubSelection;
 
 /// Type alias for JSONSelection group info
@@ -170,11 +171,9 @@ impl GroupVisitor<JSONSelectionGroup, NamedSelection>
             .selections_iter()
             .sorted_by_key(|s| s.name())
             .cloned()
-            .chain(
-                group
-                    .star_iter()
-                    .map(|s| NamedSelection::Field(s.alias().cloned(), String::new(), None)),
-            )
+            .chain(group.star_iter().map(|s| {
+                NamedSelection::Field(s.alias().cloned(), Key::field("").into_with_range(), None)
+            }))
             .collect())
     }
 

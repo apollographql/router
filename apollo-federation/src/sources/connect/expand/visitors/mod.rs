@@ -198,6 +198,7 @@ mod tests {
     use crate::sources::connect::expand::visitors::GroupVisitor;
     use crate::sources::connect::json_selection::NamedSelection;
     use crate::sources::connect::JSONSelection;
+    use crate::sources::connect::Key;
     use crate::sources::connect::SubSelection;
 
     /// Visitor for tests.
@@ -267,7 +268,13 @@ mod tests {
                         .star_iter()
                         // We just need a field name here
                         // This relies on validation to enforce the presence of an alias
-                        .map(|s| NamedSelection::Field(s.alias().cloned(), String::new(), None)),
+                        .map(|s| {
+                            NamedSelection::Field(
+                                s.alias().cloned(),
+                                Key::field("").into_with_range(),
+                                None,
+                            )
+                        }),
                 )
                 .collect())
         }

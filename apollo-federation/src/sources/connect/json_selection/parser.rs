@@ -778,6 +778,10 @@ impl StarSelection {
         }
     }
 
+    pub(crate) fn alias(&self) -> Option<&Alias> {
+        self.alias.as_ref()
+    }
+
     pub(crate) fn parse(input: Span) -> IResult<Span, Self> {
         tuple((
             // The spaces_or_comments separators are necessary here because
