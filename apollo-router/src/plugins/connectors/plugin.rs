@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use apollo_federation::sources::connect::ApplyToError;
@@ -327,16 +328,31 @@ fn serialize_response(
 fn aggregate_apply_to_errors(errors: &[ApplyToError]) -> Vec<serde_json_bytes::Value> {
     let mut aggregated = vec![];
 
-    for (key, group) in &errors
-        .iter()
-        .chunk_by(|e| (e.message(), e.path(), e.range()))
-    {
-        let group = group.collect_vec();
+    for (key, count) in &errors.iter().fold(
+        HashMap::default(),
+        |mut acc: HashMap<(&str, String), usize>, e| {
+            let path = e
+                .path()
+                .iter()
+                .map(|p| {
+                    if p.as_u64().is_some() {
+                        "@"
+                    } else {
+                        p.as_str().unwrap_or_default()
+                    }
+                })
+                .join(".");
+
+            acc.entry((e.message(), path))
+                .and_modify(|c| *c += 1)
+                .or_insert(1);
+            acc
+        },
+    ) {
         aggregated.push(json!({
             "message": key.0,
             "path": key.1,
-            "range": key.2,
-            "count": group.len(),
+            "count": count,
         }));
     }
 
