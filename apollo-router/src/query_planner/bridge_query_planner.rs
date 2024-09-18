@@ -70,7 +70,6 @@ use crate::Configuration;
 pub(crate) const RUST_QP_MODE: &str = "rust";
 pub(crate) const JS_QP_MODE: &str = "js";
 const UNSUPPORTED_CONTEXT: &str = "context";
-const UNSUPPORTED_OVERRIDES: &str = "overrides";
 const UNSUPPORTED_FED1: &str = "fed1";
 const INTERNAL_INIT_ERROR: &str = "internal";
 
@@ -205,9 +204,6 @@ impl PlannerMode {
                     metric_rust_qp_init(Some(UNSUPPORTED_FED1));
                 }
                 SingleFederationError::UnsupportedFeature { message: _, kind } => match kind {
-                    apollo_federation::error::UnsupportedFeatureKind::ProgressiveOverrides => {
-                        metric_rust_qp_init(Some(UNSUPPORTED_OVERRIDES))
-                    }
                     apollo_federation::error::UnsupportedFeatureKind::Context => {
                         metric_rust_qp_init(Some(UNSUPPORTED_CONTEXT))
                     }
@@ -356,7 +352,7 @@ impl PlannerMode {
                 let start = Instant::now();
 
                 let result = js
-                    .plan(filtered_query, operation.clone(), plan_options)
+                    .plan(filtered_query, operation.clone(), plan_options.clone())
                     .await;
 
                 let elapsed = start.elapsed().as_secs_f64();
@@ -375,6 +371,9 @@ impl PlannerMode {
                     }
                 }
 
+                let query_plan_options = QueryPlanOptions {
+                    override_conditions: HashSet::from_iter(plan_options.override_conditions),
+                };
                 BothModeComparisonJob {
                     rust_planner: rust.clone(),
                     js_duration: elapsed,
@@ -385,6 +384,7 @@ impl PlannerMode {
                         .as_ref()
                         .map(|success| success.data.clone())
                         .map_err(|e| e.errors.clone()),
+                    plan_options: query_plan_options,
                 }
                 .schedule();
 
