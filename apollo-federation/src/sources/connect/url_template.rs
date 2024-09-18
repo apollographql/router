@@ -39,7 +39,6 @@ pub enum ValuePart {
 }
 
 impl URLTemplate {
-    // TODO: enforce that path params come from required schema elements
     pub fn path_variables(&self) -> impl Iterator<Item = &Variable> {
         self.path.iter().flat_map(Component::variables)
     }

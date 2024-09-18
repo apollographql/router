@@ -45,8 +45,23 @@ pub(crate) fn validate_template(
     }
 
     for variable in template.path_variables() {
-        if let Err(err) = validate_variable(variable, str_value, coordinate, schema) {
-            messages.push(err);
+        match validate_variable(variable, str_value, coordinate, schema) {
+            Err(err) => messages.push(err),
+            Ok(Some(ty)) if !ty.is_non_null() => {
+                messages.push(Message {
+                    code: Code::NullablePathVariable,
+                    message: format!(
+                        "Variables in path parameters should be non-null, but {coordinate} contains `{{{variable}}}` which is nullable.\
+                         If a null value is provided at runtime, the request will fail.",
+                    ),
+                    locations: select_substring_location(
+                        coordinate.node.line_column_range(&schema.sources),
+                        str_value,
+                        Some(variable.location.clone()),
+                    ),
+                });
+            }
+            Ok(_) => {} // Type is non-null, or unknowable
         }
     }
 
@@ -55,9 +70,6 @@ pub(crate) fn validate_template(
             messages.push(err);
         }
     }
-
-    // TODO: What happens with `?{$this.blah}`?
-    // TODO: hint at nullability requirements for path parameters
 
     if messages.is_empty() {
         Ok(template)
@@ -136,12 +148,12 @@ fn select_substring_location(
         .collect()
 }
 
-fn validate_variable(
-    variable: &Variable,
+fn validate_variable<'schema>(
+    variable: &'schema Variable,
     url_value: &str,
-    coordinate: HttpMethodCoordinate,
-    schema: &Schema,
-) -> Result<(), Message> {
+    coordinate: HttpMethodCoordinate<'schema>,
+    schema: &'schema Schema,
+) -> Result<Option<&'schema Type>, Message> {
     let field_coordinate = coordinate.connect.field_coordinate;
     let field = field_coordinate.field;
     let mut path = variable.path.split('.');
@@ -150,7 +162,7 @@ fn validate_variable(
     let mut path_component_end = path_component_start + path_root.len();
     let mut variable_type = match variable.var_type {
         VariableType::Config => {
-            return Ok(()); // We don't validate Router config yet
+            return Ok(None); // We don't validate Router config yet
         }
         VariableType::Args => {
             field.arguments.iter().find(|arg| arg.name == path_root).ok_or_else( || {
@@ -222,7 +234,7 @@ fn validate_variable(
             })?;
     }
 
-    Ok(())
+    Ok(Some(variable_type))
 }
 
 fn resolve_type<'schema>(

@@ -514,12 +514,14 @@ pub enum Code {
     UndefinedField,
     /// A type used in a variable is not yet supported (i.e., unions)
     UnsupportedVariableType,
+    /// A path variable is nullable, which can cause errors at runtime
+    NullablePathVariable,
 }
 
 impl Code {
     pub const fn severity(&self) -> Severity {
         match self {
-            Self::NoSourceImport => Severity::Warning,
+            Self::NoSourceImport | Self::NullablePathVariable => Severity::Warning,
             _ => Severity::Error,
         }
     }
