@@ -525,7 +525,6 @@ impl Executable {
         #[cfg(not(unix))]
         let akp: &Option<PathBuf> = &None;
 
-
         let schema_source = match (schema, &opt.supergraph_path, &opt.supergraph_urls, &opt.apollo_key, akp) {
             (Some(_), Some(_), _, _, _) | (Some(_), _, Some(_), _, _) => {
                 return Err(anyhow!(
@@ -588,7 +587,7 @@ impl Executable {
                         let mode = meta.mode();
                         // If our mode isn't "safe", fail...
                         // safe == none of the "group" or "other" bits set.
-                        if mode & 0o077 != 0 { 
+                        if mode & 0o077 != 0 {
                             return Err(
                                 anyhow!(
                                     "Apollo key file permissions ({:#o}) are too permissive", mode & 0o000777
