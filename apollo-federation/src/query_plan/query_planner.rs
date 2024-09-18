@@ -197,13 +197,11 @@ impl QueryPlannerConfig {
 
 #[derive(Debug, Default, Clone)]
 pub struct QueryPlanOptions {
-    /**
-     * A set of labels which will be used _during query planning_ to
-     * enable/disable edges with a matching label in their override condition.
-     * Edges with override conditions require their label to be present or absent
-     * from this set in order to be traversable. These labels enable the
-     * progressive @override feature.
-     */
+    /// A set of labels which will be used _during query planning_ to
+    /// enable/disable edges with a matching label in their override condition.
+    /// Edges with override conditions require their label to be present or absent
+    /// from this set in order to be traversable. These labels enable the
+    /// progressive @override feature.
     // PORT_NOTE: In JS implementation this was a HashMap
     pub override_conditions: HashSet<String>,
 }
@@ -346,7 +344,7 @@ impl QueryPlanner {
         &self,
         document: &Valid<ExecutableDocument>,
         operation_name: Option<Name>,
-        options: Option<QueryPlanOptions>,
+        options: QueryPlanOptions,
     ) -> Result<QueryPlan, FederationError> {
         let operation = document
             .operations
