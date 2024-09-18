@@ -18,6 +18,7 @@ use itertools::Itertools;
 
 use super::coordinates::ConnectDirectiveCoordinate;
 use super::coordinates::ConnectHTTPCoordinate;
+use super::coordinates::FieldCoordinate;
 use super::coordinates::HttpHeadersCoordinate;
 use super::entity::validate_entity_arg;
 use super::http::headers;
@@ -173,6 +174,11 @@ fn validate_field(
     schema: &Schema,
     seen_fields: &mut IndexSet<(Name, Name)>,
 ) -> Vec<Message> {
+    let field_coordinate = FieldCoordinate { object, field };
+    let connect_coordinate = ConnectDirectiveCoordinate {
+        connect_directive_name,
+        field_coordinate,
+    };
     let source_map = &schema.sources;
     let mut errors = Vec::new();
     let connect_directives = field
@@ -209,15 +215,15 @@ fn validate_field(
     // direct recursion isn't allowed, like a connector on User.friends: [User]
     if matches!(category, ObjectCategory::Other) && &object.name == field.ty.inner_named_type() {
         errors.push(Message {
-                    code: Code::CircularReference,
-                    message: format!(
-                        "Direct circular reference detected in `{}.{}: {}`. For more information, see https://go.apollo.dev/connectors/limitations#circular-references",
-                        object.name,
-                        field.name,
-                        field.ty
-                    ),
-                    locations: field.line_column_range(source_map).into_iter().collect(),
-                });
+            code: Code::CircularReference,
+            message: format!(
+                "Direct circular reference detected in `{}.{}: {}`. For more information, see https://go.apollo.dev/connectors/limitations#circular-references",
+                object.name,
+                field.name,
+                field.ty
+            ),
+            locations: field.line_column_range(source_map).into_iter().collect(),
+        });
     }
 
     for connect_directive in connect_directives {
@@ -238,19 +244,15 @@ fn validate_field(
             category,
         ));
 
-        let coordinate = ConnectDirectiveCoordinate {
-            connect_directive_name,
-            object_name: &object.name,
-            field_name: &field.name,
-        };
-
         let Some((http_arg, http_arg_node)) = connect_directive
             .argument_by_name(&HTTP_ARGUMENT_NAME)
             .and_then(|arg| Some((arg.as_object()?, arg)))
         else {
             errors.push(Message {
                 code: Code::GraphQLError,
-                message: format!("{coordinate} must have a `{HTTP_ARGUMENT_NAME}` argument."),
+                message: format!(
+                    "{connect_coordinate} must have a `{HTTP_ARGUMENT_NAME}` argument."
+                ),
                 locations: connect_directive
                     .line_column_range(source_map)
                     .into_iter()
@@ -261,7 +263,7 @@ fn validate_field(
 
         let url_template = match method::validate(
             http_arg,
-            ConnectHTTPCoordinate::from(coordinate),
+            ConnectHTTPCoordinate::from(connect_coordinate),
             http_arg_node,
             source_map,
         ) {

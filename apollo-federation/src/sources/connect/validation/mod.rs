@@ -512,6 +512,8 @@ pub enum Code {
     FieldWithArguments,
     /// Invalid star selection
     InvalidStarSelection,
+    /// Part of the `@connect` refers to an `$args` which is not defined
+    UndefinedArgument,
 }
 
 impl Code {

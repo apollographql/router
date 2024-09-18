@@ -9,6 +9,7 @@ use apollo_compiler::Node;
 use url::Url;
 
 use crate::sources::connect::url_template;
+use crate::sources::connect::url_template::VariableType;
 use crate::sources::connect::validation::coordinates::HttpMethodCoordinate;
 use crate::sources::connect::validation::require_value_is_str;
 use crate::sources::connect::validation::Code;
@@ -33,6 +34,36 @@ pub(crate) fn validate_template(
             sources,
         ));
     }
+
+    let field_coordinate = coordinate.connect.field_coordinate;
+    let field = field_coordinate.field;
+
+    for variable in template.path_variables() {
+        match variable.var_type {
+            VariableType::Config => {} // We don't validate Router config yet
+            VariableType::Args => {
+                let arg_name = variable.path.split('.').next().unwrap_or(&variable.path);
+                if !field.arguments.iter().any(|arg| arg.name == arg_name) {
+                    messages.push(Message {
+                        code: Code::UndefinedArgument,
+                        message: format!(
+                            "{coordinate} contains `{{{variable}}}`, but {field_coordinate} does not have an argument named {arg_name}.",
+                        ),
+                        locations: select_substring_location(
+                            coordinate.node.line_column_range(sources),
+                            str_value,
+                            Some(variable.location.clone()),
+                        )
+                    });
+                }
+            }
+            VariableType::This => {} // TODO: validate this
+        }
+    }
+
+    // TODO: handle complex types of arguments/paths
+    // TODO: validate query parameters
+    // TODO: hint at nullability requirements for path parameters
 
     if messages.is_empty() {
         Ok(template)

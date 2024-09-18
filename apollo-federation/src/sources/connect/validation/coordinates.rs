@@ -2,7 +2,9 @@ use std::fmt;
 use std::fmt::Display;
 use std::fmt::Formatter;
 
+use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::Value;
+use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
@@ -17,24 +19,39 @@ use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_NAME_ARGUMENT_NAME;
 
+/// The location of a field within an object.
+#[derive(Clone, Copy)]
+pub(super) struct FieldCoordinate<'a> {
+    pub object: &'a Node<ObjectType>,
+    pub field: &'a Component<FieldDefinition>,
+}
+
+impl Display for FieldCoordinate<'_> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        let Self { object, field } = self;
+        write!(
+            f,
+            "`{object}.{field}`",
+            object = object.name,
+            field = field.name
+        )
+    }
+}
+
+/// The location of a `@connect` directive.
 #[derive(Clone, Copy)]
 pub(super) struct ConnectDirectiveCoordinate<'a> {
     pub connect_directive_name: &'a Name,
-    pub object_name: &'a Name,
-    pub field_name: &'a Name,
+    pub field_coordinate: FieldCoordinate<'a>,
 }
 
 impl Display for ConnectDirectiveCoordinate<'_> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let Self {
             connect_directive_name,
-            object_name,
-            field_name,
+            field_coordinate,
         } = self;
-        write!(
-            f,
-            "`@{connect_directive_name}` on `{object_name}.{field_name}`",
-        )
+        write!(f, "`@{connect_directive_name}` on {field_coordinate}",)
     }
 }
 
@@ -47,12 +64,11 @@ impl Display for ConnectHTTPCoordinate<'_> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let ConnectDirectiveCoordinate {
             connect_directive_name,
-            object_name,
-            field_name,
+            field_coordinate,
         } = self.connect_directive_coordinate;
         write!(
             f,
-            "`@{connect_directive_name}({HTTP_ARGUMENT_NAME}:)` on `{object_name}.{field_name}`",
+            "`@{connect_directive_name}({HTTP_ARGUMENT_NAME}:)` on {field_coordinate}",
         )
     }
 }
@@ -79,13 +95,15 @@ impl Display for HttpMethodCoordinate<'_> {
             connect:
                 ConnectDirectiveCoordinate {
                     connect_directive_name,
-                    object_name,
-                    field_name,
+                    field_coordinate,
                 },
             http_method,
             node: _node,
         } = self;
-        write!(f, "`{http_method}` in `@{connect_directive_name}({HTTP_ARGUMENT_NAME}:)` on `{object_name}.{field_name}`")
+        write!(
+            f,
+            "`{http_method}` in `@{connect_directive_name}({HTTP_ARGUMENT_NAME}:)` on {field_coordinate}",
+        )
     }
 }
 
