@@ -343,7 +343,7 @@ pub enum VariableType {
 }
 
 impl VariableType {
-    const fn as_str(&self) -> &'static str {
+    pub(crate) const fn as_str(&self) -> &'static str {
         match self {
             VariableType::Args => "$args",
             VariableType::This => "$this",
@@ -413,7 +413,7 @@ impl Variable {
 
         let var_type = VariableType::from_str(var_type_str).map_err(|message| Error {
             message,
-            location: Some(location.clone()),
+            location: Some(location.start..location.start + var_type_str.len()),
         })?;
         let path = parts.join(".");
         if path.is_empty() {

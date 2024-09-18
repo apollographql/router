@@ -146,6 +146,8 @@ fn validate_variable(
     let field = field_coordinate.field;
     let mut path = variable.path.split('.');
     let path_root = path.next().unwrap_or(&variable.path);
+    let mut path_component_start = variable.location.start + variable.var_type.as_str().len() + 1;
+    let mut path_component_end = path_component_start + path_root.len();
     let mut variable_type = match variable.var_type {
         VariableType::Config => {
             return Ok(()); // We don't validate Router config yet
@@ -160,7 +162,7 @@ fn validate_variable(
                     locations: select_substring_location(
                         coordinate.node.line_column_range(&schema.sources),
                         url_value,
-                        Some(variable.location.clone()),
+                        Some(path_component_start..path_component_end),
                     )
                 }
             }).map(|arg| &arg.ty)?
@@ -175,14 +177,15 @@ fn validate_variable(
                     locations: select_substring_location(
                         coordinate.node.line_column_range(&schema.sources),
                         url_value,
-                        Some(variable.location.clone()),
+                        Some(path_component_start..path_component_end),
                     )
                 }).map(|field| &field.ty)?
         }
     };
 
     for nested_field_name in path {
-        // TODO: point at the particular piece of the path in errors
+        path_component_start = path_component_end + 1; // Past the last component and its dot
+        path_component_end = path_component_start + nested_field_name.len();
         variable_type = resolve_type(schema, variable_type, field_coordinate.field)
             .and_then(|extended_type| {
                 match extended_type {
@@ -213,7 +216,7 @@ fn validate_variable(
                         locations: select_substring_location(
                             coordinate.node.line_column_range(&schema.sources),
                             url_value,
-                            Some(variable.location.clone()),
+                            Some(path_component_start..path_component_end),
                         )
                     })
             })?;
