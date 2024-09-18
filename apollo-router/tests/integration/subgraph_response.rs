@@ -24,7 +24,7 @@ async fn test_subgraph_returning_data_null() -> Result<(), BoxError> {
     let (_trace_id, response) = router.execute_query(&json!({ "query":  query })).await;
     assert_eq!(response.status(), 200);
     assert_eq!(
-        serde_json::from_str::<serde_json::Value>(&response.text().await?)?,
+        response.json::<serde_json::Value>().await?,
         json!({ "data": null })
     );
     Ok(())
@@ -67,7 +67,7 @@ async fn test_subgraph_returning_different_typename_on_query_root() -> Result<()
     let (_trace_id, response) = router.execute_query(&json!({ "query":  query })).await;
     assert_eq!(response.status(), 200);
     assert_eq!(
-        serde_json::from_str::<serde_json::Value>(&response.text().await?)?,
+        response.json::<serde_json::Value>().await?,
         json!({
             "data": {
                 "topProducts": null,
@@ -107,7 +107,7 @@ async fn test_valid_error_locations() -> Result<(), BoxError> {
         .await;
     assert_eq!(response.status(), 200);
     assert_eq!(
-        serde_json::from_str::<serde_json::Value>(&response.text().await?)?,
+        response.json::<serde_json::Value>().await?,
         json!({
             "data": { "topProducts": null },
             "errors": [{
@@ -148,7 +148,7 @@ async fn test_empty_error_locations() -> Result<(), BoxError> {
         .await;
     assert_eq!(response.status(), 200);
     assert_eq!(
-        serde_json::from_str::<serde_json::Value>(&response.text().await?)?,
+        response.json::<serde_json::Value>().await?,
         json!({
             "data": { "topProducts": null },
             "errors": [{
@@ -185,7 +185,7 @@ async fn test_invalid_error_locations() -> Result<(), BoxError> {
         .await;
     assert_eq!(response.status(), 200);
     assert_eq!(
-        serde_json::from_str::<serde_json::Value>(&response.text().await?)?,
+        response.json::<serde_json::Value>().await?,
         json!({
             "data": null,
             "errors": [{
@@ -227,7 +227,7 @@ async fn test_invalid_error_locations_with_single_negative_one_location() -> Res
         .await;
     assert_eq!(response.status(), 200);
     assert_eq!(
-        serde_json::from_str::<serde_json::Value>(&response.text().await?)?,
+        response.json::<serde_json::Value>().await?,
         json!({
             "data": { "topProducts": null },
             "errors": [{
@@ -268,7 +268,7 @@ async fn test_invalid_error_locations_contains_negative_one_location() -> Result
         .await;
     assert_eq!(response.status(), 200);
     assert_eq!(
-        serde_json::from_str::<serde_json::Value>(&response.text().await?)?,
+        response.json::<serde_json::Value>().await?,
         json!({
             "data": { "topProducts": null },
             "errors": [{
