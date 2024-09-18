@@ -727,7 +727,7 @@ fragment F on Query {
     }
     directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
     directive @remove on FIELD | INLINE_FRAGMENT | FRAGMENT_SPREAD
-    directive @hasArg(arg: String!) on QUERY | FRAGMENT_DEFINITION
+    directive @hasArg(arg: String!) on QUERY | FRAGMENT_DEFINITION | INLINE_FRAGMENT | FRAGMENT_SPREAD
     scalar link__Import
       enum link__Purpose {
       """
@@ -896,6 +896,42 @@ fragment F on Query {
 
             fragment TestFragment2 on Query @hasArg(arg: $c) {
                 __typename
+            }
+            "#;
+        let doc = ast::Document::parse(query, "query.graphql").unwrap();
+        let result = document(&mut visitor, &doc).unwrap();
+        insta::assert_snapshot!(TestResult { query, result });
+
+        // test removed field with variable in directive on fragment spread
+        let query = r#"
+            query Test($a: String, $b: String) {
+                ...TestFragment @hasArg(arg: $a)
+                ...TestFragment2 @hasArg(arg: $b)
+                c
+            }
+
+            fragment TestFragment on Query {
+                __typename @remove
+            }
+
+            fragment TestFragment2 on Query {
+                __typename
+            }
+            "#;
+        let doc = ast::Document::parse(query, "query.graphql").unwrap();
+        let result = document(&mut visitor, &doc).unwrap();
+        insta::assert_snapshot!(TestResult { query, result });
+
+        // test removed field with variable in directive on inline fragment
+        let query = r#"
+            query Test($a: String, $b: String) {
+                ... @hasArg(arg: $a) {
+                  c @remove
+                }
+                ... @hasArg(arg: $b) {
+                  test: c
+                }
+                c
             }
             "#;
         let doc = ast::Document::parse(query, "query.graphql").unwrap();
