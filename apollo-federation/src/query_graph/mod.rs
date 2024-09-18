@@ -157,7 +157,10 @@ pub(crate) struct QueryGraphEdge {
 }
 
 impl QueryGraphEdge {
-    fn satisfies_override_conditions(&self, conditions_to_check: &EnabledOverrideConditions) -> bool {
+    fn satisfies_override_conditions(
+        &self,
+        conditions_to_check: &EnabledOverrideConditions,
+    ) -> bool {
         if let Some(override_condition) = &self.override_condition {
             override_condition.condition == conditions_to_check.contains(&override_condition.label)
         } else {

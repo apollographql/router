@@ -35,7 +35,8 @@ use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphPro
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToCostProcessor;
 use crate::query_plan::generate::generate_all_plans_and_find_best;
 use crate::query_plan::generate::PlanBuilder;
-use crate::query_plan::query_planner::{compute_root_fetch_groups, EnabledOverrideConditions};
+use crate::query_plan::query_planner::compute_root_fetch_groups;
+use crate::query_plan::query_planner::EnabledOverrideConditions;
 use crate::query_plan::query_planner::QueryPlannerConfig;
 use crate::query_plan::query_planner::QueryPlanningStatistics;
 use crate::query_plan::QueryPlanCost;

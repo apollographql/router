@@ -500,7 +500,9 @@ impl QueryPlanner {
                 .clone()
                 .into(),
             config: self.config.clone(),
-            override_conditions: EnabledOverrideConditions(HashSet::from_iter(options.override_conditions)),
+            override_conditions: EnabledOverrideConditions(HashSet::from_iter(
+                options.override_conditions,
+            )),
         };
 
         let root_node = match defer_conditions {
