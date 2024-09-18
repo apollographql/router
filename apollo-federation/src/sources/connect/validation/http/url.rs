@@ -16,37 +16,43 @@ use crate::sources::connect::validation::Message;
 use crate::sources::connect::URLTemplate;
 
 pub(crate) fn validate_template(
-    value: &Node<Value>,
     coordinate: HttpMethodCoordinate,
     sources: &SourceMap,
 ) -> Result<URLTemplate, Vec<Message>> {
-    let (template, str_value) = match parse_template(value, coordinate, sources) {
+    let (template, str_value) = match parse_template(coordinate, sources) {
         Ok(tuple) => tuple,
         Err(message) => return Err(vec![message]),
     };
     let mut messages = Vec::new();
     if let Some(base) = template.base.as_ref() {
         messages.extend(validate_base_url(
-            base, coordinate, value, str_value, sources,
+            base,
+            coordinate,
+            coordinate.node,
+            str_value,
+            sources,
         ));
     }
 
-    Ok(template)
+    if messages.is_empty() {
+        Ok(template)
+    } else {
+        Err(messages)
+    }
 }
 
 pub(crate) fn parse_template<'schema>(
-    value: &'schema Node<Value>,
-    coordinate: HttpMethodCoordinate,
+    coordinate: HttpMethodCoordinate<'schema>,
     sources: &SourceMap,
 ) -> Result<(URLTemplate, &'schema str), Message> {
-    let str_value = require_value_is_str(value, coordinate, sources)?;
+    let str_value = require_value_is_str(coordinate.node, coordinate, sources)?;
     let template =
         URLTemplate::from_str(str_value).map_err(|url_template::Error { message, location }| {
             Message {
                 code: Code::InvalidUrl,
                 message: format!("{coordinate} must be a valid URL template. {message}"),
                 locations: select_substring_location(
-                    value.line_column_range(sources),
+                    coordinate.node.line_column_range(sources),
                     str_value,
                     location,
                 ),

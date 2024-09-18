@@ -70,6 +70,7 @@ impl<'a> From<ConnectDirectiveCoordinate<'a>> for ConnectHTTPCoordinate<'a> {
 pub(super) struct HttpMethodCoordinate<'a> {
     pub(crate) connect: ConnectDirectiveCoordinate<'a>,
     pub(crate) http_method: &'a Name,
+    pub(crate) node: &'a Node<Value>,
 }
 
 impl Display for HttpMethodCoordinate<'_> {
@@ -82,6 +83,7 @@ impl Display for HttpMethodCoordinate<'_> {
                     field_name,
                 },
             http_method,
+            node: _node,
         } = self;
         write!(f, "`{http_method}` in `@{connect_directive_name}({HTTP_ARGUMENT_NAME}:)` on `{object_name}.{field_name}`")
     }

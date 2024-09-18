@@ -19,11 +19,9 @@ use itertools::Itertools;
 use super::coordinates::ConnectDirectiveCoordinate;
 use super::coordinates::ConnectHTTPCoordinate;
 use super::coordinates::HttpHeadersCoordinate;
-use super::coordinates::HttpMethodCoordinate;
 use super::entity::validate_entity_arg;
 use super::http::headers;
 use super::http::method;
-use super::http::url;
 use super::resolvable_key_fields;
 use super::selection::validate_body_selection;
 use super::selection::validate_selection;
@@ -300,27 +298,30 @@ fn validate_field(
                 &connect_directive.name,
             ));
 
-            if let Some((template, node)) = url_template {
+            if let Some((template, coordinate)) = url_template {
                 if template.base.is_some() {
                     errors.push(Message {
-                                code: Code::AbsoluteConnectUrlWithSource,
-                                message: format!(
-                                    "{coordinate} contains the absolute URL {template} while also specifying a `{CONNECT_SOURCE_ARGUMENT_NAME}`. Either remove the `{CONNECT_SOURCE_ARGUMENT_NAME}` argument or change the URL to a path.",
-                                ),
-                                locations: node.line_column_range(source_map)
-                                    .into_iter()
-                                    .collect(),
-                            })
+                        code: Code::AbsoluteConnectUrlWithSource,
+                        message: format!(
+                            "{coordinate} contains the absolute URL {raw_value} while also specifying a `{CONNECT_SOURCE_ARGUMENT_NAME}`. Either remove the `{CONNECT_SOURCE_ARGUMENT_NAME}` argument or change the URL to a path.",
+                            raw_value = coordinate.node
+                        ),
+                        locations: coordinate.node.line_column_range(source_map)
+                            .into_iter()
+                            .collect(),
+                    })
                 }
             }
-        } else if let Some((template, node)) = url_template {
+        } else if let Some((template, coordinate)) = url_template {
             if template.base.is_none() {
                 errors.push(Message {
-                        code: Code::RelativeConnectUrlWithoutSource,
-                        message: format!(
-                            "{coordinate} specifies the relative URL {template}, but no `{CONNECT_SOURCE_ARGUMENT_NAME}` is defined. Either use an absolute URL including scheme (http://), or add a `@{source_directive_name}`."),
-                        locations: node.line_column_range(source_map).into_iter().collect()
-                    })
+                    code: Code::RelativeConnectUrlWithoutSource,
+                    message: format!(
+                        "{coordinate} specifies the relative URL {raw_value}, but no `{CONNECT_SOURCE_ARGUMENT_NAME}` is defined. Either use an absolute URL including scheme (http://), or add a `@{source_directive_name}`.",
+                        raw_value = coordinate.node
+                    ),
+                    locations: coordinate.node.line_column_range(source_map).into_iter().collect()
+                })
             }
         }
 
