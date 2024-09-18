@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use apollo_compiler::collections::{HashMap, IndexMap};
+use apollo_compiler::collections::HashMap;
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::DirectiveList as ComponentDirectiveList;
 use apollo_compiler::schema::ExtendedType;
@@ -102,13 +103,7 @@ pub fn build_query_graph(
         root_kinds_to_nodes_by_source: Default::default(),
         non_trivial_followup_edges: Default::default(),
     };
-    let builder = SchemaQueryGraphBuilder::new(
-        query_graph,
-        name,
-        schema,
-        None,
-        false,
-    )?;
+    let builder = SchemaQueryGraphBuilder::new(query_graph, name, schema, None, false)?;
     query_graph = builder.build()?;
     Ok(query_graph)
 }
@@ -1406,7 +1401,7 @@ impl FederatedQueryGraphBuilder {
             target_field: &ObjectFieldDefinitionPosition,
             label: &str,
             condition: bool,
-            edge_to_conditions: &mut HashMap<EdgeIndex, OverrideCondition>
+            edge_to_conditions: &mut HashMap<EdgeIndex, OverrideCondition>,
         ) -> Result<(), FederationError> {
             let target_field = FieldDefinitionPosition::Object(target_field.clone());
             let subgraph_nodes = query_graph
@@ -1429,7 +1424,13 @@ impl FederatedQueryGraphBuilder {
                 };
 
                 if &target_field == field_definition_position {
-                    edge_to_conditions.insert(edge.id(), OverrideCondition { label: label.to_string(), condition });
+                    edge_to_conditions.insert(
+                        edge.id(),
+                        OverrideCondition {
+                            label: label.to_string(),
+                            condition,
+                        },
+                    );
                 }
             }
             Ok(())
@@ -1437,7 +1438,11 @@ impl FederatedQueryGraphBuilder {
 
         for (to_subgraph_name, subgraph) in &self.base.query_graph.subgraphs_by_name {
             let subgraph_data = self.subgraphs.get(&to_subgraph_name)?;
-            if let Some(override_referencers) = subgraph.referencers().directives.get(&subgraph_data.overrides_directive_definition_name) {
+            if let Some(override_referencers) = subgraph
+                .referencers()
+                .directives
+                .get(&subgraph_data.overrides_directive_definition_name)
+            {
                 for field_definition_position in &override_referencers.object_fields {
                     let field = field_definition_position.get(subgraph.schema())?;
                     for directive in field
@@ -1448,8 +1453,22 @@ impl FederatedQueryGraphBuilder {
                             .federation_spec_definition
                             .override_directive_arguments(directive)?;
                         if let Some(label) = application.label {
-                            collect_edge_label(&self.base.query_graph, to_subgraph_name, field_definition_position, label, true, &mut edge_to_conditions)?;
-                            collect_edge_label(&self.base.query_graph, application.from, field_definition_position, label, false, &mut edge_to_conditions)?;
+                            collect_edge_label(
+                                &self.base.query_graph,
+                                to_subgraph_name,
+                                field_definition_position,
+                                label,
+                                true,
+                                &mut edge_to_conditions,
+                            )?;
+                            collect_edge_label(
+                                &self.base.query_graph,
+                                application.from,
+                                field_definition_position,
+                                label,
+                                false,
+                                &mut edge_to_conditions,
+                            )?;
                         }
                     }
                 }
