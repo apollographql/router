@@ -1408,6 +1408,7 @@ where
         feature = "snapshot_tracing",
         tracing::instrument(skip_all, level = "trace")
     )]
+    #[allow(clippy::too_many_arguments)]
     fn advance_with_non_collecting_and_type_preserving_transitions(
         self: &Arc<Self>,
         context: &OpGraphPathContext,

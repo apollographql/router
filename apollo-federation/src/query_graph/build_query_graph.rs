@@ -1405,7 +1405,7 @@ impl FederatedQueryGraphBuilder {
                 .unwrap()
                 .first()
                 .unwrap();
-            for edge in query_graph.out_edges(parent_node.clone()) {
+            for edge in query_graph.out_edges(*parent_node) {
                 let edge_weight = query_graph.edge_weight(edge.id())?;
                 let QueryGraphEdgeTransition::FieldCollection {
                     field_definition_position,
@@ -1429,7 +1429,7 @@ impl FederatedQueryGraphBuilder {
         }
 
         for (to_subgraph_name, subgraph) in &self.base.query_graph.subgraphs_by_name {
-            let subgraph_data = self.subgraphs.get(&to_subgraph_name)?;
+            let subgraph_data = self.subgraphs.get(to_subgraph_name)?;
             if let Some(override_referencers) = subgraph
                 .referencers()
                 .directives

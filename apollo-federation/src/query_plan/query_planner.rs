@@ -195,6 +195,7 @@ impl QueryPlannerConfig {
     }
 }
 
+#[derive(Debug, Default, Clone)]
 pub struct QueryPlanOptions {
     /**
      * A set of labels which will be used _during query planning_ to
@@ -205,14 +206,6 @@ pub struct QueryPlanOptions {
      */
     // PORT_NOTE: In JS implementation this was a HashMap
     pub override_conditions: HashSet<String>,
-}
-
-impl Default for QueryPlanOptions {
-    fn default() -> Self {
-        Self {
-            override_conditions: Default::default(),
-        }
-    }
 }
 
 pub struct QueryPlanner {
