@@ -421,10 +421,6 @@ fn used_variables_from_value<V: Visitor>(
     visitor: &mut V,
     argument_value: &apollo_compiler::ast::Value,
 ) {
-    println!(
-        "used_variables_from_value: argument value: {:?}",
-        argument_value
-    );
     match argument_value {
         apollo_compiler::ast::Value::Variable(name) => {
             visitor
