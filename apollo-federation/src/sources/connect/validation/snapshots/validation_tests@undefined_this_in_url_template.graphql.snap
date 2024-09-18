@@ -1,12 +1,12 @@
 ---
 source: apollo-federation/src/sources/connect/validation/mod.rs
 expression: "format!(\"{:#?}\", errors)"
-input_file: apollo-federation/src/sources/connect/validation/test_data/used_undefined_arg_in_url_template.graphql
+input_file: apollo-federation/src/sources/connect/validation/test_data/undefined_this_in_url_template.graphql
 ---
 [
     Message {
-        code: UndefinedArgument,
-        message: "`GET` in `@connect(http:)` on `Query.resources` contains `{$args.blah}`, but `Query.resources` does not have an argument named blah.",
+        code: UndefinedField,
+        message: "`GET` in `@connect(http:)` on `Query.resources` contains `{$this.blah}`, but Query does not have a field named `blah`.",
         locations: [
             LineColumn {
                 line: 10,

@@ -19,7 +19,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_e
     },
     Message {
         code: UndefinedArgument,
-        message: "`GET` in `@connect(http:)` on `Query.product` contains `{$args.id}`, but `Query.product` does not have an argument named id.",
+        message: "`GET` in `@connect(http:)` on `Query.product` contains `{$args.id}`, but `Query.product` does not have an argument named `id`.",
         locations: [
             LineColumn {
                 line: 14,

@@ -514,6 +514,8 @@ pub enum Code {
     InvalidStarSelection,
     /// Part of the `@connect` refers to an `$args` which is not defined
     UndefinedArgument,
+    /// Part of the `@connect` refers to an `$this` which is not defined
+    UndefinedField,
 }
 
 impl Code {

@@ -47,7 +47,7 @@ pub(crate) fn validate_template(
                     messages.push(Message {
                         code: Code::UndefinedArgument,
                         message: format!(
-                            "{coordinate} contains `{{{variable}}}`, but {field_coordinate} does not have an argument named {arg_name}.",
+                            "{coordinate} contains `{{{variable}}}`, but {field_coordinate} does not have an argument named `{arg_name}`.",
                         ),
                         locations: select_substring_location(
                             coordinate.node.line_column_range(sources),
@@ -57,7 +57,23 @@ pub(crate) fn validate_template(
                     });
                 }
             }
-            VariableType::This => {} // TODO: validate this
+            VariableType::This => {
+                let field_name = variable.path.split('.').next().unwrap_or(&variable.path);
+                if !field_coordinate.object.fields.contains_key(field_name) {
+                    messages.push(Message {
+                        code: Code::UndefinedField,
+                        message: format!(
+                            "{coordinate} contains `{{{variable}}}`, but {object} does not have a field named `{field_name}`.",
+                            object = field_coordinate.object.name,
+                        ),
+                        locations: select_substring_location(
+                            coordinate.node.line_column_range(sources),
+                            str_value,
+                            Some(variable.location.clone()),
+                        )
+                    });
+                }
+            }
         }
     }
 
