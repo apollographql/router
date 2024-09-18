@@ -1,5 +1,5 @@
 # rover supergraph compose --config apollo-federation/src/sources/connect/expand/tests/schemas/steelthread.yaml > apollo-federation/src/sources/connect/expand/tests/schemas/steelthread.graphql
-federation_version: =2.9.0-connectors.0
+federation_version: =2.10.0-alpha.0
 subgraphs:
   connectors:
     routing_url: none
@@ -7,7 +7,7 @@ subgraphs:
       sdl: |
         extend schema
           @link(
-            url: "https://specs.apollo.dev/federation/v2.7"
+            url: "https://specs.apollo.dev/federation/v2.10"
             import: ["@key", "@external", "@requires", "@shareable"]
           )
           @link(
@@ -31,6 +31,7 @@ subgraphs:
               id
               name
               username
+              rest: *
               """
               entity: true
             )
@@ -45,6 +46,7 @@ subgraphs:
           id: ID!
           name: String
           username: String
+          rest: JSON
           c: String @external
           d: String
             @requires(fields: "c")
@@ -54,6 +56,8 @@ subgraphs:
               selection: "$.phone"
             )
         }
+
+        scalar JSON
 
   graphql:
     routing_url: https://localhost:4001

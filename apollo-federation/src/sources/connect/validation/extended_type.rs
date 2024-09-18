@@ -3,6 +3,7 @@ use std::sync::Arc;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
+use apollo_compiler::executable::Selection;
 use apollo_compiler::parser::FileId;
 use apollo_compiler::parser::SourceFile;
 use apollo_compiler::parser::SourceMap;
@@ -23,6 +24,7 @@ use super::entity::validate_entity_arg;
 use super::http::headers;
 use super::http::method;
 use super::http::url;
+use super::resolvable_key_fields;
 use super::selection::validate_body_selection;
 use super::selection::validate_selection;
 use super::source_name::validate_source_name_arg;
@@ -84,6 +86,31 @@ fn validate_object_fields(
 ) -> Vec<Message> {
     if object.is_built_in() {
         return Vec::new();
+    }
+
+    // Mark resolvable key fields as seen
+    let mut selections: Vec<(Name, Selection)> = resolvable_key_fields(object, schema)
+        .flat_map(|field_set| {
+            field_set
+                .selection_set
+                .selections
+                .iter()
+                .map(|selection| (object.name.clone(), selection.clone()))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    while !selections.is_empty() {
+        if let Some((type_name, selection)) = selections.pop() {
+            if let Some(field) = selection.as_field() {
+                let t = (type_name, field.name.clone());
+                if !seen_fields.contains(&t) {
+                    seen_fields.insert(t);
+                    field.selection_set.selections.iter().for_each(|selection| {
+                        selections.push((field.ty().inner_named_type().clone(), selection.clone()));
+                    });
+                }
+            }
+        }
     }
 
     let source_map = &schema.sources;

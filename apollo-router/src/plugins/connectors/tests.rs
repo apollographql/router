@@ -103,6 +103,8 @@ pub(crate) mod mock_api {
               "name": "Leanne Graham",
               "username": "Bret",
               "phone": "1-770-736-8031 x56442",
+              "email": "Sincere@april.biz",
+              "website": "hildegard.org"
             })))
     }
 
@@ -113,7 +115,9 @@ pub(crate) mod mock_api {
               "id": 2,
               "name": "Ervin Howell",
               "username": "Antonette",
-              "phone": "1-770-736-8031 x56442"
+              "phone": "1-770-736-8031 x56442",
+              "email": "Shanna@melissa.tv",
+              "website": "anastasia.net"
             })))
     }
 
@@ -437,7 +441,7 @@ async fn test_root_field_plus_entity_plus_requires() {
     let response = execute(
         STEEL_THREAD_SCHEMA,
         &mock_server.uri(),
-        "query { users { id name username d } }",
+        "query { users { id name username d rest } }",
         Default::default(),
         None,
         |_| {},
@@ -452,13 +456,23 @@ async fn test_root_field_plus_entity_plus_requires() {
             "id": 1,
             "name": "Leanne Graham",
             "username": "Bret",
-            "d": "1-770-736-8031 x56442"
+            "d": "1-770-736-8031 x56442",
+            "rest": {
+              "phone": "1-770-736-8031 x56442",
+              "email": "Sincere@april.biz",
+              "website": "hildegard.org"
+            }
           },
           {
             "id": 2,
             "name": "Ervin Howell",
             "username": "Antonette",
-            "d": "1-770-736-8031 x56442"
+            "d": "1-770-736-8031 x56442",
+            "rest": {
+              "phone": "1-770-736-8031 x56442",
+              "email": "Shanna@melissa.tv",
+              "website": "anastasia.net"
+            }
           }
         ]
       }

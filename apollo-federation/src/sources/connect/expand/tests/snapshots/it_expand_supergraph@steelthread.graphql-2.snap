@@ -189,9 +189,31 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
                         None,
                     ),
                 ],
-                star: None,
+                star: Some(
+                    StarSelection {
+                        alias: Some(
+                            Alias {
+                                name: WithRange {
+                                    node: Field(
+                                        "rest",
+                                    ),
+                                    range: Some(
+                                        17..21,
+                                    ),
+                                },
+                                range: Some(
+                                    17..22,
+                                ),
+                            },
+                        ),
+                        selection: None,
+                        range: Some(
+                            17..24,
+                        ),
+                    },
+                ),
                 range: Some(
-                    0..16,
+                    0..24,
                 ),
             },
         ),

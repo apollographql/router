@@ -183,6 +183,9 @@ pub(super) mod strip_ranges {
                     PathList::Key(key, rest) => {
                         PathList::Key(key.strip_ranges(), rest.strip_ranges())
                     }
+                    PathList::Expr(expr, rest) => {
+                        PathList::Expr(expr.strip_ranges(), rest.strip_ranges())
+                    }
                     PathList::Method(method, opt_args, rest) => PathList::Method(
                         method.strip_ranges(),
                         opt_args.as_ref().map(|args| args.strip_ranges()),
