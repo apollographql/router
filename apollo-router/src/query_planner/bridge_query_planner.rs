@@ -1807,13 +1807,6 @@ mod tests {
             "init.error_kind" = "context",
             "init.is_success" = false
         );
-        metric_rust_qp_init(Some(UNSUPPORTED_OVERRIDES));
-        assert_counter!(
-            "apollo.router.lifecycle.query_planner.init",
-            1,
-            "init.error_kind" = "overrides",
-            "init.is_success" = false
-        );
         metric_rust_qp_init(Some(UNSUPPORTED_FED1));
         assert_counter!(
             "apollo.router.lifecycle.query_planner.init",
