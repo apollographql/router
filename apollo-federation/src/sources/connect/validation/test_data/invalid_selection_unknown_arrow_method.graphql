@@ -1,0 +1,21 @@
+extend schema
+@link(
+    url: "https://specs.apollo.dev/connect/v0.1"
+    import: ["@connect"]
+)
+
+type Query {
+    me: User
+      @connect(
+        http: {GET: "http://127.0.0.1/something"},
+        selection: """
+        id
+        invalid: invalid->match([@, @->doesnotexist])
+        """
+      )
+}
+
+type User {
+    id: ID!
+    invalid: String
+}

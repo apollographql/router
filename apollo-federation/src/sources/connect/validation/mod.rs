@@ -542,6 +542,10 @@ pub enum Code {
     UnsupportedVariableType,
     /// A path variable is nullable, which can cause errors at runtime
     NullablePathVariable,
+    /// A method name is not known
+    UnknownMethod,
+    /// A method requires a different number of inputs
+    IncorrectArity,
 }
 
 impl Code {

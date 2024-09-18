@@ -297,7 +297,7 @@ impl ExternalVarPaths for NamedSelection {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct PathSelection {
-    pub(super) path: WithRange<PathList>,
+    pub(crate) path: WithRange<PathList>,
 }
 
 // Like NamedSelection, PathSelection is an AST structure that takes its range
@@ -378,7 +378,7 @@ impl From<PathList> for PathSelection {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub(super) enum PathList {
+pub(crate) enum PathList {
     // A VarPath must start with a variable (either $identifier, $, or @),
     // followed by any number of PathStep items (the WithRange<PathList>).
     // Because we represent the @ quasi-variable using PathList::Var, this
