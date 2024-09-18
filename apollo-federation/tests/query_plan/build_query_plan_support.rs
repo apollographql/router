@@ -71,7 +71,7 @@ macro_rules! assert_plan {
         insta::assert_snapshot!(plan, @$expected);
         plan
     }};
-        ($api_schema_and_planner: expr, $operation: expr, @$expected: literal) => {{
+    ($api_schema_and_planner: expr, $operation: expr, @$expected: literal) => {{
         let (api_schema, planner) = $api_schema_and_planner;
         let document = apollo_compiler::ExecutableDocument::parse_and_validate(
             api_schema.schema(),
