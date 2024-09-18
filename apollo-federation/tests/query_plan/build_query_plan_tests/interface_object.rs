@@ -710,8 +710,6 @@ fn it_handles_interface_object_in_nested_entity() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
 fn it_handles_interface_object_input_rewrites_when_cloning_dependency_graph() {
     let planner = planner!(
         S1: r#"
@@ -791,6 +789,22 @@ fn it_handles_interface_object_input_rewrites_when_cloning_dependency_graph() {
               }
             },
             Parallel {
+              Flatten(path: "i.i2") {
+                Fetch(service: "S4") {
+                  {
+                    ... on T {
+                      __typename
+                      t1
+                    }
+                  } =>
+                  {
+                    ... on T {
+                      __typename
+                      t2
+                    }
+                  }
+                },
+              },
               Flatten(path: "i") {
                 Fetch(service: "S2") {
                   {
@@ -802,22 +816,6 @@ fn it_handles_interface_object_input_rewrites_when_cloning_dependency_graph() {
                   {
                     ... on I {
                       i3
-                    }
-                  }
-                },
-              },
-              Flatten(path: "i.i2") {
-                Fetch(service: "S3") {
-                  {
-                    ... on T {
-                      __typename
-                      t1
-                    }
-                  } =>
-                  {
-                    ... on T {
-                      __typename
-                      t2
                     }
                   }
                 },
