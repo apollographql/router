@@ -705,6 +705,7 @@ fragment F on Query {
     }
     directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
     directive @remove on FIELD | INLINE_FRAGMENT | FRAGMENT_SPREAD
+    directive @hasArg(arg: String!) on QUERY | FRAGMENT_DEFINITION
     scalar link__Import
       enum link__Purpose {
       """
@@ -722,6 +723,13 @@ fragment F on Query {
         a(arg: String): String
         b: Obj
         c: Int
+        d(arg: [String]): String
+        e(arg: Inp): String
+    }
+
+    input Inp {
+        a: String
+        b: String
     }
 
     type Obj {
@@ -822,6 +830,45 @@ fragment F on Query {
 
             fragment G on Query {
                 a(arg: $a) @remove
+            }
+            "#;
+        let doc = ast::Document::parse(query, "query.graphql").unwrap();
+        let result = document(&mut visitor, &doc).unwrap();
+        insta::assert_snapshot!(TestResult { query, result });
+
+        // test removed field with variable in list argument
+        let query = r#"
+            query($a: String, $b: String) {
+                c
+                d(arg: ["a", $a, "b"]) @remove
+                aliased: d(arg: ["$b"])
+            }
+            "#;
+        let doc = ast::Document::parse(query, "query.graphql").unwrap();
+        let result = document(&mut visitor, &doc).unwrap();
+        insta::assert_snapshot!(TestResult { query, result });
+
+        // test removed field with variable in input argument
+        let query = r#"
+            query($a: String, $b: String) {
+                c
+                e(arg:  {a: $a, b: "b"}) @remove
+                aliased:  e(arg:  {a: "a", b: $b})
+            }
+            "#;
+        let doc = ast::Document::parse(query, "query.graphql").unwrap();
+        let result = document(&mut visitor, &doc).unwrap();
+        insta::assert_snapshot!(TestResult { query, result });
+
+        // test removed field with variable in directive on operation and fragment
+        let query = r#"
+            query Test($a: String, $b: String) @hasArg(arg: $a) {
+                ...TestFragment
+                c
+            }
+
+            fragment TestFragment on Query @hasArg(arg: $b) {
+                __typename @remove
             }
             "#;
         let doc = ast::Document::parse(query, "query.graphql").unwrap();
