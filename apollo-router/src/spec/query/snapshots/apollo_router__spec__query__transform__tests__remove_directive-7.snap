@@ -7,11 +7,11 @@ query:
             query($a: String, $b: String) {
                 c
                 d(arg: ["a", $a, "b"]) @remove
-                aliased: d(arg: ["$b"])
+                aliased: d(arg: [$b])
             }
             
 filtered:
-query($a: String, $b: String) {
+query($b: String) {
   c
-  aliased: d(arg: ["$b"])
+  aliased: d(arg: [$b])
 }

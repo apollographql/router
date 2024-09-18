@@ -294,22 +294,12 @@ pub(crate) fn field(
     };
 
     for argument in def.arguments.iter() {
-        if let Some(var) = argument.value.as_variable() {
-            visitor
-                .state()
-                .used_variables
-                .insert(var.as_str().to_string());
-        }
+        used_variables_from_value(visitor, &argument.value);
     }
 
     for directive in def.directives.iter() {
         for argument in directive.arguments.iter() {
-            if let Some(var) = argument.value.as_variable() {
-                visitor
-                    .state()
-                    .used_variables
-                    .insert(var.as_str().to_string());
-            }
+            used_variables_from_value(visitor, &argument.value);
         }
     }
 
@@ -336,12 +326,7 @@ pub(crate) fn fragment_spread(
 
     for directive in def.directives.iter() {
         for argument in directive.arguments.iter() {
-            if let Some(var) = argument.value.as_variable() {
-                visitor
-                    .state()
-                    .used_variables
-                    .insert(var.as_str().to_string());
-            }
+            used_variables_from_value(visitor, &argument.value);
         }
     }
 
@@ -362,12 +347,7 @@ pub(crate) fn inline_fragment(
 
     for directive in def.directives.iter() {
         for argument in directive.arguments.iter() {
-            if let Some(var) = argument.value.as_variable() {
-                visitor
-                    .state()
-                    .used_variables
-                    .insert(var.as_str().to_string());
-            }
+            used_variables_from_value(visitor, &argument.value);
         }
     }
 
@@ -422,6 +402,35 @@ pub(crate) fn selection_set(
         }
     }
     Ok((!selections.is_empty()).then_some(selections))
+}
+
+fn used_variables_from_value<V: Visitor>(
+    visitor: &mut V,
+    argument_value: &apollo_compiler::ast::Value,
+) {
+    println!(
+        "used_variables_from_value: argument value: {:?}",
+        argument_value
+    );
+    match argument_value {
+        apollo_compiler::ast::Value::Variable(name) => {
+            visitor
+                .state()
+                .used_variables
+                .insert(name.as_str().to_string());
+        }
+        apollo_compiler::ast::Value::List(values) => {
+            for value in values {
+                used_variables_from_value(visitor, value);
+            }
+        }
+        apollo_compiler::ast::Value::Object(values) => {
+            for (_, value) in values {
+                used_variables_from_value(visitor, value);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// this visitor goes through the list of fragments in the query, looking at fragment spreads
@@ -841,7 +850,7 @@ fragment F on Query {
             query($a: String, $b: String) {
                 c
                 d(arg: ["a", $a, "b"]) @remove
-                aliased: d(arg: ["$b"])
+                aliased: d(arg: [$b])
             }
             "#;
         let doc = ast::Document::parse(query, "query.graphql").unwrap();
