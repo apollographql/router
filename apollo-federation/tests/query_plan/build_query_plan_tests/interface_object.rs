@@ -290,8 +290,6 @@ fn does_not_rely_on_an_interface_object_directly_if_a_specific_implementation_is
 }
 
 #[test]
-#[should_panic(expected = "assertion `left == right` failed")]
-// TODO: investigate this failure (fetch node for `iFromS1.y` is missing)
 fn can_use_a_key_on_an_interface_object_type_even_for_a_concrete_implementation() {
     let planner = planner!(
         S1: SUBGRAPH1,
@@ -350,12 +348,18 @@ fn can_use_a_key_on_an_interface_object_type_even_for_a_concrete_implementation(
     let rewrite = rewrites[0].clone();
     match rewrite.deref() {
         FetchDataRewrite::ValueSetter(v) => {
-            assert_eq!(v.path.len(), 1);
+            assert_eq!(v.path.len(), 2);
             match &v.path[0] {
                 FetchDataPathElement::TypenameEquals(typename) => {
                     assert_eq!(*typename, apollo_compiler::name!("A"))
                 }
                 _ => unreachable!("Expected FetchDataPathElement::TypenameEquals path"),
+            }
+            match &v.path[1] {
+                FetchDataPathElement::Key(name, _conditions) => {
+                    assert_eq!(*name, apollo_compiler::name!("__typename"))
+                }
+                _ => unreachable!("Expected FetchDataPathElement::Key path"),
             }
             assert_eq!(v.set_value_to, "I");
         }
