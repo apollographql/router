@@ -20,10 +20,10 @@ type: application
 # so it matches the shape of our release process and release automation.
 # By proxy of that decision, this version uses SemVer 2.0.0, though the prefix
 # of "v" is not included.
-version: 2.0.0-alpha.4
+version: 2.0.0-alpha.6
 
 # This is the version number of the application being deployed. This version number should be
 # incremented each time you make changes to the application. Versions are not expected to
 # follow Semantic Versioning. They should reflect the version the application is using.
 # It is recommended to use it with quotes.
-appVersion: "v2.0.0-alpha.4"
+appVersion: "v2.0.0-alpha.6"

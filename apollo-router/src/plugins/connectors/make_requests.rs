@@ -12,11 +12,11 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 
+use super::http::Request;
 use super::http_json_transport::make_request;
 use super::http_json_transport::HttpJsonTransportError;
 use super::plugin::ConnectorContext;
 use crate::services::connect;
-use crate::services::router::body::RouterBody;
 
 const REPRESENTATIONS_VAR: &str = "representations";
 const ENTITIES: &str = "_entities";
@@ -100,7 +100,7 @@ pub(crate) fn make_requests(
     request: connect::Request,
     connector: &Connector,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
-) -> Result<Vec<(http::Request<RouterBody>, ResponseKey)>, MakeRequestError> {
+) -> Result<Vec<Request>, MakeRequestError> {
     let request_params = match connector.entity_resolver {
         Some(EntityResolver::Explicit) => entities_from_request(connector, &request),
         Some(EntityResolver::Implicit) => entities_with_fields_from_request(connector, &request),
@@ -115,7 +115,7 @@ fn request_params_to_requests(
     request_params: Vec<ResponseKey>,
     original_request: &connect::Request,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
-) -> Result<Vec<(http::Request<RouterBody>, ResponseKey)>, MakeRequestError> {
+) -> Result<Vec<Request>, MakeRequestError> {
     let mut results = vec![];
     let context: Map<ByteString, Value> = original_request
         .context
@@ -123,7 +123,7 @@ fn request_params_to_requests(
         .map(|r| (r.key().as_str().into(), r.value().clone()))
         .collect();
     for response_key in request_params {
-        let request = make_request(
+        let (request, debug_request) = make_request(
             &connector.transport,
             response_key
                 .inputs()
@@ -132,7 +132,11 @@ fn request_params_to_requests(
             debug,
         )?;
 
-        results.push((request, response_key));
+        results.push(Request {
+            request,
+            key: response_key,
+            debug_request,
+        });
     }
 
     Ok(results)
@@ -548,11 +552,21 @@ mod tests {
                             selections: [
                                 Field(
                                     None,
-                                    "f",
+                                    WithRange {
+                                        node: Field(
+                                            "f",
+                                        ),
+                                        range: Some(
+                                            0..1,
+                                        ),
+                                    },
                                     None,
                                 ),
                             ],
                             star: None,
+                            range: Some(
+                                0..1,
+                            ),
                         },
                     ),
                     inputs: RequestInputs {
@@ -571,14 +585,30 @@ mod tests {
                                 Field(
                                     Some(
                                         Alias {
-                                            name: "f2",
+                                            name: WithRange {
+                                                node: Field(
+                                                    "f2",
+                                                ),
+                                                range: None,
+                                            },
+                                            range: None,
                                         },
                                     ),
-                                    "f",
+                                    WithRange {
+                                        node: Field(
+                                            "f",
+                                        ),
+                                        range: Some(
+                                            0..1,
+                                        ),
+                                    },
                                     None,
                                 ),
                             ],
                             star: None,
+                            range: Some(
+                                0..1,
+                            ),
                         },
                     ),
                     inputs: RequestInputs {
@@ -655,10 +685,25 @@ mod tests {
                     ),
                     selection: Path(
                         PathSelection {
-                            path: Var(
-                                $,
-                                Empty,
-                            ),
+                            path: WithRange {
+                                node: Var(
+                                    WithRange {
+                                        node: $,
+                                        range: Some(
+                                            0..1,
+                                        ),
+                                    },
+                                    WithRange {
+                                        node: Empty,
+                                        range: Some(
+                                            1..1,
+                                        ),
+                                    },
+                                ),
+                                range: Some(
+                                    0..1,
+                                ),
+                            },
                         },
                     ),
                     inputs: RequestInputs {
@@ -677,10 +722,25 @@ mod tests {
                     ),
                     selection: Path(
                         PathSelection {
-                            path: Var(
-                                $,
-                                Empty,
-                            ),
+                            path: WithRange {
+                                node: Var(
+                                    WithRange {
+                                        node: $,
+                                        range: Some(
+                                            0..1,
+                                        ),
+                                    },
+                                    WithRange {
+                                        node: Empty,
+                                        range: Some(
+                                            1..1,
+                                        ),
+                                    },
+                                ),
+                                range: Some(
+                                    0..1,
+                                ),
+                            },
                         },
                     ),
                     inputs: RequestInputs {
@@ -787,12 +847,27 @@ mod tests {
                     ),
                     selection: Path(
                         PathSelection {
-                            path: Key(
-                                Field(
-                                    "data",
+                            path: WithRange {
+                                node: Key(
+                                    WithRange {
+                                        node: Field(
+                                            "data",
+                                        ),
+                                        range: Some(
+                                            1..5,
+                                        ),
+                                    },
+                                    WithRange {
+                                        node: Empty,
+                                        range: Some(
+                                            5..5,
+                                        ),
+                                    },
                                 ),
-                                Empty,
-                            ),
+                                range: Some(
+                                    0..5,
+                                ),
+                            },
                         },
                     ),
                     inputs: RequestInputs {
@@ -825,12 +900,27 @@ mod tests {
                     ),
                     selection: Path(
                         PathSelection {
-                            path: Key(
-                                Field(
-                                    "data",
+                            path: WithRange {
+                                node: Key(
+                                    WithRange {
+                                        node: Field(
+                                            "data",
+                                        ),
+                                        range: Some(
+                                            1..5,
+                                        ),
+                                    },
+                                    WithRange {
+                                        node: Empty,
+                                        range: Some(
+                                            5..5,
+                                        ),
+                                    },
                                 ),
-                                Empty,
-                            ),
+                                range: Some(
+                                    0..5,
+                                ),
+                            },
                         },
                     ),
                     inputs: RequestInputs {
@@ -965,43 +1055,91 @@ mod tests {
                         selections: [
                             Path(
                                 Alias {
-                                    name: "__typename",
+                                    name: WithRange {
+                                        node: Field(
+                                            "__typename",
+                                        ),
+                                        range: None,
+                                    },
+                                    range: None,
                                 },
                                 PathSelection {
-                                    path: Var(
-                                        $,
-                                        Method(
-                                            "echo",
-                                            Some(
-                                                MethodArgs(
-                                                    [
-                                                        String(
-                                                            "_Entity",
-                                                        ),
-                                                    ],
+                                    path: WithRange {
+                                        node: Var(
+                                            WithRange {
+                                                node: $,
+                                                range: None,
+                                            },
+                                            WithRange {
+                                                node: Method(
+                                                    WithRange {
+                                                        node: "echo",
+                                                        range: None,
+                                                    },
+                                                    Some(
+                                                        MethodArgs {
+                                                            args: [
+                                                                WithRange {
+                                                                    node: String(
+                                                                        "_Entity",
+                                                                    ),
+                                                                    range: None,
+                                                                },
+                                                            ],
+                                                            range: None,
+                                                        },
+                                                    ),
+                                                    WithRange {
+                                                        node: Empty,
+                                                        range: None,
+                                                    },
                                                 ),
-                                            ),
-                                            Empty,
+                                                range: None,
+                                            },
                                         ),
-                                    ),
+                                        range: None,
+                                    },
                                 },
                             ),
                             Field(
                                 None,
-                                "field",
+                                WithRange {
+                                    node: Field(
+                                        "field",
+                                    ),
+                                    range: Some(
+                                        0..5,
+                                    ),
+                                },
                                 None,
                             ),
                             Field(
                                 Some(
                                     Alias {
-                                        name: "alias",
+                                        name: WithRange {
+                                            node: Field(
+                                                "alias",
+                                            ),
+                                            range: None,
+                                        },
+                                        range: None,
                                     },
                                 ),
-                                "field",
+                                WithRange {
+                                    node: Field(
+                                        "field",
+                                    ),
+                                    range: Some(
+                                        0..5,
+                                    ),
+                                },
                                 None,
                             ),
                         ],
                         star: None,
+                        range: Some(
+                            0..5,
+                        ),
                     },
                 ),
                 inputs: RequestInputs {
@@ -1026,43 +1164,91 @@ mod tests {
                         selections: [
                             Path(
                                 Alias {
-                                    name: "__typename",
+                                    name: WithRange {
+                                        node: Field(
+                                            "__typename",
+                                        ),
+                                        range: None,
+                                    },
+                                    range: None,
                                 },
                                 PathSelection {
-                                    path: Var(
-                                        $,
-                                        Method(
-                                            "echo",
-                                            Some(
-                                                MethodArgs(
-                                                    [
-                                                        String(
-                                                            "_Entity",
-                                                        ),
-                                                    ],
+                                    path: WithRange {
+                                        node: Var(
+                                            WithRange {
+                                                node: $,
+                                                range: None,
+                                            },
+                                            WithRange {
+                                                node: Method(
+                                                    WithRange {
+                                                        node: "echo",
+                                                        range: None,
+                                                    },
+                                                    Some(
+                                                        MethodArgs {
+                                                            args: [
+                                                                WithRange {
+                                                                    node: String(
+                                                                        "_Entity",
+                                                                    ),
+                                                                    range: None,
+                                                                },
+                                                            ],
+                                                            range: None,
+                                                        },
+                                                    ),
+                                                    WithRange {
+                                                        node: Empty,
+                                                        range: None,
+                                                    },
                                                 ),
-                                            ),
-                                            Empty,
+                                                range: None,
+                                            },
                                         ),
-                                    ),
+                                        range: None,
+                                    },
                                 },
                             ),
                             Field(
                                 None,
-                                "field",
+                                WithRange {
+                                    node: Field(
+                                        "field",
+                                    ),
+                                    range: Some(
+                                        0..5,
+                                    ),
+                                },
                                 None,
                             ),
                             Field(
                                 Some(
                                     Alias {
-                                        name: "alias",
+                                        name: WithRange {
+                                            node: Field(
+                                                "alias",
+                                            ),
+                                            range: None,
+                                        },
+                                        range: None,
                                     },
                                 ),
-                                "field",
+                                WithRange {
+                                    node: Field(
+                                        "field",
+                                    ),
+                                    range: Some(
+                                        0..5,
+                                    ),
+                                },
                                 None,
                             ),
                         ],
                         star: None,
+                        range: Some(
+                            0..5,
+                        ),
                     },
                 ),
                 inputs: RequestInputs {
@@ -1167,22 +1353,42 @@ mod tests {
                         selections: [
                             Field(
                                 None,
-                                "field",
+                                WithRange {
+                                    node: Field(
+                                        "field",
+                                    ),
+                                    range: Some(
+                                        0..5,
+                                    ),
+                                },
                                 Some(
                                     SubSelection {
                                         selections: [
                                             Field(
                                                 None,
-                                                "field",
+                                                WithRange {
+                                                    node: Field(
+                                                        "field",
+                                                    ),
+                                                    range: Some(
+                                                        8..13,
+                                                    ),
+                                                },
                                                 None,
                                             ),
                                         ],
                                         star: None,
+                                        range: Some(
+                                            6..15,
+                                        ),
                                     },
                                 ),
                             ),
                         ],
                         star: None,
+                        range: Some(
+                            0..15,
+                        ),
                     },
                 ),
                 inputs: RequestInputs {
@@ -1204,26 +1410,52 @@ mod tests {
                         selections: [
                             Field(
                                 None,
-                                "field",
+                                WithRange {
+                                    node: Field(
+                                        "field",
+                                    ),
+                                    range: Some(
+                                        0..5,
+                                    ),
+                                },
                                 Some(
                                     SubSelection {
                                         selections: [
                                             Field(
                                                 Some(
                                                     Alias {
-                                                        name: "alias",
+                                                        name: WithRange {
+                                                            node: Field(
+                                                                "alias",
+                                                            ),
+                                                            range: None,
+                                                        },
+                                                        range: None,
                                                     },
                                                 ),
-                                                "field",
+                                                WithRange {
+                                                    node: Field(
+                                                        "field",
+                                                    ),
+                                                    range: Some(
+                                                        8..13,
+                                                    ),
+                                                },
                                                 None,
                                             ),
                                         ],
                                         star: None,
+                                        range: Some(
+                                            6..15,
+                                        ),
                                     },
                                 ),
                             ),
                         ],
                         star: None,
+                        range: Some(
+                            0..15,
+                        ),
                     },
                 ),
                 inputs: RequestInputs {
@@ -1348,11 +1580,21 @@ mod tests {
                         selections: [
                             Field(
                                 None,
-                                "selected",
+                                WithRange {
+                                    node: Field(
+                                        "selected",
+                                    ),
+                                    range: Some(
+                                        0..8,
+                                    ),
+                                },
                                 None,
                             ),
                         ],
                         star: None,
+                        range: Some(
+                            0..8,
+                        ),
                     },
                 ),
                 inputs: RequestInputs {
@@ -1382,11 +1624,21 @@ mod tests {
                         selections: [
                             Field(
                                 None,
-                                "selected",
+                                WithRange {
+                                    node: Field(
+                                        "selected",
+                                    ),
+                                    range: Some(
+                                        0..8,
+                                    ),
+                                },
                                 None,
                             ),
                         ],
                         star: None,
+                        range: Some(
+                            0..8,
+                        ),
                     },
                 ),
                 inputs: RequestInputs {
@@ -1416,11 +1668,21 @@ mod tests {
                         selections: [
                             Field(
                                 None,
-                                "selected",
+                                WithRange {
+                                    node: Field(
+                                        "selected",
+                                    ),
+                                    range: Some(
+                                        0..8,
+                                    ),
+                                },
                                 None,
                             ),
                         ],
                         star: None,
+                        range: Some(
+                            0..8,
+                        ),
                     },
                 ),
                 inputs: RequestInputs {
@@ -1450,11 +1712,21 @@ mod tests {
                         selections: [
                             Field(
                                 None,
-                                "selected",
+                                WithRange {
+                                    node: Field(
+                                        "selected",
+                                    ),
+                                    range: Some(
+                                        0..8,
+                                    ),
+                                },
                                 None,
                             ),
                         ],
                         star: None,
+                        range: Some(
+                            0..8,
+                        ),
                     },
                 ),
                 inputs: RequestInputs {
@@ -1582,11 +1854,21 @@ mod tests {
                         selections: [
                             Field(
                                 None,
-                                "selected",
+                                WithRange {
+                                    node: Field(
+                                        "selected",
+                                    ),
+                                    range: Some(
+                                        0..8,
+                                    ),
+                                },
                                 None,
                             ),
                         ],
                         star: None,
+                        range: Some(
+                            0..8,
+                        ),
                     },
                 ),
                 inputs: RequestInputs {
@@ -1614,11 +1896,21 @@ mod tests {
                         selections: [
                             Field(
                                 None,
-                                "selected",
+                                WithRange {
+                                    node: Field(
+                                        "selected",
+                                    ),
+                                    range: Some(
+                                        0..8,
+                                    ),
+                                },
                                 None,
                             ),
                         ],
                         star: None,
+                        range: Some(
+                            0..8,
+                        ),
                     },
                 ),
                 inputs: RequestInputs {
@@ -1694,8 +1986,8 @@ mod tests {
 
         assert_debug_snapshot!(requests, @r###"
         [
-            (
-                Request {
+            Request {
+                request: Request {
                     method: GET,
                     uri: http://localhost/api/path,
                     version: HTTP/1.1,
@@ -1704,19 +1996,34 @@ mod tests {
                         Empty,
                     ),
                 },
-                RootField {
+                key: RootField {
                     name: "a",
                     typename: Concrete(
                         "String",
                     ),
                     selection: Path(
                         PathSelection {
-                            path: Key(
-                                Field(
-                                    "data",
+                            path: WithRange {
+                                node: Key(
+                                    WithRange {
+                                        node: Field(
+                                            "data",
+                                        ),
+                                        range: Some(
+                                            1..5,
+                                        ),
+                                    },
+                                    WithRange {
+                                        node: Empty,
+                                        range: Some(
+                                            5..5,
+                                        ),
+                                    },
                                 ),
-                                Empty,
-                            ),
+                                range: Some(
+                                    0..5,
+                                ),
+                            },
                         },
                     ),
                     inputs: RequestInputs {
@@ -1724,7 +2031,8 @@ mod tests {
                         this: {},
                     },
                 },
-            ),
+                debug_request: None,
+            },
         ]
         "###);
     }

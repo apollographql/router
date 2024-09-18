@@ -1,3 +1,4 @@
+use insta::assert_debug_snapshot;
 use serde_json_bytes::json;
 
 use super::*;
@@ -215,6 +216,7 @@ fn test_missing_method() {
             vec![ApplyToError::from_json(&json!({
                 "message": "Method ->bogus not found",
                 "path": ["nested", "path"],
+                "range": [13, 18],
             }))],
         ),
     );
@@ -504,8 +506,9 @@ fn test_array_methods() {
         (
             None,
             vec![ApplyToError::from_json(&json!({
-                "message": "Method ->get(3) array index out of bounds",
+                "message": "Method ->get(3) index out of bounds",
                 "path": [],
+                "range": [7, 8],
             }))]
         ),
     );
@@ -515,8 +518,9 @@ fn test_array_methods() {
         (
             None,
             vec![ApplyToError::from_json(&json!({
-                "message": "Method ->get(-4) array index out of bounds",
+                "message": "Method ->get(-4) index out of bounds",
                 "path": [],
+                "range": [7, 9],
             }))]
         ),
     );
@@ -528,6 +532,7 @@ fn test_array_methods() {
             vec![ApplyToError::from_json(&json!({
                 "message": "Method ->get requires an argument",
                 "path": [],
+                "range": [3, 6],
             }))]
         ),
     );
@@ -539,6 +544,7 @@ fn test_array_methods() {
             vec![ApplyToError::from_json(&json!({
                 "message": "Method ->get(\"bogus\") requires an object input",
                 "path": [],
+                "range": [3, 15],
             }))]
         ),
     );
@@ -593,6 +599,7 @@ fn test_size_method_errors() {
             vec![ApplyToError::from_json(&json!({
                 "message": "Method ->size requires an array, string, or object input, not null",
                 "path": [],
+                "range": [3, 7],
             }))]
         ),
     );
@@ -604,6 +611,7 @@ fn test_size_method_errors() {
             vec![ApplyToError::from_json(&json!({
                 "message": "Method ->size requires an array, string, or object input, not boolean",
                 "path": [],
+                "range": [3, 7],
             }))]
         ),
     );
@@ -617,6 +625,7 @@ fn test_size_method_errors() {
             vec![ApplyToError::from_json(&json!({
                 "message": "Method ->size requires an array, string, or object input, not number",
                 "path": ["count"],
+                "range": [7, 11],
             }))]
         ),
     );
@@ -674,22 +683,49 @@ fn test_string_methods() {
         (
             None,
             vec![ApplyToError::from_json(&json!({
-                "message": "Method ->get(4) string index out of bounds",
+                "message": "Method ->get(4) index out of bounds",
                 "path": [],
+                "range": [7, 8],
             }))]
         ),
     );
 
-    assert_eq!(
-        selection!("$->get($->echo(-5)->mul(2))").apply_to(&json!("oyez")),
-        (
+    {
+        let expected = (
             None,
             vec![ApplyToError::from_json(&json!({
-                "message": "Method ->get(-10) string index out of bounds",
+                "message": "Method ->get(-10) index out of bounds",
                 "path": [],
-            }))]
-        ),
-    );
+                "range": [7, 26],
+            }))],
+        );
+        assert_eq!(
+            selection!("$->get($->echo(-5)->mul(2))").apply_to(&json!("oyez")),
+            expected.clone(),
+        );
+        assert_eq!(
+            // The extra spaces here should not affect the error.range, as long
+            // as we don't accidentally capture trailing spaces in the range.
+            selection!("$->get($->echo(-5)->mul(2)  )").apply_to(&json!("oyez")),
+            expected.clone(),
+        );
+        // All these extra spaces certainly do affect the error.range, but it's
+        // worth testing that we get all the ranges right, even with so much
+        // space that could be accidentally captured.
+        let selection_with_spaces = selection!(" $ -> get ( $ -> echo ( - 5 ) -> mul ( 2 ) ) ");
+        assert_eq!(
+            selection_with_spaces.apply_to(&json!("oyez")),
+            (
+                None,
+                vec![ApplyToError::from_json(&json!({
+                    "message": "Method ->get(-10) index out of bounds",
+                    "path": [],
+                    "range": [12, 42],
+                }))]
+            )
+        );
+        assert_debug_snapshot!(selection_with_spaces);
+    }
 
     assert_eq!(
         selection!("$->get(true)").apply_to(&json!("input")),
@@ -698,6 +734,7 @@ fn test_string_methods() {
             vec![ApplyToError::from_json(&json!({
                 "message": "Method ->get(true) requires an integer or string argument",
                 "path": [],
+                "range": [7, 11],
             }))]
         ),
     );
@@ -853,6 +890,7 @@ fn test_object_methods() {
             vec![ApplyToError::from_json(&json!({
                 "message": "Method ->get(\"d\") object key not found",
                 "path": [],
+                "range": [7, 10],
             }))]
         ),
     );
@@ -898,6 +936,7 @@ fn test_object_methods() {
             vec![ApplyToError::from_json(&json!({
                 "message": "Method ->keys requires an object input, not number",
                 "path": ["notAnObject"],
+                "range": [13, 17],
             }))]
         ),
     );
@@ -925,6 +964,7 @@ fn test_object_methods() {
             vec![ApplyToError::from_json(&json!({
                 "message": "Method ->values requires an object input, not null",
                 "path": ["notAnObject"],
+                "range": [13, 19],
             }))]
         ),
     );
@@ -983,6 +1023,7 @@ fn test_object_methods() {
             vec![ApplyToError::from_json(&json!({
                 "message": "Method ->entries requires an object input, not boolean",
                 "path": ["notAnObject"],
+                "range": [13, 20],
             }))]
         ),
     );

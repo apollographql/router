@@ -84,16 +84,16 @@ below.
 JSONSelection        ::= NakedSubSelection | PathSelection
 NakedSubSelection    ::= NamedSelection* StarSelection?
 SubSelection         ::= "{" NakedSubSelection "}"
-NamedSelection       ::= NamedPathSelection | NamedFieldSelection | NamedQuotedSelection | NamedGroupSelection
+NamedSelection       ::= NamedPathSelection | NamedFieldSelection | NamedGroupSelection
 NamedPathSelection   ::= Alias PathSelection
-NamedFieldSelection  ::= Alias? Identifier SubSelection?
-NamedQuotedSelection ::= Alias LitString SubSelection?
+NamedFieldSelection  ::= Alias? Key SubSelection?
 NamedGroupSelection  ::= Alias SubSelection
-Alias                ::= Identifier ":"
-PathSelection        ::= (VarPath | KeyPath | AtPath) SubSelection?
+Alias                ::= Key ":"
+PathSelection        ::= (VarPath | KeyPath | AtPath | ExprPath) SubSelection?
 VarPath              ::= "$" (NO_SPACE Identifier)? PathStep*
 KeyPath              ::= Key PathStep+
 AtPath               ::= "@" PathStep*
+ExprPath             ::= "$(" LitExpr ")" PathStep*
 PathStep             ::= "." Key | "->" Identifier MethodArgs?
 Key                  ::= Identifier | LitString
 Identifier           ::= [a-zA-Z_] NO_SPACE [0-9a-zA-Z_]*
@@ -381,9 +381,6 @@ In addition to renaming, `Alias` can provide names to otherwise anonymous
 structures, such as those selected by `PathSelection`, `NamedGroupSelection`, or
 `StarSelection` syntax.
 
-Because we always want to generate GraphQL-safe output properties, an `Alias`
-must be a valid GraphQL identifier, rather than a quoted string.
-
 ### `PathSelection ::=`
 
 ![PathSelection](./grammar/PathSelection.svg)
@@ -612,6 +609,63 @@ This special behavior of `@` within `->map` is available to any method
 implementation, since method arguments are not evaluated before calling the
 method, but are passed in as expressions that the method may choose to evaluate
 (or even repeatedly reevaluate) however it chooses.
+
+### `ExprPath ::=`
+
+![ExprPath](./grammar/ExprPath.svg)
+
+Another syntax for beginning a `PathSelection` is the `ExprPath` rule, which is
+a `LitExpr` enclosed by `$(...)`, followed by zero or more `PathStep` items.
+
+This syntax is especially useful for embedding literal values, allowing
+
+```graphql
+__typename: $("Product")
+condition: $(true)
+
+# Probably incorrect because "Product" and true parse as field names:
+# __typename: "Product"
+# condition: true
+
+# Best alternative option without ExprPath:
+# __typename: $->echo("Product")
+# condition: $->echo(true)
+```
+
+In addition to embedding a single value, this syntax also makes it easier to use
+a literal expression as the input value for a `.key` or `->method` application,
+as in
+
+```graphql
+alphabetSlice: $("abcdefghijklmnopqrstuvwxyz")->slice($args.start, $args.end)
+
+# Instead of using $->echo(...):
+# alphabetSlice: $->echo("abcdefghijklmnopqrstuvwxyz")->slice($args.start, $args.end)
+```
+
+The `->echo` method is still useful when you want to do something with the input
+value (which is bound to `@` within the echoed expression), rather than ignoring
+the input value (using `@` nowhere in the expression).
+
+The `$(...)` syntax can be useful within a `LitExpr` as well:
+
+```graphql
+# $(-1) needs wrapping in order to apply the ->mul method
+suffix: results.slice($(-1)->mul($args.suffixLength))
+
+# Instead of something like this:
+# suffix: results.slice($->echo(-1)->mul($args.suffixLength))
+```
+
+In fairness, due to the commutavity of multiplication, this particular case
+could have been written as `suffix: results.slice($args.suffixLength->mul(-1))`,
+but not all methods allow reversing the input and arguments so easily, and this
+syntax works in part because it still parenthesizes the `-1` literal value,
+forcing `LitExpr` parsing, much like the new `ExprPath` syntax.
+
+When you don't need to apply a `.key` or `->method` to a literal value within a
+`LitExpr`, you do not need to wrap it with `$(...)`, so the `ExprPath` syntax is
+relatively uncommon within `LitExpr` expressions.
 
 ### `PathStep ::=`
 

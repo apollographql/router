@@ -21,6 +21,7 @@ use super::new_service::ServiceFactory;
 use crate::error::FetchError;
 use crate::plugins::connectors::error::Error as ConnectorError;
 use crate::plugins::connectors::handle_responses::handle_responses;
+use crate::plugins::connectors::http::Request;
 use crate::plugins::connectors::http::Response as ConnectorResponse;
 use crate::plugins::connectors::http::Result as ConnectorResult;
 use crate::plugins::connectors::make_requests::make_requests;
@@ -52,7 +53,7 @@ pub(crate) const APOLLO_CONNECTOR_SOURCE_DETAIL: Key =
 #[derive(Clone)]
 pub(crate) struct ConnectorService {
     pub(crate) http_service_factory: Arc<IndexMap<String, HttpClientServiceFactory>>,
-    pub(crate) schema: Arc<Schema>,
+    pub(crate) _schema: Arc<Schema>,
     pub(crate) _subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     pub(crate) _subscription_config: Option<SubscriptionConfig>,
     pub(crate) connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
@@ -77,8 +78,6 @@ impl tower::Service<ConnectRequest> for ConnectorService {
             .http_service_factory
             .get(&request.service_name.to_string())
             .cloned();
-
-        let schema = self.schema.supergraph_schema().clone();
 
         Box::pin(async move {
             let Some(connector) = connector else {
@@ -119,7 +118,7 @@ impl tower::Service<ConnectRequest> for ConnectorService {
                 }
             }
 
-            execute(&http_client_factory, request, &connector, &schema)
+            execute(&http_client_factory, request, &connector)
                 .instrument(span)
                 .await
         })
@@ -130,7 +129,6 @@ async fn execute(
     http_client_factory: &HttpClientServiceFactory,
     request: ConnectRequest,
     connector: &Connector,
-    schema: &Valid<apollo_compiler::Schema>,
 ) -> Result<ConnectResponse, BoxError> {
     let context = request.context.clone();
     let original_subgraph_name = connector.id.subgraph_name.to_string();
@@ -146,59 +144,67 @@ async fn execute(
 
     let requests = make_requests(request, connector, &debug).map_err(BoxError::from)?;
 
-    let tasks = requests.into_iter().map(move |(req, key)| {
-        // Returning an error from this closure causes all tasks to be cancelled and the operation
-        // to fail. This is the reason for the Result-wrapped-in-a-Result here. An `Err` on the
-        // inner result fails just that one task, but an `Err` on the outer result cancels all the
-        // tasks and fails the whole operation.
-        let context = context.clone();
-        let original_subgraph_name = original_subgraph_name.clone();
-        let request_limit = request_limit.clone();
-        async move {
-            if let Some(request_limit) = request_limit {
-                if !request_limit.allow() {
-                    return Ok(ConnectorResponse {
-                        result: ConnectorResult::Err(ConnectorError::RequestLimitExceeded),
-                        key,
-                    });
+    let tasks = requests.into_iter().map(
+        move |Request {
+                  request: req,
+                  key,
+                  debug_request,
+              }| {
+            // Returning an error from this closure causes all tasks to be cancelled and the operation
+            // to fail. This is the reason for the Result-wrapped-in-a-Result here. An `Err` on the
+            // inner result fails just that one task, but an `Err` on the outer result cancels all the
+            // tasks and fails the whole operation.
+            let context = context.clone();
+            let original_subgraph_name = original_subgraph_name.clone();
+            let request_limit = request_limit.clone();
+            async move {
+                if let Some(request_limit) = request_limit {
+                    if !request_limit.allow() {
+                        return Ok(ConnectorResponse {
+                            result: ConnectorResult::Err(ConnectorError::RequestLimitExceeded),
+                            key,
+                            debug_request,
+                        });
+                    }
                 }
-            }
-            let client = http_client_factory.create(&original_subgraph_name);
-            let req = HttpRequest {
-                http_request: req,
-                context,
-            };
-            let res = client.oneshot(req).await.map_err(|e| {
-                match e.downcast::<FetchError>() {
-                    // Replace the internal subgraph name with the connector label
-                    Ok(inner) => match *inner {
-                        FetchError::SubrequestHttpError {
-                            status_code,
-                            service: _,
-                            reason,
-                        } => Box::new(FetchError::SubrequestHttpError {
-                            status_code,
-                            service: connector.id.label.clone(),
-                            reason,
-                        }),
-                        _ => inner,
-                    },
-                    Err(e) => e,
-                }
-            })?;
+                let client = http_client_factory.create(&original_subgraph_name);
+                let req = HttpRequest {
+                    http_request: req,
+                    context,
+                };
+                let res = client.oneshot(req).await.map_err(|e| {
+                    match e.downcast::<FetchError>() {
+                        // Replace the internal subgraph name with the connector label
+                        Ok(inner) => match *inner {
+                            FetchError::SubrequestHttpError {
+                                status_code,
+                                service: _,
+                                reason,
+                            } => Box::new(FetchError::SubrequestHttpError {
+                                status_code,
+                                service: connector.id.label.clone(),
+                                reason,
+                            }),
+                            _ => inner,
+                        },
+                        Err(e) => e,
+                    }
+                })?;
 
-            Ok::<_, BoxError>(ConnectorResponse {
-                result: ConnectorResult::HttpResponse(res.http_response),
-                key,
-            })
-        }
-    });
+                Ok::<_, BoxError>(ConnectorResponse {
+                    result: ConnectorResult::HttpResponse(res.http_response),
+                    key,
+                    debug_request,
+                })
+            }
+        },
+    );
 
     let responses = futures::future::try_join_all(tasks)
         .await
         .map_err(BoxError::from)?;
 
-    handle_responses(responses, connector, &debug, schema)
+    handle_responses(responses, connector, &debug)
         .await
         .map_err(BoxError::from)
 }
@@ -247,7 +253,7 @@ impl ServiceFactory<ConnectRequest> for ConnectorServiceFactory {
     fn create(&self) -> Self::Service {
         ConnectorService {
             http_service_factory: self.http_service_factory.clone(),
-            schema: self.schema.clone(),
+            _schema: self.schema.clone(),
             _subgraph_schemas: self.subgraph_schemas.clone(),
             _subscription_config: self.subscription_config.clone(),
             connectors_by_service_name: self.connectors_by_service_name.clone(),

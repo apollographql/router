@@ -9,11 +9,24 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/all_field
         message: "No connector resolves field `T.unselected`. It must have a `@connect` directive or appear in `@connect(selection:)`.",
         locations: [
             LineColumn {
-                line: 27,
+                line: 34,
                 column: 3,
             }..LineColumn {
-                line: 27,
+                line: 34,
                 column: 22,
+            },
+        ],
+    },
+    Message {
+        code: UnresolvedField,
+        message: "No connector resolves field `T.secondUnused`. It must have a `@connect` directive or appear in `@connect(selection:)`.",
+        locations: [
+            LineColumn {
+                line: 48,
+                column: 3,
+            }..LineColumn {
+                line: 48,
+                column: 23,
             },
         ],
     },
@@ -22,10 +35,10 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/all_field
         message: "No connector resolves field `C.unselected`. It must have a `@connect` directive or appear in `@connect(selection:)`.",
         locations: [
             LineColumn {
-                line: 44,
+                line: 54,
                 column: 3,
             }..LineColumn {
-                line: 44,
+                line: 54,
                 column: 21,
             },
         ],
@@ -35,10 +48,10 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/all_field
         message: "No connector resolves field `D.unselected`. It must have a `@connect` directive or appear in `@connect(selection:)`.",
         locations: [
             LineColumn {
-                line: 49,
+                line: 59,
                 column: 3,
             }..LineColumn {
-                line: 49,
+                line: 59,
                 column: 21,
             },
         ],
@@ -48,10 +61,10 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/all_field
         message: "No connector resolves field `Unused.unselected`. It must have a `@connect` directive or appear in `@connect(selection:)`.",
         locations: [
             LineColumn {
-                line: 53,
+                line: 63,
                 column: 3,
             }..LineColumn {
-                line: 53,
+                line: 63,
                 column: 18,
             },
         ],

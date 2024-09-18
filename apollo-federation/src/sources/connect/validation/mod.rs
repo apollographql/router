@@ -17,35 +17,39 @@
 mod coordinates;
 mod entity;
 mod extended_type;
-mod http_headers;
-mod http_method;
+mod http;
 mod selection;
 mod source_name;
 
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::ops::Range;
 
 use apollo_compiler::ast::OperationType;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexSet;
+use apollo_compiler::executable::FieldSet;
 use apollo_compiler::name;
 use apollo_compiler::parser::LineColumn;
+use apollo_compiler::parser::Parser;
 use apollo_compiler::parser::SourceMap;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::ObjectType;
+use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
-use coordinates::source_base_url_argument_coordinate;
 use coordinates::source_http_argument_coordinate;
 use extended_type::validate_extended_type;
-use http_headers::get_http_headers_arg;
-use http_headers::validate_headers_arg;
 use itertools::Itertools;
 use source_name::SourceName;
 use url::Url;
 
+use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
+use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_RESOLVABLE_ARGUMENT_NAME;
 use crate::link::spec::Identity;
 use crate::link::Import;
 use crate::link::Link;
@@ -53,6 +57,9 @@ use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
 use crate::sources::connect::spec::schema::SOURCE_NAME_ARGUMENT_NAME;
+use crate::sources::connect::validation::coordinates::BaseUrlCoordinate;
+use crate::sources::connect::validation::coordinates::HttpHeadersCoordinate;
+use crate::sources::connect::validation::http::headers;
 use crate::sources::connect::ConnectSpecDefinition;
 use crate::subgraph::spec::CONTEXT_DIRECTIVE_NAME;
 use crate::subgraph::spec::EXTERNAL_DIRECTIVE_NAME;
@@ -298,7 +305,9 @@ fn validate_source(directive: &Component<Directive>, sources: &SourceMap) -> Sou
         {
             if let Some(url_error) = parse_url(
                 url_value,
-                &source_base_url_argument_coordinate(&directive.name),
+                BaseUrlCoordinate {
+                    source_directive_name: &directive.name,
+                },
                 sources,
             )
             .err()
@@ -307,11 +316,17 @@ fn validate_source(directive: &Component<Directive>, sources: &SourceMap) -> Sou
             }
         }
 
-        // Validate headers argument
-        if let Some(headers) = get_http_headers_arg(http_arg) {
-            let header_errors = validate_headers_arg(&directive.name, headers, sources, None, None);
-            errors.extend(header_errors);
-        }
+        errors.extend(
+            headers::validate_arg(
+                http_arg,
+                sources,
+                HttpHeadersCoordinate::Source {
+                    directive_name: &directive.name,
+                },
+            )
+            .into_iter()
+            .flatten(),
+        );
     } else {
         errors.push(Message {
             code: Code::GraphQLError,
@@ -337,36 +352,67 @@ struct SourceDirective {
     directive: Component<Directive>,
 }
 
-fn parse_url(value: &Node<Value>, coordinate: &str, sources: &SourceMap) -> Result<Url, Message> {
+fn parse_url<Coordinate: Display + Copy>(
+    value: &Node<Value>,
+    coordinate: Coordinate,
+    sources: &SourceMap,
+) -> Result<Url, Message> {
     let str_value = require_value_is_str(value, coordinate, sources)?;
     let url = Url::parse(str_value).map_err(|inner| Message {
         code: Code::InvalidUrl,
-        message: format!("The value {value} for {coordinate} is not a valid URL: {inner}.",),
+        message: format!("The value {value} for {coordinate} is not a valid URL: {inner}."),
         locations: value.line_column_range(sources).into_iter().collect(),
     })?;
-    let scheme = url.scheme();
-    if scheme != "http" && scheme != "https" {
-        return Err(Message {
-            code: Code::SourceScheme,
-            message: format!(
-                "The value {value} for {coordinate} must be http or https, got {scheme}.",
-            ),
-            locations: value.line_column_range(sources).into_iter().collect(),
-        });
-    }
+    http::url::validate_base_url(&url, coordinate, value, sources)?;
     Ok(url)
 }
 
-fn require_value_is_str<'a>(
+fn require_value_is_str<'a, Coordinate: Display>(
     value: &'a Node<Value>,
-    coordinate: &str,
+    coordinate: Coordinate,
     sources: &SourceMap,
 ) -> Result<&'a str, Message> {
     value.as_str().ok_or_else(|| Message {
         code: Code::GraphQLError,
-        message: format!("The value for {coordinate} must be a string.",),
+        message: format!("The value for {coordinate} must be a string."),
         locations: value.line_column_range(sources).into_iter().collect(),
     })
+}
+
+fn resolvable_key_fields<'a>(
+    object: &'a Node<ObjectType>,
+    schema: &'a Schema,
+) -> impl Iterator<Item = FieldSet> + 'a {
+    object
+        .directives
+        .iter()
+        .filter(|directive| directive.name == FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC)
+        .filter(|directive| {
+            directive
+                .arguments
+                .iter()
+                .find(|arg| arg.name == FEDERATION_RESOLVABLE_ARGUMENT_NAME)
+                .and_then(|arg| arg.value.to_bool())
+                .unwrap_or(true)
+        })
+        .filter_map(|directive| {
+            directive
+                .arguments
+                .iter()
+                .find(|arg| arg.name == FEDERATION_FIELDS_ARGUMENT_NAME)
+        })
+        .map(|fields| &*fields.value)
+        .filter_map(|key_fields| key_fields.as_str())
+        .filter_map(|fields| {
+            Parser::new()
+                .parse_field_set(
+                    Valid::assume_valid_ref(schema),
+                    object.name.clone(),
+                    fields.to_string(),
+                    "",
+                )
+                .ok()
+        })
 }
 
 type DirectiveName = Name;
@@ -399,8 +445,10 @@ pub enum Code {
     DuplicateSourceName,
     InvalidSourceName,
     EmptySourceName,
+    /// A provided URL was not valid
     InvalidUrl,
-    SourceScheme,
+    /// A URL scheme is not `http` or `https`
+    InvalidUrlScheme,
     SourceNameMismatch,
     SubscriptionInConnectors,
     /// Query field is missing the `@connect` directive
@@ -426,7 +474,9 @@ pub enum Code {
     MissingHttpMethod,
     /// The `entity` argument should only be used on the root `Query` field.
     EntityNotOnRootQuery,
-    /// The `entity` argument should only be used with non-list, object types.
+    /// The arguments to the entity reference resolver do not match the entity type.
+    EntityResolverArgumentMismatch,
+    /// The `entity` argument should only be used with non-list, nullable, object types.
     EntityTypeInvalid,
     /// A syntax error in `selection`
     InvalidJsonSelection,

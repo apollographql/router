@@ -1,0 +1,930 @@
+---
+source: apollo-federation/src/sources/connect/expand/tests/mod.rs
+expression: connectors.by_service_name
+input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/realistic.graphql
+---
+{
+    "connectors_Mutation_createUser_0": Connector {
+        id: ConnectId {
+            label: "connectors.example http: POST /create/user",
+            subgraph_name: "connectors",
+            source_name: Some(
+                "example",
+            ),
+            directive: ObjectOrInterfaceFieldDirectivePosition {
+                field: Object(Mutation.createUser),
+                directive_name: "connect",
+                directive_index: 0,
+            },
+        },
+        transport: HttpJsonTransport {
+            source_url: Some(
+                Url {
+                    scheme: "http",
+                    cannot_be_a_base: false,
+                    username: "",
+                    password: None,
+                    host: Some(
+                        Domain(
+                            "example",
+                        ),
+                    ),
+                    port: None,
+                    path: "/",
+                    query: None,
+                    fragment: None,
+                },
+            ),
+            connect_template: URLTemplate {
+                base: None,
+                path: [
+                    Component {
+                        parts: [
+                            Text(
+                                "create",
+                            ),
+                        ],
+                    },
+                    Component {
+                        parts: [
+                            Text(
+                                "user",
+                            ),
+                        ],
+                    },
+                ],
+                query: {},
+            },
+            method: Post,
+            headers: {},
+            body: Some(
+                Path(
+                    PathSelection {
+                        path: WithRange {
+                            node: Var(
+                                WithRange {
+                                    node: $args,
+                                    range: Some(
+                                        0..5,
+                                    ),
+                                },
+                                WithRange {
+                                    node: Key(
+                                        WithRange {
+                                            node: Field(
+                                                "input",
+                                            ),
+                                            range: Some(
+                                                6..11,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Selection(
+                                                SubSelection {
+                                                    selections: [
+                                                        Field(
+                                                            None,
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "name",
+                                                                ),
+                                                                range: Some(
+                                                                    14..18,
+                                                                ),
+                                                            },
+                                                            None,
+                                                        ),
+                                                        Field(
+                                                            None,
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "username",
+                                                                ),
+                                                                range: Some(
+                                                                    19..27,
+                                                                ),
+                                                            },
+                                                            None,
+                                                        ),
+                                                        Field(
+                                                            None,
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "email",
+                                                                ),
+                                                                range: Some(
+                                                                    28..33,
+                                                                ),
+                                                            },
+                                                            None,
+                                                        ),
+                                                        Field(
+                                                            None,
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "status",
+                                                                ),
+                                                                range: Some(
+                                                                    34..40,
+                                                                ),
+                                                            },
+                                                            None,
+                                                        ),
+                                                        Field(
+                                                            None,
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "address",
+                                                                ),
+                                                                range: Some(
+                                                                    41..48,
+                                                                ),
+                                                            },
+                                                            Some(
+                                                                SubSelection {
+                                                                    selections: [
+                                                                        Field(
+                                                                            None,
+                                                                            WithRange {
+                                                                                node: Field(
+                                                                                    "street",
+                                                                                ),
+                                                                                range: Some(
+                                                                                    51..57,
+                                                                                ),
+                                                                            },
+                                                                            None,
+                                                                        ),
+                                                                        Field(
+                                                                            None,
+                                                                            WithRange {
+                                                                                node: Field(
+                                                                                    "suite",
+                                                                                ),
+                                                                                range: Some(
+                                                                                    58..63,
+                                                                                ),
+                                                                            },
+                                                                            None,
+                                                                        ),
+                                                                        Field(
+                                                                            None,
+                                                                            WithRange {
+                                                                                node: Field(
+                                                                                    "city",
+                                                                                ),
+                                                                                range: Some(
+                                                                                    64..68,
+                                                                                ),
+                                                                            },
+                                                                            None,
+                                                                        ),
+                                                                        Field(
+                                                                            None,
+                                                                            WithRange {
+                                                                                node: Field(
+                                                                                    "zipcode",
+                                                                                ),
+                                                                                range: Some(
+                                                                                    69..76,
+                                                                                ),
+                                                                            },
+                                                                            None,
+                                                                        ),
+                                                                        Field(
+                                                                            None,
+                                                                            WithRange {
+                                                                                node: Field(
+                                                                                    "geo",
+                                                                                ),
+                                                                                range: Some(
+                                                                                    77..80,
+                                                                                ),
+                                                                            },
+                                                                            Some(
+                                                                                SubSelection {
+                                                                                    selections: [
+                                                                                        Field(
+                                                                                            None,
+                                                                                            WithRange {
+                                                                                                node: Field(
+                                                                                                    "lat",
+                                                                                                ),
+                                                                                                range: Some(
+                                                                                                    83..86,
+                                                                                                ),
+                                                                                            },
+                                                                                            None,
+                                                                                        ),
+                                                                                        Field(
+                                                                                            None,
+                                                                                            WithRange {
+                                                                                                node: Field(
+                                                                                                    "lng",
+                                                                                                ),
+                                                                                                range: Some(
+                                                                                                    87..90,
+                                                                                                ),
+                                                                                            },
+                                                                                            None,
+                                                                                        ),
+                                                                                    ],
+                                                                                    star: None,
+                                                                                    range: Some(
+                                                                                        81..92,
+                                                                                    ),
+                                                                                },
+                                                                            ),
+                                                                        ),
+                                                                    ],
+                                                                    star: None,
+                                                                    range: Some(
+                                                                        49..94,
+                                                                    ),
+                                                                },
+                                                            ),
+                                                        ),
+                                                    ],
+                                                    star: None,
+                                                    range: Some(
+                                                        12..96,
+                                                    ),
+                                                },
+                                            ),
+                                            range: Some(
+                                                12..96,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        5..96,
+                                    ),
+                                },
+                            ),
+                            range: Some(
+                                0..96,
+                            ),
+                        },
+                    },
+                ),
+            ),
+        },
+        selection: Named(
+            SubSelection {
+                selections: [
+                    Field(
+                        None,
+                        WithRange {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                0..2,
+                            ),
+                        },
+                        None,
+                    ),
+                ],
+                star: None,
+                range: Some(
+                    0..2,
+                ),
+            },
+        ),
+        config: None,
+        max_requests: None,
+        entity_resolver: None,
+    },
+    "connectors_Query_filterUsersByEmailDomain_0": Connector {
+        id: ConnectId {
+            label: "connectors.example http: GET /filter/users",
+            subgraph_name: "connectors",
+            source_name: Some(
+                "example",
+            ),
+            directive: ObjectOrInterfaceFieldDirectivePosition {
+                field: Object(Query.filterUsersByEmailDomain),
+                directive_name: "connect",
+                directive_index: 0,
+            },
+        },
+        transport: HttpJsonTransport {
+            source_url: Some(
+                Url {
+                    scheme: "http",
+                    cannot_be_a_base: false,
+                    username: "",
+                    password: None,
+                    host: Some(
+                        Domain(
+                            "example",
+                        ),
+                    ),
+                    port: None,
+                    path: "/",
+                    query: None,
+                    fragment: None,
+                },
+            ),
+            connect_template: URLTemplate {
+                base: None,
+                path: [
+                    Component {
+                        parts: [
+                            Text(
+                                "filter",
+                            ),
+                        ],
+                    },
+                    Component {
+                        parts: [
+                            Text(
+                                "users",
+                            ),
+                        ],
+                    },
+                ],
+                query: {},
+            },
+            method: Get,
+            headers: {},
+            body: Some(
+                Named(
+                    SubSelection {
+                        selections: [
+                            Path(
+                                Alias {
+                                    name: WithRange {
+                                        node: Field(
+                                            "emailDomain",
+                                        ),
+                                        range: Some(
+                                            0..11,
+                                        ),
+                                    },
+                                    range: Some(
+                                        0..12,
+                                    ),
+                                },
+                                PathSelection {
+                                    path: WithRange {
+                                        node: Var(
+                                            WithRange {
+                                                node: $args,
+                                                range: Some(
+                                                    13..18,
+                                                ),
+                                            },
+                                            WithRange {
+                                                node: Key(
+                                                    WithRange {
+                                                        node: Field(
+                                                            "email",
+                                                        ),
+                                                        range: Some(
+                                                            19..24,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Empty,
+                                                        range: Some(
+                                                            24..24,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    18..24,
+                                                ),
+                                            },
+                                        ),
+                                        range: Some(
+                                            13..24,
+                                        ),
+                                    },
+                                },
+                            ),
+                        ],
+                        star: None,
+                        range: Some(
+                            0..24,
+                        ),
+                    },
+                ),
+            ),
+        },
+        selection: Named(
+            SubSelection {
+                selections: [
+                    Field(
+                        None,
+                        WithRange {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                0..2,
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        WithRange {
+                            node: Field(
+                                "name",
+                            ),
+                            range: Some(
+                                3..7,
+                            ),
+                        },
+                        None,
+                    ),
+                ],
+                star: None,
+                range: Some(
+                    0..7,
+                ),
+            },
+        ),
+        config: None,
+        max_requests: None,
+        entity_resolver: None,
+    },
+    "connectors_Query_usersByCompany_0": Connector {
+        id: ConnectId {
+            label: "connectors.example http: GET /by-company/{$args.company.name}",
+            subgraph_name: "connectors",
+            source_name: Some(
+                "example",
+            ),
+            directive: ObjectOrInterfaceFieldDirectivePosition {
+                field: Object(Query.usersByCompany),
+                directive_name: "connect",
+                directive_index: 0,
+            },
+        },
+        transport: HttpJsonTransport {
+            source_url: Some(
+                Url {
+                    scheme: "http",
+                    cannot_be_a_base: false,
+                    username: "",
+                    password: None,
+                    host: Some(
+                        Domain(
+                            "example",
+                        ),
+                    ),
+                    port: None,
+                    path: "/",
+                    query: None,
+                    fragment: None,
+                },
+            ),
+            connect_template: URLTemplate {
+                base: None,
+                path: [
+                    Component {
+                        parts: [
+                            Text(
+                                "by-company",
+                            ),
+                        ],
+                    },
+                    Component {
+                        parts: [
+                            Var(
+                                Variable {
+                                    var_type: Args,
+                                    path: "company.name",
+                                    location: 13..31,
+                                },
+                            ),
+                        ],
+                    },
+                ],
+                query: {},
+            },
+            method: Get,
+            headers: {},
+            body: None,
+        },
+        selection: Named(
+            SubSelection {
+                selections: [
+                    Field(
+                        None,
+                        WithRange {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                0..2,
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        WithRange {
+                            node: Field(
+                                "name",
+                            ),
+                            range: Some(
+                                3..7,
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        WithRange {
+                            node: Field(
+                                "company",
+                            ),
+                            range: Some(
+                                8..15,
+                            ),
+                        },
+                        Some(
+                            SubSelection {
+                                selections: [
+                                    Field(
+                                        None,
+                                        WithRange {
+                                            node: Field(
+                                                "name",
+                                            ),
+                                            range: Some(
+                                                20..24,
+                                            ),
+                                        },
+                                        None,
+                                    ),
+                                    Field(
+                                        None,
+                                        WithRange {
+                                            node: Field(
+                                                "catchPhrase",
+                                            ),
+                                            range: Some(
+                                                27..38,
+                                            ),
+                                        },
+                                        None,
+                                    ),
+                                    Field(
+                                        None,
+                                        WithRange {
+                                            node: Field(
+                                                "bs",
+                                            ),
+                                            range: Some(
+                                                41..43,
+                                            ),
+                                        },
+                                        None,
+                                    ),
+                                ],
+                                star: None,
+                                range: Some(
+                                    16..45,
+                                ),
+                            },
+                        ),
+                    ),
+                ],
+                star: None,
+                range: Some(
+                    0..45,
+                ),
+            },
+        ),
+        config: None,
+        max_requests: None,
+        entity_resolver: None,
+    },
+    "connectors_Query_user_0": Connector {
+        id: ConnectId {
+            label: "connectors.example http: GET /{$args.id}",
+            subgraph_name: "connectors",
+            source_name: Some(
+                "example",
+            ),
+            directive: ObjectOrInterfaceFieldDirectivePosition {
+                field: Object(Query.user),
+                directive_name: "connect",
+                directive_index: 0,
+            },
+        },
+        transport: HttpJsonTransport {
+            source_url: Some(
+                Url {
+                    scheme: "http",
+                    cannot_be_a_base: false,
+                    username: "",
+                    password: None,
+                    host: Some(
+                        Domain(
+                            "example",
+                        ),
+                    ),
+                    port: None,
+                    path: "/",
+                    query: None,
+                    fragment: None,
+                },
+            ),
+            connect_template: URLTemplate {
+                base: None,
+                path: [
+                    Component {
+                        parts: [
+                            Var(
+                                Variable {
+                                    var_type: Args,
+                                    path: "id",
+                                    location: 2..10,
+                                },
+                            ),
+                        ],
+                    },
+                ],
+                query: {},
+            },
+            method: Get,
+            headers: {},
+            body: None,
+        },
+        selection: Named(
+            SubSelection {
+                selections: [
+                    Field(
+                        None,
+                        WithRange {
+                            node: Field(
+                                "id",
+                            ),
+                            range: Some(
+                                0..2,
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        WithRange {
+                            node: Field(
+                                "name",
+                            ),
+                            range: Some(
+                                3..7,
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        WithRange {
+                            node: Field(
+                                "username",
+                            ),
+                            range: Some(
+                                8..16,
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        WithRange {
+                            node: Field(
+                                "email",
+                            ),
+                            range: Some(
+                                17..22,
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        WithRange {
+                            node: Field(
+                                "address",
+                            ),
+                            range: Some(
+                                23..30,
+                            ),
+                        },
+                        Some(
+                            SubSelection {
+                                selections: [
+                                    Field(
+                                        None,
+                                        WithRange {
+                                            node: Field(
+                                                "street",
+                                            ),
+                                            range: Some(
+                                                35..41,
+                                            ),
+                                        },
+                                        None,
+                                    ),
+                                    Field(
+                                        None,
+                                        WithRange {
+                                            node: Field(
+                                                "suite",
+                                            ),
+                                            range: Some(
+                                                44..49,
+                                            ),
+                                        },
+                                        None,
+                                    ),
+                                    Field(
+                                        None,
+                                        WithRange {
+                                            node: Field(
+                                                "city",
+                                            ),
+                                            range: Some(
+                                                52..56,
+                                            ),
+                                        },
+                                        None,
+                                    ),
+                                    Field(
+                                        None,
+                                        WithRange {
+                                            node: Field(
+                                                "zipcode",
+                                            ),
+                                            range: Some(
+                                                59..66,
+                                            ),
+                                        },
+                                        None,
+                                    ),
+                                    Field(
+                                        None,
+                                        WithRange {
+                                            node: Field(
+                                                "geo",
+                                            ),
+                                            range: Some(
+                                                69..72,
+                                            ),
+                                        },
+                                        Some(
+                                            SubSelection {
+                                                selections: [
+                                                    Field(
+                                                        None,
+                                                        WithRange {
+                                                            node: Field(
+                                                                "lat",
+                                                            ),
+                                                            range: Some(
+                                                                79..82,
+                                                            ),
+                                                        },
+                                                        None,
+                                                    ),
+                                                    Field(
+                                                        None,
+                                                        WithRange {
+                                                            node: Field(
+                                                                "lng",
+                                                            ),
+                                                            range: Some(
+                                                                87..90,
+                                                            ),
+                                                        },
+                                                        None,
+                                                    ),
+                                                ],
+                                                star: None,
+                                                range: Some(
+                                                    73..94,
+                                                ),
+                                            },
+                                        ),
+                                    ),
+                                ],
+                                star: None,
+                                range: Some(
+                                    31..96,
+                                ),
+                            },
+                        ),
+                    ),
+                    Field(
+                        None,
+                        WithRange {
+                            node: Field(
+                                "phone",
+                            ),
+                            range: Some(
+                                97..102,
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        WithRange {
+                            node: Field(
+                                "website",
+                            ),
+                            range: Some(
+                                103..110,
+                            ),
+                        },
+                        None,
+                    ),
+                    Field(
+                        None,
+                        WithRange {
+                            node: Field(
+                                "company",
+                            ),
+                            range: Some(
+                                111..118,
+                            ),
+                        },
+                        Some(
+                            SubSelection {
+                                selections: [
+                                    Field(
+                                        None,
+                                        WithRange {
+                                            node: Field(
+                                                "name",
+                                            ),
+                                            range: Some(
+                                                123..127,
+                                            ),
+                                        },
+                                        None,
+                                    ),
+                                    Field(
+                                        None,
+                                        WithRange {
+                                            node: Field(
+                                                "catchPhrase",
+                                            ),
+                                            range: Some(
+                                                130..141,
+                                            ),
+                                        },
+                                        None,
+                                    ),
+                                    Field(
+                                        None,
+                                        WithRange {
+                                            node: Field(
+                                                "bs",
+                                            ),
+                                            range: Some(
+                                                144..146,
+                                            ),
+                                        },
+                                        None,
+                                    ),
+                                    Field(
+                                        None,
+                                        WithRange {
+                                            node: Field(
+                                                "email",
+                                            ),
+                                            range: Some(
+                                                149..154,
+                                            ),
+                                        },
+                                        None,
+                                    ),
+                                ],
+                                star: None,
+                                range: Some(
+                                    119..156,
+                                ),
+                            },
+                        ),
+                    ),
+                ],
+                star: None,
+                range: Some(
+                    0..156,
+                ),
+            },
+        ),
+        config: None,
+        max_requests: None,
+        entity_resolver: Some(
+            Explicit,
+        ),
+    },
+}

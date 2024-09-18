@@ -1,0 +1,504 @@
+---
+source: apollo-federation/src/sources/connect/json_selection/location.rs
+expression: "format!(\"{:#?}\", parsed)"
+---
+Named(
+    SubSelection {
+        selections: [
+            Path(
+                Alias {
+                    name: WithRange {
+                        node: Field(
+                            "path",
+                        ),
+                        range: Some(
+                            9..13,
+                        ),
+                    },
+                    range: Some(
+                        9..14,
+                    ),
+                },
+                PathSelection {
+                    path: WithRange {
+                        node: Key(
+                            WithRange {
+                                node: Field(
+                                    "some",
+                                ),
+                                range: Some(
+                                    15..19,
+                                ),
+                            },
+                            WithRange {
+                                node: Key(
+                                    WithRange {
+                                        node: Field(
+                                            "nested",
+                                        ),
+                                        range: Some(
+                                            20..26,
+                                        ),
+                                    },
+                                    WithRange {
+                                        node: Key(
+                                            WithRange {
+                                                node: Field(
+                                                    "path",
+                                                ),
+                                                range: Some(
+                                                    27..31,
+                                                ),
+                                            },
+                                            WithRange {
+                                                node: Selection(
+                                                    SubSelection {
+                                                        selections: [
+                                                            Field(
+                                                                None,
+                                                                WithRange {
+                                                                    node: Field(
+                                                                        "isbn",
+                                                                    ),
+                                                                    range: Some(
+                                                                        34..38,
+                                                                    ),
+                                                                },
+                                                                None,
+                                                            ),
+                                                            Field(
+                                                                None,
+                                                                WithRange {
+                                                                    node: Field(
+                                                                        "author",
+                                                                    ),
+                                                                    range: Some(
+                                                                        39..45,
+                                                                    ),
+                                                                },
+                                                                Some(
+                                                                    SubSelection {
+                                                                        selections: [
+                                                                            Field(
+                                                                                None,
+                                                                                WithRange {
+                                                                                    node: Field(
+                                                                                        "name",
+                                                                                    ),
+                                                                                    range: Some(
+                                                                                        48..52,
+                                                                                    ),
+                                                                                },
+                                                                                None,
+                                                                            ),
+                                                                        ],
+                                                                        star: None,
+                                                                        range: Some(
+                                                                            46..54,
+                                                                        ),
+                                                                    },
+                                                                ),
+                                                            ),
+                                                        ],
+                                                        star: None,
+                                                        range: Some(
+                                                            32..55,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    32..55,
+                                                ),
+                                            },
+                                        ),
+                                        range: Some(
+                                            26..55,
+                                        ),
+                                    },
+                                ),
+                                range: Some(
+                                    19..55,
+                                ),
+                            },
+                        ),
+                        range: Some(
+                            15..55,
+                        ),
+                    },
+                },
+            ),
+            Field(
+                Some(
+                    Alias {
+                        name: WithRange {
+                            node: Field(
+                                "alias",
+                            ),
+                            range: Some(
+                                64..69,
+                            ),
+                        },
+                        range: Some(
+                            64..70,
+                        ),
+                    },
+                ),
+                WithRange {
+                    node: Quoted(
+                        "not an identifier",
+                    ),
+                    range: Some(
+                        71..90,
+                    ),
+                },
+                Some(
+                    SubSelection {
+                        selections: [
+                            Path(
+                                Alias {
+                                    name: WithRange {
+                                        node: Field(
+                                            "__typename",
+                                        ),
+                                        range: Some(
+                                            151..161,
+                                        ),
+                                    },
+                                    range: Some(
+                                        151..162,
+                                    ),
+                                },
+                                PathSelection {
+                                    path: WithRange {
+                                        node: Var(
+                                            WithRange {
+                                                node: @,
+                                                range: Some(
+                                                    163..164,
+                                                ),
+                                            },
+                                            WithRange {
+                                                node: Method(
+                                                    WithRange {
+                                                        node: "echo",
+                                                        range: Some(
+                                                            166..170,
+                                                        ),
+                                                    },
+                                                    Some(
+                                                        MethodArgs {
+                                                            args: [
+                                                                WithRange {
+                                                                    node: String(
+                                                                        "Frog",
+                                                                    ),
+                                                                    range: Some(
+                                                                        172..178,
+                                                                    ),
+                                                                },
+                                                            ],
+                                                            range: Some(
+                                                                170..182,
+                                                            ),
+                                                        },
+                                                    ),
+                                                    WithRange {
+                                                        node: Empty,
+                                                        range: Some(
+                                                            182..182,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    164..182,
+                                                ),
+                                            },
+                                        ),
+                                        range: Some(
+                                            163..182,
+                                        ),
+                                    },
+                                },
+                            ),
+                            Path(
+                                Alias {
+                                    name: WithRange {
+                                        node: Field(
+                                            "wrapped",
+                                        ),
+                                        range: Some(
+                                            195..202,
+                                        ),
+                                    },
+                                    range: Some(
+                                        195..203,
+                                    ),
+                                },
+                                PathSelection {
+                                    path: WithRange {
+                                        node: Var(
+                                            WithRange {
+                                                node: $,
+                                                range: Some(
+                                                    204..205,
+                                                ),
+                                            },
+                                            WithRange {
+                                                node: Method(
+                                                    WithRange {
+                                                        node: "echo",
+                                                        range: Some(
+                                                            207..211,
+                                                        ),
+                                                    },
+                                                    Some(
+                                                        MethodArgs {
+                                                            args: [
+                                                                WithRange {
+                                                                    node: Object(
+                                                                        {
+                                                                            WithRange {
+                                                                                node: Field(
+                                                                                    "wrapped",
+                                                                                ),
+                                                                                range: Some(
+                                                                                    214..221,
+                                                                                ),
+                                                                            }: WithRange {
+                                                                                node: Path(
+                                                                                    PathSelection {
+                                                                                        path: WithRange {
+                                                                                            node: Var(
+                                                                                                WithRange {
+                                                                                                    node: @,
+                                                                                                    range: Some(
+                                                                                                        224..225,
+                                                                                                    ),
+                                                                                                },
+                                                                                                WithRange {
+                                                                                                    node: Empty,
+                                                                                                    range: Some(
+                                                                                                        225..225,
+                                                                                                    ),
+                                                                                                },
+                                                                                            ),
+                                                                                            range: Some(
+                                                                                                224..225,
+                                                                                            ),
+                                                                                        },
+                                                                                    },
+                                                                                ),
+                                                                                range: Some(
+                                                                                    224..225,
+                                                                                ),
+                                                                            },
+                                                                        },
+                                                                    ),
+                                                                    range: Some(
+                                                                        212..229,
+                                                                    ),
+                                                                },
+                                                            ],
+                                                            range: Some(
+                                                                211..230,
+                                                            ),
+                                                        },
+                                                    ),
+                                                    WithRange {
+                                                        node: Empty,
+                                                        range: Some(
+                                                            230..230,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    205..230,
+                                                ),
+                                            },
+                                        ),
+                                        range: Some(
+                                            204..230,
+                                        ),
+                                    },
+                                },
+                            ),
+                            Group(
+                                Alias {
+                                    name: WithRange {
+                                        node: Field(
+                                            "group",
+                                        ),
+                                        range: Some(
+                                            243..248,
+                                        ),
+                                    },
+                                    range: Some(
+                                        243..249,
+                                    ),
+                                },
+                                SubSelection {
+                                    selections: [
+                                        Field(
+                                            None,
+                                            WithRange {
+                                                node: Field(
+                                                    "a",
+                                                ),
+                                                range: Some(
+                                                    252..253,
+                                                ),
+                                            },
+                                            None,
+                                        ),
+                                        Field(
+                                            None,
+                                            WithRange {
+                                                node: Field(
+                                                    "b",
+                                                ),
+                                                range: Some(
+                                                    254..255,
+                                                ),
+                                            },
+                                            None,
+                                        ),
+                                        Field(
+                                            None,
+                                            WithRange {
+                                                node: Field(
+                                                    "c",
+                                                ),
+                                                range: Some(
+                                                    256..257,
+                                                ),
+                                            },
+                                            None,
+                                        ),
+                                    ],
+                                    star: None,
+                                    range: Some(
+                                        250..259,
+                                    ),
+                                },
+                            ),
+                            Path(
+                                Alias {
+                                    name: WithRange {
+                                        node: Field(
+                                            "arg",
+                                        ),
+                                        range: Some(
+                                            272..275,
+                                        ),
+                                    },
+                                    range: Some(
+                                        272..276,
+                                    ),
+                                },
+                                PathSelection {
+                                    path: WithRange {
+                                        node: Var(
+                                            WithRange {
+                                                node: $args,
+                                                range: Some(
+                                                    277..282,
+                                                ),
+                                            },
+                                            WithRange {
+                                                node: Key(
+                                                    WithRange {
+                                                        node: Field(
+                                                            "arg",
+                                                        ),
+                                                        range: Some(
+                                                            285..288,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Empty,
+                                                        range: Some(
+                                                            288..288,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    283..288,
+                                                ),
+                                            },
+                                        ),
+                                        range: Some(
+                                            277..288,
+                                        ),
+                                    },
+                                },
+                            ),
+                            Field(
+                                None,
+                                WithRange {
+                                    node: Field(
+                                        "field",
+                                    ),
+                                    range: Some(
+                                        301..306,
+                                    ),
+                                },
+                                None,
+                            ),
+                        ],
+                        star: Some(
+                            StarSelection {
+                                alias: Some(
+                                    Alias {
+                                        name: WithRange {
+                                            node: Field(
+                                                "rest",
+                                            ),
+                                            range: Some(
+                                                319..323,
+                                            ),
+                                        },
+                                        range: Some(
+                                            319..324,
+                                        ),
+                                    },
+                                ),
+                                selection: Some(
+                                    SubSelection {
+                                        selections: [
+                                            Field(
+                                                None,
+                                                WithRange {
+                                                    node: Field(
+                                                        "data",
+                                                    ),
+                                                    range: Some(
+                                                        329..333,
+                                                    ),
+                                                },
+                                                None,
+                                            ),
+                                        ],
+                                        star: None,
+                                        range: Some(
+                                            327..335,
+                                        ),
+                                    },
+                                ),
+                                range: Some(
+                                    319..335,
+                                ),
+                            },
+                        ),
+                        range: Some(
+                            91..345,
+                        ),
+                    },
+                ),
+            ),
+        ],
+        star: None,
+        range: Some(
+            9..345,
+        ),
+    },
+)

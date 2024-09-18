@@ -85,7 +85,7 @@ pub(super) fn validate_body_selection(
 
     let (_rest, selection) = JSONSelection::parse(selection_str).map_err(|err| Message {
         code: Code::InvalidJsonSelection,
-        message: format!("{coordinate} is not a valid JSONSelection: {err}",),
+        message: format!("{coordinate} is not a valid JSONSelection: {err}"),
         locations: selection_node
             .line_column_range(&schema.sources)
             .into_iter()

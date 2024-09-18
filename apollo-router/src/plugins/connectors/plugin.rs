@@ -145,46 +145,55 @@ pub(crate) struct ConnectorContext {
 }
 
 impl ConnectorContext {
-    pub(crate) fn push_request(
-        &mut self,
-        req: &http::Request<RouterBody>,
-        kind: String,
-        json_body: Option<&serde_json_bytes::Value>,
-        selection_data: Option<SelectionData>,
-    ) {
-        self.requests
-            .push(serialize_request(req, kind, json_body, selection_data));
-    }
-
     pub(crate) fn push_response(
         &mut self,
+        request: Option<ConnectorDebugHttpRequest>,
         parts: &http::response::Parts,
         json_body: &serde_json_bytes::Value,
         selection_data: Option<SelectionData>,
     ) {
-        self.responses
-            .push(serialize_response(parts, json_body, selection_data));
+        if let Some(request) = request {
+            self.requests.push(request);
+            self.responses
+                .push(serialize_response(parts, json_body, selection_data));
+        } else {
+            tracing::warn!(
+                "connectors debugging: couldn't find a matching request for the response"
+            );
+        }
     }
 
-    pub(crate) fn push_invalid_response(&mut self, parts: &http::response::Parts, body: &Bytes) {
-        self.responses.push(ConnectorDebugHttpResponse {
-            status: parts.status.as_u16(),
-            headers: parts
-                .headers
-                .iter()
-                .map(|(name, value)| {
-                    (
-                        name.as_str().to_string(),
-                        value.to_str().unwrap().to_string(),
-                    )
-                })
-                .collect(),
-            body: ConnectorDebugBody {
-                kind: "invalid".to_string(),
-                content: format!("{:?}", body).into(),
-                selection: None,
-            },
-        });
+    pub(crate) fn push_invalid_response(
+        &mut self,
+        request: Option<ConnectorDebugHttpRequest>,
+        parts: &http::response::Parts,
+        body: &Bytes,
+    ) {
+        if let Some(request) = request {
+            self.requests.push(request);
+            self.responses.push(ConnectorDebugHttpResponse {
+                status: parts.status.as_u16(),
+                headers: parts
+                    .headers
+                    .iter()
+                    .map(|(name, value)| {
+                        (
+                            name.as_str().to_string(),
+                            value.to_str().unwrap().to_string(),
+                        )
+                    })
+                    .collect(),
+                body: ConnectorDebugBody {
+                    kind: "invalid".to_string(),
+                    content: format!("{:?}", body).into(),
+                    selection: None,
+                },
+            });
+        } else {
+            tracing::warn!(
+                "connectors debugging: couldn't find a matching request for the response"
+            );
+        }
     }
 
     fn serialize(self) -> serde_json_bytes::Value {
@@ -231,7 +240,7 @@ struct ConnectorDebugBody {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct ConnectorDebugHttpRequest {
+pub(crate) struct ConnectorDebugHttpRequest {
     url: String,
     method: String,
     headers: Vec<(String, String)>,
@@ -246,7 +255,7 @@ struct ConnectorDebugSelection {
     errors: Vec<serde_json_bytes::Value>,
 }
 
-fn serialize_request(
+pub(crate) fn serialize_request(
     req: &http::Request<RouterBody>,
     kind: String,
     json_body: Option<&serde_json_bytes::Value>,
@@ -318,11 +327,15 @@ fn serialize_response(
 fn aggregate_apply_to_errors(errors: &[ApplyToError]) -> Vec<serde_json_bytes::Value> {
     let mut aggregated = vec![];
 
-    for (key, group) in &errors.iter().group_by(|e| (e.message(), e.path())) {
+    for (key, group) in &errors
+        .iter()
+        .chunk_by(|e| (e.message(), e.path(), e.range()))
+    {
         let group = group.collect_vec();
         aggregated.push(json!({
             "message": key.0,
             "path": key.1,
+            "range": key.2,
             "count": group.len(),
         }));
     }

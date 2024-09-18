@@ -1,0 +1,26 @@
+---
+source: apollo-federation/src/sources/connect/url_template.rs
+expression: "URLTemplate::from_str(\"/abc/def\")"
+---
+Ok(
+    URLTemplate {
+        base: None,
+        path: [
+            Component {
+                parts: [
+                    Text(
+                        "abc",
+                    ),
+                ],
+            },
+            Component {
+                parts: [
+                    Text(
+                        "def",
+                    ),
+                ],
+            },
+        ],
+        query: {},
+    },
+)

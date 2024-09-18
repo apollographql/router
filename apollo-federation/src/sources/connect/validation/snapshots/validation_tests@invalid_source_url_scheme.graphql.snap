@@ -5,7 +5,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_s
 ---
 [
     Message {
-        code: SourceScheme,
+        code: InvalidUrlScheme,
         message: "The value \"file://data.json\" for `@source(baseURL:)` must be http or https, got file.",
         locations: [
             LineColumn {

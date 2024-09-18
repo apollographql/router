@@ -9,6 +9,7 @@ use url::Url;
 
 use super::spec::ConnectHTTPArguments;
 use super::spec::SourceHTTPArguments;
+use super::url_template;
 use super::ConnectId;
 use super::JSONSelection;
 use super::URLTemplate;
@@ -182,9 +183,11 @@ impl HttpJsonTransport {
 
         Ok(Self {
             source_url: source.map(|s| s.base_url.clone()),
-            connect_template: connect_url.parse().map_err(|e| {
-                FederationError::internal(format!("could not parse URL template: {e}"))
-            })?,
+            connect_template: connect_url.parse().map_err(
+                |url_template::Error { message, .. }| {
+                    FederationError::internal(format!("could not parse URL template: {message}"))
+                },
+            )?,
             method,
             headers,
             body: http.body.clone(),
@@ -295,7 +298,7 @@ mod tests {
                     connect_template: URLTemplate {
                         base: None,
                         path: [
-                            ParameterValue {
+                            Component {
                                 parts: [
                                     Text(
                                         "users",
@@ -327,16 +330,33 @@ mod tests {
                         selections: [
                             Field(
                                 None,
-                                "id",
+                                WithRange {
+                                    node: Field(
+                                        "id",
+                                    ),
+                                    range: Some(
+                                        0..2,
+                                    ),
+                                },
                                 None,
                             ),
                             Field(
                                 None,
-                                "name",
+                                WithRange {
+                                    node: Field(
+                                        "name",
+                                    ),
+                                    range: Some(
+                                        3..7,
+                                    ),
+                                },
                                 None,
                             ),
                         ],
                         star: None,
+                        range: Some(
+                            0..7,
+                        ),
                     },
                 ),
                 config: None,
@@ -388,7 +408,7 @@ mod tests {
                     connect_template: URLTemplate {
                         base: None,
                         path: [
-                            ParameterValue {
+                            Component {
                                 parts: [
                                     Text(
                                         "posts",
@@ -420,21 +440,45 @@ mod tests {
                         selections: [
                             Field(
                                 None,
-                                "id",
+                                WithRange {
+                                    node: Field(
+                                        "id",
+                                    ),
+                                    range: Some(
+                                        0..2,
+                                    ),
+                                },
                                 None,
                             ),
                             Field(
                                 None,
-                                "title",
+                                WithRange {
+                                    node: Field(
+                                        "title",
+                                    ),
+                                    range: Some(
+                                        3..8,
+                                    ),
+                                },
                                 None,
                             ),
                             Field(
                                 None,
-                                "body",
+                                WithRange {
+                                    node: Field(
+                                        "body",
+                                    ),
+                                    range: Some(
+                                        9..13,
+                                    ),
+                                },
                                 None,
                             ),
                         ],
                         star: None,
+                        range: Some(
+                            0..13,
+                        ),
                     },
                 ),
                 config: None,

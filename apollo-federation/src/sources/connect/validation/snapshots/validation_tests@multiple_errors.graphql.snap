@@ -5,7 +5,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/multiple_
 ---
 [
     Message {
-        code: SourceScheme,
+        code: InvalidUrlScheme,
         message: "The value \"ftp://127.0.0.1\" for `@source(baseURL:)` must be http or https, got ftp.",
         locations: [
             LineColumn {

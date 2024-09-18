@@ -78,8 +78,8 @@ pub(crate) struct EntityCache {
 }
 
 pub(crate) struct Storage {
-    all: Option<RedisCacheStorage>,
-    subgraphs: HashMap<String, RedisCacheStorage>,
+    pub(crate) all: Option<RedisCacheStorage>,
+    pub(crate) subgraphs: HashMap<String, RedisCacheStorage>,
 }
 
 impl Storage {
@@ -278,7 +278,20 @@ impl Plugin for EntityCache {
             subgraphs: subgraph_storages,
         });
 
-        let invalidation = Invalidation::new(storage.clone()).await?;
+        let invalidation = Invalidation::new(
+            storage.clone(),
+            init.config
+                .invalidation
+                .as_ref()
+                .map(|i| i.scan_count)
+                .unwrap_or(1000),
+            init.config
+                .invalidation
+                .as_ref()
+                .map(|i| i.concurrent_requests)
+                .unwrap_or(10),
+        )
+        .await?;
 
         Ok(Self {
             storage,
@@ -448,7 +461,7 @@ impl EntityCache {
             all: Some(storage),
             subgraphs: HashMap::new(),
         });
-        let invalidation = Invalidation::new(storage.clone()).await?;
+        let invalidation = Invalidation::new(storage.clone(), 1000, 10).await?;
 
         Ok(Self {
             storage,
@@ -466,6 +479,8 @@ impl EntityCache {
                     IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
                     4000,
                 )),
+                scan_count: 1000,
+                concurrent_requests: 10,
             })),
             invalidation,
         })

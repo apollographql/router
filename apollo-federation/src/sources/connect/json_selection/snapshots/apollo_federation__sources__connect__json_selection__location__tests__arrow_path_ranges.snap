@@ -1,0 +1,80 @@
+---
+source: apollo-federation/src/sources/connect/json_selection/location.rs
+expression: parsed
+---
+Named(
+    SubSelection {
+        selections: [
+            Path(
+                Alias {
+                    name: WithRange {
+                        node: Field(
+                            "__typename",
+                        ),
+                        range: Some(
+                            2..12,
+                        ),
+                    },
+                    range: Some(
+                        2..13,
+                    ),
+                },
+                PathSelection {
+                    path: WithRange {
+                        node: Var(
+                            WithRange {
+                                node: @,
+                                range: Some(
+                                    14..15,
+                                ),
+                            },
+                            WithRange {
+                                node: Method(
+                                    WithRange {
+                                        node: "echo",
+                                        range: Some(
+                                            19..23,
+                                        ),
+                                    },
+                                    Some(
+                                        MethodArgs {
+                                            args: [
+                                                WithRange {
+                                                    node: String(
+                                                        "Frog",
+                                                    ),
+                                                    range: Some(
+                                                        26..32,
+                                                    ),
+                                                },
+                                            ],
+                                            range: Some(
+                                                24..36,
+                                            ),
+                                        },
+                                    ),
+                                    WithRange {
+                                        node: Empty,
+                                        range: Some(
+                                            36..36,
+                                        ),
+                                    },
+                                ),
+                                range: Some(
+                                    16..36,
+                                ),
+                            },
+                        ),
+                        range: Some(
+                            14..36,
+                        ),
+                    },
+                },
+            ),
+        ],
+        star: None,
+        range: Some(
+            2..36,
+        ),
+    },
+)
