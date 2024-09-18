@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::{HashMap, IndexMap};
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::DirectiveList as ComponentDirectiveList;
 use apollo_compiler::schema::ExtendedType;
@@ -1398,81 +1398,67 @@ impl FederatedQueryGraphBuilder {
     /// override condition of `false`, whereas the "to" subgraph will have an
     /// override condition of `true`.
     fn handle_progressive_overrides(&mut self) -> Result<(), FederationError> {
-        let mut overriden_to_edges: Vec<(EdgeIndex, String)> = vec![];
-        let mut overriden_from_edges: Vec<(EdgeIndex, String)> = vec![];
-        for to_edge in self.base.query_graph.graph.edge_indices() {
-            let to_edge_weight = self.base.query_graph.edge_weight(to_edge)?;
-            let QueryGraphEdgeTransition::FieldCollection {
-                source: to_source,
-                field_definition_position: to_field_definition_position,
-                ..
-            } = &to_edge_weight.transition
-            else {
-                continue;
-            };
-            if *to_source == self.base.query_graph.current_source {
-                continue;
+        let mut edge_to_conditions: HashMap<EdgeIndex, OverrideCondition> = Default::default();
+
+        fn collect_edge_label(
+            query_graph: &QueryGraph,
+            target_graph: &str,
+            target_field: &ObjectFieldDefinitionPosition,
+            label: &str,
+            condition: bool,
+            edge_to_conditions: &mut HashMap<EdgeIndex, OverrideCondition>
+        ) -> Result<(), FederationError> {
+            let target_field = FieldDefinitionPosition::Object(target_field.clone());
+            let subgraph_nodes = query_graph
+                .types_to_nodes_by_source
+                .get(target_graph)
+                .unwrap();
+            let parent_node = subgraph_nodes
+                .get(target_field.type_name())
+                .unwrap()
+                .first()
+                .unwrap();
+            for edge in query_graph.out_edges(parent_node.clone()) {
+                let edge_weight = query_graph.edge_weight(edge.id())?;
+                let QueryGraphEdgeTransition::FieldCollection {
+                    field_definition_position,
+                    ..
+                } = &edge_weight.transition
+                else {
+                    continue;
+                };
+
+                if &target_field == field_definition_position {
+                    edge_to_conditions.insert(edge.id(), OverrideCondition { label: label.to_string(), condition });
+                }
             }
-            let to_source = to_source.clone();
-            let to_schema = self.base.query_graph.schema_by_source(&to_source)?;
-            let to_subgraph_data = self.subgraphs.get(&to_source)?;
-            let to_field = to_field_definition_position.get(to_schema.schema())?;
-            for directive in to_field
-                .directives
-                .get_all(&to_subgraph_data.overrides_directive_definition_name)
-            {
-                let application = to_subgraph_data
-                    .federation_spec_definition
-                    .override_directive_arguments(directive)?;
-                if let Some(label) = application.label {
-                    // found overridden field
-                    overriden_to_edges.push((to_edge.clone(), label.to_string()));
+            Ok(())
+        }
 
-                    // need to find the corresponding field in the "from" subgraph
-                    let from_subgraph_nodes = self
-                        .base
-                        .query_graph
-                        .types_to_nodes_by_source
-                        .get(application.from)
-                        .unwrap();
-                    let from_parent_node = from_subgraph_nodes
-                        .get(to_field_definition_position.type_name())
-                        .unwrap()
-                        .first()
-                        .unwrap();
-                    for from_edge in self.base.query_graph.out_edges(from_parent_node.clone()) {
-                        let from_edge_weight = self.base.query_graph.edge_weight(from_edge.id())?;
-                        let QueryGraphEdgeTransition::FieldCollection {
-                            field_definition_position: from_field_definition_position,
-                            ..
-                        } = &from_edge_weight.transition
-                        else {
-                            continue;
-                        };
-
-                        if from_field_definition_position == to_field_definition_position {
-                            overriden_from_edges.push((from_edge.id(), label.to_string()));
+        for (to_subgraph_name, subgraph) in &self.base.query_graph.subgraphs_by_name {
+            let subgraph_data = self.subgraphs.get(&to_subgraph_name)?;
+            if let Some(override_referencers) = subgraph.referencers().directives.get(&subgraph_data.overrides_directive_definition_name) {
+                for field_definition_position in &override_referencers.object_fields {
+                    let field = field_definition_position.get(subgraph.schema())?;
+                    for directive in field
+                        .directives
+                        .get_all(&subgraph_data.overrides_directive_definition_name)
+                    {
+                        let application = subgraph_data
+                            .federation_spec_definition
+                            .override_directive_arguments(directive)?;
+                        if let Some(label) = application.label {
+                            collect_edge_label(&self.base.query_graph, to_subgraph_name, field_definition_position, label, true, &mut edge_to_conditions)?;
+                            collect_edge_label(&self.base.query_graph, application.from, field_definition_position, label, false, &mut edge_to_conditions)?;
                         }
                     }
-                } else {
-                    continue;
                 }
             }
         }
 
-        for (to_edge_id, to_label) in overriden_to_edges {
-            let to_edge = self.base.query_graph.edge_weight_mut(to_edge_id)?;
-            to_edge.override_condition = Some(OverrideCondition {
-                label: to_label.clone(),
-                condition: true,
-            });
-        }
-        for (from_edge_id, from_label) in overriden_from_edges {
-            let from_edge = self.base.query_graph.edge_weight_mut(from_edge_id)?;
-            from_edge.override_condition = Some(OverrideCondition {
-                label: from_label.clone(),
-                condition: false,
-            });
+        for (edge, condition) in edge_to_conditions {
+            let mutable_edge = self.base.query_graph.edge_weight_mut(edge)?;
+            mutable_edge.override_condition = Some(condition);
         }
         Ok(())
     }

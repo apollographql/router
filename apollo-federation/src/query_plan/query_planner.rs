@@ -48,7 +48,6 @@ use crate::utils::logging::snapshot;
 use crate::ApiSchemaOptions;
 use crate::Supergraph;
 
-pub(crate) const OVERRIDE_LABEL_ARG_NAME: &str = "overrideLabel";
 pub(crate) const CONTEXT_DIRECTIVE: &str = "context";
 pub(crate) const JOIN_FIELD: &str = "join__field";
 
