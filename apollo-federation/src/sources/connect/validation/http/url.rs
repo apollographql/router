@@ -26,11 +26,11 @@ pub(crate) fn validate_template(
             Message {
                 code: Code::InvalidUrl,
                 message: format!("{coordinate} must be a valid URL template. {message}"),
-                locations: select_substring_location(
-                    value.line_column_range(sources),
-                    str_value,
-                    location,
-                ),
+                locations: location
+                    .and_then(|location| select_substring_location(value, location, sources))
+                    .or_else(|| value.line_column_range(sources))
+                    .into_iter()
+                    .collect(),
             }
         })?;
 
@@ -61,25 +61,33 @@ pub(crate) fn validate_base_url(
 }
 
 fn select_substring_location(
-    line_column: Option<Range<LineColumn>>,
-    full_url: &str,
-    substring_location: Option<Range<usize>>,
-) -> Vec<Range<LineColumn>> {
-    line_column
-        .map(|mut template_location| {
-            // The default location includes the parameter name, we just want the value,
-            // so we need to calculate that.
-            template_location.end.column -= 1; // Get rid of the end quote
-            template_location.start.column = template_location.end.column - full_url.len();
+    value: &Node<Value>,
+    substring_location: Range<usize>,
+    sources: &SourceMap,
+) -> Option<Range<LineColumn>> {
+    let value_without_quotes = value.as_str()?;
 
-            if let Some(location) = substring_location {
-                // We can point to a substring of the URL template! do it.
-                template_location.start.column += location.start;
-                template_location.end.column =
-                    template_location.start.column + location.end - location.start;
-            }
-            template_location
-        })
-        .into_iter()
-        .collect()
+    let source_span = value.location()?;
+    let file = sources.get(&source_span.file_id())?;
+    let source_text = file.source_text();
+    let start_of_quotes = source_span.offset();
+    let end_of_quotes = source_span.end_offset();
+    let value_with_quotes = source_text.get(start_of_quotes..end_of_quotes)?;
+
+    let len_of_starting_quotes = value_with_quotes.find(value_without_quotes)?;
+    let len_of_ending_quotes =
+        value_with_quotes.len() - value_without_quotes.len() - len_of_starting_quotes;
+
+    let subslice_start_offset = start_of_quotes + len_of_starting_quotes + substring_location.start;
+    let subslice_end_offset = end_of_quotes
+        - len_of_ending_quotes
+        - (value_without_quotes.len() - substring_location.end);
+
+    let lookup = line_col::LineColLookup::new(source_text); // TODO: store and reuse
+    let (line, column) = lookup.get(subslice_start_offset);
+    let start = LineColumn { line, column };
+    let (line, column) = lookup.get(subslice_end_offset);
+    let end = LineColumn { line, column };
+
+    Some(start..end)
 }
