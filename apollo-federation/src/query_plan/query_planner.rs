@@ -1055,7 +1055,9 @@ type User
             "operation.graphql",
         )
         .unwrap();
-        let plan = planner.build_query_plan(&document, None, None).unwrap();
+        let plan = planner
+            .build_query_plan(&document, None, Default::default())
+            .unwrap();
         insta::assert_snapshot!(plan, @r###"
         QueryPlan {
           Fetch(service: "accounts") {
@@ -1087,7 +1089,9 @@ type User
             "operation.graphql",
         )
         .unwrap();
-        let plan = planner.build_query_plan(&document, None, None).unwrap();
+        let plan = planner
+            .build_query_plan(&document, None, Default::default())
+            .unwrap();
         insta::assert_snapshot!(plan, @r###"
         QueryPlan {
           Sequence {
@@ -1176,7 +1180,9 @@ type User
             "operation.graphql",
         )
         .unwrap();
-        let plan = planner.build_query_plan(&document, None, None).unwrap();
+        let plan = planner
+            .build_query_plan(&document, None, Default::default())
+            .unwrap();
         insta::assert_snapshot!(plan, @r###"
               QueryPlan {
                 Parallel {
@@ -1287,7 +1293,9 @@ type User
         let mut config = QueryPlannerConfig::default();
         config.debug.bypass_planner_for_single_subgraph = true;
         let planner = QueryPlanner::new(&supergraph, config).unwrap();
-        let plan = planner.build_query_plan(&document, None, None).unwrap();
+        let plan = planner
+            .build_query_plan(&document, None, Default::default())
+            .unwrap();
         insta::assert_snapshot!(plan, @r###"
         QueryPlan {
           Fetch(service: "A") {
@@ -1331,7 +1339,9 @@ type User
         .unwrap();
 
         let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
-        let plan = planner.build_query_plan(&document, None, None).unwrap();
+        let plan = planner
+            .build_query_plan(&document, None, Default::default())
+            .unwrap();
         insta::assert_snapshot!(plan, @r###"
         QueryPlan {
           Fetch(service: "accounts") {
@@ -1390,7 +1400,9 @@ type User
         .unwrap();
 
         let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
-        let plan = planner.build_query_plan(&document, None, None).unwrap();
+        let plan = planner
+            .build_query_plan(&document, None, Default::default())
+            .unwrap();
         insta::assert_snapshot!(plan, @r###"
         QueryPlan {
           Fetch(service: "accounts") {
@@ -1450,7 +1462,9 @@ type User
         .unwrap();
 
         let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
-        let plan = planner.build_query_plan(&document, None, None).unwrap();
+        let plan = planner
+            .build_query_plan(&document, None, Default::default())
+            .unwrap();
         // Make sure `fragment F2` contains `...F1`.
         insta::assert_snapshot!(plan, @r###"
         QueryPlan {
@@ -1507,7 +1521,9 @@ type User
             "operation.graphql",
         )
         .unwrap();
-        let plan = planner.build_query_plan(&document, None, None).unwrap();
+        let plan = planner
+            .build_query_plan(&document, None, Default::default())
+            .unwrap();
         insta::assert_snapshot!(plan, @r###"
         QueryPlan {
           Fetch(service: "Subgraph1") {

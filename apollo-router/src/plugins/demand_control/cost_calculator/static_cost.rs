@@ -726,7 +726,7 @@ mod tests {
             QueryPlanner::new(schema.federation_supergraph(), Default::default()).unwrap();
 
         let query_plan = planner
-            .build_query_plan(&query.executable, None, None)
+            .build_query_plan(&query.executable, None, Default::default())
             .unwrap();
 
         let schema =

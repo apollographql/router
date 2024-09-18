@@ -7,7 +7,6 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use apollo_compiler::ast;
-use apollo_compiler::collections::HashSet;
 use apollo_compiler::execution::InputCoercionError;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
@@ -297,7 +296,7 @@ impl PlannerMode {
                     let start = Instant::now();
 
                     let query_plan_options = QueryPlanOptions {
-                        override_conditions: HashSet::from_iter(plan_options.override_conditions),
+                        override_conditions: plan_options.override_conditions,
                     };
 
                     let result = operation
@@ -308,7 +307,7 @@ impl PlannerMode {
                             rust_planner.build_query_plan(
                                 &doc.executable,
                                 operation,
-                                Some(query_plan_options),
+                                query_plan_options,
                             )
                         })
                         .map_err(|e| QueryPlannerError::FederationError(e.to_string()));
@@ -372,7 +371,7 @@ impl PlannerMode {
                 }
 
                 let query_plan_options = QueryPlanOptions {
-                    override_conditions: HashSet::from_iter(plan_options.override_conditions),
+                    override_conditions: plan_options.override_conditions,
                 };
                 BothModeComparisonJob {
                     rust_planner: rust.clone(),

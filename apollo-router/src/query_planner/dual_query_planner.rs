@@ -92,7 +92,7 @@ impl BothModeComparisonJob {
             // No question mark operator or macro from here …
             let result =
                 self.rust_planner
-                    .build_query_plan(&self.document, name, Some(self.plan_options));
+                    .build_query_plan(&self.document, name, self.plan_options);
 
             let elapsed = start.elapsed().as_secs_f64();
             metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
