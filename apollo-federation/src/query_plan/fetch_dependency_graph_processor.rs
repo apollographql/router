@@ -293,6 +293,7 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
         value: Option<PlanNode>,
     ) -> Option<PlanNode> {
         let mut value = value?;
+        println!("Processing {value} with conditions {conditions:?}");
         match conditions {
             Conditions::Boolean(condition) => {
                 // Note that currently `ConditionNode` only works for variables

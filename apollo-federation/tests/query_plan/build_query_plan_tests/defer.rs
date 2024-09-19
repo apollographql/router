@@ -72,7 +72,7 @@ fn defer_test_handles_simple_defer_without_defer_enabled() {
 }
 
 #[test]
-fn defer_test_handles_simple_defer() {
+fn defer_test_handles_simple_defer_with_defer_enabled() {
     let planner = planner!(
         config = config_with_defer(),
         Subgraph1: r#"
@@ -107,7 +107,7 @@ fn defer_test_handles_simple_defer() {
           QueryPlan {
             Defer {
               Primary {
-                {
+                    {
                   t {
                     v1
                   }
@@ -658,7 +658,7 @@ fn defer_test_defer_multiple_fields_in_different_subgraphs() {
 }
 
 #[test]
-fn defer_test_multiple_non_nested_defer_plus_lable_handling() {
+fn defer_test_multiple_non_nested_defer_plus_label_handling() {
     let planner = planner!(
         config = config_with_defer(),
         Subgraph1: r#"
@@ -837,7 +837,7 @@ fn defer_test_multiple_non_nested_defer_plus_lable_handling() {
 }
 
 #[test]
-fn defer_test_nested_defer_on_entities() {
+fn deefer_test_nested_defer_on_entities() {
     let planner = planner!(
         config = config_with_defer(),
           Subgraph1: r#"
@@ -1094,7 +1094,7 @@ fn defer_test_defer_on_value_types() {
 }
 
 #[test]
-fn defer_test_direct_nesting_on_entity() {
+fn deefer_test_direct_nesting_on_entity() {
     let planner = planner!(
         config = config_with_defer(),
         Subgraph1: r#"
@@ -1202,7 +1202,7 @@ fn defer_test_direct_nesting_on_entity() {
 }
 
 #[test]
-fn defer_test_direct_nesting_on_value_type() {
+fn deefer_test_direct_nesting_on_value_type() {
     let planner = planner!(
         config = config_with_defer(),
         Subgraph1: r#"
@@ -1275,7 +1275,7 @@ fn defer_test_direct_nesting_on_value_type() {
 }
 
 #[test]
-fn defer_test_defer_on_enity_but_with_unuseful_key() {
+fn deefer_test_defer_on_enity_but_with_unuseful_key() {
     let planner = planner!(
         config = config_with_defer(),
           Subgraph1: r#"

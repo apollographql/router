@@ -27,6 +27,7 @@ use petgraph::visit::IntoNodeReferences;
 use serde::Serialize;
 
 use super::query_planner::SubgraphOperationCompression;
+use crate::display_helpers::DisplayOption;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::graphql_definition::DeferDirectiveArguments;
@@ -1677,6 +1678,7 @@ impl FetchDependencyGraph {
         &mut self,
         node_index: NodeIndex,
     ) -> Result<(Vec<NodeIndex>, DeferredNodes), FederationError> {
+        println!("extract_children_and_deferred_dependencies: {self}");
         let mut children = vec![];
         let mut deferred_nodes = DeferredNodes::new();
 
@@ -1686,13 +1688,17 @@ impl FetchDependencyGraph {
             .graph
             .neighbors_directed(node_index, petgraph::Direction::Outgoing);
         let node = self.node_weight(node_index)?;
+        println!("Node: {}", node.selection_set.selection_set);
         for child_index in node_children {
             let child = self.node_weight(child_index)?;
+            println!("Child: {}", child.selection_set.selection_set);
             if node.defer_ref == child.defer_ref {
                 children.push(child_index);
             } else {
-                let parent_defer_ref = node.defer_ref.as_ref().unwrap();
+                println!("{} == {}", DisplayOption(node.defer_ref.as_ref()), DisplayOption(child.defer_ref.as_ref()));
                 let Some(child_defer_ref) = &child.defer_ref else {
+                    // FIXME: We should not be unwrapping here. Does a `DisplayOption` make sense?
+                    let parent_defer_ref = node.defer_ref.as_ref().unwrap();
                     panic!("{} has defer_ref `{parent_defer_ref}`, so its child {} cannot have a top-level defer_ref.",
                            node.display(node_index),
                            child.display(child_index),
@@ -2615,6 +2621,7 @@ impl FetchDependencyGraphNode {
         };
         let operation =
             operation_compression.compress(&self.subgraph_name, subgraph_schema, operation)?;
+        println!("Operation: {operation}");
         let operation_document = operation.try_into().map_err(|err| match err {
             FederationError::SingleFederationError {
                 inner: SingleFederationError::InvalidGraphQL { diagnostics },
