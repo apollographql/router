@@ -743,11 +743,15 @@ fragment F on Query {
         c: Int
         d(arg: [String]): String
         e(arg: Inp): String
+        f(arg: [[String]]): String
+        g(arg: [Inp]): String
+
     }
 
     input Inp {
         a: String
         b: String
+        c: [String]
     }
 
     type Obj {
@@ -930,6 +934,42 @@ fragment F on Query {
                 c
             }
             "#;
+        let doc = ast::Document::parse(query, "query.graphql").unwrap();
+        let result = document(&mut visitor, &doc).unwrap();
+        insta::assert_snapshot!(TestResult { query, result });
+
+        // test removed field with variable in nested list argument
+        let query = r#"
+         query($a: String, $b: String) {
+             c
+             f(arg: [["a"], [$a], ["b"]]) @remove
+             aliased: f(arg: [["a"], [$b]])
+         }
+         "#;
+        let doc = ast::Document::parse(query, "query.graphql").unwrap();
+        let result = document(&mut visitor, &doc).unwrap();
+        insta::assert_snapshot!(TestResult { query, result });
+
+        // test removed field with variable in input type in list argument
+        let query = r#"
+         query($a: String, $b: String) {
+             c
+             g(arg: [{a: $a}, {a: "a"}]) @remove
+             aliased: g(arg: [{a: "a"}, {a: $b}])
+         }
+         "#;
+        let doc = ast::Document::parse(query, "query.graphql").unwrap();
+        let result = document(&mut visitor, &doc).unwrap();
+        insta::assert_snapshot!(TestResult { query, result });
+
+        // test removed field with variable in list in input type argument
+        let query = r#"
+         query($a: String, $b: String) {
+             c
+             e(arg: {c: [$a]}) @remove
+             aliased: e(arg: {c: [$b]})
+         }
+         "#;
         let doc = ast::Document::parse(query, "query.graphql").unwrap();
         let result = document(&mut visitor, &doc).unwrap();
         insta::assert_snapshot!(TestResult { query, result });
