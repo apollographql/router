@@ -214,9 +214,9 @@ impl InstrumentData {
             apollo.router.config.rhai,
             "$.rhai",
             opt.scripts,
-            "$[?(@.scripts]",
+            "$[?(@.scripts)]",
             opt.main,
-            "$[?(@.main]"
+            "$[?(@.main)]"
         );
         populate_config_instrument!(
             apollo.router.config.persisted_queries,
