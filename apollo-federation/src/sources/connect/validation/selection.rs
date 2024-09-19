@@ -24,6 +24,7 @@ use crate::sources::connect::expand::visitors::GroupVisitor;
 use crate::sources::connect::json_selection::NamedSelection;
 use crate::sources::connect::spec::schema::CONNECT_SELECTION_ARGUMENT_NAME;
 use crate::sources::connect::validation::coordinates::connect_directive_http_body_coordinate;
+use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::JSONSelection;
 use crate::sources::connect::SubSelection;
 
@@ -31,7 +32,7 @@ pub(super) fn validate_selection(
     field: &Component<FieldDefinition>,
     connect_directive: &Node<Directive>,
     parent_type: &Node<ObjectType>,
-    schema: &Schema,
+    schema: &SchemaInfo,
     seen_fields: &mut IndexSet<(Name, Name)>,
 ) -> Option<Message> {
     let (selection_value, json_selection) =

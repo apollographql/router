@@ -14,6 +14,7 @@ use apollo_compiler::parser::SourceMap;
 use apollo_compiler::Node;
 use line_col::LineColLookup;
 
+#[derive(Clone, Copy)]
 pub(crate) struct GraphQLString<'schema> {
     /// The GraphQL String literal without quotes, but with all whitespace intact
     raw_string: &'schema str,
@@ -59,7 +60,7 @@ impl<'schema> GraphQLString<'schema> {
         lookup: &LineColLookup,
     ) -> Option<Range<LineColumn>> {
         let start_offset = self.offset + substring_location.start;
-        let end_offset = start_offset + substring_location.end;
+        let end_offset = self.offset + substring_location.end;
 
         let (line, column) = lookup.get(start_offset);
         let start = LineColumn { line, column };
@@ -72,47 +73,89 @@ impl<'schema> GraphQLString<'schema> {
 
 #[cfg(test)]
 mod tests {
+    use apollo_compiler::ast::Value;
     use apollo_compiler::parser::LineColumn;
     use apollo_compiler::schema::ExtendedType;
+    use apollo_compiler::Node;
     use apollo_compiler::Schema;
     use line_col::LineColLookup;
     use pretty_assertions::assert_eq;
 
     use crate::sources::connect::validation::graphql::GraphQLString;
 
-    #[test]
-    fn single_quoted_string() {
-        let text = r#"
+    const SCHEMA: &str = r#"
         type Query {
-          field: String @connect(http: {GET: "https://example.com"})
+          field: String @connect(
+            http: {
+                GET: "https://example.com"
+            },
+            selection: """
+            something
+            somethingElse {
+              nested
+            }
+            """
+          )
         } 
         "#;
 
-        let schema = Schema::parse(text, "test.graphql").unwrap();
+    fn connect_argument<'schema>(schema: &'schema Schema, name: &str) -> &'schema Node<Value> {
         let ExtendedType::Object(query) = schema.types.get("Query").unwrap() else {
             panic!("Query type not found");
         };
         let field = query.fields.get("field").unwrap();
         let directive = field.directives.get("connect").unwrap();
-        let http = directive
-            .argument_by_name("http")
-            .unwrap()
-            .as_object()
-            .unwrap();
+        directive.argument_by_name(name).unwrap()
+    }
+
+    #[test]
+    fn single_quoted_string() {
+        let schema = Schema::parse(SCHEMA, "test.graphql").unwrap();
+        let http = connect_argument(&schema, "http").as_object().unwrap();
         let value = &http[0].1;
 
         let string = GraphQLString::new(value, &schema.sources).unwrap();
         assert_eq!(string.as_str(), "https://example.com");
-        let lookup = LineColLookup::new(text);
+        let lookup = LineColLookup::new(SCHEMA);
         assert_eq!(
-            string.line_col_for_subslice(0..4, &lookup),
+            string.line_col_for_subslice(2..5, &lookup),
             Some(
                 LineColumn {
-                    line: 3,
-                    column: 38
+                    line: 5,
+                    column: 25
                 }..LineColumn {
-                    line: 3,
-                    column: 42
+                    line: 5,
+                    column: 28
+                }
+            )
+        );
+    }
+
+    #[test]
+    fn multi_line_string() {
+        let schema = Schema::parse(SCHEMA, "test.graphql").unwrap();
+        let value = connect_argument(&schema, "selection");
+
+        let string = GraphQLString::new(value, &schema.sources).unwrap();
+        assert_eq!(
+            string.as_str(),
+            r#"
+            something
+            somethingElse {
+              nested
+            }
+            "#
+        );
+        let lookup = LineColLookup::new(SCHEMA);
+        assert_eq!(
+            string.line_col_for_subslice(8..16, &lookup),
+            Some(
+                LineColumn {
+                    line: 4,
+                    column: 12
+                }..LineColumn {
+                    line: 4,
+                    column: 16
                 }
             )
         );

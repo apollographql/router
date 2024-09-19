@@ -1,6 +1,6 @@
+//! Helper structs & functions for dealing with GraphQL schemas
 use std::ops::Deref;
 
-///! Helper structs & functions for dealing with GraphQL schemas
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use line_col::LineColLookup;
