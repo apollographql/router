@@ -254,10 +254,11 @@ impl ExternalVarPaths for NamedSelection {
     }
 }
 
-// PathSelection ::= (VarPath | KeyPath | AtPath) SubSelection?
+// PathSelection ::= (VarPath | KeyPath | AtPath | ExprPath) SubSelection?
 // VarPath       ::= "$" (NO_SPACE Identifier)? PathStep*
 // KeyPath       ::= Key PathStep+
 // AtPath        ::= "@" PathStep*
+// ExprPath      ::= "$(" LitExpr ")" PathStep*
 // PathStep      ::= "." Key | "->" Identifier MethodArgs?
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -340,10 +341,9 @@ pub(super) enum PathList {
     // A VarPath must start with a variable (either $identifier, $, or @),
     // followed by any number of PathStep items (the WithRange<PathList>).
     // Because we represent the @ quasi-variable using PathList::Var, this
-    // variant handles both VarPath and AtPath from the grammar. The String
-    // variable name must always contain the $ character. The PathList::Var
-    // variant may only appear at the beginning of a PathSelection's PathList,
-    // not in the middle.
+    // variant handles both VarPath and AtPath from the grammar. The
+    // PathList::Var variant may only appear at the beginning of a
+    // PathSelection's PathList, not in the middle.
     Var(WithRange<KnownVariable>, WithRange<PathList>),
 
     // A PathSelection that starts with a PathList::Key is a KeyPath, but a
@@ -351,9 +351,12 @@ pub(super) enum PathList {
     // middle/tail of a PathList.
     Key(WithRange<Key>, WithRange<PathList>),
 
+    // An ExprPath, which begins with a LitExpr enclosed by $(...). Must appear
+    // only at the beginning of a PathSelection, like PathList::Var.
+    Expr(WithRange<LitExpr>, WithRange<PathList>),
+
     // A PathList::Method is a PathStep item that may appear only in the
-    // middle/tail (not the beginning) of a PathSelection. Methods are
-    // distinguished from .keys by their ->method invocation syntax.
+    // middle/tail (not the beginning) of a PathSelection.
     Method(WithRange<String>, Option<MethodArgs>, WithRange<PathList>),
 
     // Optionally, a PathList may end with a SubSelection, which applies a set
@@ -392,10 +395,32 @@ impl PathList {
         // Consume leading spaces_or_comments for all cases below.
         let (input, _spaces) = spaces_or_comments(input)?;
 
-        // Variable references (including @ references) and key references
-        // without a leading . are accepted only at depth 0, or at the beginning
-        // of the PathSelection.
+        // Variable references (including @ references), $(...) literals, and
+        // key references without a leading . are accepted only at depth 0, or
+        // at the beginning of the PathSelection.
         if depth == 0 {
+            // The $(...) syntax allows embedding LitExpr values within
+            // JSONSelection syntax (when not already parsing a LitExpr). This
+            // case needs to come before the $ (and $var) case, because $( looks
+            // like the $ variable followed by a parse error in the variable
+            // case, unless we add some complicated lookahead logic there.
+            if let Ok((suffix, (_, dollar_open_paren, expr, close_paren, _))) = tuple((
+                spaces_or_comments,
+                ranged_span("$("),
+                LitExpr::parse,
+                spaces_or_comments,
+                ranged_span(")"),
+            ))(input)
+            {
+                let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
+                let expr_range = merge_ranges(dollar_open_paren.range(), close_paren.range());
+                let full_range = merge_ranges(expr_range, rest.range());
+                return Ok((
+                    remainder,
+                    WithRange::new(Self::Expr(expr, rest), full_range),
+                ));
+            }
+
             if let Ok((suffix, (dollar, opt_var))) =
                 tuple((ranged_span("$"), opt(parse_identifier_no_space)))(input)
             {
@@ -432,11 +457,6 @@ impl PathList {
             if let Ok((suffix, at)) = ranged_span("@")(input) {
                 let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
                 let full_range = merge_ranges(at.range(), rest.range());
-                // Because we include the $ in the variable name for ordinary
-                // variables, we have the freedom to store other symbols as
-                // special variables, such as @ for the current value. In fact,
-                // as long as we can parse the token(s) as a PathList::Var, the
-                // name of a variable could technically be any string we like.
                 return Ok((
                     remainder,
                     WithRange::new(
@@ -473,8 +493,8 @@ impl PathList {
         }
 
         if depth == 0 {
-            // If the PathSelection does not start with a $var, a key., or a
-            // .key, it is not a valid PathSelection.
+            // If the PathSelection does not start with a $var (or $ or @), a
+            // key. (or .key), or $(expr), it is not a valid PathSelection.
             return Err(nom::Err::Error(nom::error::Error::new(
                 input,
                 nom::error::ErrorKind::IsNot,
@@ -482,7 +502,7 @@ impl PathList {
         }
 
         // PathSelection can never start with a naked ->method (instead, use
-        // $->method if you want to operate on the current value).
+        // $->method or @->method if you want to operate on the current value).
         if let Ok((suffix, (arrow, _, method, args))) = tuple((
             ranged_span("->"),
             spaces_or_comments,
@@ -546,6 +566,7 @@ impl PathList {
         match self {
             Self::Var(_, tail) => tail.next_subselection(),
             Self::Key(_, tail) => tail.next_subselection(),
+            Self::Expr(_, tail) => tail.next_subselection(),
             Self::Method(_, _, tail) => tail.next_subselection(),
             Self::Selection(sub) => Some(sub),
             Self::Empty => None,
@@ -557,6 +578,7 @@ impl PathList {
         match self {
             Self::Var(_, tail) => tail.next_mut_subselection(),
             Self::Key(_, tail) => tail.next_mut_subselection(),
+            Self::Expr(_, tail) => tail.next_mut_subselection(),
             Self::Method(_, _, tail) => tail.next_mut_subselection(),
             Self::Selection(sub) => Some(sub),
             Self::Empty => None,
@@ -575,6 +597,10 @@ impl ExternalVarPaths for PathList {
             // recursively because the tail of the list could contain other full
             // PathSelection variable references.
             PathList::Var(_, rest) | PathList::Key(_, rest) => {
+                paths.extend(rest.external_var_paths());
+            }
+            PathList::Expr(expr, rest) => {
+                paths.extend(expr.external_var_paths());
                 paths.extend(rest.external_var_paths());
             }
             PathList::Method(_, opt_args, rest) => {
@@ -675,6 +701,10 @@ impl SubSelection {
         self.star = star;
     }
 
+    pub fn star_iter(&self) -> impl Iterator<Item = &StarSelection> {
+        self.star.iter()
+    }
+
     pub fn append_selection(&mut self, selection: NamedSelection) {
         self.selections.push(selection);
     }
@@ -746,6 +776,10 @@ impl StarSelection {
             selection: selection.map(Box::new),
             range: None,
         }
+    }
+
+    pub(crate) fn alias(&self) -> Option<&Alias> {
+        self.alias.as_ref()
     }
 
     pub(crate) fn parse(input: Span) -> IResult<Span, Self> {
@@ -1039,6 +1073,7 @@ impl MethodArgs {
 
 #[cfg(test)]
 mod tests {
+    use apollo_compiler::collections::IndexMap;
     use insta::assert_debug_snapshot;
 
     use super::super::location::strip_ranges::StripRanges;
@@ -2065,6 +2100,84 @@ mod tests {
                 )
                 .into_with_range(),
             },
+        );
+    }
+
+    #[test]
+    fn test_expr_path_selections() {
+        fn check_simple_lit_expr(input: &str, expected: LitExpr) {
+            check_path_selection(
+                input,
+                PathSelection {
+                    path: PathList::Expr(
+                        expected.into_with_range(),
+                        PathList::Empty.into_with_range(),
+                    )
+                    .into_with_range(),
+                },
+            );
+        }
+
+        check_simple_lit_expr("$(null)", LitExpr::Null);
+
+        check_simple_lit_expr("$(true)", LitExpr::Bool(true));
+        check_simple_lit_expr("$(false)", LitExpr::Bool(false));
+
+        check_simple_lit_expr(
+            "$(1234)",
+            LitExpr::Number("1234".parse().expect("serde_json::Number parse error")),
+        );
+        check_simple_lit_expr(
+            "$(1234.5678)",
+            LitExpr::Number("1234.5678".parse().expect("serde_json::Number parse error")),
+        );
+
+        check_simple_lit_expr(
+            "$('hello world')",
+            LitExpr::String("hello world".to_string()),
+        );
+        check_simple_lit_expr(
+            "$(\"hello world\")",
+            LitExpr::String("hello world".to_string()),
+        );
+        check_simple_lit_expr(
+            "$(\"hello \\\"world\\\"\")",
+            LitExpr::String("hello \"world\"".to_string()),
+        );
+
+        check_simple_lit_expr(
+            "$([1, 2, 3])",
+            LitExpr::Array(
+                vec!["1".parse(), "2".parse(), "3".parse()]
+                    .into_iter()
+                    .map(|n| {
+                        LitExpr::Number(n.expect("serde_json::Number parse error"))
+                            .into_with_range()
+                    })
+                    .collect(),
+            ),
+        );
+
+        check_simple_lit_expr("$({})", LitExpr::Object(IndexMap::default()));
+        check_simple_lit_expr(
+            "$({ a: 1, b: 2, c: 3 })",
+            LitExpr::Object({
+                let mut map = IndexMap::default();
+                for (key, value) in &[("a", "1"), ("b", "2"), ("c", "3")] {
+                    map.insert(
+                        Key::field(key).into_with_range(),
+                        LitExpr::Number(value.parse().expect("serde_json::Number parse error"))
+                            .into_with_range(),
+                    );
+                }
+                map
+            }),
+        );
+
+        assert_debug_snapshot!(
+            // Using extra spaces here to make sure the ranges don't
+            // accidentally include leading/trailing spaces.
+            selection!(" suffix : results -> slice ( $( - 1 ) -> mul ( $args . suffixLength ) ) ")
         );
     }
 

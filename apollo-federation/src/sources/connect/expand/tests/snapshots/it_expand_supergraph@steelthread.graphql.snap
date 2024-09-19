@@ -10,6 +10,8 @@ type Contact {
   email: String
 }
 
+scalar JSON
+
 type Query {
   users: [User]
   user(id: ID!): User
@@ -19,6 +21,7 @@ type User {
   id: ID!
   name: String
   username: String
+  rest: JSON
   c: String
   d: String
 }

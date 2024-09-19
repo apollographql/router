@@ -78,6 +78,11 @@ pub fn json_type_name(v: &JSON) -> &str {
     }
 }
 
+pub fn vec_push<T>(mut vec: Vec<T>, item: T) -> Vec<T> {
+    vec.push(item);
+    vec
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

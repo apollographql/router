@@ -37,9 +37,7 @@ type ArrowMethod = fn(
     input_path: &InputPath<JSON>,
     // The rest of the PathList
     tail: &WithRange<PathList>,
-    // Errors
-    errors: &mut IndexSet<ApplyToError>,
-) -> Option<JSON>;
+) -> (Option<JSON>, Vec<ApplyToError>);
 
 lazy_static! {
     // This set controls which ->methods are exposed for use in connector

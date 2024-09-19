@@ -13,7 +13,7 @@ type Query {
         id: ProductInput!
     ): Product
     @connect(
-        http: { GET: "http://myapi/products/{$args.input.id}" }
+        http: { GET: "http://myapi/products/{$args.id}" }
         selection: "id name"
         entity: true
     )

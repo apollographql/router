@@ -58,7 +58,14 @@ impl JSONSelection {
         // selection set was applied to.
         vars_with_paths.insert(KnownVariable::Dollar, (data, InputPath::empty()));
 
-        let value = self.apply_to_path(data, &vars_with_paths, &InputPath::empty(), &mut errors);
+        let (value, apply_errors) = self.apply_to_path(data, &vars_with_paths, &InputPath::empty());
+
+        // Since errors is an IndexSet, this line effectively deduplicates the
+        // errors, in an attempt to make them less verbose. However, now that we
+        // include both path and range information in the errors, there's an
+        // argument to be made that errors can no longer be meaningfully
+        // deduplicated, so we might consider sticking with a Vec<ApplyToError>.
+        errors.extend(apply_errors);
 
         (value, errors.into_iter().collect())
     }
@@ -72,8 +79,7 @@ pub(super) trait ApplyToInternal {
         data: &JSON,
         vars: &VarsWithPathsMap,
         input_path: &InputPath<JSON>,
-        errors: &mut IndexSet<ApplyToError>,
-    ) -> Option<JSON>;
+    ) -> (Option<JSON>, Vec<ApplyToError>);
 
     // When array is encountered, the Self selection will be applied to each
     // element of the array, producing a new array.
@@ -82,20 +88,21 @@ pub(super) trait ApplyToInternal {
         data_array: &[JSON],
         vars: &VarsWithPathsMap,
         input_path: &InputPath<JSON>,
-        errors: &mut IndexSet<ApplyToError>,
-    ) -> Option<JSON> {
+    ) -> (Option<JSON>, Vec<ApplyToError>) {
         let mut output = Vec::with_capacity(data_array.len());
+        let mut errors = Vec::new();
 
         for (i, element) in data_array.iter().enumerate() {
             let input_path_with_index = input_path.append(json!(i));
-            let applied = self.apply_to_path(element, vars, &input_path_with_index, errors);
+            let (applied, apply_errors) = self.apply_to_path(element, vars, &input_path_with_index);
+            errors.extend(apply_errors);
             // When building an Object, we can simply omit missing properties
             // and report an error, but when building an Array, we need to
             // insert null values to preserve the original array indices/length.
             output.push(applied.unwrap_or(JSON::Null));
         }
 
-        Some(JSON::Array(output))
+        (Some(JSON::Array(output)), errors)
     }
 }
 
@@ -148,14 +155,52 @@ impl ApplyToError {
     }
 }
 
+// Rust doesn't allow implementing methods directly on tuples like
+// (Option<JSON>, Vec<ApplyToError>), so we define a trait to provide the
+// methods we need, and implement the trait for the tuple in question.
+pub(super) trait ApplyToResultMethods {
+    fn prepend_errors(self, errors: Vec<ApplyToError>) -> Self;
+
+    fn and_then_collecting_errors(
+        self,
+        f: impl FnOnce(&JSON) -> (Option<JSON>, Vec<ApplyToError>),
+    ) -> (Option<JSON>, Vec<ApplyToError>);
+}
+
+impl ApplyToResultMethods for (Option<JSON>, Vec<ApplyToError>) {
+    // Intentionally taking ownership of self to avoid cloning, since we pretty
+    // much always use this method to replace the previous (value, errors) tuple
+    // before returning.
+    fn prepend_errors(self, mut errors: Vec<ApplyToError>) -> Self {
+        if errors.is_empty() {
+            self
+        } else {
+            let (value_opt, apply_errors) = self;
+            errors.extend(apply_errors);
+            (value_opt, errors)
+        }
+    }
+
+    // A substitute for Option<_>::and_then that accumulates errors behind the
+    // scenes. I'm no Haskell programmer, but this feels monadic? ¯\_(ツ)_/¯
+    fn and_then_collecting_errors(
+        self,
+        f: impl FnOnce(&JSON) -> (Option<JSON>, Vec<ApplyToError>),
+    ) -> (Option<JSON>, Vec<ApplyToError>) {
+        match self {
+            (Some(data), errors) => f(&data).prepend_errors(errors),
+            (None, errors) => (None, errors),
+        }
+    }
+}
+
 impl ApplyToInternal for JSONSelection {
     fn apply_to_path(
         &self,
         data: &JSON,
         vars: &VarsWithPathsMap,
         input_path: &InputPath<JSON>,
-        errors: &mut IndexSet<ApplyToError>,
-    ) -> Option<JSON> {
+    ) -> (Option<JSON>, Vec<ApplyToError>) {
         match self {
             // Because we represent a JSONSelection::Named as a SubSelection, we
             // can fully delegate apply_to_path to SubSelection::apply_to_path.
@@ -163,12 +208,8 @@ impl ApplyToInternal for JSONSelection {
             // could still delegate to SubSelection::apply_to_path, but we would
             // need to create a temporary SubSelection to wrap the selections
             // Vec.
-            Self::Named(named_selections) => {
-                named_selections.apply_to_path(data, vars, input_path, errors)
-            }
-            Self::Path(path_selection) => {
-                path_selection.apply_to_path(data, vars, input_path, errors)
-            }
+            Self::Named(named_selections) => named_selections.apply_to_path(data, vars, input_path),
+            Self::Path(path_selection) => path_selection.apply_to_path(data, vars, input_path),
         }
     }
 }
@@ -179,13 +220,13 @@ impl ApplyToInternal for NamedSelection {
         data: &JSON,
         vars: &VarsWithPathsMap,
         input_path: &InputPath<JSON>,
-        errors: &mut IndexSet<ApplyToError>,
-    ) -> Option<JSON> {
+    ) -> (Option<JSON>, Vec<ApplyToError>) {
         if let JSON::Array(array) = data {
-            return self.apply_to_array(array, vars, input_path, errors);
+            return self.apply_to_array(array, vars, input_path);
         }
 
         let mut output = JSONMap::new();
+        let mut errors = Vec::new();
 
         match self {
             Self::Field(alias, key, selection) => {
@@ -194,8 +235,9 @@ impl ApplyToInternal for NamedSelection {
                 if let Some(child) = data.get(name) {
                     let output_name = alias.as_ref().map_or(name, |alias| alias.name());
                     if let Some(selection) = selection {
-                        let value =
-                            selection.apply_to_path(child, vars, &input_path_with_key, errors);
+                        let (value, apply_errors) =
+                            selection.apply_to_path(child, vars, &input_path_with_key);
+                        errors.extend(apply_errors);
                         if let Some(value) = value {
                             output.insert(output_name, value);
                         }
@@ -203,7 +245,7 @@ impl ApplyToInternal for NamedSelection {
                         output.insert(output_name, child.clone());
                     }
                 } else {
-                    errors.insert(ApplyToError::new(
+                    errors.push(ApplyToError::new(
                         format!(
                             "Property {} not found in {}",
                             key.dotted(),
@@ -215,20 +257,23 @@ impl ApplyToInternal for NamedSelection {
                 }
             }
             Self::Path(alias, path_selection) => {
-                let value = path_selection.apply_to_path(data, vars, input_path, errors);
-                if let Some(value) = value {
+                let (value_opt, apply_errors) =
+                    path_selection.apply_to_path(data, vars, input_path);
+                errors.extend(apply_errors);
+                if let Some(value) = value_opt {
                     output.insert(alias.name(), value);
                 }
             }
             Self::Group(alias, sub_selection) => {
-                let value = sub_selection.apply_to_path(data, vars, input_path, errors);
-                if let Some(value) = value {
+                let (value_opt, apply_errors) = sub_selection.apply_to_path(data, vars, input_path);
+                errors.extend(apply_errors);
+                if let Some(value) = value_opt {
                     output.insert(alias.name(), value);
                 }
             }
         };
 
-        Some(JSON::Object(output))
+        (Some(JSON::Object(output)), errors)
     }
 }
 
@@ -238,8 +283,7 @@ impl ApplyToInternal for PathSelection {
         data: &JSON,
         vars: &VarsWithPathsMap,
         input_path: &InputPath<JSON>,
-        errors: &mut IndexSet<ApplyToError>,
-    ) -> Option<JSON> {
+    ) -> (Option<JSON>, Vec<ApplyToError>) {
         match (self.path.as_ref(), vars.get(&KnownVariable::Dollar)) {
             // If this is a KeyPath, instead of using data as given, we need to
             // evaluate the path starting from the current value of $. To evaluate
@@ -247,15 +291,14 @@ impl ApplyToInternal for PathSelection {
             // method chaining like obj->has('a')->and(obj->has('b')), where both
             // obj references are interpreted as $.obj.
             (PathList::Key(_, _), Some((dollar_data, dollar_path))) => {
-                self.path
-                    .apply_to_path(dollar_data, vars, dollar_path, errors)
+                self.path.apply_to_path(dollar_data, vars, dollar_path)
             }
 
             // If $ is undefined for some reason, fall back to using data...
             // TODO: Since $ should never be undefined, we might want to
             // guarantee its existence at compile time, somehow.
             // (PathList::Key(_, _), None) => todo!(),
-            _ => self.path.apply_to_path(data, vars, input_path, errors),
+            _ => self.path.apply_to_path(data, vars, input_path),
         }
     }
 }
@@ -266,8 +309,7 @@ impl ApplyToInternal for WithRange<PathList> {
         data: &JSON,
         vars: &VarsWithPathsMap,
         input_path: &InputPath<JSON>,
-        errors: &mut IndexSet<ApplyToError>,
-    ) -> Option<JSON> {
+    ) -> (Option<JSON>, Vec<ApplyToError>) {
         match self.as_ref() {
             PathList::Var(ranged_var_name, tail) => {
                 let var_name = ranged_var_name.as_ref();
@@ -275,57 +317,66 @@ impl ApplyToInternal for WithRange<PathList> {
                     // We represent @ as a variable name in PathList::Var, but
                     // it is never stored in the vars map, because it is always
                     // shorthand for the current data value.
-                    tail.apply_to_path(data, vars, input_path, errors)
+                    tail.apply_to_path(data, vars, input_path)
                 } else if let Some((var_data, var_path)) = vars.get(var_name) {
                     // Variables are associated with a path, which is always
                     // just the variable name for named $variables other than $.
                     // For the special variable $, the path represents the
                     // sequence of keys from the root input data to the $ data.
-                    tail.apply_to_path(var_data, vars, var_path, errors)
+                    tail.apply_to_path(var_data, vars, var_path)
                 } else {
-                    errors.insert(ApplyToError::new(
-                        format!("Variable {} not found", var_name.as_str()),
-                        input_path.to_vec(),
-                        ranged_var_name.range(),
-                    ));
-                    None
+                    (
+                        None,
+                        vec![ApplyToError::new(
+                            format!("Variable {} not found", var_name.as_str()),
+                            input_path.to_vec(),
+                            ranged_var_name.range(),
+                        )],
+                    )
                 }
             }
             PathList::Key(key, tail) => {
                 if let JSON::Array(array) = data {
-                    return self.apply_to_array(array, vars, input_path, errors);
+                    return self.apply_to_array(array, vars, input_path);
                 }
 
                 let input_path_with_key = input_path.append(key.to_json());
 
                 if !matches!(data, JSON::Object(_)) {
-                    errors.insert(ApplyToError::new(
-                        format!(
-                            "Property {} not found in {}",
-                            key.dotted(),
-                            json_type_name(data),
-                        ),
-                        input_path_with_key.to_vec(),
-                        key.range(),
-                    ));
-                    return None;
+                    return (
+                        None,
+                        vec![ApplyToError::new(
+                            format!(
+                                "Property {} not found in {}",
+                                key.dotted(),
+                                json_type_name(data),
+                            ),
+                            input_path_with_key.to_vec(),
+                            key.range(),
+                        )],
+                    );
                 }
 
                 if let Some(child) = data.get(key.as_str()) {
-                    tail.apply_to_path(child, vars, &input_path_with_key, errors)
+                    tail.apply_to_path(child, vars, &input_path_with_key)
                 } else {
-                    errors.insert(ApplyToError::new(
-                        format!(
-                            "Property {} not found in {}",
-                            key.dotted(),
-                            json_type_name(data),
-                        ),
-                        input_path_with_key.to_vec(),
-                        key.range(),
-                    ));
-                    None
+                    (
+                        None,
+                        vec![ApplyToError::new(
+                            format!(
+                                "Property {} not found in {}",
+                                key.dotted(),
+                                json_type_name(data),
+                            ),
+                            input_path_with_key.to_vec(),
+                            key.range(),
+                        )],
+                    )
                 }
             }
+            PathList::Expr(expr, tail) => expr
+                .apply_to_path(data, vars, input_path)
+                .and_then_collecting_errors(|value| tail.apply_to_path(value, vars, input_path)),
             PathList::Method(method_name, method_args, tail) => {
                 if let Some(method) = lookup_arrow_method(method_name) {
                     method(
@@ -335,24 +386,23 @@ impl ApplyToInternal for WithRange<PathList> {
                         vars,
                         input_path,
                         tail,
-                        errors,
                     )
                 } else {
-                    errors.insert(ApplyToError::new(
-                        format!("Method ->{} not found", method_name.as_ref()),
-                        input_path.to_vec(),
-                        method_name.range(),
-                    ));
-                    None
+                    (
+                        None,
+                        vec![ApplyToError::new(
+                            format!("Method ->{} not found", method_name.as_ref()),
+                            input_path.to_vec(),
+                            method_name.range(),
+                        )],
+                    )
                 }
             }
-            PathList::Selection(selection) => {
-                selection.apply_to_path(data, vars, input_path, errors)
-            }
+            PathList::Selection(selection) => selection.apply_to_path(data, vars, input_path),
             PathList::Empty => {
                 // If data is not an object here, we want to preserve its value
                 // without an error.
-                Some(data.clone())
+                (Some(data.clone()), vec![])
             }
         }
     }
@@ -364,34 +414,35 @@ impl ApplyToInternal for WithRange<LitExpr> {
         data: &JSON,
         vars: &VarsWithPathsMap,
         input_path: &InputPath<JSON>,
-        errors: &mut IndexSet<ApplyToError>,
-    ) -> Option<JSON> {
+    ) -> (Option<JSON>, Vec<ApplyToError>) {
         match self.as_ref() {
-            LitExpr::String(s) => Some(JSON::String(s.clone().into())),
-            LitExpr::Number(n) => Some(JSON::Number(n.clone())),
-            LitExpr::Bool(b) => Some(JSON::Bool(*b)),
-            LitExpr::Null => Some(JSON::Null),
+            LitExpr::String(s) => (Some(JSON::String(s.clone().into())), vec![]),
+            LitExpr::Number(n) => (Some(JSON::Number(n.clone())), vec![]),
+            LitExpr::Bool(b) => (Some(JSON::Bool(*b)), vec![]),
+            LitExpr::Null => (Some(JSON::Null), vec![]),
             LitExpr::Object(map) => {
                 let mut output = JSONMap::with_capacity(map.len());
+                let mut errors = Vec::new();
                 for (key, value) in map {
-                    if let Some(value_json) = value.apply_to_path(data, vars, input_path, errors) {
+                    let (value_opt, apply_errors) = value.apply_to_path(data, vars, input_path);
+                    errors.extend(apply_errors);
+                    if let Some(value_json) = value_opt {
                         output.insert(key.as_str(), value_json);
                     }
                 }
-                Some(JSON::Object(output))
+                (Some(JSON::Object(output)), errors)
             }
             LitExpr::Array(vec) => {
                 let mut output = Vec::with_capacity(vec.len());
+                let mut errors = Vec::new();
                 for value in vec {
-                    output.push(
-                        value
-                            .apply_to_path(data, vars, input_path, errors)
-                            .unwrap_or(JSON::Null),
-                    );
+                    let (value_opt, apply_errors) = value.apply_to_path(data, vars, input_path);
+                    errors.extend(apply_errors);
+                    output.push(value_opt.unwrap_or(JSON::Null));
                 }
-                Some(JSON::Array(output))
+                (Some(JSON::Array(output)), errors)
             }
-            LitExpr::Path(path) => path.apply_to_path(data, vars, input_path, errors),
+            LitExpr::Path(path) => path.apply_to_path(data, vars, input_path),
         }
     }
 }
@@ -402,10 +453,9 @@ impl ApplyToInternal for SubSelection {
         data: &JSON,
         vars: &VarsWithPathsMap,
         input_path: &InputPath<JSON>,
-        errors: &mut IndexSet<ApplyToError>,
-    ) -> Option<JSON> {
+    ) -> (Option<JSON>, Vec<ApplyToError>) {
         if let JSON::Array(array) = data {
-            return self.apply_to_array(array, vars, input_path, errors);
+            return self.apply_to_array(array, vars, input_path);
         }
 
         let vars: VarsWithPathsMap = {
@@ -420,10 +470,12 @@ impl ApplyToInternal for SubSelection {
         };
 
         let mut output = JSONMap::new();
+        let mut errors = Vec::new();
         let mut input_names = IndexSet::default();
 
         for named_selection in self.selections.iter() {
-            let value = named_selection.apply_to_path(data, &vars, input_path, errors);
+            let (value, apply_errors) = named_selection.apply_to_path(data, &vars, input_path);
+            errors.extend(apply_errors);
 
             // If value is an object, extend output with its keys and their values.
             if let Some(JSON::Object(key_and_value)) = value {
@@ -474,9 +526,10 @@ impl ApplyToInternal for SubSelection {
                 let mut star_output = JSONMap::new();
                 for (key, value) in &data_map {
                     if !input_names.contains(key.as_str()) {
-                        if let Some(selected) =
-                            selection.apply_to_path(value, &vars, input_path, errors)
-                        {
+                        let (selected_opt, apply_errors) =
+                            selection.apply_to_path(value, &vars, input_path);
+                        errors.extend(apply_errors);
+                        if let Some(selected) = selected_opt {
                             star_output.insert(key.clone(), selected);
                         }
                     }
@@ -491,9 +544,10 @@ impl ApplyToInternal for SubSelection {
             }) => {
                 for (key, value) in &data_map {
                     if !input_names.contains(key.as_str()) {
-                        if let Some(selected) =
-                            selection.apply_to_path(value, &vars, input_path, errors)
-                        {
+                        let (selected_opt, apply_errors) =
+                            selection.apply_to_path(value, &vars, input_path);
+                        errors.extend(apply_errors);
+                        if let Some(selected) = selected_opt {
                             output.insert(key.clone(), selected);
                         }
                     }
@@ -516,10 +570,10 @@ impl ApplyToInternal for SubSelection {
         };
 
         if data_really_primitive && output.is_empty() {
-            return Some(data.clone());
+            return (Some(data.clone()), errors);
         }
 
-        Some(JSON::Object(output))
+        (Some(JSON::Object(output)), errors)
     }
 }
 
@@ -1377,6 +1431,234 @@ mod tests {
                 Some(json!({"__typename": "Product", "reviews": [{ "__typename": "Review" }] })),
                 vec![]
             )
+        );
+    }
+
+    #[test]
+    fn test_literal_expressions_in_parentheses() {
+        assert_eq!(
+            selection!("__typename: $('Product')").apply_to(&json!({})),
+            (Some(json!({"__typename": "Product"})), vec![]),
+        );
+
+        assert_eq!(
+            selection!(" __typename : 'Product' ").apply_to(&json!({})),
+            (
+                Some(json!({})),
+                vec![ApplyToError::new(
+                    "Property .\"Product\" not found in object".to_string(),
+                    vec![json!("Product")],
+                    Some(14..23),
+                )],
+            ),
+        );
+
+        assert_eq!(
+            selection!(
+                r#"
+                one: $(1)
+                two: $(2)
+                negativeThree: $(-  3)
+                true: $(true  )
+                false: $(  false)
+                null: $(null)
+                string: $("string")
+                array: $( [ 1 , 2 , 3 ] )
+                object: $( { "key" : "value" } )
+                path: $(nested.path)
+            "#
+            )
+            .apply_to(&json!({
+                "nested": {
+                    "path": "nested path value"
+                }
+            })),
+            (
+                Some(json!({
+                    "one": 1,
+                    "two": 2,
+                    "negativeThree": -3,
+                    "true": true,
+                    "false": false,
+                    "null": null,
+                    "string": "string",
+                    "array": [1, 2, 3],
+                    "object": { "key": "value" },
+                    "path": "nested path value",
+                })),
+                vec![],
+            ),
+        );
+
+        assert_eq!(
+            selection!(
+                r#"
+                one: $(1)->typeof
+                two: $(2)->typeof
+                negativeThree: $(-3)->typeof
+                true: $(true)->typeof
+                false: $(false)->typeof
+                null: $(null)->typeof
+                string: $("string")->typeof
+                array: $([1, 2, 3])->typeof
+                object: $({ "key": "value" })->typeof
+                path: $(nested.path)->typeof
+            "#
+            )
+            .apply_to(&json!({
+                "nested": {
+                    "path": 12345
+                }
+            })),
+            (
+                Some(json!({
+                    "one": "number",
+                    "two": "number",
+                    "negativeThree": "number",
+                    "true": "boolean",
+                    "false": "boolean",
+                    "null": "null",
+                    "string": "string",
+                    "array": "array",
+                    "object": "object",
+                    "path": "number",
+                })),
+                vec![],
+            ),
+        );
+
+        assert_eq!(
+            selection!(
+                r#"
+                items: $([
+                    1,
+                    -2.0,
+                    true,
+                    false,
+                    null,
+                    "string",
+                    [1, 2, 3],
+                    { "key": "value" },
+                    nested.path,
+                ])->map(@->typeof)
+            "#
+            )
+            .apply_to(&json!({
+                "nested": {
+                    "path": { "deeply": "nested" }
+                }
+            })),
+            (
+                Some(json!({
+                    "items": [
+                        "number",
+                        "number",
+                        "boolean",
+                        "boolean",
+                        "null",
+                        "string",
+                        "array",
+                        "object",
+                        "object",
+                    ],
+                })),
+                vec![],
+            ),
+        );
+
+        assert_eq!(
+            selection!(
+                r#"
+                $({
+                    one: 1,
+                    two: 2,
+                    negativeThree: -3,
+                    true: true,
+                    false: false,
+                    null: null,
+                    string: "string",
+                    array: [1, 2, 3],
+                    object: { "key": "value" },
+                    path: $ . nested . path ,
+                })->entries
+            "#
+            )
+            .apply_to(&json!({
+                "nested": {
+                    "path": "nested path value"
+                }
+            })),
+            (
+                Some(json!([
+                    { "key": "one", "value": 1 },
+                    { "key": "two", "value": 2 },
+                    { "key": "negativeThree", "value": -3 },
+                    { "key": "true", "value": true },
+                    { "key": "false", "value": false },
+                    { "key": "null", "value": null },
+                    { "key": "string", "value": "string" },
+                    { "key": "array", "value": [1, 2, 3] },
+                    { "key": "object", "value": { "key": "value" } },
+                    { "key": "path", "value": "nested path value" },
+                ])),
+                vec![],
+            ),
+        );
+
+        assert_eq!(
+            selection!(
+                r#"
+                $({
+                    string: $("string")->slice(1, 4),
+                    array: $([1, 2, 3])->map(@->add(10)),
+                    object: $({ "key": "value" })->get("key"),
+                    path: nested.path->slice($("nested ")->size),
+                    needlessParens: $("oyez"),
+                    withoutParens: "oyez",
+                })
+            "#
+            )
+            .apply_to(&json!({
+                "nested": {
+                    "path": "nested path value"
+                }
+            })),
+            (
+                Some(json!({
+                    "string": "tri",
+                    "array": [11, 12, 13],
+                    "object": "value",
+                    "path": "path value",
+                    "needlessParens": "oyez",
+                    "withoutParens": "oyez",
+                })),
+                vec![],
+            ),
+        );
+
+        assert_eq!(
+            selection!(
+                r#"
+                string: $("string")->slice(1, 4)
+                array: $([1, 2, 3])->map(@->add(10))
+                object: $({ "key": "value" })->get("key")
+                path: nested.path->slice($("nested ")->size)
+            "#
+            )
+            .apply_to(&json!({
+                "nested": {
+                    "path": "nested path value"
+                }
+            })),
+            (
+                Some(json!({
+                    "string": "tri",
+                    "array": [11, 12, 13],
+                    "object": "value",
+                    "path": "path value",
+                })),
+                vec![],
+            ),
         );
     }
 

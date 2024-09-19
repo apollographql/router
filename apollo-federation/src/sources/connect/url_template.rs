@@ -15,37 +15,39 @@ use url::Url;
 /// A parser accepting URLTemplate syntax, which is useful both for
 /// generating new URL paths from provided variables and for extracting variable
 /// values from concrete URL paths.
-#[derive(Debug, PartialEq, Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct URLTemplate {
     /// Scheme + host if this is an absolute URL
     pub base: Option<Url>,
     path: Vec<Component>,
-    query: IndexMap<String, Component>,
+    query: IndexMap<Component, Component>,
 }
 
 /// A single component of a path, like `/<component>` or a single query parameter, like `?<something>`.
 /// Each component can consist of multiple parts, which are either text or variables.
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Component {
     /// The parts, which together, make up the single path component or query parameter.
     parts: Vec<ValuePart>,
 }
 
 /// A piece of a path or query parameter, which is either static text or a variable.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum ValuePart {
     Text(String),
     Var(Variable),
 }
 
 impl URLTemplate {
-    // TODO: enforce that path params come from required schema elements
     pub fn path_variables(&self) -> impl Iterator<Item = &Variable> {
         self.path.iter().flat_map(Component::variables)
     }
 
     pub fn query_variables(&self) -> impl Iterator<Item = &Variable> {
-        self.query.values().flat_map(Component::variables)
+        self.query
+            .keys()
+            .chain(self.query.values())
+            .flat_map(Component::variables)
     }
     /// Return all variables in the template in the order they appeared
     pub fn variables(&self) -> impl Iterator<Item = &Variable> {
@@ -69,9 +71,7 @@ impl URLTemplate {
         self.query
             .iter()
             .filter_map(|(key, param_value)| {
-                param_value
-                    .interpolate(vars)
-                    .map(|value| (key.to_string(), value))
+                key.interpolate(vars).zip(param_value.interpolate(vars))
             })
             .collect()
     }
@@ -88,30 +88,34 @@ impl FromStr for URLTemplate {
 
     /// Top-level parsing entry point for URLTemplate syntax.
     fn from_str(input: &str) -> Result<Self, Self::Err> {
-        let (base, path) = if let Some((scheme, rest)) = input.split_once("://") {
-            if let Some((host, path)) = rest.split_once('/') {
-                (
-                    Some(
-                        Url::parse(&format!("{}://{}", scheme, host)).map_err(|err| Error {
-                            message: err.to_string(),
-                            location: Some(0..(input.len() - path.len())),
-                        })?,
-                    ),
-                    path,
-                )
+        let (raw_base, rest) = if let Some(end_of_scheme) = input.find("://") {
+            let start_of_authority = end_of_scheme + 3;
+            let rest_of_uri = &input[start_of_authority..];
+            let end_of_authority = rest_of_uri
+                .find('/')
+                .or_else(|| rest_of_uri.find('?'))
+                .or_else(|| rest_of_uri.find('#'))
+                .unwrap_or(rest_of_uri.len())
+                + start_of_authority;
+            let authority = Some(&input[..end_of_authority]);
+            if end_of_authority < input.len() {
+                (authority, Some(&input[end_of_authority..]))
             } else {
-                (
-                    Some(Url::parse(input).map_err(|err| Error {
-                        message: err.to_string(),
-                        location: None,
-                    })?),
-                    "",
-                )
+                (authority, None)
             }
         } else {
-            (None, input)
+            (None, Some(input))
         };
-        let mut prefix_suffix = path.splitn(2, '?');
+        let base = raw_base
+            .map(|raw_base| {
+                Url::parse(raw_base).map_err(|err| Error {
+                    message: err.to_string(),
+                    location: Some(0..raw_base.len()),
+                })
+            })
+            .transpose()?;
+
+        let mut prefix_suffix = rest.into_iter().flat_map(|rest| rest.splitn(2, '?'));
         let path_prefix = prefix_suffix.next();
         let query_suffix = prefix_suffix.next();
 
@@ -125,9 +129,18 @@ impl FromStr for URLTemplate {
         let query = query_suffix
             .into_iter()
             .flat_map(|query_suffix| query_suffix.split('&'))
-            .filter_map(|query_part| {
-                let (key, value) = query_part.split_once('=')?;
-                Some(Component::parse(value, input).map(|value| (key.to_string(), value)))
+            .map(|query_part| {
+                let (key, value) = query_part.split_once('=').ok_or_else(|| {
+                    let start = query_part.as_ptr() as usize - input.as_ptr() as usize;
+                    let end = start + query_part.len();
+                    Error {
+                        message: format!("Query parameter {query_part} must have a value"),
+                        location: Some(start..end),
+                    }
+                })?;
+                let key = Component::parse(key, input)?;
+                let value = Component::parse(value, input)?;
+                Ok((key, value))
             })
             .try_collect()?;
 
@@ -155,7 +168,7 @@ impl Display for URLTemplate {
                 } else {
                     f.write_str("&")?;
                 }
-                f.write_str(key)?;
+                key.fmt(f)?;
                 f.write_str("=")?;
                 param_value.fmt(f)?;
             }
@@ -339,7 +352,7 @@ pub enum VariableType {
 }
 
 impl VariableType {
-    const fn as_str(&self) -> &'static str {
+    pub(crate) const fn as_str(&self) -> &'static str {
         match self {
             VariableType::Args => "$args",
             VariableType::This => "$this",
@@ -409,7 +422,7 @@ impl Variable {
 
         let var_type = VariableType::from_str(var_type_str).map_err(|message| Error {
             message,
-            location: Some(location.clone()),
+            location: Some(location.start..location.start + var_type_str.len()),
         })?;
         let path = parts.join(".");
         if path.is_empty() {
@@ -417,6 +430,12 @@ impl Variable {
                 message: format!(
                     "Variable expression {input} must have a path after the variable type",
                 ),
+                location: Some(location),
+            });
+        }
+        if path.ends_with('.') {
+            return Err(Error {
+                message: format!("Variable expression {input} must not end with a period",),
                 location: Some(location),
             });
         }
@@ -496,7 +515,39 @@ mod test_parse {
             err.message,
             "Variable type must be one of $args, $this, $config, got $blah"
         );
-        assert_eq!(err.location, Some(12..23));
+        assert_eq!(err.location, Some(12..17));
+    }
+
+    #[test]
+    fn basic_absolute_url() {
+        assert_debug_snapshot!(URLTemplate::from_str("http://example.com"));
+    }
+
+    #[test]
+    fn absolute_url_with_path() {
+        assert_debug_snapshot!(URLTemplate::from_str("http://example.com/abc/def"));
+    }
+
+    #[test]
+    fn absolute_url_with_path_variable() {
+        assert_debug_snapshot!(URLTemplate::from_str("http://example.com/{$args.abc}/def"));
+    }
+
+    #[test]
+    fn absolute_url_with_query() {
+        assert_debug_snapshot!(URLTemplate::from_str("http://example.com?abc=def"));
+    }
+
+    #[test]
+    fn absolute_url_with_query_variable() {
+        assert_debug_snapshot!(URLTemplate::from_str("http://example.com?abc={$args.abc}"));
+    }
+
+    #[test]
+    fn variable_param_key() {
+        assert_debug_snapshot!(URLTemplate::from_str(
+            "?{$args.filter.field}={$args.filter.value}"
+        ));
     }
 }
 
@@ -511,4 +562,49 @@ fn test_display_trait(#[case] template: &str) {
         URLTemplate::from_str(template).unwrap().to_string(),
         template.to_string()
     );
+}
+
+#[cfg(test)]
+mod test_interpolate {
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+
+    #[test]
+    fn query_key_variable() {
+        let template = URLTemplate::from_str("?{$args.filter.field}={$args.filter.value}").unwrap();
+        let mut vars = Map::new();
+        assert_eq!(
+            template.interpolate_query(&vars),
+            Vec::new(),
+            "When there are no variables, there should be no query parameters"
+        );
+
+        vars.insert(
+            ByteString::from("$args.filter.field"),
+            JSON::String(ByteString::from("name")),
+        );
+        assert_eq!(
+            template.interpolate_query(&vars),
+            Vec::new(),
+            "When a query param value is missing, the query parameter should be skipped"
+        );
+
+        vars.insert(
+            ByteString::from("$args.filter.value"),
+            JSON::String(ByteString::from("value")),
+        );
+        assert_eq!(
+            template.interpolate_query(&vars),
+            vec![("name".to_string(), "value".to_string())],
+            "When both variables present, query parameter interpolated"
+        );
+
+        vars.remove("$args.filter.field");
+        assert_eq!(
+            template.interpolate_query(&vars),
+            Vec::new(),
+            "Missing key, query parameter skipped"
+        );
+    }
 }
