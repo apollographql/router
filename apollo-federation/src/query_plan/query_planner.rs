@@ -1,10 +1,11 @@
 use std::cell::Cell;
 use std::num::NonZeroU32;
+use std::ops::Deref;
 use std::sync::Arc;
 
+use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
-use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
@@ -48,7 +49,6 @@ use crate::utils::logging::snapshot;
 use crate::ApiSchemaOptions;
 use crate::Supergraph;
 
-pub(crate) const OVERRIDE_LABEL_ARG_NAME: &str = "overrideLabel";
 pub(crate) const CONTEXT_DIRECTIVE: &str = "context";
 pub(crate) const JOIN_FIELD: &str = "join__field";
 
@@ -196,6 +196,28 @@ impl QueryPlannerConfig {
     }
 }
 
+#[derive(Debug, Default, Clone)]
+pub struct QueryPlanOptions {
+    /// A set of labels which will be used _during query planning_ to
+    /// enable/disable edges with a matching label in their override condition.
+    /// Edges with override conditions require their label to be present or absent
+    /// from this set in order to be traversable. These labels enable the
+    /// progressive @override feature.
+    // PORT_NOTE: In JS implementation this was a Map
+    pub override_conditions: Vec<String>,
+}
+
+#[derive(Debug, Default, Clone)]
+pub(crate) struct EnabledOverrideConditions(HashSet<String>);
+
+impl Deref for EnabledOverrideConditions {
+    type Target = HashSet<String>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 pub struct QueryPlanner {
     config: QueryPlannerConfig,
     federated_query_graph: Arc<QueryGraph>,
@@ -308,11 +330,6 @@ impl QueryPlanner {
             .filter(|position| is_inconsistent(position.clone()))
             .collect::<IndexSet<_>>();
 
-        // PORT_NOTE: JS prepares a map of override conditions here, which is
-        // a map where the keys are all `@join__field(overrideLabel:)` argument values
-        // and the values are all initialised to `false`. Instead of doing that, we should
-        // be able to use a Set where presence means `true` and absence means `false`.
-
         Ok(Self {
             config,
             federated_query_graph: Arc::new(query_graph),
@@ -339,6 +356,7 @@ impl QueryPlanner {
         &self,
         document: &Valid<ExecutableDocument>,
         operation_name: Option<Name>,
+        options: QueryPlanOptions,
     ) -> Result<QueryPlan, FederationError> {
         let operation = document
             .operations
@@ -482,7 +500,9 @@ impl QueryPlanner {
                 .clone()
                 .into(),
             config: self.config.clone(),
-            // PORT_NOTE: JS provides `override_conditions` here: see port note in `QueryPlanner::new`.
+            override_conditions: EnabledOverrideConditions(HashSet::from_iter(
+                options.override_conditions,
+            )),
         };
 
         let root_node = match defer_conditions {
@@ -549,59 +569,6 @@ impl QueryPlanner {
     }
 
     fn check_unsupported_features(supergraph: &Supergraph) -> Result<(), FederationError> {
-        // We have a *progressive* override when `join__field` has a
-        // non-null value for `overrideLabel` field.
-        //
-        // This looks at object types' fields and their directive
-        // applications, looking specifically for `@join__field`
-        // arguments list.
-        let has_progressive_overrides = supergraph
-            .schema
-            .schema()
-            .types
-            .values()
-            .filter_map(|extended_type| {
-                // The override label args can be only on ObjectTypes
-                if let ExtendedType::Object(object_type) = extended_type {
-                    Some(object_type)
-                } else {
-                    None
-                }
-            })
-            .flat_map(|object_type| &object_type.fields)
-            .flat_map(|(_, field)| {
-                field
-                    .directives
-                    .iter()
-                    .filter(|d| d.name.as_str() == JOIN_FIELD)
-            })
-            .any(|join_directive| {
-                if let Some(override_label_arg) =
-                    join_directive.argument_by_name(OVERRIDE_LABEL_ARG_NAME)
-                {
-                    // Any argument value for `overrideLabel` that's not
-                    // null can be considered as progressive override usage
-                    if !override_label_arg.is_null() {
-                        return true;
-                    }
-                    return false;
-                }
-                false
-            });
-        if has_progressive_overrides {
-            let message = "\
-                `experimental_query_planner_mode: new` or `both` cannot yet \
-                be used with progressive overrides. \
-                Remove uses of progressive overrides to try the experimental query planner, \
-                otherwise switch back to `legacy` or `both_best_effort`.\
-            ";
-            return Err(SingleFederationError::UnsupportedFeature {
-                message: message.to_owned(),
-                kind: crate::error::UnsupportedFeatureKind::ProgressiveOverrides,
-            }
-            .into());
-        }
-
         // We will only check for `@context` direcive, since
         // `@fromContext` can only be used if `@context` is already
         // applied, and we assume a correctly composed supergraph.
@@ -1102,7 +1069,9 @@ type User
             "operation.graphql",
         )
         .unwrap();
-        let plan = planner.build_query_plan(&document, None).unwrap();
+        let plan = planner
+            .build_query_plan(&document, None, Default::default())
+            .unwrap();
         insta::assert_snapshot!(plan, @r###"
         QueryPlan {
           Fetch(service: "accounts") {
@@ -1134,7 +1103,9 @@ type User
             "operation.graphql",
         )
         .unwrap();
-        let plan = planner.build_query_plan(&document, None).unwrap();
+        let plan = planner
+            .build_query_plan(&document, None, Default::default())
+            .unwrap();
         insta::assert_snapshot!(plan, @r###"
         QueryPlan {
           Sequence {
@@ -1223,7 +1194,9 @@ type User
             "operation.graphql",
         )
         .unwrap();
-        let plan = planner.build_query_plan(&document, None).unwrap();
+        let plan = planner
+            .build_query_plan(&document, None, Default::default())
+            .unwrap();
         insta::assert_snapshot!(plan, @r###"
               QueryPlan {
                 Parallel {
@@ -1334,7 +1307,9 @@ type User
         let mut config = QueryPlannerConfig::default();
         config.debug.bypass_planner_for_single_subgraph = true;
         let planner = QueryPlanner::new(&supergraph, config).unwrap();
-        let plan = planner.build_query_plan(&document, None).unwrap();
+        let plan = planner
+            .build_query_plan(&document, None, Default::default())
+            .unwrap();
         insta::assert_snapshot!(plan, @r###"
         QueryPlan {
           Fetch(service: "A") {
@@ -1378,7 +1353,9 @@ type User
         .unwrap();
 
         let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
-        let plan = planner.build_query_plan(&document, None).unwrap();
+        let plan = planner
+            .build_query_plan(&document, None, Default::default())
+            .unwrap();
         insta::assert_snapshot!(plan, @r###"
         QueryPlan {
           Fetch(service: "accounts") {
@@ -1437,7 +1414,9 @@ type User
         .unwrap();
 
         let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
-        let plan = planner.build_query_plan(&document, None).unwrap();
+        let plan = planner
+            .build_query_plan(&document, None, Default::default())
+            .unwrap();
         insta::assert_snapshot!(plan, @r###"
         QueryPlan {
           Fetch(service: "accounts") {
@@ -1497,7 +1476,9 @@ type User
         .unwrap();
 
         let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
-        let plan = planner.build_query_plan(&document, None).unwrap();
+        let plan = planner
+            .build_query_plan(&document, None, Default::default())
+            .unwrap();
         // Make sure `fragment F2` contains `...F1`.
         insta::assert_snapshot!(plan, @r###"
         QueryPlan {
@@ -1554,7 +1535,9 @@ type User
             "operation.graphql",
         )
         .unwrap();
-        let plan = planner.build_query_plan(&document, None).unwrap();
+        let plan = planner
+            .build_query_plan(&document, None, Default::default())
+            .unwrap();
         insta::assert_snapshot!(plan, @r###"
         QueryPlan {
           Fetch(service: "Subgraph1") {
