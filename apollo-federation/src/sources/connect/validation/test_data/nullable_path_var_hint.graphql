@@ -1,0 +1,11 @@
+extend schema
+@link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect"])
+
+type Query {
+    something(isNull: String): String @connect(http: { GET: "http://example.com/{$args.isNull}" }, selection: "$")
+    nestedNull(nullabled: Nullable): String @connect(http: { GET: "http://example.com/{$args.nullabled.notNull}" }, selection: "$")
+}
+
+input Nullable {
+    notNull: String!
+}

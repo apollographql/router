@@ -515,7 +515,7 @@ mod test_parse {
             err.message,
             "Variable type must be one of $args, $this, $config, got $blah"
         );
-        assert_eq!(err.location, Some(12..23));
+        assert_eq!(err.location, Some(12..17));
     }
 
     #[test]

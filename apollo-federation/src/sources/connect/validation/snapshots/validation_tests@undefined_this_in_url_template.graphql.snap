@@ -10,7 +10,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/undefined
         locations: [
             LineColumn {
                 line: 10,
-                column: 39,
+                column: 45,
             }..LineColumn {
                 line: 10,
                 column: 49,
@@ -23,7 +23,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/undefined
         locations: [
             LineColumn {
                 line: 10,
-                column: 62,
+                column: 68,
             }..LineColumn {
                 line: 10,
                 column: 77,

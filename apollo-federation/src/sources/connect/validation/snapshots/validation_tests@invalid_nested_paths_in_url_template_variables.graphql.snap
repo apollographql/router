@@ -10,7 +10,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_n
         locations: [
             LineColumn {
                 line: 10,
-                column: 49,
+                column: 62,
             }..LineColumn {
                 line: 10,
                 column: 66,
@@ -23,7 +23,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_n
         locations: [
             LineColumn {
                 line: 15,
-                column: 49,
+                column: 61,
             }..LineColumn {
                 line: 15,
                 column: 81,
@@ -36,7 +36,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_n
         locations: [
             LineColumn {
                 line: 20,
-                column: 47,
+                column: 58,
             }..LineColumn {
                 line: 20,
                 column: 72,
@@ -49,7 +49,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_n
         locations: [
             LineColumn {
                 line: 29,
-                column: 49,
+                column: 55,
             }..LineColumn {
                 line: 29,
                 column: 75,

@@ -153,7 +153,7 @@ fn validate_variable<'schema>(
     url_value: &str,
     coordinate: HttpMethodCoordinate<'schema>,
     schema: &'schema Schema,
-) -> Result<Option<&'schema Type>, Message> {
+) -> Result<Option<Type>, Message> {
     let field_coordinate = coordinate.connect.field_coordinate;
     let field = field_coordinate.field;
     let mut path = variable.path.split('.');
@@ -177,7 +177,7 @@ fn validate_variable<'schema>(
                         Some(path_component_start..path_component_end),
                     )
                 }
-            }).map(|arg| &arg.ty)?
+            }).map(|arg| arg.ty.as_ref().clone())?
         }
         VariableType::This => {
             field_coordinate.object.fields.get(path_root).ok_or_else(||Message {
@@ -191,14 +191,15 @@ fn validate_variable<'schema>(
                         url_value,
                         Some(path_component_start..path_component_end),
                     )
-                }).map(|field| &field.ty)?
+                }).map(|field| field.ty.clone())?
         }
     };
 
     for nested_field_name in path {
         path_component_start = path_component_end + 1; // Past the last component and its dot
         path_component_end = path_component_start + nested_field_name.len();
-        variable_type = resolve_type(schema, variable_type, field_coordinate.field)
+        let parent_is_nullable = !variable_type.is_non_null();
+        variable_type = resolve_type(schema, &variable_type, field_coordinate.field)
             .and_then(|extended_type| {
                 match extended_type {
                     ExtendedType::Enum(_) | ExtendedType::Scalar(_) => None,
@@ -231,7 +232,10 @@ fn validate_variable<'schema>(
                             Some(path_component_start..path_component_end),
                         )
                     })
-            })?;
+            })?.clone();
+        if parent_is_nullable && variable_type.is_non_null() {
+            variable_type = variable_type.nullable();
+        }
     }
 
     Ok(Some(variable_type))

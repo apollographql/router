@@ -23,7 +23,13 @@ Ok(
         ),
         path: [],
         query: {
-            "abc": Component {
+            Component {
+                parts: [
+                    Text(
+                        "abc",
+                    ),
+                ],
+            }: Component {
                 parts: [
                     Text(
                         "def",
