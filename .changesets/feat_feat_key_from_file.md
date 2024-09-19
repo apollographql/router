@@ -4,4 +4,6 @@ Users sometimes would rather not pass sensitive keys to the router through envir
 
 This addresses a portion of #3264, specifically the APOLLO_KEY.
 
+Note: This feature is not available on Windows.
+
 By [@lleadbet](https://github.com/lleadbet) in https://github.com/apollographql/router/pull/5917
