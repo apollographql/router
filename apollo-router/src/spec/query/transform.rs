@@ -251,6 +251,12 @@ pub(crate) fn operation(
         return Ok(None);
     };
 
+    for directive in def.directives.iter() {
+        for argument in directive.arguments.iter() {
+            used_variables_from_value(visitor, &argument.value);
+        }
+    }
+
     Ok(Some(ast::OperationDefinition {
         name: def.name.clone(),
         operation_type: def.operation_type,
@@ -271,6 +277,13 @@ pub(crate) fn fragment_definition(
     else {
         return Ok(None);
     };
+
+    for directive in def.directives.iter() {
+        for argument in directive.arguments.iter() {
+            used_variables_from_value(visitor, &argument.value);
+        }
+    }
+
     Ok(Some(ast::FragmentDefinition {
         name: def.name.clone(),
         type_condition: def.type_condition.clone(),
@@ -294,22 +307,12 @@ pub(crate) fn field(
     };
 
     for argument in def.arguments.iter() {
-        if let Some(var) = argument.value.as_variable() {
-            visitor
-                .state()
-                .used_variables
-                .insert(var.as_str().to_string());
-        }
+        used_variables_from_value(visitor, &argument.value);
     }
 
     for directive in def.directives.iter() {
         for argument in directive.arguments.iter() {
-            if let Some(var) = argument.value.as_variable() {
-                visitor
-                    .state()
-                    .used_variables
-                    .insert(var.as_str().to_string());
-            }
+            used_variables_from_value(visitor, &argument.value);
         }
     }
 
@@ -336,12 +339,7 @@ pub(crate) fn fragment_spread(
 
     for directive in def.directives.iter() {
         for argument in directive.arguments.iter() {
-            if let Some(var) = argument.value.as_variable() {
-                visitor
-                    .state()
-                    .used_variables
-                    .insert(var.as_str().to_string());
-            }
+            used_variables_from_value(visitor, &argument.value);
         }
     }
 
@@ -362,12 +360,7 @@ pub(crate) fn inline_fragment(
 
     for directive in def.directives.iter() {
         for argument in directive.arguments.iter() {
-            if let Some(var) = argument.value.as_variable() {
-                visitor
-                    .state()
-                    .used_variables
-                    .insert(var.as_str().to_string());
-            }
+            used_variables_from_value(visitor, &argument.value);
         }
     }
 
@@ -422,6 +415,31 @@ pub(crate) fn selection_set(
         }
     }
     Ok((!selections.is_empty()).then_some(selections))
+}
+
+fn used_variables_from_value<V: Visitor>(
+    visitor: &mut V,
+    argument_value: &apollo_compiler::ast::Value,
+) {
+    match argument_value {
+        apollo_compiler::ast::Value::Variable(name) => {
+            visitor
+                .state()
+                .used_variables
+                .insert(name.as_str().to_string());
+        }
+        apollo_compiler::ast::Value::List(values) => {
+            for value in values {
+                used_variables_from_value(visitor, value);
+            }
+        }
+        apollo_compiler::ast::Value::Object(values) => {
+            for (_, value) in values {
+                used_variables_from_value(visitor, value);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// this visitor goes through the list of fragments in the query, looking at fragment spreads
@@ -705,6 +723,7 @@ fragment F on Query {
     }
     directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
     directive @remove on FIELD | INLINE_FRAGMENT | FRAGMENT_SPREAD
+    directive @hasArg(arg: String!) on QUERY | FRAGMENT_DEFINITION | INLINE_FRAGMENT | FRAGMENT_SPREAD
     scalar link__Import
       enum link__Purpose {
       """
@@ -722,6 +741,17 @@ fragment F on Query {
         a(arg: String): String
         b: Obj
         c: Int
+        d(arg: [String]): String
+        e(arg: Inp): String
+        f(arg: [[String]]): String
+        g(arg: [Inp]): String
+
+    }
+
+    input Inp {
+        a: String
+        b: String
+        c: [String]
     }
 
     type Obj {
@@ -824,6 +854,122 @@ fragment F on Query {
                 a(arg: $a) @remove
             }
             "#;
+        let doc = ast::Document::parse(query, "query.graphql").unwrap();
+        let result = document(&mut visitor, &doc).unwrap();
+        insta::assert_snapshot!(TestResult { query, result });
+
+        // test removed field with variable in list argument
+        let query = r#"
+            query($a: String, $b: String) {
+                c
+                d(arg: ["a", $a, "b"]) @remove
+                aliased: d(arg: [$b])
+            }
+            "#;
+        let doc = ast::Document::parse(query, "query.graphql").unwrap();
+        let result = document(&mut visitor, &doc).unwrap();
+        insta::assert_snapshot!(TestResult { query, result });
+
+        // test removed field with variable in input argument
+        let query = r#"
+            query($a: String, $b: String) {
+                c
+                e(arg:  {a: $a, b: "b"}) @remove
+                aliased:  e(arg:  {a: "a", b: $b})
+            }
+            "#;
+        let doc = ast::Document::parse(query, "query.graphql").unwrap();
+        let result = document(&mut visitor, &doc).unwrap();
+        insta::assert_snapshot!(TestResult { query, result });
+
+        // test removed field with variable in directive on operation and fragment
+        let query = r#"
+            query Test($a: String, $b: String, $c: String) @hasArg(arg: $a) {
+                ...TestFragment
+                ...TestFragment2
+                c
+            }
+
+            fragment TestFragment on Query @hasArg(arg: $b) {
+                __typename @remove
+            }
+
+            fragment TestFragment2 on Query @hasArg(arg: $c) {
+                __typename
+            }
+            "#;
+        let doc = ast::Document::parse(query, "query.graphql").unwrap();
+        let result = document(&mut visitor, &doc).unwrap();
+        insta::assert_snapshot!(TestResult { query, result });
+
+        // test removed field with variable in directive on fragment spread
+        let query = r#"
+            query Test($a: String, $b: String) {
+                ...TestFragment @hasArg(arg: $a)
+                ...TestFragment2 @hasArg(arg: $b)
+                c
+            }
+
+            fragment TestFragment on Query {
+                __typename @remove
+            }
+
+            fragment TestFragment2 on Query {
+                __typename
+            }
+            "#;
+        let doc = ast::Document::parse(query, "query.graphql").unwrap();
+        let result = document(&mut visitor, &doc).unwrap();
+        insta::assert_snapshot!(TestResult { query, result });
+
+        // test removed field with variable in directive on inline fragment
+        let query = r#"
+            query Test($a: String, $b: String) {
+                ... @hasArg(arg: $a) {
+                  c @remove
+                }
+                ... @hasArg(arg: $b) {
+                  test: c
+                }
+                c
+            }
+            "#;
+        let doc = ast::Document::parse(query, "query.graphql").unwrap();
+        let result = document(&mut visitor, &doc).unwrap();
+        insta::assert_snapshot!(TestResult { query, result });
+
+        // test removed field with variable in nested list argument
+        let query = r#"
+         query($a: String, $b: String) {
+             c
+             f(arg: [["a"], [$a], ["b"]]) @remove
+             aliased: f(arg: [["a"], [$b]])
+         }
+         "#;
+        let doc = ast::Document::parse(query, "query.graphql").unwrap();
+        let result = document(&mut visitor, &doc).unwrap();
+        insta::assert_snapshot!(TestResult { query, result });
+
+        // test removed field with variable in input type in list argument
+        let query = r#"
+         query($a: String, $b: String) {
+             c
+             g(arg: [{a: $a}, {a: "a"}]) @remove
+             aliased: g(arg: [{a: "a"}, {a: $b}])
+         }
+         "#;
+        let doc = ast::Document::parse(query, "query.graphql").unwrap();
+        let result = document(&mut visitor, &doc).unwrap();
+        insta::assert_snapshot!(TestResult { query, result });
+
+        // test removed field with variable in list in input type argument
+        let query = r#"
+         query($a: String, $b: String) {
+             c
+             e(arg: {c: [$a]}) @remove
+             aliased: e(arg: {c: [$b]})
+         }
+         "#;
         let doc = ast::Document::parse(query, "query.graphql").unwrap();
         let result = document(&mut visitor, &doc).unwrap();
         insta::assert_snapshot!(TestResult { query, result });
