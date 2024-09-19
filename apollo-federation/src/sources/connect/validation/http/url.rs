@@ -51,7 +51,7 @@ pub(crate) fn validate_template(
                 messages.push(Message {
                     code: Code::NullablePathVariable,
                     message: format!(
-                        "Variables in path parameters should be non-null, but {coordinate} contains `{{{variable}}}` which is nullable.\
+                        "Variables in path parameters should be non-null, but {coordinate} contains `{{{variable}}}` which is nullable. \
                          If a null value is provided at runtime, the request will fail.",
                     ),
                     locations: select_substring_location(
