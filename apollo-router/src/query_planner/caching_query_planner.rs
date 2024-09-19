@@ -393,6 +393,11 @@ impl CachingQueryPlanner<BridgeQueryPlannerPool> {
     ) -> Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>> {
         self.delegate.subgraph_schemas()
     }
+
+    pub(crate) fn activate(&self) {
+        self.cache.activate();
+        self.delegate.activate();
+    }
 }
 
 impl<T: Clone + Send + 'static> tower::Service<query_planner::CachingRequest>

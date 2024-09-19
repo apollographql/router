@@ -220,3 +220,72 @@ async fn test_graphql_metrics() {
             .assert_metrics_contains(r#"custom_histogram_sum{graphql_field_name="topProducts",graphql_field_type="Product",graphql_type_name="Query",otel_scope_name="apollo/router"} 3"#, None)
             .await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_gauges_on_reload() {
+    let mut router = IntegrationTest::builder()
+        .config(include_str!("fixtures/no-telemetry.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    router.execute_default_query().await;
+    router.update_config(PROMETHEUS_CONFIG).await;
+    router.assert_reloaded().await;
+
+    // Regular query
+    router.execute_default_query().await;
+
+    // Introspection query
+    router
+        .execute_query(&json!({"query":"{__schema {types {name}}}","variables":{}}))
+        .await;
+
+    // Persisted query
+    router
+        .execute_query(
+            &json!({"query": "{__typename}", "variables":{}, "extensions": {"persistedQuery":{"version" : 1, "sha256Hash" : "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38"}}})
+        )
+        .await;
+
+    router
+        .assert_metrics_contains(r#"apollo_router_cache_storage_estimated_size{kind="query planner",type="memory",otel_scope_name="apollo/router"} "#, None)
+        .await;
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_query_planning_queued{otel_scope_name="apollo/router"} "#,
+            None,
+        )
+        .await;
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_v8_heap_total_bytes{otel_scope_name="apollo/router"} "#,
+            None,
+        )
+        .await;
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_v8_heap_total_bytes{otel_scope_name="apollo/router"} "#,
+            None,
+        )
+        .await;
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_cache_size{kind="APQ",type="memory",otel_scope_name="apollo/router"} 1"#,
+            None,
+        )
+        .await;
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_cache_size{kind="query planner",type="memory",otel_scope_name="apollo/router"} 3"#,
+            None,
+        )
+        .await;
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_cache_size{kind="introspection",type="memory",otel_scope_name="apollo/router"} 1"#,
+            None,
+        )
+        .await;
+}
