@@ -12,7 +12,7 @@
 //!
 //! The snapshot server can be started from tests by calling the [`SnapshotServer::spawn`] method,
 //! or as a standalone application by invoking [`standalone::main`]. In the latter case, there
-//! is a binary wrapper in `snapshot_main.rs` that can be run like this:
+//! is a binary wrapper in `http_snapshot_main` that can be run like this:
 //!
 //! `cargo run --bin snapshot --features="snapshot" -- --snapshot-path <file> --url <base URL to snapshot> [--offline] [--update] [--port <port number>]`
 //!

@@ -1429,7 +1429,7 @@ mod quickstart_tests {
     use http::Uri;
 
     use super::*;
-    use crate::http_snapshot::SnapshotServer;
+    use crate::test_harness::http_snapshot::SnapshotServer;
 
     const SNAPSHOT_DIR: &str = "./src/plugins/connectors/testdata/quickstart_api_snapshots/";
 

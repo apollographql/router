@@ -66,8 +66,6 @@ mod files;
 pub mod graphql;
 mod http_ext;
 mod http_server_factory;
-#[cfg(any(feature = "snapshot", test))]
-mod http_snapshot;
 mod introspection;
 pub mod layers;
 pub(crate) mod logging;
@@ -93,10 +91,6 @@ pub use crate::context::extensions::Extensions;
 pub use crate::context::Context;
 pub use crate::executable::main;
 pub use crate::executable::Executable;
-#[cfg(feature = "snapshot")]
-pub use crate::http_snapshot::standalone::main as snapshot_server;
-#[cfg(feature = "snapshot")]
-pub use crate::http_snapshot::SnapshotServer;
 pub use crate::notification::Notify;
 pub use crate::router::ApolloRouterError;
 pub use crate::router::ConfigurationSource;
@@ -105,6 +99,10 @@ pub use crate::router::RouterHttpServer;
 pub use crate::router::SchemaSource;
 pub use crate::router::ShutdownSource;
 pub use crate::router_factory::Endpoint;
+#[cfg(feature = "snapshot")]
+pub use crate::test_harness::http_snapshot::standalone::main as snapshot_server;
+#[cfg(feature = "snapshot")]
+pub use crate::test_harness::http_snapshot::SnapshotServer;
 pub use crate::test_harness::make_fake_batch;
 pub use crate::test_harness::MockedSubgraphs;
 pub use crate::test_harness::TestHarness;

@@ -390,7 +390,7 @@ required-features = ["snapshot"]
 
 [[bin]]
 name = "snapshot"
-path = "src/snapshot_main.rs"
+path = "src/test_harness/http_snapshot_main.rs"
 test = false
 required-features = ["snapshot"]
 
