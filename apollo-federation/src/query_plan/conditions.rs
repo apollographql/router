@@ -223,12 +223,12 @@ pub(crate) fn remove_conditions_from_selection_set(
                             selection.with_updated_selection_set(Some(updated_selection_set))?
                         }
                     } else {
-                        Selection::from_element(updated_element, Some(updated_selection_set), None)?
+                        Selection::from_element(updated_element, Some(updated_selection_set))?
                     }
                 } else if updated_element == element {
                     selection.clone()
                 } else {
-                    Selection::from_element(updated_element, None, None)?
+                    Selection::from_element(updated_element, None)?
                 };
                 selection_map.insert(new_selection);
             }
@@ -262,12 +262,14 @@ pub(crate) fn remove_unneeded_top_level_fragment_directives(
                     // if there is no type condition we should preserve the directive info
                     selection_map.insert(selection.clone());
                 } else {
-                    let needed_directives: Vec<Node<Directive>> = fragment
-                        .directives
-                        .iter()
-                        .filter(|directive| !unneded_directives.contains(directive))
-                        .cloned()
-                        .collect();
+                    let mut needed_directives: Vec<Node<Directive>> = Vec::new();
+                    if fragment.directives.len() > 0 {
+                        for directive in fragment.directives.iter() {
+                            if !unneded_directives.contains(directive) {
+                                needed_directives.push(directive.clone());
+                            }
+                        }
+                    }
 
                     // We recurse, knowing that we'll stop as soon as we hit field selections, so this only cover the fragments
                     // at the "top-level" of the set.
@@ -280,15 +282,12 @@ pub(crate) fn remove_unneeded_top_level_fragment_directives(
                         let final_selection =
                             inline_fragment.with_updated_selection_set(updated_selections);
                         selection_map.insert(Selection::InlineFragment(Arc::new(final_selection)));
-                    } else {
-                        // We can skip some of the fragment directives directive.
-                        let final_selection = inline_fragment
-                            .with_updated_directives_and_selection_set(
-                                DirectiveList::from_iter(needed_directives),
-                                updated_selections,
-                            );
-                        selection_map.insert(Selection::InlineFragment(Arc::new(final_selection)));
                     }
+
+                    // We can skip some of the fragment directives directive.
+                    let final_selection = inline_fragment
+                        .with_updated_directives(DirectiveList::from_iter(needed_directives));
+                    selection_map.insert(Selection::InlineFragment(Arc::new(final_selection)));
                 }
             }
             _ => {

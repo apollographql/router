@@ -1204,7 +1204,7 @@ mod make_selection_tests {
                 base_selection_set.type_position.clone(),
                 selection.clone(),
             );
-            Selection::from_element(base.element().unwrap(), Some(subselections), None).unwrap()
+            Selection::from_element(base.element().unwrap(), Some(subselections)).unwrap()
         };
 
         let foo_with_a = clone_selection_at_path(foo, &[name!("a")]);
@@ -1331,7 +1331,7 @@ mod lazy_map_tests {
             let field_element =
                 Field::new_introspection_typename(s.schema(), &parent_type_pos, None);
             let typename_selection =
-                Selection::from_element(field_element.into(), /*subselection*/ None, None)?;
+                Selection::from_element(field_element.into(), /*subselection*/ None)?;
             // return `updated` and `typename_selection`
             Ok([updated, typename_selection].into_iter().collect())
         })

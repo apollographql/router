@@ -34,7 +34,6 @@ use crate::compat::coerce_executable_values;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::error::SingleFederationError::Internal;
-use crate::query_graph::graph_path::op_slice_condition_directives;
 use crate::query_graph::graph_path::OpPathElement;
 use crate::query_plan::conditions::Conditions;
 use crate::query_plan::FetchDataKeyRenamer;
@@ -789,7 +788,6 @@ impl Selection {
     pub(crate) fn from_element(
         element: OpPathElement,
         sub_selections: Option<SelectionSet>,
-        unnecessary_directives: Option<&DirectiveList>,
     ) -> Result<Selection, FederationError> {
         // PORT_NOTE: This is TODO item is copied from the JS `selectionOfElement` function.
         // TODO: validate that the subSelection is ok for the element
@@ -801,21 +799,7 @@ impl Selection {
                         "unexpected inline fragment without sub-selections",
                     ));
                 };
-                if let Some(unnecessary_directives) = unnecessary_directives {
-                    let directives = inline_fragment
-                        .directives
-                        .iter()
-                        .filter(|dir| !unnecessary_directives.contains(dir))
-                        .cloned()
-                        .collect::<DirectiveList>();
-                    Ok(InlineFragmentSelection::new(
-                        inline_fragment.with_updated_directives(directives),
-                        sub_selections,
-                    )
-                    .into())
-                } else {
-                    Ok(InlineFragmentSelection::new(inline_fragment, sub_selections).into())
-                }
+                Ok(InlineFragmentSelection::new(inline_fragment, sub_selections).into())
             }
         }
     }
@@ -1686,16 +1670,6 @@ mod inline_fragment_selection {
                 selection_set: self.selection_set.clone(),
             }
         }
-        pub(crate) fn with_updated_directives_and_selection_set(
-            &self,
-            directives: impl Into<DirectiveList>,
-            selection_set: SelectionSet,
-        ) -> Self {
-            Self {
-                inline_fragment: self.inline_fragment.with_updated_directives(directives),
-                selection_set,
-            }
-        }
     }
 
     impl HasSelectionKey for InlineFragmentSelection {
@@ -1931,7 +1905,7 @@ impl SelectionSet {
                         .flat_map(SelectionSet::split_top_level_fields)
                         .filter_map(move |set| {
                             let parent_type = ele.parent_type_position();
-                            Selection::from_element(ele.clone(), Some(set), None)
+                            Selection::from_element(ele.clone(), Some(set))
                                 .ok()
                                 .map(|sel| SelectionSet::from_selection(parent_type, sel))
                         }),
@@ -2051,7 +2025,7 @@ impl SelectionSet {
             type_position,
             selections: Arc::new(SelectionMap::new()),
         };
-        merged.merge_selections_into(normalized_selections.iter(), false)?;
+        merged.merge_selections_into(normalized_selections.iter())?;
         Ok(merged)
     }
 
@@ -2148,7 +2122,7 @@ impl SelectionSet {
             type_position: self.type_position.clone(),
             selections: Arc::new(SelectionMap::new()),
         };
-        expanded.merge_selections_into(expanded_selections.iter(), false)?;
+        expanded.merge_selections_into(expanded_selections.iter())?;
         Ok(expanded)
     }
 
@@ -2522,7 +2496,7 @@ impl SelectionSet {
                 sibling_typename.alias().cloned(),
             );
             let typename_selection =
-                Selection::from_element(field_element.into(), /*subselection*/ None, None)?;
+                Selection::from_element(field_element.into(), /*subselection*/ None)?;
             Ok([typename_selection, updated].into_iter().collect())
         })
     }
@@ -2639,13 +2613,11 @@ impl SelectionSet {
                 let mut selection = Arc::make_mut(&mut self.selections)
                     .entry(ele.key())
                     .or_insert(|| {
-                        let unnecessary_directives = op_slice_condition_directives(path);
                         Selection::from_element(
                             element,
                             // We immediately add a selection afterward to make this selection set
                             // valid.
                             Some(SelectionSet::empty(self.schema.clone(), sub_selection_type)),
-                            Some(&unnecessary_directives),
                         )
                     })?;
                 match &mut selection {
@@ -2677,11 +2649,9 @@ impl SelectionSet {
                     if !ele.is_terminal()? {
                         return Ok(());
                     } else {
-                        let unneeded_directives = op_slice_condition_directives(path);
                         // add leaf
-                        let selection =
-                            Selection::from_element(element, None, Some(&unneeded_directives))?;
-                        self.add_local_selection(&selection, true)?
+                        let selection = Selection::from_element(element, None)?;
+                        self.add_local_selection(&selection)?
                     }
                 } else {
                     let selection_set = selection_set
@@ -2696,13 +2666,8 @@ impl SelectionSet {
                         })
                         .transpose()?
                         .map(|selection_set| selection_set.without_unnecessary_fragments());
-                    let unneeded_directives = op_slice_condition_directives(path);
-                    let selection = Selection::from_element(
-                        element,
-                        selection_set,
-                        Some(&unneeded_directives),
-                    )?;
-                    self.add_local_selection(&selection, true)?;
+                    let selection = Selection::from_element(element, selection_set)?;
+                    self.add_local_selection(&selection)?
                 }
             }
             // If we don't have any path, we rebase and merge in the given sub selections at the root.
