@@ -1,14 +1,16 @@
-# Composed from subgraphs with hash: 722cd56dba6c8500f961ba2c48cc9f643b2fda98
+# Composed from subgraphs with hash: eeb0b0963b210e2f82e6f40f535037882afb96db
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
-  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+  @link(url: "https://specs.apollo.dev/join/v0.4", for: EXECUTION)
 {
   query: Query
 }
 
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
 directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
-directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 
 directive @join__graph(name: String!, url: String!) on ENUM_VALUE
 
@@ -37,6 +39,8 @@ type Inner4Type
   inner4_required: Int! @join__field(graph: SUBGRAPH4) @join__field(graph: SUBGRAPH5, external: true)
   inner4_nested: Int! @join__field(graph: SUBGRAPH5, requires: "inner4_required")
 }
+
+scalar join__DirectiveArguments
 
 scalar join__FieldSet
 

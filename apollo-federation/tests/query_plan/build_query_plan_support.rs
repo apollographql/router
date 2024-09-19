@@ -14,8 +14,7 @@ use sha1::Digest;
 
 const ROVER_FEDERATION_VERSION: &str = "2.7.4";
 
-// TODO: use 2.7 when join v0.4 is fully supported in this crate
-const IMPLICIT_LINK_DIRECTIVE: &str = r#"@link(url: "https://specs.apollo.dev/federation/v2.6", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"])"#;
+const DEFAULT_LINK_DIRECTIVE: &str = r#"@link(url: "https://specs.apollo.dev/federation/v2.7", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"])"#;
 
 /// Runs composition on the given subgraph schemas and return `(api_schema, query_planner)`
 ///
@@ -122,7 +121,7 @@ pub(crate) fn compose(
         .map(|(name, schema)| {
             (
                 *name,
-                format!("extend schema {IMPLICIT_LINK_DIRECTIVE}\n\n{}", schema,),
+                format!("extend schema {DEFAULT_LINK_DIRECTIVE}\n\n{}", schema,),
             )
         })
         .collect();
