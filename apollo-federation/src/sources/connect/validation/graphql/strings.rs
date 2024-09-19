@@ -139,24 +139,19 @@ mod tests {
         let string = GraphQLString::new(value, &schema.sources).unwrap();
         assert_eq!(
             string.as_str(),
-            r#"
-            something
+            r#"something
             somethingElse {
               nested
-            }
-            "#
+            }"#
         );
         let lookup = LineColLookup::new(SCHEMA);
         assert_eq!(
             string.line_col_for_subslice(8..16, &lookup),
             Some(
                 LineColumn {
-                    line: 4,
-                    column: 12
-                }..LineColumn {
-                    line: 4,
-                    column: 16
-                }
+                    line: 8,
+                    column: 21
+                }..LineColumn { line: 9, column: 7 }
             )
         );
     }
