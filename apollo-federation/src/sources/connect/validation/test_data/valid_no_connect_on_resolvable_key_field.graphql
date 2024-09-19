@@ -24,7 +24,7 @@ type Product @key(fields: "sku { id }") {
     price: Price
     @connect(
         source: "v2"
-        http: { GET: "/products/{$this.id}" }
+        http: { GET: "/products/{$this.sku.id}" }
         selection: """
         id: default_price
         """

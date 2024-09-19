@@ -356,15 +356,14 @@ fn parse_url<Coordinate: Display + Copy>(
     value: &Node<Value>,
     coordinate: Coordinate,
     sources: &SourceMap,
-) -> Result<Url, Message> {
+) -> Result<(), Message> {
     let str_value = require_value_is_str(value, coordinate, sources)?;
     let url = Url::parse(str_value).map_err(|inner| Message {
         code: Code::InvalidUrl,
         message: format!("The value {value} for {coordinate} is not a valid URL: {inner}."),
         locations: value.line_column_range(sources).into_iter().collect(),
     })?;
-    http::url::validate_base_url(&url, coordinate, value, sources)?;
-    Ok(url)
+    http::url::validate_base_url(&url, coordinate, value, str_value, sources)
 }
 
 fn require_value_is_str<'a, Coordinate: Display>(
@@ -509,12 +508,20 @@ pub enum Code {
     FieldWithArguments,
     /// Invalid star selection
     InvalidStarSelection,
+    /// Part of the `@connect` refers to an `$args` which is not defined
+    UndefinedArgument,
+    /// Part of the `@connect` refers to an `$this` which is not defined
+    UndefinedField,
+    /// A type used in a variable is not yet supported (i.e., unions)
+    UnsupportedVariableType,
+    /// A path variable is nullable, which can cause errors at runtime
+    NullablePathVariable,
 }
 
 impl Code {
     pub const fn severity(&self) -> Severity {
         match self {
-            Self::NoSourceImport => Severity::Warning,
+            Self::NoSourceImport | Self::NullablePathVariable => Severity::Warning,
             _ => Severity::Error,
         }
     }

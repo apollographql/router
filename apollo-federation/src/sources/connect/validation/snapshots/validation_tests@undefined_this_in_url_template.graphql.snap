@@ -1,0 +1,33 @@
+---
+source: apollo-federation/src/sources/connect/validation/mod.rs
+expression: "format!(\"{:#?}\", errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/undefined_this_in_url_template.graphql
+---
+[
+    Message {
+        code: UndefinedField,
+        message: "`GET` in `@connect(http:)` on `Query.resources` contains `{$this.blah}`, but Query does not have a field named `blah`.",
+        locations: [
+            LineColumn {
+                line: 10,
+                column: 45,
+            }..LineColumn {
+                line: 10,
+                column: 49,
+            },
+        ],
+    },
+    Message {
+        code: UndefinedField,
+        message: "`GET` in `@connect(http:)` on `Query.resources` contains `{$this.something}`, but Query does not have a field named `something`.",
+        locations: [
+            LineColumn {
+                line: 10,
+                column: 68,
+            }..LineColumn {
+                line: 10,
+                column: 77,
+            },
+        ],
+    },
+]

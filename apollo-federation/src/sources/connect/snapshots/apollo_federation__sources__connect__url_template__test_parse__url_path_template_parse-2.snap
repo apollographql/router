@@ -26,7 +26,13 @@ Ok(
             },
         ],
         query: {
-            "a": Component {
+            Component {
+                parts: [
+                    Text(
+                        "a",
+                    ),
+                ],
+            }: Component {
                 parts: [
                     Var(
                         Variable {
@@ -37,7 +43,13 @@ Ok(
                     ),
                 ],
             },
-            "c": Component {
+            Component {
+                parts: [
+                    Text(
+                        "c",
+                    ),
+                ],
+            }: Component {
                 parts: [
                     Var(
                         Variable {
@@ -48,7 +60,13 @@ Ok(
                     ),
                 ],
             },
-            "e": Component {
+            Component {
+                parts: [
+                    Text(
+                        "e",
+                    ),
+                ],
+            }: Component {
                 parts: [
                     Var(
                         Variable {

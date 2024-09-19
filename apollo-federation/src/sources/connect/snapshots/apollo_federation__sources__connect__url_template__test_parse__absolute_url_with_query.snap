@@ -1,0 +1,41 @@
+---
+source: apollo-federation/src/sources/connect/url_template.rs
+expression: "URLTemplate::from_str(\"http://example.com?abc=def\")"
+---
+Ok(
+    URLTemplate {
+        base: Some(
+            Url {
+                scheme: "http",
+                cannot_be_a_base: false,
+                username: "",
+                password: None,
+                host: Some(
+                    Domain(
+                        "example.com",
+                    ),
+                ),
+                port: None,
+                path: "/",
+                query: None,
+                fragment: None,
+            },
+        ),
+        path: [],
+        query: {
+            Component {
+                parts: [
+                    Text(
+                        "abc",
+                    ),
+                ],
+            }: Component {
+                parts: [
+                    Text(
+                        "def",
+                    ),
+                ],
+            },
+        },
+    },
+)
