@@ -319,7 +319,7 @@ fn validate_field(
                 errors.push(Message {
                     code: Code::RelativeConnectUrlWithoutSource,
                     message: format!(
-                        "{coordinate} specifies the relative URL {raw_value}, but no `{CONNECT_SOURCE_ARGUMENT_NAME}` is defined. Either use an absolute URL including scheme (http://), or add a `@{source_directive_name}`.",
+                        "{coordinate} specifies the relative URL {raw_value}, but no `{CONNECT_SOURCE_ARGUMENT_NAME}` is defined. Either use an absolute URL including scheme (e.g. https://), or add a `@{source_directive_name}`.",
                         raw_value = coordinate.node
                     ),
                     locations: coordinate.node.line_column_range(source_map).into_iter().collect()
