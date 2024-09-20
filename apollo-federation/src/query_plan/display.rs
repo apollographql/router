@@ -149,7 +149,7 @@ impl FlattenNode {
         node.write_indented(state)?;
 
         state.dedent()?;
-        state.write("},")
+        state.write("}")
     }
 }
 
