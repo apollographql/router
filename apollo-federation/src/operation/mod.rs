@@ -204,12 +204,14 @@ pub(crate) struct NormalizedDefer {
     pub operation: Operation,
     pub has_defers: bool,
     pub assigned_defer_labels: IndexSet<String>,
-    pub defer_conditions: IndexMap<String, IndexSet<String>>,
+    pub defer_conditions: IndexMap<Name, IndexSet<String>>,
 }
 
 struct DeferNormalizer {
     used_labels: HashSet<String>,
+    assigned_labels: IndexSet<String>,
     problems: HashSet<SelectionKey>,
+    conditions: IndexMap<Name, IndexSet<String>>,
     label_offset: usize,
 }
 
@@ -219,6 +221,8 @@ impl DeferNormalizer {
             used_labels: HashSet::default(),
             problems: HashSet::default(),
             label_offset: 0,
+            assigned_labels: IndexSet::default(),
+            conditions: IndexMap::default(),
         };
         let mut stack = selection_set
             .into_iter()
@@ -267,9 +271,14 @@ impl DeferNormalizer {
             let digest = format!("qp__{}", self.label_offset);
             self.label_offset += 1;
             if !self.used_labels.contains(&digest) {
+                self.assigned_labels.insert(digest.clone());
                 return digest;
             }
         }
+    }
+
+    fn register_condition(&mut self, label: String, cond: Name) {
+        self.conditions.entry(cond).or_default().insert(label);
     }
 }
 
@@ -324,11 +333,8 @@ impl Operation {
     ///    `@defer` application that has `if: false`.
     // PORT_NOTE(@goto-bus-stop): It might make sense for the returned data structure to *be* the
     // `DeferNormalizer` from the JS side
-    #[allow(clippy::unnecessary_fold)]
     pub(crate) fn with_normalized_defer(mut self) -> NormalizedDefer {
         if self.has_defer() {
-            // PORT_NOTE:
-            // TODO: Can this set use &str instead of strings?
             let mut normalizer = DeferNormalizer::new(&self.selection_set);
             println!("Before normalization: {}", self.selection_set);
             if !normalizer.problems.is_empty() {
@@ -339,8 +345,8 @@ impl Operation {
             NormalizedDefer {
                 operation: self,
                 has_defers: true,
-                assigned_defer_labels: IndexSet::default(),
-                defer_conditions: IndexMap::default(),
+                assigned_defer_labels: normalizer.assigned_labels,
+                defer_conditions: normalizer.conditions,
             }
         } else {
             NormalizedDefer {
@@ -365,6 +371,14 @@ impl Operation {
     pub(crate) fn without_defer(mut self) -> Self {
         if self.has_defer() {
             self.selection_set.without_defer();
+        }
+        debug_assert!(!self.has_defer());
+        self
+    }
+
+    pub(crate) fn reduce_defer(mut self, labels: &IndexSet<String>) -> Self {
+        if self.has_defer() {
+            self.selection_set.reduce_defer(labels);
         }
         debug_assert!(!self.has_defer());
         self
@@ -2832,6 +2846,28 @@ impl SelectionSet {
         debug_assert!(!self.has_defer());
     }
 
+    fn reduce_defer(&mut self, labels: &IndexSet<String>) {
+        for (_key, mut selection) in Arc::make_mut(&mut self.selections).iter_mut() {
+            if let SelectionValue::InlineFragment(inline) = &selection {
+                // TODO: Do we want to ignore an error here?
+                if let Ok(Some(args)) = inline.get().inline_fragment.defer_directive_arguments() {
+                    // TODO(@goto-bus-stop): doing this changes the key of the selection!
+                    // We have to rebuild the selection map.
+                    if args
+                        .label
+                        .as_ref()
+                        .is_some_and(|label| labels.contains(label))
+                    {
+                        selection.get_directives_mut().remove_one("defer");
+                    }
+                }
+            }
+            if let Some(set) = selection.get_selection_set_mut() {
+                set.without_defer();
+            }
+        }
+    }
+
     fn has_defer(&self) -> bool {
         self.selections.values().any(|s| s.has_defer())
     }
@@ -3623,6 +3659,11 @@ impl InlineFragmentSelection {
         if remove_defer {
             todo!();
             // return;
+        }
+
+        // NOTE: If this is `Some`, it will be a variable.
+        if let Some(BooleanOrVariable::Variable(cond)) = args_copy.if_.clone() {
+            normalizer.register_condition(args_copy.label.clone().unwrap(), cond);
         }
 
         if args_copy == args {

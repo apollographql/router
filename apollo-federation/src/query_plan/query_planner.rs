@@ -12,12 +12,12 @@ use apollo_compiler::Name;
 use itertools::Itertools;
 use serde::Serialize;
 
-use crate::operation::NormalizedDefer;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::operation::normalize_operation;
 use crate::operation::NamedFragments;
+use crate::operation::NormalizedDefer;
 use crate::operation::Operation;
 use crate::operation::SelectionSet;
 use crate::query_graph::build_federated_query_graph;
@@ -49,6 +49,8 @@ use crate::schema::ValidFederationSchema;
 use crate::utils::logging::snapshot;
 use crate::ApiSchemaOptions;
 use crate::Supergraph;
+
+use super::ConditionNode;
 
 pub(crate) const CONTEXT_DIRECTIVE: &str = "context";
 pub(crate) const JOIN_FIELD: &str = "join__field";
@@ -500,7 +502,11 @@ impl QueryPlanner {
 
         let root_node = match defer_conditions {
             Some(defer_conditions) if !defer_conditions.is_empty() => {
-                compute_plan_for_defer_conditionals(&mut parameters, defer_conditions)?
+                compute_plan_for_defer_conditionals(
+                    &mut parameters,
+                    &mut processor,
+                    defer_conditions,
+                )?
             }
             _ => compute_plan_internal(&mut parameters, &mut processor, has_defers)?,
         };
@@ -830,14 +836,48 @@ fn compute_plan_internal(
 
 // TODO: FED-95
 fn compute_plan_for_defer_conditionals(
-    _parameters: &mut QueryPlanningParameters,
-    _defer_conditions: IndexMap<String, IndexSet<String>>,
+    parameters: &mut QueryPlanningParameters,
+    processor: &mut FetchDependencyGraphToQueryPlanProcessor,
+    defer_conditions: IndexMap<Name, IndexSet<String>>,
 ) -> Result<Option<PlanNode>, FederationError> {
-    Err(SingleFederationError::UnsupportedFeature {
-        message: String::from("@defer is currently not supported"),
-        kind: crate::error::UnsupportedFeatureKind::Defer,
+    generate_condition_nodes(
+        parameters.operation.clone(),
+        defer_conditions.iter(),
+        &mut |op| {
+            parameters.operation = op;
+            compute_plan_internal(parameters, processor, true)
+        },
+    )
+}
+
+fn generate_condition_nodes<'a>(
+    op: Arc<Operation>,
+    mut conditions: impl Clone + Iterator<Item = (&'a Name, &'a IndexSet<String>)>,
+    mut on_final_operation: &mut impl FnMut(Arc<Operation>) -> Result<Option<PlanNode>, FederationError>,
+) -> Result<Option<PlanNode>, FederationError> {
+    match conditions.next() {
+        None => on_final_operation(op),
+        Some((cond, labels)) => {
+            let else_op = Arc::unwrap_or_clone(op.clone()).reduce_defer(labels);
+            let if_op = op;
+            let node = ConditionNode {
+                condition_variable: cond.clone(),
+                if_clause: generate_condition_nodes(
+                    if_op,
+                    conditions.clone(),
+                    on_final_operation,
+                )?
+                .map(Box::new),
+                else_clause: generate_condition_nodes(
+                    Arc::new(else_op),
+                    conditions.clone(),
+                    on_final_operation,
+                )?
+                .map(Box::new),
+            };
+            Ok(Some(PlanNode::Condition(Box::new(node))))
+        }
     }
-    .into())
 }
 
 /// Tracks fragments from the original operation, along with versions rebased on other subgraphs.
