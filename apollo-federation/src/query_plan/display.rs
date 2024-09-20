@@ -117,7 +117,7 @@ impl SequenceNode {
 
         write_indented_lines(state, nodes, |state, node| node.write_indented(state))?;
 
-        state.write("},")
+        state.write("}")
     }
 }
 
@@ -128,7 +128,7 @@ impl ParallelNode {
 
         write_indented_lines(state, nodes, |state, node| node.write_indented(state))?;
 
-        state.write("},")
+        state.write("}")
     }
 }
 
@@ -215,7 +215,7 @@ impl DeferNode {
 
         primary.write_indented(state)?;
         if !deferred.is_empty() {
-            state.write(", [")?;
+            state.write(" [")?;
             write_indented_lines(state, deferred, |state, deferred| {
                 deferred.write_indented(state)
             })?;
@@ -284,17 +284,21 @@ impl DeferredDeferBlock {
             }
         }
         state.write("\"")?;
+        /*
         if let Some(label) = label {
             state.write(", label: \"")?;
             state.write(label)?;
             state.write("\"")?;
         }
+        */
         state.write(") {")?;
         if sub_selection.is_some() || node.is_some() {
             state.indent()?;
 
             if let Some(sub_selection) = sub_selection {
                 write_selections(state, &sub_selection.selections)?;
+                state.write(":")?;
+                state.new_line()?;
             }
             if let Some(node) = node {
                 node.write_indented(state)?;
