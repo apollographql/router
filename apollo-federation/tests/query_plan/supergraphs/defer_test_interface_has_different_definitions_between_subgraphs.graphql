@@ -1,14 +1,16 @@
-# Composed from subgraphs with hash: ae77e3f82782908c6b570a784b30bb2e13fa19ef
+# Composed from subgraphs with hash: d280d3aae78ad7080c8df8b5a8982d70a4000a78
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
-  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+  @link(url: "https://specs.apollo.dev/join/v0.4", for: EXECUTION)
 {
   query: Query
 }
 
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
 directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
-directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 
 directive @join__graph(name: String!, url: String!) on ENUM_VALUE
 
@@ -28,6 +30,8 @@ interface I
   c: Int @join__field(graph: SUBGRAPH1)
   b: Int @join__field(graph: SUBGRAPH2)
 }
+
+scalar join__DirectiveArguments
 
 scalar join__FieldSet
 
