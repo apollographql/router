@@ -1,0 +1,77 @@
+{
+    "actions": [
+        {
+            "type": "Start",
+            "schema_path": "./supergraph.graphql",
+            "configuration_path": "./configuration.yaml",
+            "subgraphs": {
+                "products": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query Variables__products__0($a:String$b:String){a(arg:$a)aliased:a(arg:$b)}",
+                                    "operationName": "Variables__products__0"
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "a": "a",
+                                        "aliased": "a"
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query Variables($a: String, $b: String, $c: String, $d: String) { d(arg: [\"a\", $a, \"b\"]) e(arg: { a: $b}) ...F } fragment F on Query { aa: d(arg: [\"a\", $c, \"b\"]) ab: e(arg: { a: $d})) }"
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "d": "d",
+                                        "e": "e",
+                                        "aa": "d",
+                                        "ab": "e"
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "Request",
+            "request": {
+                "query": "query Variables($a: String, $b: String) { a(arg: $a) ...F } fragment F on Query { aliased: a(arg: $b) }"
+            },
+            "expected_response": {
+                "data": {
+                    "a": "a",
+                    "aliased": "a"
+                }
+            }
+        },
+        {
+            "type": "Request",
+            "request": {
+                "query": "query Variables($a: String, $b: String, $c: String, $d: String) { d(arg: [\"a\", $a, \"b\"]) e(arg: { a: $b}) ...F } fragment F on Query { aa: d(arg: [\"a\", $c, \"b\"]) ab: e(arg: { a: $d}) }"
+            },
+            "expected_response": {
+                "data": {
+                    "d": "d",
+                    "e": "e",
+                    "aa": "d",
+                    "ab": "e"
+                }
+            }
+        },
+        {
+            "type": "Stop"
+        }
+    ]
+}
