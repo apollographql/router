@@ -1,0 +1,144 @@
+{
+    "actions": [
+        {
+            "type": "Start",
+            "schema_path": "./supergraph.graphql",
+            "configuration_path": "./configuration.yaml",
+            "subgraphs": {
+                "accounts": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "{me{name}}"
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "me": {
+                                            "name": "test"
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "{me{__typename id name}}"
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "me": {
+                                            "__typename": "User",
+                                            "id": "1",
+                                            "name": "test"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                },
+                "reviews": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{reviews{body}}}}",
+                                    "variables": {
+                                        "representations": [
+                                            {
+                                                "__typename": "User",
+                                                "id": "1"
+                                            }
+                                        ]
+                                    }
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "_entities": [
+                                            {
+                                                "reviews": [
+                                                    {
+                                                        "body": "test"
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "Request",
+            "request": {
+                "query": "{ topProducts { upc name } }"
+            },
+            "expected_response": {
+                "errors": [
+                    {
+                        "message": "Cannot query field \"upc\" on type \"Product\".",
+                        "locations": [
+                            {
+                                "line": 1,
+                                "column": 17
+                            }
+                        ],
+                        "extensions": {
+                            "code": "GRAPHQL_VALIDATION_FAILED"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "type": "Request",
+            "request": {
+                "query": "{ me { name reviews { body } } }"
+            },
+            "expected_response": {
+                "data": {
+                    "me": {
+                        "name": "test",
+                        "reviews": [
+                            {
+                                "body": "test"
+                            }
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "type": "Request",
+            "request": {
+                "query": "query Invalid { me { name { reviews { body } } } }"
+            },
+            "expected_response": {
+                "data": {
+                    "me": {
+                        "name": "test",
+                        "reviews": [
+                            {
+                                "body": "test"
+                            }
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "type": "Stop"
+        }
+    ]
+}
