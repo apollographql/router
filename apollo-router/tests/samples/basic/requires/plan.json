@@ -1,0 +1,130 @@
+{
+    "actions": [
+        {
+            "type": "Start",
+            "schema_path": "./supergraph.graphql",
+            "configuration_path": "./configuration.yaml",
+            "subgraphs": {
+                "accounts": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "{me{__typename id name username}}"
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "me": {
+                                            "__typename": "User",
+                                            "id": "1",
+                                            "name": "usertest",
+                                            "username": "usertest"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                },
+                "reviews": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{reviews{author{username}body product{__typename upc}}}}}",
+                                    "variables": {
+                                        "representations": [
+                                            {
+                                                "__typename": "User",
+                                                "id": "1",
+                                                "name": "usertest",
+                                                "username": "usertest"
+                                            }
+                                        ]
+                                    }
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "_entities": [
+                                            {
+                                                "reviews": [
+                                                    {
+                                                        "author": {
+                                                            "username": "usertest"
+                                                        },
+                                                        "body": "review",
+                                                        "product": {
+                                                            "__typename": "Product",
+                                                            "upc": "1"
+                                                        }
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                },
+                "products": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Product{name}}}",
+                                    "variables": {
+                                        "representations": [
+                                            {
+                                                "__typename": "Product",
+                                                "upc": "1"
+                                            }
+                                        ]
+                                    }
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "_entities": [
+                                            {
+                                                "name": "product test"
+                                            }
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "Request",
+            "request": {
+                "query": "{ me { reviews { body product { name } } } }"
+            },
+            "expected_response": {
+                "data": {
+                    "me": {
+                        "reviews": [
+                            {
+                                "body": "review",
+                                "product": {
+                                    "name": "product test"
+                                }
+                            }
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "type": "Stop"
+        }
+    ]
+}
