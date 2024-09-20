@@ -104,9 +104,10 @@ type C @join__type(graph: ACCOUNTS, key: "id")
 
 type D
   @join__type(graph: ACCOUNTS, key: "id")
+  @join__type(graph: REVIEWS, key: "id")
   @join__type(graph: PRODUCTS, key: "id") {
     id: ID!
-    i: I @join__field(graph: ACCOUNTS) @join__field(graph: PRODUCTS, external: true)
+    i: [I] @join__field(graph: REVIEWS) @join__field(graph: PRODUCTS, external: true)
     j: String @join__field(graph: PRODUCTS, requires: "i { x ... on XY { y } ... on XZ { z } }")
 }
 
@@ -119,19 +120,23 @@ interface I
 }
 
 type XY implements I
+  @join__type(graph: ACCOUNTS, key: "upc")
   @join__type(graph: INVENTORY, key: "upc")
-  @join__type(graph: PRODUCTS, key: "upc"){
+  @join__type(graph: PRODUCTS)
+  @join__type(graph: REVIEWS, key: "upc") {
   upc: String!
   x: String
-  y: String @join__field(graph: PRODUCTS, external: true)
+  y: String @join__field(graph: REVIEWS) @join__field(graph: PRODUCTS, external: true)
 }
 
 type XZ implements I
+  @join__type(graph: ACCOUNTS, key: "upc")
   @join__type(graph: INVENTORY, key: "upc")
-  @join__type(graph: PRODUCTS, key: "upc") {
+  @join__type(graph: PRODUCTS, key: "upc")
+  @join__type(graph: REVIEWS, key: "upc") {
   upc: String!
   x: String
-  z: String @join__field(graph: PRODUCTS, external: true)
+  z: String @join__field(graph: REVIEWS) @join__field(graph: PRODUCTS, external: true)
 }
 
 type E

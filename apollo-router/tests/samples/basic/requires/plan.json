@@ -25,6 +25,24 @@
                                     }
                                 }
                             }
+                        },
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query TestD__accounts__0{d{__typename id}}",
+                                    "operationName": "TestD__accounts__0"
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "d": {
+                                            "__typename": "D",
+                                            "id": "1"
+                                        }
+                                    }
+                                }
+                            }
                         }
                     ]
                 },
@@ -54,6 +72,40 @@
                                                 "b": {
                                                     "b": "b"
                                                 }
+                                            }
+                                        ]
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query TestD__reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on D{i{__typename x}}}}",
+                                    "operationName": "TestD__reviews__1",
+                                    "variables": {
+                                        "representations": [
+                                            {
+                                                "__typename": "D",
+                                                "id": "1"
+                                            }
+                                        ]
+                                    }
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "_entities": [
+                                            {
+                                                "i": [
+                                                    {
+                                                        "x": "xy"
+                                                    },
+                                                    {
+                                                        "x": "xz"
+                                                    }
+                                                ]
                                             }
                                         ]
                                     }
@@ -95,6 +147,43 @@
                                     }
                                 }
                             }
+                        },
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query TestD__products__2($representations:[_Any!]!){_entities(representations:$representations){...on D{j}}}",
+                                    "operationName": "TestD__products__2",
+                                    "variables": {
+                                        "representations": [
+                                            {
+                                                "__typename": "D",
+                                                "i": [
+                                                    {
+                                                        "x": "xy",
+                                                        "y": "y"
+                                                    },
+                                                    {
+                                                        "x": "xz",
+                                                        "z": "z"
+                                                    }
+                                                ],
+                                                "id": "1"
+                                            }
+                                        ]
+                                    }
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "_entities": [
+                                            {
+                                                "j": "j"
+                                            }
+                                        ]
+                                    }
+                                }
+                            }
                         }
                     ]
                 }
@@ -111,6 +200,19 @@
                         "c": {
                             "c": "c"
                         }
+                    }
+                }
+            }
+        },
+        {
+            "type": "Request",
+            "request": {
+                "query": "query TestD { d { j } }"
+            },
+            "expected_response": {
+                "data": {
+                    "d": {
+                        "j": "j"
                     }
                 }
             }
