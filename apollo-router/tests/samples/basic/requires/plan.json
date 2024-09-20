@@ -10,17 +10,17 @@
                         {
                             "request": {
                                 "body": {
-                                    "query": "{me{__typename id name username}}"
+                                    "query": "query TestA__accounts__0{a{__typename id a}}",
+                                    "operationName": "TestA__accounts__0"
                                 }
                             },
                             "response": {
                                 "body": {
                                     "data": {
-                                        "me": {
-                                            "__typename": "User",
+                                        "a": {
+                                            "__typename": "A",
                                             "id": "1",
-                                            "name": "usertest",
-                                            "username": "usertest"
+                                            "a": "a"
                                         }
                                     }
                                 }
@@ -33,14 +33,14 @@
                         {
                             "request": {
                                 "body": {
-                                    "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{reviews{author{username}body product{__typename upc}}}}}",
+                                    "query": "query TestA__reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on A{b{b}}}}",
+                                    "operationName": "TestA__reviews__1",
                                     "variables": {
                                         "representations": [
                                             {
-                                                "__typename": "User",
-                                                "id": "1",
-                                                "name": "usertest",
-                                                "username": "usertest"
+                                                "__typename": "A",
+                                                "a": "a",
+                                                "id": "1"
                                             }
                                         ]
                                     }
@@ -51,18 +51,9 @@
                                     "data": {
                                         "_entities": [
                                             {
-                                                "reviews": [
-                                                    {
-                                                        "author": {
-                                                            "username": "usertest"
-                                                        },
-                                                        "body": "review",
-                                                        "product": {
-                                                            "__typename": "Product",
-                                                            "upc": "1"
-                                                        }
-                                                    }
-                                                ]
+                                                "b": {
+                                                    "b": "b"
+                                                }
                                             }
                                         ]
                                     }
@@ -76,12 +67,16 @@
                         {
                             "request": {
                                 "body": {
-                                    "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Product{name}}}",
+                                    "query": "query TestA__products__2($representations:[_Any!]!){_entities(representations:$representations){...on A{c{c}}}}",
+                                    "operationName": "TestA__products__2",
                                     "variables": {
                                         "representations": [
                                             {
-                                                "__typename": "Product",
-                                                "upc": "1"
+                                                "__typename": "A",
+                                                "b": {
+                                                    "b": "b"
+                                                },
+                                                "id": "1"
                                             }
                                         ]
                                     }
@@ -92,7 +87,9 @@
                                     "data": {
                                         "_entities": [
                                             {
-                                                "name": "product test"
+                                                "c": {
+                                                    "c": "c"
+                                                }
                                             }
                                         ]
                                     }
@@ -106,19 +103,14 @@
         {
             "type": "Request",
             "request": {
-                "query": "{ me { reviews { body product { name } } } }"
+                "query": "query TestA { a { c { c } } }"
             },
             "expected_response": {
                 "data": {
-                    "me": {
-                        "reviews": [
-                            {
-                                "body": "review",
-                                "product": {
-                                    "name": "product test"
-                                }
-                            }
-                        ]
+                    "a": {
+                        "c": {
+                            "c": "c"
+                        }
                     }
                 }
             }
