@@ -64,8 +64,8 @@ fn defer_test_handles_simple_defer_without_defer_enabled() {
                     }
                   }
                 },
-              },
-            },
+              }
+            }
           }
         "###
     );
@@ -837,7 +837,7 @@ fn defer_test_multiple_non_nested_defer_plus_label_handling() {
 }
 
 #[test]
-fn deefer_test_nested_defer_on_entities() {
+fn defer_test_nested_defer_on_entities() {
     let planner = planner!(
         config = config_with_defer(),
           Subgraph1: r#"
@@ -1094,7 +1094,7 @@ fn defer_test_defer_on_value_types() {
 }
 
 #[test]
-fn deefer_test_direct_nesting_on_entity() {
+fn defer_test_direct_nesting_on_entity() {
     let planner = planner!(
         config = config_with_defer(),
         Subgraph1: r#"
@@ -1202,7 +1202,7 @@ fn deefer_test_direct_nesting_on_entity() {
 }
 
 #[test]
-fn deefer_test_direct_nesting_on_value_type() {
+fn defer_test_direct_nesting_on_value_type() {
     let planner = planner!(
         config = config_with_defer(),
         Subgraph1: r#"
@@ -1275,7 +1275,7 @@ fn deefer_test_direct_nesting_on_value_type() {
 }
 
 #[test]
-fn deefer_test_defer_on_enity_but_with_unuseful_key() {
+fn defer_test_defer_on_enity_but_with_unuseful_key() {
     let planner = planner!(
         config = config_with_defer(),
           Subgraph1: r#"
