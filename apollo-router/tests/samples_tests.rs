@@ -413,6 +413,7 @@ impl TestExecution {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn request(
         &mut self,
         mut request: Value,
