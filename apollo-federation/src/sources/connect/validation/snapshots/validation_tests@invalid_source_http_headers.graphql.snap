@@ -8,105 +8,51 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_s
         code: MissingHeaderSource,
         message: "`@source(http.headers:)` must include either a `from` or `value` argument.",
         locations: [
-            LineColumn {
-                line: 10,
-                column: 7,
-            }..LineColumn {
-                line: 24,
-                column: 8,
-            },
+            10:16..24:8,
         ],
     },
     Message {
         code: GraphQLError,
         message: "`@source(http.headers:)` must include a `name` value.",
         locations: [
-            LineColumn {
-                line: 10,
-                column: 7,
-            }..LineColumn {
-                line: 24,
-                column: 8,
-            },
+            10:16..24:8,
         ],
     },
     Message {
         code: InvalidHttpHeaderMapping,
         message: "`@source(http.headers:)` uses both `from` and `value` keys together. Please choose only one.",
         locations: [
-            LineColumn {
-                line: 15,
-                column: 35,
-            }..LineColumn {
-                line: 15,
-                column: 57,
-            },
-            LineColumn {
-                line: 15,
-                column: 59,
-            }..LineColumn {
-                line: 15,
-                column: 77,
-            },
+            15:41..15:57,
+            15:66..15:77,
         ],
     },
     Message {
         code: HttpHeaderNameCollision,
         message: "Duplicate header names are not allowed. The header name 'x-name-collision' at `@source(http.headers:)` is already defined.",
         locations: [
-            LineColumn {
-                line: 17,
-                column: 11,
-            }..LineColumn {
-                line: 17,
-                column: 35,
-            },
-            LineColumn {
-                line: 16,
-                column: 11,
-            }..LineColumn {
-                line: 16,
-                column: 35,
-            },
+            17:17..17:35,
+            16:17..16:35,
         ],
     },
     Message {
         code: InvalidHttpHeaderName,
         message: "The value `<Invalid-Header>` for `name` at `@source(http.headers:)` must be a valid HTTP header name.",
         locations: [
-            LineColumn {
-                line: 18,
-                column: 11,
-            }..LineColumn {
-                line: 18,
-                column: 35,
-            },
+            18:17..18:35,
         ],
     },
     Message {
         code: InvalidHttpHeaderName,
         message: "The value `<Invalid-Header>` for `from` at `@source(http.headers:)` must be a valid HTTP header name.",
         locations: [
-            LineColumn {
-                line: 19,
-                column: 35,
-            }..LineColumn {
-                line: 19,
-                column: 59,
-            },
+            19:41..19:59,
         ],
     },
     Message {
         code: InvalidHttpHeaderValue,
         message: "The value `\"  Value with 😊 emoji and newline  \\n \"` at `@source(http.headers:)` is an invalid HTTP header",
         locations: [
-            LineColumn {
-                line: 22,
-                column: 11,
-            }..LineColumn {
-                line: 22,
-                column: 60,
-            },
+            22:18..22:60,
         ],
     },
 ]

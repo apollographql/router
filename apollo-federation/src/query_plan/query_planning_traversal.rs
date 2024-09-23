@@ -30,11 +30,13 @@ use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphNodeType;
 use crate::query_plan::fetch_dependency_graph::compute_nodes_for_tree;
 use crate::query_plan::fetch_dependency_graph::FetchDependencyGraph;
+use crate::query_plan::fetch_dependency_graph::FetchDependencyGraphNodePath;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToCostProcessor;
 use crate::query_plan::generate::generate_all_plans_and_find_best;
 use crate::query_plan::generate::PlanBuilder;
 use crate::query_plan::query_planner::compute_root_fetch_groups;
+use crate::query_plan::query_planner::EnabledOverrideConditions;
 use crate::query_plan::query_planner::QueryPlannerConfig;
 use crate::query_plan::query_planner::QueryPlanningStatistics;
 use crate::query_plan::QueryPlanCost;
@@ -71,6 +73,7 @@ pub(crate) struct QueryPlanningParameters<'a> {
     /// The configuration for the query planner.
     pub(crate) config: QueryPlannerConfig,
     pub(crate) statistics: &'a QueryPlanningStatistics,
+    pub(crate) override_conditions: EnabledOverrideConditions,
 }
 
 pub(crate) struct QueryPlanningTraversal<'a, 'b> {
@@ -246,6 +249,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             &mut traversal,
             excluded_destinations,
             excluded_conditions,
+            &parameters.override_conditions,
         )?;
 
         traversal.open_branches = map_options_to_selections(selection_set, initial_options);
@@ -336,6 +340,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 self.parameters.supergraph_schema.clone(),
                 &operation_element,
                 /*resolver*/ self,
+                &self.parameters.override_conditions,
             )?;
             let Some(followups_for_option) = followups_for_option else {
                 // There is no valid way to advance the current operation element from this option
@@ -403,7 +408,9 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                     let mut new_simultaneous_paths = vec![];
                     for simultaneous_path in &option.paths.0 {
                         new_simultaneous_paths.push(Arc::new(
-                            simultaneous_path.terminate_with_non_requested_typename_field()?,
+                            simultaneous_path.terminate_with_non_requested_typename_field(
+                                &self.parameters.override_conditions,
+                            )?,
                         ));
                     }
                     closed_paths.push(Arc::new(ClosedPath {
@@ -663,7 +670,11 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 *root,
                 &single_choice_branches,
             )?;
-            self.updated_dependency_graph(&mut initial_dependency_graph, &initial_tree)?;
+            self.updated_dependency_graph(
+                &mut initial_dependency_graph,
+                &initial_tree,
+                self.parameters.config.type_conditioned_fetching,
+            )?;
             snapshot!(
                 initial_dependency_graph,
                 "Updated dep graph with initial tree"
@@ -963,34 +974,44 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         &self,
         dependency_graph: &mut FetchDependencyGraph,
         path_tree: &OpPathTree,
+        type_conditioned_fetching_enabled: bool,
     ) -> Result<(), FederationError> {
         let is_root_path_tree = matches!(
             path_tree.graph.node_weight(path_tree.node)?.type_,
             QueryGraphNodeType::FederatedRootType(_)
         );
         if is_root_path_tree {
-            compute_root_fetch_groups(self.root_kind, dependency_graph, path_tree)?;
+            compute_root_fetch_groups(
+                self.root_kind,
+                dependency_graph,
+                path_tree,
+                type_conditioned_fetching_enabled,
+            )?;
         } else {
             let query_graph_node = path_tree.graph.node_weight(path_tree.node)?;
             let subgraph_name = &query_graph_node.source;
-            let root_type = match &query_graph_node.type_ {
+            let root_type: CompositeTypeDefinitionPosition = match &query_graph_node.type_ {
                 QueryGraphNodeType::SchemaType(position) => position.clone().try_into()?,
                 QueryGraphNodeType::FederatedRootType(_) => {
                     return Err(FederationError::internal(
                         "unexpected FederatedRootType not at the start of an OpPathTree",
-                    ))
+                    ));
                 }
             };
             let fetch_dependency_node = dependency_graph.get_or_create_root_node(
                 subgraph_name,
                 self.root_kind,
-                root_type,
+                root_type.clone(),
             )?;
             compute_nodes_for_tree(
                 dependency_graph,
                 path_tree,
                 fetch_dependency_node,
-                Default::default(),
+                FetchDependencyGraphNodePath::new(
+                    dependency_graph.supergraph_schema.clone(),
+                    self.parameters.config.type_conditioned_fetching,
+                    root_type,
+                )?,
                 Default::default(),
                 &Default::default(),
             )?;
@@ -1039,6 +1060,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 .clone(),
             config: self.parameters.config.clone(),
             statistics: self.parameters.statistics,
+            override_conditions: self.parameters.override_conditions.clone(),
         };
         let best_plan_opt = QueryPlanningTraversal::new_inner(
             &parameters,
@@ -1069,11 +1091,15 @@ impl<'a: 'b, 'b> PlanBuilder<PlanInfo, Arc<OpPathTree>> for QueryPlanningTravers
         tree: Arc<OpPathTree>,
     ) -> Result<PlanInfo, FederationError> {
         let mut updated_graph = plan_info.fetch_dependency_graph.clone();
-        self.updated_dependency_graph(&mut updated_graph, &tree)
-            .map(|_| PlanInfo {
-                fetch_dependency_graph: updated_graph,
-                path_tree: plan_info.path_tree.merge(&tree),
-            })
+        self.updated_dependency_graph(
+            &mut updated_graph,
+            &tree,
+            self.parameters.config.type_conditioned_fetching,
+        )
+        .map(|_| PlanInfo {
+            fetch_dependency_graph: updated_graph,
+            path_tree: plan_info.path_tree.merge(&tree),
+        })
     }
 
     fn compute_plan_cost(

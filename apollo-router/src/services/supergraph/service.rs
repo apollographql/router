@@ -857,6 +857,7 @@ impl PluggableSupergraphServiceBuilder {
 
         let schema = self.planner.schema();
         let subgraph_schemas = self.planner.subgraph_schemas();
+
         let query_planner_service = CachingQueryPlanner::new(
             self.planner,
             schema.clone(),
@@ -873,6 +874,10 @@ impl PluggableSupergraphServiceBuilder {
                 telemetry.activate();
             }
         }
+
+        // We need a non-fallible hook so that once we know we are going live with a pipeline we do final initialization.
+        // For now just shoe-horn something in, but if we ever reintroduce the query planner hook in plugins and activate then this can be made clean.
+        query_planner_service.activate();
 
         let subscription_plugin_conf = self
             .plugins

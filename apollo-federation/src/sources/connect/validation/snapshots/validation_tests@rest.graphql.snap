@@ -8,73 +8,31 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/rest.grap
         code: InvalidStarSelection,
         message: "`@connect(selection:)` on `Query.notScalar` contains `rest: *` but the field `NotScalar.rest: Obj` returns an object type. It must be a non-list custom scalar.",
         locations: [
-            LineColumn {
-                line: 13,
-                column: 59,
-            }..LineColumn {
-                line: 13,
-                column: 71,
-            },
-            LineColumn {
-                line: 34,
-                column: 3,
-            }..LineColumn {
-                line: 34,
-                column: 12,
-            },
+            13:59..13:71,
+            34:3..34:12,
         ],
     },
     Message {
         code: InvalidStarSelection,
         message: "`@connect(selection:)` on `Query.builtIn` contains `rest: *` but the field `BuiltIn.rest: String` returns a built-in scalar type. It must be a non-list custom scalar.",
         locations: [
-            LineColumn {
-                line: 16,
-                column: 59,
-            }..LineColumn {
-                line: 16,
-                column: 71,
-            },
-            LineColumn {
-                line: 43,
-                column: 3,
-            }..LineColumn {
-                line: 43,
-                column: 15,
-            },
+            16:59..16:71,
+            43:3..43:15,
         ],
     },
     Message {
         code: InvalidStarSelection,
         message: "`@connect(selection:)` on `Query.list` contains `rest: *` but the field `List.rest: [JSON]` returns a list. It must be a non-list custom scalar.",
         locations: [
-            LineColumn {
-                line: 19,
-                column: 59,
-            }..LineColumn {
-                line: 19,
-                column: 71,
-            },
-            LineColumn {
-                line: 48,
-                column: 3,
-            }..LineColumn {
-                line: 48,
-                column: 15,
-            },
+            19:59..19:71,
+            48:3..48:15,
         ],
     },
     Message {
         code: SelectedFieldNotFound,
         message: "`@connect(selection:)` on `Query.notFound` contains field `rest`, which does not exist on `NotFound`.",
         locations: [
-            LineColumn {
-                line: 22,
-                column: 59,
-            }..LineColumn {
-                line: 22,
-                column: 71,
-            },
+            22:59..22:71,
         ],
     },
 ]
