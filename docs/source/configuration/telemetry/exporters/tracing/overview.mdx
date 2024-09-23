@@ -111,6 +111,20 @@ telemetry:
 
 - `parent_based_sampler` enables clients to make the sampling decision. This guarantees that a trace that starts at a client will also have spans at the router. You may wish to disable it (setting `parent_based_sampler: false`) if your router is exposed directly to the internet.
 
+### `datadog_agent_sampling`
+
+If you are sending traces to the Datadog agent, you must set `datadog_agent_sampling: true` in `router.yaml` to ensure that APM metrics display correctly.
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+     tracing:
+       common:
+         datadog_agent_sampling: true
+```
+
+This setting will cause the router to send ALL spans to the Datadog agent. The agent will then sample the spans before sending them to datadog.
+
 ### `propagation`
 
 The `telemetry.exporters.tracing.propagation` section allows you to configure which propagators are active in addition to those automatically activated by using an exporter.

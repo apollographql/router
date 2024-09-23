@@ -26,7 +26,7 @@ otlp_config:
         endpoint: <dd-agent-ip>:4317
 ```
 
-To configure the router, enable the [OTLP exporter](./otlp) and set `endpoint: <datadog-agent-endpoint>`. For example: 
+To configure the router, enable the [OTLP exporter](./otlp) and set `endpoint: <datadog-agent-endpoint>` and enable `datadog_agent_sampling`. For example:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -37,7 +37,9 @@ telemetry:
    
         # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317)
         endpoint: "${env.DATADOG_AGENT_HOST}:4317"
-
+      common:
+        # Important! APM metrics will not display correctly without this setting.
+        datadog_agent_sampling: true
 ```
 
 For more details about Datadog configuration, see [Datadog Agent configuration](https://docs.datadoghq.com/opentelemetry/otlp_ingest_in_the_agent/?tab=host).
@@ -72,10 +74,13 @@ The router can be configured to connect to either the native, default Datadog ag
 telemetry:
   exporters:
     tracing:
-     datadog:
-       enabled: true
-       # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:8126)
-       endpoint: "http://${env.DATADOG_AGENT_HOST}:8126"
+      datadog:
+        enabled: true
+        # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:8126)
+        endpoint: "http://${env.DATADOG_AGENT_HOST}:8126"
+    common:
+      # Important! APM metrics will not display correctly without this setting.
+      datadog_agent_sampling: true
 
   # Enable graphql.operation.name attribute on supergraph spans.
   instrumentation:
