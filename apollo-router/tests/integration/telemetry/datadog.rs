@@ -792,11 +792,11 @@ impl TraceSpec {
         tracing::debug!("{}", serde_json::to_string_pretty(&trace)?);
         self.verify_trace_participants(&trace)?;
         self.verify_spans_present(&trace)?;
-        self.validate_measured_spans(&trace)?;
+        self.verify_measured_spans(&trace)?;
         self.verify_operation_name(&trace)?;
         self.verify_priority_sampled(&trace)?;
         self.verify_version(&trace)?;
-        self.validate_span_kinds(&trace)?;
+        self.verify_span_kinds(&trace)?;
         Ok(())
     }
 
@@ -815,7 +815,7 @@ impl TraceSpec {
         Ok(())
     }
 
-    fn validate_measured_spans(&self, trace: &Value) -> Result<(), BoxError> {
+    fn verify_measured_spans(&self, trace: &Value) -> Result<(), BoxError> {
         for expected in &self.measured_spans {
             assert!(
                 self.measured_span(trace, expected)?,
@@ -850,7 +850,7 @@ impl TraceSpec {
             .unwrap_or_default())
     }
 
-    fn validate_span_kinds(&self, trace: &Value) -> Result<(), BoxError> {
+    fn verify_span_kinds(&self, trace: &Value) -> Result<(), BoxError> {
         // Validate that the span.kind has been propagated. We can just do this for a selection of spans.
         self.validate_span_kind(trace, "router", "server")?;
         self.validate_span_kind(trace, "supergraph", "internal")?;
@@ -911,19 +911,24 @@ impl TraceSpec {
             trace.select_path(&format!("$..[?(@.name == '{}')].meta.['span.kind']", name))?;
         let binding = binding1.first().or(binding2.first());
 
-        assert!(
-            binding.is_some(),
-            "span.kind missing or incorrect {}, {}",
-            name,
-            trace
-        );
-        assert_eq!(
-            binding
-                .expect("expected binding")
-                .as_str()
-                .expect("expected string"),
-            kind
-        );
+        if binding.is_none() {
+            return Err(BoxError::from(format!(
+                "span.kind missing or incorrect {}, {}",
+                name, trace
+            )));
+        }
+
+        let binding = binding
+            .expect("expected binding")
+            .as_str()
+            .expect("expected string");
+        if binding != kind {
+            return Err(BoxError::from(format!(
+                "span.kind mismatch, expected {} got {}",
+                kind, binding
+            )));
+        }
+
         Ok(())
     }
 
