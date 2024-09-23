@@ -169,9 +169,9 @@ impl ConditionNode {
                 state.indent()?;
                 if_clause.write_indented(state)?;
                 state.dedent()?;
-                state.write("},")?;
+                state.write("}")?;
 
-                state.write("Else {")?;
+                state.write(" Else {")?;
                 state.indent()?;
                 else_clause.write_indented(state)?;
                 state.dedent()?;
@@ -235,12 +235,12 @@ impl PrimaryDeferBlock {
         } = self;
         state.write("Primary {")?;
         if sub_selection.is_some() || node.is_some() {
-            // Manually indent and write the newline
-            // to prevent a duplicate indent from `.new_line()` and `.initial_indent_level()`.
-            state.indent_no_new_line();
-            state.write("\n")?;
-
             if let Some(sub_selection) = sub_selection {
+                // Manually indent and write the newline
+                // to prevent a duplicate indent from `.new_line()` and `.initial_indent_level()`.
+                state.indent_no_new_line();
+                state.write("\n")?;
+
                 state.write(
                     sub_selection
                         .serialize()
@@ -250,7 +250,11 @@ impl PrimaryDeferBlock {
                     state.write(":")?;
                     state.new_line()?;
                 }
+            } else {
+                // Indent to match the Some() case
+                state.indent()?;
             }
+
             if let Some(node) = node {
                 node.write_indented(state)?;
             }
