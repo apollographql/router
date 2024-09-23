@@ -603,7 +603,7 @@ fn defer_test_defer_multiple_fields_in_different_subgraphs() {
                     id
                   }
                 }
-              }
+              },
             }, [
               Deferred(depends: [0], path: "t") {
                 {
@@ -613,7 +613,7 @@ fn defer_test_defer_multiple_fields_in_different_subgraphs() {
                 }:
                 Parallel {
                   Flatten(path: "t") {
-                    Fetch(service: "Subgraph3") {
+                    Fetch(service: "Subgraph1") {
                       {
                         ... on T {
                           __typename
@@ -622,7 +622,7 @@ fn defer_test_defer_multiple_fields_in_different_subgraphs() {
                       } =>
                       {
                         ... on T {
-                          v3
+                          v1
                         }
                       }
                     },
@@ -643,7 +643,7 @@ fn defer_test_defer_multiple_fields_in_different_subgraphs() {
                     },
                   },
                   Flatten(path: "t") {
-                    Fetch(service: "Subgraph1") {
+                    Fetch(service: "Subgraph3") {
                       {
                         ... on T {
                           __typename
@@ -652,12 +652,12 @@ fn defer_test_defer_multiple_fields_in_different_subgraphs() {
                       } =>
                       {
                         ... on T {
-                          v1
+                          v3
                         }
                       }
                     },
                   },
-                }
+                },
               },
             ]
           },
@@ -1587,7 +1587,7 @@ fn defer_test_defer_on_mutation_on_different_subgraphs() {
                       }
                     },
                   },
-                }
+                },
               }, [
                 Deferred(depends: [0], path: "update1") {
                   {
@@ -1607,7 +1607,7 @@ fn defer_test_defer_on_mutation_on_different_subgraphs() {
                         }
                       }
                     },
-                  }
+                  },
                 },
                 Deferred(depends: [1], path: "update2") {
                   {
@@ -1615,21 +1615,6 @@ fn defer_test_defer_on_mutation_on_different_subgraphs() {
                     v2
                   }:
                   Parallel {
-                    Flatten(path: "update2") {
-                      Fetch(service: "Subgraph2") {
-                        {
-                          ... on T {
-                            __typename
-                            id
-                          }
-                        } =>
-                        {
-                          ... on T {
-                            v2
-                          }
-                        }
-                      },
-                    },
                     Flatten(path: "update2") {
                       Fetch(service: "Subgraph1") {
                         {
@@ -1645,7 +1630,22 @@ fn defer_test_defer_on_mutation_on_different_subgraphs() {
                         }
                       },
                     },
-                  }
+                    Flatten(path: "update2") {
+                      Fetch(service: "Subgraph2") {
+                        {
+                          ... on T {
+                            __typename
+                            id
+                          }
+                        } =>
+                        {
+                          ... on T {
+                            v2
+                          }
+                        }
+                      },
+                    },
+                  },
                 },
               ]
             },
@@ -1727,23 +1727,7 @@ fn defer_test_defer_on_multi_dependency_deferred_section() {
                 },
                 Parallel {
                   Flatten(path: "t") {
-                    Fetch(service: "Subgraph3", id: 0) {
-                      {
-                        ... on T {
-                          __typename
-                          id0
-                        }
-                      } =>
-                      {
-                        ... on T {
-                          v3
-                          id2
-                        }
-                      }
-                    },
-                  },
-                  Flatten(path: "t") {
-                    Fetch(service: "Subgraph2", id: 1) {
+                    Fetch(service: "Subgraph2", id: 0) {
                       {
                         ... on T {
                           __typename
@@ -1758,8 +1742,24 @@ fn defer_test_defer_on_multi_dependency_deferred_section() {
                       }
                     },
                   },
+                  Flatten(path: "t") {
+                    Fetch(service: "Subgraph3", id: 1) {
+                      {
+                        ... on T {
+                          __typename
+                          id0
+                        }
+                      } =>
+                      {
+                        ... on T {
+                          v3
+                          id2
+                        }
+                      }
+                    },
+                  },
                 },
-              }
+              },
             }, [
               Deferred(depends: [0, 1], path: "t") {
                 {
