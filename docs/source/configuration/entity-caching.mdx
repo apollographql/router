@@ -145,7 +145,7 @@ To process an invalidation request, the router first sends a `SCAN` command to R
 
 #### Configuration
 
-You can configure entity cache invalidation both globally (`preview_entity_cache.invalidation`) and per subgraph (`preview_entity_cache.subgraph.subgraphs.invalidation`).
+You can configure entity cache invalidation globally with `preview_entity_cache.invalidation`. You can also override the global setting for a subgraph with `preview_entity_cache.subgraph.subgraphs.invalidation`. The example below shows both:
 
 ```yaml title="router.yaml"
 preview_entity_cache:
@@ -169,7 +169,7 @@ preview_entity_cache:
         shared_key: "agm3ipv7egb78dmxzv0gr5q0t5l6qs37"
     subgraphs:
       products:
-        # per subgraph invalidation configuration
+        # per subgraph invalidation configuration overrides global configuration
         invalidation:
           # whether invalidation is enabled for this subgraph
           enabled: true
@@ -313,6 +313,7 @@ To help tune invalidation performance and scalability, you should benchmark the 
 - Increase the number of pooled Redis connections.
 - Increasing the `SCAN` count option. This shouldn't be too large, with 1000 as a generally reasonable value, because larger values will reduce the operation throughput of the Redis instance.
 - Use separate Redis instances for some subgraphs.
+
 ### Private information caching
 
 A subgraph can return a response with the header `Cache-Control: private`, indicating that it contains user-personalized data. Although this usually forbids intermediate servers from storing data, the router may be able to recognize different users and store their data in different parts of the cache.
