@@ -249,7 +249,7 @@ fn defer_test_non_router_based_defer() {
             {
               b
             }:
-            
+
           },
         ]
       },
@@ -1081,7 +1081,7 @@ fn defer_test_defer_on_value_types() {
                       lines
                     }
                   }:
-                  
+
                 },
               ]
             },
@@ -1263,7 +1263,7 @@ fn defer_test_direct_nesting_on_value_type() {
                   {
                     address
                   }:
-                  
+
                 },
               ]
             },
@@ -1334,7 +1334,7 @@ fn defer_test_defer_on_enity_but_with_unuseful_key() {
                   {
                     b
                   }:
-                  
+
                 },
               ]
             },
@@ -3121,7 +3121,7 @@ fn defer_test_interface_has_different_definitions_between_subgraphs() {
             {
               c
             }:
-            
+
           },
         ]
       },
@@ -3556,7 +3556,7 @@ fn defer_test_defer_only_the_key_of_an_entity() {
                     id
                   }
                 }
-              }
+              },
             }, [
               Deferred(depends: [], path: "t") {
                 {
