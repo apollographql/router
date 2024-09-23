@@ -3689,7 +3689,7 @@ fn compute_nodes_for_op_path_element<'a>(
     dependency_graph: &mut FetchDependencyGraph,
     stack_item: &ComputeNodesStackItem<'a>,
     child: &'a Arc<PathTreeChild<OpGraphPathTrigger, Option<EdgeIndex>>>,
-    operation: &OpPathElement,
+    operation_element: &OpPathElement,
     created_nodes: &mut IndexSet<NodeIndex>,
 ) -> Result<ComputeNodesStackItem<'a>, FederationError> {
     let Some(edge_id) = child.edge else {
@@ -3700,7 +3700,7 @@ fn compute_nodes_for_op_path_element<'a>(
         // to one for the defer in question.
         let (updated_operation, updated_defer_context) = extract_defer_from_operation(
             dependency_graph,
-            operation,
+            operation_element,
             &stack_item.defer_context,
             &stack_item.node_path,
         )?;
@@ -3727,19 +3727,19 @@ fn compute_nodes_for_op_path_element<'a>(
     let dest = stack_item.tree.graph.node_weight(dest_id)?;
     if source.source != dest.source {
         return Err(FederationError::internal(format!(
-            "Collecting edge {edge_id:?} for {operation:?} \
-                                 should not change the underlying subgraph"
+            "Collecting edge {edge_id:?} for {operation_element:?} \
+                 should not change the underlying subgraph"
         )));
     }
 
     // We have a operation element, field or inline fragment.
     // We first check if it's been "tagged" to remember that __typename must be queried.
     // See the comment on the `optimize_sibling_typenames()` method to see why this exists.
-    if let Some(sibling_typename) = operation.sibling_typename() {
+    if let Some(sibling_typename) = operation_element.sibling_typename() {
         // We need to add the query __typename for the current type in the current node.
         let typename_field = Arc::new(OpPathElement::Field(Field::new_introspection_typename(
-            operation.schema(),
-            &operation.parent_type_position(),
+            operation_element.schema(),
+            &operation_element.parent_type_position(),
             sibling_typename.alias().cloned(),
         )));
         let typename_path = stack_item
@@ -3764,12 +3764,12 @@ fn compute_nodes_for_op_path_element<'a>(
     }
     let Ok((Some(updated_operation), updated_defer_context)) = extract_defer_from_operation(
         dependency_graph,
-        operation,
+        operation_element,
         &stack_item.defer_context,
         &stack_item.node_path,
     ) else {
         return Err(FederationError::internal(format!(
-            "Extracting @defer from {operation:?} should not have resulted in no operation"
+            "Extracting @defer from {operation_element:?} should not have resulted in no operation"
         )));
     };
     let mut updated = ComputeNodesStackItem {
@@ -4002,15 +4002,15 @@ fn compute_input_rewrites_on_key_fetch(
 /// - The updated operation can be `None`, if operation is no longer necessary.
 fn extract_defer_from_operation(
     dependency_graph: &mut FetchDependencyGraph,
-    operation: &OpPathElement,
+    operation_element: &OpPathElement,
     defer_context: &DeferContext,
     node_path: &FetchDependencyGraphNodePath,
 ) -> Result<(Option<OpPathElement>, DeferContext), FederationError> {
-    let defer_args = operation.defer_directive_args();
+    let defer_args = operation_element.defer_directive_args();
     let Some(defer_args) = defer_args else {
         let updated_path_to_defer_parent = defer_context
             .path_to_defer_parent
-            .with_pushed(operation.clone().into());
+            .with_pushed(operation_element.clone().into());
         let updated_context = DeferContext {
             path_to_defer_parent: updated_path_to_defer_parent.into(),
             // Following fields are identical to those of `defer_context`.
@@ -4018,16 +4018,13 @@ fn extract_defer_from_operation(
             active_defer_ref: defer_context.active_defer_ref.clone(),
             is_part_of_query: defer_context.is_part_of_query,
         };
-        return Ok((Some(operation.clone()), updated_context));
+        return Ok((Some(operation_element.clone()), updated_context));
     };
 
-    let updated_defer_ref = defer_args.label.as_ref().ok_or_else(||
-        // PORT_NOTE: The original TypeScript code has an assertion here.
-        FederationError::internal(
-                    "All defers should have a label at this point",
-                ))?;
-    let updated_operation = operation.without_defer();
-    let updated_path_to_defer_parent = match updated_operation {
+    // PORT_NOTE: The original TypeScript code has an assertion here.
+    let updated_defer_ref = defer_args.label.as_ref().ok_or_else(|| FederationError::internal("All defers should have a label at this point"))?;
+    let updated_operation_element = operation_element.without_defer();
+    let updated_path_to_defer_parent = match updated_operation_element {
         None => Default::default(), // empty OpPath
         Some(ref updated_operation) => OpPath(vec![Arc::new(updated_operation.clone())]),
     };
@@ -4036,7 +4033,7 @@ fn extract_defer_from_operation(
         defer_context,
         &defer_args,
         node_path.clone(),
-        operation.parent_type_position(),
+        operation_element.parent_type_position(),
     )?;
 
     let updated_context = DeferContext {
@@ -4046,7 +4043,7 @@ fn extract_defer_from_operation(
         active_defer_ref: defer_context.active_defer_ref.clone(),
         is_part_of_query: defer_context.is_part_of_query,
     };
-    Ok((updated_operation, updated_context))
+    Ok((updated_operation_element, updated_context))
 }
 
 fn handle_requires(
