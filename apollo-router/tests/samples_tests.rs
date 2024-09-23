@@ -287,7 +287,7 @@ impl TestExecution {
     async fn load_subgraph_mocks(
         &mut self,
         subgraphs_server: &mut MockServer,
-        url: &String,
+        url: &str,
     ) -> HashMap<String, String> {
         let mut subgraph_overrides = HashMap::new();
 
@@ -313,14 +313,14 @@ impl TestExecution {
                 }
                 builder
                     .respond_with(res.set_body_json(&response.body))
-                    .mount(&subgraphs_server)
+                    .mount(subgraphs_server)
                     .await;
             }
 
             // Add a default override for products, if not specified
             subgraph_overrides
                 .entry(name.to_string())
-                .or_insert(url.clone());
+                .or_insert(url.to_owned());
         }
 
         subgraph_overrides
