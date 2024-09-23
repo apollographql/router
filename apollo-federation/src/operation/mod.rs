@@ -216,7 +216,7 @@ struct DeferNormalizer {
 }
 
 impl DeferNormalizer {
-    fn new(selection_set: &SelectionSet) -> Self {
+    fn new(selection_set: &SelectionSet) -> Result<Self, FederationError> {
         let mut digest = Self {
             used_labels: HashSet::default(),
             problems: HashSet::default(),
@@ -235,10 +235,7 @@ impl DeferNormalizer {
                 if let Some(args) = inline
                     .inline_fragment
                     .data()
-                    .defer_directive_arguments()
-                    // TODO: Ideally, a version of this method exists that doesn't return a
-                    // Result...
-                    .unwrap()
+                    .defer_directive_arguments()?
                 {
                     let DeferDirectiveArguments { label, if_ } = args;
                     if let Some(label) = label {
@@ -259,7 +256,7 @@ impl DeferNormalizer {
                     .map(|(_, sel)| sel),
             );
         }
-        digest
+        Ok(digest)
     }
 
     fn is_problem(&self, key: &SelectionKey) -> bool {
@@ -335,7 +332,7 @@ impl Operation {
     // `DeferNormalizer` from the JS side
     pub(crate) fn with_normalized_defer(mut self) -> Result<NormalizedDefer, FederationError> {
         if self.has_defer() {
-            let mut normalizer = DeferNormalizer::new(&self.selection_set);
+            let mut normalizer = DeferNormalizer::new(&self.selection_set)?;
             if !normalizer.problems.is_empty() {
                 self.selection_set = self.selection_set.normalize_defer(&mut normalizer)?;
             }
@@ -377,7 +374,6 @@ impl Operation {
         if self.has_defer() {
             self.selection_set.reduce_defer(labels);
         }
-        debug_assert!(!self.has_defer());
         self
     }
 }
