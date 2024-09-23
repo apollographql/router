@@ -303,9 +303,9 @@ impl DeferredDeferBlock {
             if let Some(sub_selection) = sub_selection {
                 write_selections(state, &sub_selection.selections)?;
                 state.write(":")?;
-                state.new_line()?;
             }
             if let Some(node) = node {
+                state.new_line()?;
                 node.write_indented(state)?;
             }
 
