@@ -336,12 +336,9 @@ impl Operation {
     pub(crate) fn with_normalized_defer(mut self) -> NormalizedDefer {
         if self.has_defer() {
             let mut normalizer = DeferNormalizer::new(&self.selection_set);
-            println!("Before normalization: {}", self.selection_set);
             if !normalizer.problems.is_empty() {
-                println!("Normalizing defer...");
                 self.selection_set.normalize_defer(&mut normalizer);
             }
-            println!("After normalization: {}", self.selection_set);
             NormalizedDefer {
                 operation: self,
                 has_defers: true,
@@ -521,11 +518,6 @@ mod selection_map {
                 .iter_mut()
                 .filter_map(|(key, sel)| mapper(sel).map(|new| (key.clone(), new)))
                 .collect::<Vec<_>>();
-            print!("Found these updated selection: [");
-            for (key, sel) in &buffer {
-                print!("{key:?} -> {sel}, ");
-            }
-            println!("]");
             for (old_key, new_selection) in buffer {
                 if old_key == new_selection.key() {
                     // This unwrap is safe because we just checked that the keys match and the old
@@ -3640,8 +3632,6 @@ impl InlineFragmentSelection {
             return;
         };
 
-        println!("Normalizing: {args:?}");
-
         let mut remove_defer = false;
         let mut args_copy = args.clone();
         if let Some(BooleanOrVariable::Boolean(b)) = &args.if_ {
@@ -3667,9 +3657,7 @@ impl InlineFragmentSelection {
         }
 
         if args_copy == args {
-            println!("args are the same...");
         } else {
-            println!("args are the different...");
             /*
             const deferDirective = this.schema().deferDirective();
             const updatedDirectives = this.appliedDirectives
@@ -3685,7 +3673,6 @@ impl InlineFragmentSelection {
                 .directives
                 .iter()
                 .map(|dir| {
-                    println!("Directive: {dir}");
                     if dir.name == "defer" {
                         let mut dir: Directive = (**dir).clone();
                         dir.arguments
@@ -3710,16 +3697,13 @@ impl InlineFragmentSelection {
                             let arg = Node::new(Argument { value, name });
                             dir.arguments.push(arg);
                         }
-                        println!("New 'defer' directive: {dir}");
                         Node::new(dir)
                     } else {
-                        println!("Directive {:?} is not 'defer', passing through", dir.name);
                         dir.clone()
                     }
                 })
                 .collect();
             let new = self.with_updated_directives(directives);
-            println!("Updated InlineFragment: {new}");
             *self = new;
         }
     }
@@ -4279,9 +4263,7 @@ impl TryFrom<Operation> for Valid<executable::ExecutableDocument> {
     type Error = FederationError;
 
     fn try_from(value: Operation) -> Result<Self, Self::Error> {
-        // println!("Trying to convert operation, {value}, into an `ExecutableDocument`");
         let operation = executable::Operation::try_from(&value)?;
-        // println!("Constructed executable operation: {operation}");
         let fragments = value
             .named_fragments
             .fragments
@@ -4293,17 +4275,11 @@ impl TryFrom<Operation> for Valid<executable::ExecutableDocument> {
                 ))
             })
             .collect::<Result<IndexMap<_, _>, FederationError>>()?;
-        // println!("Constructed fragments: {fragments:?}");
 
         let mut document = executable::ExecutableDocument::new();
-        // println!("Base document: {document}");
         document.fragments = fragments;
-        // println!("Document w/ fragments: {document}");
         document.operations.insert(operation);
-        // println!("Document w/ operation: {document}");
         coerce_executable_values(value.schema.schema(), &mut document);
-        // println!("Coerced document: {document}");
-        // println!("Schema: {}", value.schema.schema());
         // FIXME: This fails because the doc does not have `@defer` in it, but it shouldn't have
         // it. For testing, we are going to assume it is valid.
         // Ok(document.validate(value.schema.schema())?)
