@@ -117,7 +117,7 @@ impl SequenceNode {
 
         write_indented_lines(state, nodes, |state, node| node.write_indented(state))?;
 
-        state.write("}")
+        state.write("},")
     }
 }
 
@@ -128,7 +128,7 @@ impl ParallelNode {
 
         write_indented_lines(state, nodes, |state, node| node.write_indented(state))?;
 
-        state.write("}")
+        state.write("},")
     }
 }
 
@@ -149,7 +149,7 @@ impl FlattenNode {
         node.write_indented(state)?;
 
         state.dedent()?;
-        state.write("}")
+        state.write("},")
     }
 }
 
