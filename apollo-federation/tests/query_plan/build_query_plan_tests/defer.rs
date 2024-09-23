@@ -255,7 +255,11 @@ fn defer_test_non_router_based_defer() {
     }
     "###
     );
+}
 
+
+#[test]
+fn defer_test_non_router_based_defer_case_two() {
     // @defer on entity but with no @key
     // While the @defer in the operation is on an entity, the @key in the first subgraph
     // is explicitely marked as non-resovable, so we cannot use it to actually defer the
@@ -280,6 +284,7 @@ fn defer_test_non_router_based_defer() {
         }
         "#,
     );
+
     assert_plan!(planner,
         r#"
             {
@@ -325,7 +330,7 @@ fn defer_test_non_router_based_defer() {
                       }
                     },
                   },
-                }
+                },
               }, [
                 Deferred(depends: [], path: "t") {
                   {
@@ -337,7 +342,11 @@ fn defer_test_non_router_based_defer() {
           }
         "###
     );
+}
 
+
+#[test]
+fn defer_test_non_router_based_defer_case_three() {
     // @defer on value type but with entity afterwards
     let planner = planner!(
         config = config_with_defer(),
@@ -429,7 +438,7 @@ fn defer_test_non_router_based_defer() {
                       }
                     },
                   },
-                }
+                },
               }, [
                 Deferred(depends: [0], path: "t/v") {
                   {
@@ -451,7 +460,7 @@ fn defer_test_non_router_based_defer() {
                         }
                       }
                     },
-                  }
+                  },
                 },
               ]
             },
