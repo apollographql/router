@@ -334,25 +334,25 @@ impl Operation {
     ///    `@defer` application that has `if: false`.
     // PORT_NOTE(@goto-bus-stop): It might make sense for the returned data structure to *be* the
     // `DeferNormalizer` from the JS side
-    pub(crate) fn with_normalized_defer(mut self) -> NormalizedDefer {
+    pub(crate) fn with_normalized_defer(mut self) -> Result<NormalizedDefer, FederationError> {
         if self.has_defer() {
             let mut normalizer = DeferNormalizer::new(&self.selection_set);
             if !normalizer.problems.is_empty() {
-                self.selection_set.normalize_defer(&mut normalizer);
+                self.selection_set = self.selection_set.normalize_defer(&mut normalizer)?;
             }
-            NormalizedDefer {
+            Ok(NormalizedDefer {
                 operation: self,
                 has_defers: true,
                 assigned_defer_labels: normalizer.assigned_labels,
                 defer_conditions: normalizer.conditions,
-            }
+            })
         } else {
-            NormalizedDefer {
+            Ok(NormalizedDefer {
                 operation: self,
                 has_defers: false,
                 assigned_defer_labels: IndexSet::default(),
                 defer_conditions: IndexMap::default(),
-            }
+            })
         }
     }
 
@@ -500,35 +500,6 @@ mod selection_map {
         pub(crate) fn extend_ref(&mut self, other: &SelectionMap) {
             self.0
                 .extend(other.iter().map(|(k, v)| (k.clone(), v.clone())))
-        }
-
-        /// Iterates over the inner map, passing each selection through the mapper. If the mapper
-        /// returns `Some`, the current selection is removed from the map and returned selection is
-        /// inserted in its place. This method is intented from sparce updates to selections which
-        /// update their keys (such as defer normalization). As such, update selections will hold
-        /// the same position as the former selection.
-        ///
-        /// NOTE: The given `mapper` function is given a mutable reference so that the `Selection`
-        /// can recurse if needed. Should any other change be needed, the mapper should clone the
-        /// `Selection` and return the updated copy.
-        pub(crate) fn update_and_reinsert<F>(&mut self, mut mapper: F)
-        where
-            F: FnMut(SelectionValue<'_>) -> Option<Selection>,
-        {
-            let buffer = self
-                .iter_mut()
-                .filter_map(|(key, sel)| mapper(sel).map(|new| (key.clone(), new)))
-                .collect::<Vec<_>>();
-            for (old_key, new_selection) in buffer {
-                if old_key == new_selection.key() {
-                    // This unwrap is safe because we just checked that the keys match and the old
-                    // key exists in the map already.
-                    *self.0.get_mut(&old_key).unwrap() = new_selection;
-                } else {
-                    self.insert(new_selection);
-                    self.0.swap_remove(&old_key);
-                }
-            }
         }
 
         /// Returns the selection set resulting from "recursively" filtering any selection
@@ -1081,6 +1052,30 @@ impl Selection {
             Selection::InlineFragment(inline_fragment_selection) => {
                 inline_fragment_selection.has_defer()
             }
+        }
+    }
+
+    fn normalize_defer(self, normalizer: &mut DeferNormalizer) -> Result<Self, FederationError> {
+        match self {
+            Selection::Field(field) => Ok(Self::Field(Arc::new(
+                field.with_updated_selection_set(
+                    field
+                        .selection_set
+                        .clone()
+                        .map(|set| set.normalize_defer(normalizer))
+                        .transpose()?,
+                ),
+            ))),
+            Selection::FragmentSpread(_spread) => {
+                Err(FederationError::internal("unexpected fragment spread"))
+            }
+            Selection::InlineFragment(inline) =>
+                inline
+                .with_updated_selection_set(
+                    inline.selection_set.clone().normalize_defer(normalizer)?,
+                )
+                .normalize_defer(normalizer)
+                .map(|inline| Self::InlineFragment(Arc::new(inline))),
         }
     }
 
@@ -2905,27 +2900,21 @@ impl SelectionSet {
         self.selections.values().any(|s| s.has_defer())
     }
 
-    fn normalize_defer(&mut self, normalizer: &mut DeferNormalizer) {
-        fn selection_normalize_defer(
-            mut selection: SelectionValue,
-            normalizer: &mut DeferNormalizer,
-        ) -> Option<Selection> {
-            if let Some(selection_set) = selection.get_selection_set_mut() {
-                selection_set.normalize_defer(normalizer);
-            }
-            match selection {
-                SelectionValue::InlineFragment(inline)
-                    if normalizer.is_problem(&inline.get().key()) =>
-                {
-                    let mut new_inline = inline.get().clone();
-                    Arc::make_mut(&mut new_inline).normalize_defer(normalizer);
-                    Some(Selection::InlineFragment(new_inline))
-                }
-                _ => None,
-            }
-        }
-        Arc::make_mut(&mut self.selections)
-            .update_and_reinsert(|sel| selection_normalize_defer(sel, normalizer))
+    fn normalize_defer(self, normalizer: &mut DeferNormalizer) -> Result<Self, FederationError> {
+        let Self {
+            schema,
+            type_position,
+            selections,
+        } = self;
+        Arc::unwrap_or_clone(selections)
+            .into_iter()
+            .map(|(_, sel)| sel.normalize_defer(normalizer))
+            .try_collect()
+            .map(|selections| Self {
+                schema,
+                type_position,
+                selections: Arc::new(selections),
+            })
     }
 
     // - `self` must be fragment-spread-free.
@@ -3652,14 +3641,14 @@ impl InlineFragmentSelection {
                 .any(|s| s.has_defer())
     }
 
-    fn normalize_defer(&mut self, normalizer: &mut DeferNormalizer) {
+    fn normalize_defer(self, normalizer: &mut DeferNormalizer) -> Result<Self, FederationError> {
         if !normalizer.is_problem(&self.key()) {
-            return;
+            return Ok(self);
         }
 
         // This should always be `Some`
-        let Some(args) = self.inline_fragment.defer_directive_arguments().unwrap() else {
-            return;
+        let Some(args) = self.inline_fragment.defer_directive_arguments()? else {
+            return Ok(self);
         };
 
         let mut remove_defer = false;
@@ -3687,6 +3676,7 @@ impl InlineFragmentSelection {
         }
 
         if args_copy == args {
+            Ok(self)
         } else {
             /*
             const deferDirective = this.schema().deferDirective();
@@ -3733,8 +3723,7 @@ impl InlineFragmentSelection {
                     }
                 })
                 .collect();
-            let new = self.with_updated_directives(directives);
-            *self = new;
+            Ok(self.with_updated_directives(directives))
         }
     }
 
@@ -4300,10 +4289,7 @@ impl TryFrom<Operation> for Valid<executable::ExecutableDocument> {
         document.fragments = fragments;
         document.operations.insert(operation);
         coerce_executable_values(value.schema.schema(), &mut document);
-        // FIXME: This fails because the doc does not have `@defer` in it, but it shouldn't have
-        // it. For testing, we are going to assume it is valid.
-        // Ok(document.validate(value.schema.schema())?)
-        Ok(Valid::assume_valid(document))
+        Ok(document.validate(value.schema.schema())?)
     }
 }
 
