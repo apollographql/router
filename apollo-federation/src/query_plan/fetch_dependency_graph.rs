@@ -1695,7 +1695,11 @@ impl FetchDependencyGraph {
             if node.defer_ref == child.defer_ref {
                 children.push(child_index);
             } else {
-                println!("{} == {}", DisplayOption(node.defer_ref.as_ref()), DisplayOption(child.defer_ref.as_ref()));
+                println!(
+                    "{} == {}",
+                    DisplayOption(node.defer_ref.as_ref()),
+                    DisplayOption(child.defer_ref.as_ref())
+                );
                 let Some(child_defer_ref) = &child.defer_ref else {
                     // FIXME: We should not be unwrapping here. Does a `DisplayOption` make sense?
                     let parent_defer_ref = node.defer_ref.as_ref().unwrap();
@@ -4020,7 +4024,10 @@ fn extract_defer_from_operation(
     };
 
     // PORT_NOTE: The original TypeScript code has an assertion here.
-    let updated_defer_ref = defer_args.label.as_ref().ok_or_else(|| FederationError::internal("All defers should have a label at this point"))?;
+    let updated_defer_ref = defer_args
+        .label
+        .as_ref()
+        .ok_or_else(|| FederationError::internal("All defers should have a label at this point"))?;
     let updated_operation_element = operation_element.without_defer();
     let updated_path_to_defer_parent = match updated_operation_element {
         None => Default::default(), // empty OpPath
