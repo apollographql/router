@@ -3222,7 +3222,8 @@ impl DeferTracking {
             .label
             .as_ref()
             .expect("All @defer should have been labeled at this point");
-        let _deferred_block = self.deferred.entry(label.clone()).or_insert_with(|| {
+
+        self.deferred.entry(label.clone()).or_insert_with(|| {
             DeferredInfo::empty(
                 primary_selection.schema.clone(),
                 label.clone(),
@@ -3457,7 +3458,7 @@ fn compute_nodes_for_key_resolution<'a>(
         conditions,
         stack_item.node_id,
         stack_item.node_path.clone(),
-        stack_item.defer_context.clone(),
+        stack_item.defer_context.for_conditions(),
         &Default::default(),
     )?;
     created_nodes.extend(conditions_nodes.iter().copied());
@@ -4125,7 +4126,7 @@ fn handle_requires(
             requires_conditions,
             new_node_id,
             fetch_node_path.clone(),
-            defer_context_for_conditions(defer_context),
+            defer_context.for_conditions(),
             &OpGraphPathContext::default(),
         )?;
         if newly_created_node_ids.is_empty() {
@@ -4357,7 +4358,7 @@ fn handle_requires(
             requires_conditions,
             fetch_node_id,
             fetch_node_path.clone(),
-            defer_context_for_conditions(defer_context),
+            defer_context.for_conditions(),
             &OpGraphPathContext::default(),
         )?;
         // If we didn't create any node, that means the whole condition was fetched from the current node
@@ -4426,11 +4427,14 @@ fn handle_requires(
     }
 }
 
-fn defer_context_for_conditions(base_context: &DeferContext) -> DeferContext {
-    let mut context = base_context.clone();
-    context.is_part_of_query = false;
-    context.current_defer_ref = base_context.active_defer_ref.clone();
-    context
+impl DeferContext {
+    /// Create a sub-context for use in resolving conditions inside an @defer block.
+    fn for_conditions(&self) -> Self {
+        let mut context = self.clone();
+        context.is_part_of_query = false;
+        context.current_defer_ref = self.active_defer_ref.clone();
+        context
+    }
 }
 
 fn inputs_for_require(
