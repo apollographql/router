@@ -325,7 +325,7 @@ fn defer_test_handles_simple_defer_with_defer_enabled() {
 }
 
 #[test]
-fn defer_test_non_router_based_defer() {
+fn defer_test_non_router_based_defer_case_one() {
     // @defer on value type
     let planner = planner!(
         config = config_with_defer(),
@@ -415,7 +415,6 @@ fn defer_test_non_router_based_defer() {
     "###
     );
 }
-
 
 #[test]
 fn defer_test_non_router_based_defer_case_two() {
