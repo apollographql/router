@@ -857,7 +857,7 @@ fn generate_condition_nodes<'a>(
     match conditions.next() {
         None => on_final_operation(op),
         Some((cond, labels)) => {
-            let else_op = Arc::unwrap_or_clone(op.clone()).reduce_defer(labels);
+            let else_op = Arc::unwrap_or_clone(op.clone()).reduce_defer(labels)?;
             let if_op = op;
             let node = ConditionNode {
                 condition_variable: cond.clone(),
