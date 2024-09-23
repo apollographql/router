@@ -72,6 +72,165 @@ fn defer_test_handles_simple_defer_without_defer_enabled() {
 }
 
 #[test]
+fn defer_test_normalizes_if_false() {
+    let planner = planner!(
+        config = config_with_defer(),
+        Subgraph1: r#"
+        type Query {
+            t: T
+        }
+
+        type T @key(fields: "id") {
+            id: ID!
+        }
+        "#,
+        Subgraph2: r#"
+        type T @key(fields: "id") {
+            id: ID!
+            v1: Int
+            v2: Int
+        }
+        "#,
+    );
+    assert_plan!(planner,
+        r#"
+            {
+              t {
+                v1
+                ... @defer(if: false) {
+                  v2
+                }
+              }
+            }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "Subgraph1") {
+          {
+            t {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "t") {
+          Fetch(service: "Subgraph2") {
+            {
+              ... on T {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on T {
+                v1
+                v2
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
+#[test]
+fn defer_test_normalizes_if_true() {
+    let planner = planner!(
+        config = config_with_defer(),
+        Subgraph1: r#"
+        type Query {
+            t: T
+        }
+
+        type T @key(fields: "id") {
+            id: ID!
+        }
+        "#,
+        Subgraph2: r#"
+        type T @key(fields: "id") {
+            id: ID!
+            v1: Int
+            v2: Int
+        }
+        "#,
+    );
+    assert_plan!(planner,
+        r#"
+            {
+              t {
+                v1
+                ... @defer(if: true) {
+                  v2
+                }
+              }
+            }
+        "#,
+        @r###"
+    QueryPlan {
+      Defer {
+        Primary {
+          {
+            t {
+              v1
+            }
+          }:
+          Sequence {
+            Fetch(service: "Subgraph1", id: 0) {
+              {
+                t {
+                  __typename
+                  id
+                }
+              }
+            },
+            Flatten(path: "t") {
+              Fetch(service: "Subgraph2") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    v1
+                  }
+                }
+              },
+            },
+          },
+        }, [
+          Deferred(depends: [0], path: "t") {
+            {
+              v2
+            }:
+            Flatten(path: "t") {
+              Fetch(service: "Subgraph2") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    v2
+                  }
+                }
+              },
+            },
+          },
+        ]
+      },
+    }
+    "###
+    );
+}
+
+#[test]
 fn defer_test_handles_simple_defer_with_defer_enabled() {
     let planner = planner!(
         config = config_with_defer(),
