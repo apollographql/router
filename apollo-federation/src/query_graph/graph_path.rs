@@ -426,12 +426,12 @@ impl OpPathElement {
     /// ignored).
     pub(crate) fn without_defer(&self) -> Option<Self> {
         match self {
-            Self::Field(_) => Some(self.clone()), // unchanged
+            Self::Field(_) => Some(self.clone()),
             Self::InlineFragment(inline_fragment) => {
-                // TODO(@goto-bus-stop): is this not exactly the wrong way around?
                 let updated_directives: DirectiveList = inline_fragment
                     .directives
-                    .get_all("defer")
+                    .iter()
+                    .filter(|directive| directive.name != "defer")
                     .cloned()
                     .collect();
                 if inline_fragment.type_condition_position.is_none()
