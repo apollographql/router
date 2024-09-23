@@ -833,7 +833,6 @@ fn compute_plan_internal(
     }
 }
 
-// TODO: FED-95
 fn compute_plan_for_defer_conditionals(
     parameters: &mut QueryPlanningParameters,
     processor: &mut FetchDependencyGraphToQueryPlanProcessor,
