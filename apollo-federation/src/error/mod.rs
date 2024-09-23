@@ -33,8 +33,6 @@ impl From<SchemaRootKind> for String {
 
 #[derive(Clone, Debug, strum_macros::Display, PartialEq, Eq)]
 pub enum UnsupportedFeatureKind {
-    #[strum(to_string = "progressive overrides")]
-    ProgressiveOverrides,
     #[strum(to_string = "defer")]
     Defer,
     #[strum(to_string = "context")]

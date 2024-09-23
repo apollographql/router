@@ -338,7 +338,6 @@ tempfile.workspace = true
 test-log = { version = "0.2.16", default-features = false, features = [
     "trace",
 ] }
-test-span = "0.8.0"
 basic-toml = "0.1.9"
 tower-test = "0.4.0"
 

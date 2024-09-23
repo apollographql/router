@@ -44,11 +44,11 @@ mod merged_abstract_types_handling;
 mod mutations;
 mod named_fragments;
 mod named_fragments_preservation;
+mod overrides;
 mod provides;
 mod requires;
 mod shareable_root_fields;
 mod subscriptions;
-
 // TODO: port the rest of query-planner-js/src/__tests__/buildPlan.test.ts
 
 #[test]
