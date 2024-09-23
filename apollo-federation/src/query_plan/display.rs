@@ -235,7 +235,10 @@ impl PrimaryDeferBlock {
         } = self;
         state.write("Primary {")?;
         if sub_selection.is_some() || node.is_some() {
-            state.indent()?;
+            // Manually indent and write the newline
+            // to prevent a duplicate indent from `.new_line()` and `.initial_indent_level()`.
+            state.indent_no_new_line();
+            state.write("\n")?;
 
             if let Some(sub_selection) = sub_selection {
                 state.write(
@@ -267,6 +270,7 @@ impl DeferredDeferBlock {
             sub_selection,
             node,
         } = self;
+
         state.write("Deferred(depends: [")?;
         if let Some((DeferredDependency { id }, rest)) = depends.split_first() {
             state.write(id)?;
@@ -284,14 +288,11 @@ impl DeferredDeferBlock {
             }
         }
         state.write("\"")?;
-        /*
         if let Some(label) = label {
-            state.write(", label: \"")?;
-            state.write(label)?;
-            state.write("\"")?;
+            state.write_fmt(format_args!(r#", label: "{label}""#))?;
         }
-        */
         state.write(") {")?;
+
         if sub_selection.is_some() || node.is_some() {
             state.indent()?;
 
@@ -306,6 +307,7 @@ impl DeferredDeferBlock {
 
             state.dedent()?;
         }
+
         state.write("},")
     }
 }
