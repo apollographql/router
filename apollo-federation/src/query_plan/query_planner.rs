@@ -12,6 +12,7 @@ use apollo_compiler::Name;
 use itertools::Itertools;
 use serde::Serialize;
 
+use super::ConditionNode;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
@@ -49,8 +50,6 @@ use crate::schema::ValidFederationSchema;
 use crate::utils::logging::snapshot;
 use crate::ApiSchemaOptions;
 use crate::Supergraph;
-
-use super::ConditionNode;
 
 pub(crate) const CONTEXT_DIRECTIVE: &str = "context";
 pub(crate) const JOIN_FIELD: &str = "join__field";
@@ -853,7 +852,7 @@ fn compute_plan_for_defer_conditionals(
 fn generate_condition_nodes<'a>(
     op: Arc<Operation>,
     mut conditions: impl Clone + Iterator<Item = (&'a Name, &'a IndexSet<String>)>,
-    mut on_final_operation: &mut impl FnMut(Arc<Operation>) -> Result<Option<PlanNode>, FederationError>,
+    on_final_operation: &mut impl FnMut(Arc<Operation>) -> Result<Option<PlanNode>, FederationError>,
 ) -> Result<Option<PlanNode>, FederationError> {
     match conditions.next() {
         None => on_final_operation(op),
@@ -862,12 +861,8 @@ fn generate_condition_nodes<'a>(
             let if_op = op;
             let node = ConditionNode {
                 condition_variable: cond.clone(),
-                if_clause: generate_condition_nodes(
-                    if_op,
-                    conditions.clone(),
-                    on_final_operation,
-                )?
-                .map(Box::new),
+                if_clause: generate_condition_nodes(if_op, conditions.clone(), on_final_operation)?
+                    .map(Box::new),
                 else_clause: generate_condition_nodes(
                     Arc::new(else_op),
                     conditions.clone(),
