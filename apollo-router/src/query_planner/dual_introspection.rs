@@ -32,11 +32,11 @@ pub(crate) fn compare_introspection_responses(
             }
             is_matched = js_response.data == rust_response.data;
             if is_matched {
-                tracing::debug!("Introspection match! 🎉")
+                tracing::trace!("Introspection match! 🎉")
             } else {
                 tracing::debug!("Introspection mismatch");
                 tracing::trace!("Introspection query:\n{query}");
-                tracing::trace!("Introspection diff:\n{}", {
+                tracing::debug!("Introspection diff:\n{}", {
                     let rust = rust_response
                         .data
                         .as_ref()
