@@ -8,20 +8,8 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/duplicate
         code: DuplicateSourceName,
         message: "Every `@source(name:)` must be unique. Found duplicate name \"v1\".",
         locations: [
-            LineColumn {
-                line: 6,
-                column: 3,
-            }..LineColumn {
-                line: 6,
-                column: 61,
-            },
-            LineColumn {
-                line: 7,
-                column: 3,
-            }..LineColumn {
-                line: 7,
-                column: 61,
-            },
+            6:3..6:61,
+            7:3..7:61,
         ],
     },
 ]

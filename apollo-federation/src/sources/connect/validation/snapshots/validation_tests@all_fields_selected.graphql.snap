@@ -8,65 +8,35 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/all_field
         code: UnresolvedField,
         message: "No connector resolves field `T.unselected`. It must have a `@connect` directive or appear in `@connect(selection:)`.",
         locations: [
-            LineColumn {
-                line: 34,
-                column: 3,
-            }..LineColumn {
-                line: 34,
-                column: 22,
-            },
+            34:3..34:22,
         ],
     },
     Message {
         code: UnresolvedField,
         message: "No connector resolves field `T.secondUnused`. It must have a `@connect` directive or appear in `@connect(selection:)`.",
         locations: [
-            LineColumn {
-                line: 48,
-                column: 3,
-            }..LineColumn {
-                line: 48,
-                column: 23,
-            },
+            48:3..48:23,
         ],
     },
     Message {
         code: UnresolvedField,
         message: "No connector resolves field `C.unselected`. It must have a `@connect` directive or appear in `@connect(selection:)`.",
         locations: [
-            LineColumn {
-                line: 54,
-                column: 3,
-            }..LineColumn {
-                line: 54,
-                column: 21,
-            },
+            54:3..54:21,
         ],
     },
     Message {
         code: UnresolvedField,
         message: "No connector resolves field `D.unselected`. It must have a `@connect` directive or appear in `@connect(selection:)`.",
         locations: [
-            LineColumn {
-                line: 59,
-                column: 3,
-            }..LineColumn {
-                line: 59,
-                column: 21,
-            },
+            59:3..59:21,
         ],
     },
     Message {
         code: UnresolvedField,
         message: "No connector resolves field `Unused.unselected`. It must have a `@connect` directive or appear in `@connect(selection:)`.",
         locations: [
-            LineColumn {
-                line: 63,
-                column: 3,
-            }..LineColumn {
-                line: 63,
-                column: 18,
-            },
+            63:3..63:18,
         ],
     },
 ]

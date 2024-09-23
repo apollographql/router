@@ -8,20 +8,8 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_e
         code: EntityResolverArgumentMismatch,
         message: "`Query.product` with `@connect(entity: true)` has invalid arguments. Field `id` on input type `CountryInput` does not match a field in a `@key` on type `Product`.",
         locations: [
-            LineColumn {
-                line: 51,
-                column: 5,
-            }..LineColumn {
-                line: 51,
-                column: 12,
-            },
-            LineColumn {
-                line: 19,
-                column: 9,
-            }..LineColumn {
-                line: 19,
-                column: 21,
-            },
+            51:5..51:12,
+            19:9..19:21,
         ],
     },
 ]

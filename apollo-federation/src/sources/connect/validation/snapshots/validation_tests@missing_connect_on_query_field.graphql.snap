@@ -8,13 +8,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/missing_c
         code: QueryFieldMissingConnect,
         message: "The field `Query.resources` has no `@connect` directive.",
         locations: [
-            LineColumn {
-                line: 9,
-                column: 5,
-            }..LineColumn {
-                line: 9,
-                column: 26,
-            },
+            9:5..9:26,
         ],
     },
 ]

@@ -8,13 +8,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/connect_s
         code: SourceNameMismatch,
         message: "`@connect(source: \"v1\")` on `Query.resources` does not match any defined sources. Did you mean `@source(name: \"v2\")`?",
         locations: [
-            LineColumn {
-                line: 10,
-                column: 14,
-            }..LineColumn {
-                line: 10,
-                column: 26,
-            },
+            10:14..10:26,
         ],
     },
 ]
