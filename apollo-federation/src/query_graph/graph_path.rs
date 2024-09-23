@@ -3784,25 +3784,6 @@ impl OpPath {
     }
 }
 
-impl TryFrom<&'_ OpPath> for Vec<QueryPathElement> {
-    type Error = FederationError;
-
-    fn try_from(value: &'_ OpPath) -> Result<Self, Self::Error> {
-        value
-            .0
-            .iter()
-            .map(|path_element| {
-                Ok(match path_element.as_ref() {
-                    OpPathElement::Field(field) => QueryPathElement::Field(field.try_into()?),
-                    OpPathElement::InlineFragment(inline) => {
-                        QueryPathElement::InlineFragment(inline.try_into()?)
-                    }
-                })
-            })
-            .collect()
-    }
-}
-
 pub(crate) fn concat_paths_in_parents(
     first: &Option<Arc<OpPath>>,
     second: &Option<Arc<OpPath>>,
