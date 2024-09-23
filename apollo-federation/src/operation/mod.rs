@@ -640,11 +640,11 @@ mod selection_map {
             }
         }
 
-        pub(super) fn get_directives_mut(&mut self) -> &mut DirectiveList {
+        pub(super) fn directives(&self) -> &'_ DirectiveList {
             match self {
-                Self::Field(field) => field.get_directives_mut(),
-                Self::FragmentSpread(spread) => spread.get_directives_mut(),
-                Self::InlineFragment(inline) => inline.get_directives_mut(),
+                Self::Field(field) => &field.get().field.directives,
+                Self::FragmentSpread(frag) => &frag.get().spread.directives,
+                Self::InlineFragment(frag) => &frag.get().inline_fragment.directives,
             }
         }
 
@@ -673,10 +673,6 @@ mod selection_map {
             Arc::make_mut(self.0).field.sibling_typename_mut()
         }
 
-        pub(super) fn get_directives_mut(&mut self) -> &mut DirectiveList {
-            Arc::make_mut(self.0).field.directives_mut()
-        }
-
         pub(crate) fn get_selection_set_mut(&mut self) -> &mut Option<SelectionSet> {
             &mut Arc::make_mut(self.0).selection_set
         }
@@ -688,10 +684,6 @@ mod selection_map {
     impl<'a> FragmentSpreadSelectionValue<'a> {
         pub(crate) fn new(fragment_spread_selection: &'a mut Arc<FragmentSpreadSelection>) -> Self {
             Self(fragment_spread_selection)
-        }
-
-        pub(super) fn get_directives_mut(&mut self) -> &mut DirectiveList {
-            Arc::make_mut(self.0).spread.directives_mut()
         }
 
         pub(crate) fn get_selection_set_mut(&mut self) -> &mut SelectionSet {
@@ -713,10 +705,6 @@ mod selection_map {
 
         pub(crate) fn get(&self) -> &Arc<InlineFragmentSelection> {
             self.0
-        }
-
-        pub(super) fn get_directives_mut(&mut self) -> &mut DirectiveList {
-            Arc::make_mut(self.0).inline_fragment.directives_mut()
         }
 
         pub(crate) fn get_selection_set_mut(&mut self) -> &mut SelectionSet {
@@ -2758,7 +2746,7 @@ impl SelectionSet {
                 };
                 unnecessary_directives.extend(
                     selection
-                        .get_directives_mut()
+                        .directives()
                         .iter()
                         .filter(|d| d.name == "include" || d.name == "skip")
                         .cloned(),
