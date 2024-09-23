@@ -239,7 +239,7 @@ async fn both_mode_integration() {
             ",
         )
         .supergraph("../examples/graphql/local.graphql")
-        .log("error,apollo_router=info,apollo_router::query_planner=debug")
+        .log("error,apollo_router=info,apollo_router::query_planner=trace")
         .build()
         .await;
     router.start().await;

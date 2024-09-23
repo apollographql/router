@@ -153,7 +153,7 @@ impl BothModeComparisonJob {
                 let match_result = opt_plan_node_matches(js_root_node, &rust_root_node);
                 is_matched = match_result.is_ok();
                 match match_result {
-                    Ok(_) => tracing::debug!("JS and Rust query plans match{operation_desc}! 🎉"),
+                    Ok(_) => tracing::trace!("JS and Rust query plans match{operation_desc}! 🎉"),
                     Err(err) => {
                         tracing::debug!("JS v.s. Rust query plan mismatch{operation_desc}");
                         tracing::debug!("{}", err.full_description());
