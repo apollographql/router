@@ -1053,8 +1053,7 @@ impl Selection {
             Selection::FragmentSpread(_spread) => {
                 Err(FederationError::internal("unexpected fragment spread"))
             }
-            Selection::InlineFragment(inline) =>
-                inline
+            Selection::InlineFragment(inline) => inline
                 .with_updated_selection_set(
                     inline.selection_set.clone().normalize_defer(normalizer)?,
                 )
@@ -3636,8 +3635,14 @@ impl InlineFragmentSelection {
         }
 
         if remove_defer {
-            todo!();
-            // return;
+            let directives: DirectiveList = self
+                .inline_fragment
+                .directives
+                .iter()
+                .filter(|dir| dir.name != "defer")
+                .cloned()
+                .collect();
+            return Ok(self.with_updated_directives(directives));
         }
 
         // NOTE: If this is `Some`, it will be a variable.
@@ -3648,16 +3653,6 @@ impl InlineFragmentSelection {
         if args_copy == args {
             Ok(self)
         } else {
-            /*
-            const deferDirective = this.schema().deferDirective();
-            const updatedDirectives = this.appliedDirectives
-              .filter((d) => d.name !== deferDirective.name)
-              .concat(new Directive<FragmentElement>(deferDirective.name, newDeferArgs));
-
-            const updated = new FragmentElement(this.sourceType, this.typeCondition, updatedDirectives);
-            this.copyAttachementsTo(updated);
-            return updated;
-            */
             let directives: DirectiveList = self
                 .inline_fragment
                 .directives
