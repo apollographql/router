@@ -3867,6 +3867,31 @@ impl Fragment {
     }
 }
 
+impl NamedFragments {
+    /// Returns true if any fragment uses the @defer directive.
+    fn has_defer(&self) -> bool {
+        self.iter().any(|fragment| fragment.has_defer())
+    }
+
+    /// Creates new fragment definitions with the @defer directive removed.
+    fn without_defer(&self, filter: DeferFilter<'_>) -> Result<Self, FederationError> {
+        let mut new_fragments = NamedFragments {
+            fragments: Default::default(),
+        };
+        // The iteration is in dependency order: when we iterate a fragment A that depends on
+        // fragment B, we know that we have already processed fragment B.
+        // This implies that all references to other fragments will already be part of
+        // `new_fragments`. Note that we must process all fragments that depend on each other, even
+        // if a fragment doesn't actually use @defer itself, to make sure that the `.selection_set`
+        // values on each selection are up to date.
+        for fragment in self.iter() {
+            let fragment = fragment.without_defer(filter, &new_fragments)?;
+            new_fragments.insert(fragment);
+        }
+        Ok(new_fragments)
+    }
+}
+
 impl FieldSelection {
     /// Returns true if the selection or any of its subselections uses the @defer directive.
     fn has_defer(&self) -> bool {
@@ -4011,9 +4036,9 @@ impl Operation {
     /// Create a new operation without @defer directive applications.
     pub(crate) fn without_defer(mut self) -> Result<Self, FederationError> {
         if self.has_defer() {
-            let named_fragments = &self.named_fragments;
-            // TODO: remove @defer applications from fragment selection sets
-            self.selection_set = self.selection_set.without_defer(DeferFilter::All, named_fragments)?;
+            let named_fragments = self.named_fragments.without_defer(DeferFilter::All)?;
+            self.selection_set = self.selection_set.without_defer(DeferFilter::All, &named_fragments)?;
+            self.named_fragments = named_fragments;
         }
         debug_assert!(!self.has_defer());
         Ok(self)
@@ -4022,9 +4047,9 @@ impl Operation {
     /// Create a new operation without specific @defer(label:) directive applications.
     pub(crate) fn reduce_defer(mut self, labels: &IndexSet<String>) -> Result<Self, FederationError> {
         if self.has_defer() {
-            let named_fragments = &self.named_fragments;
-            // TODO: remove @defer applications from fragment selection sets
-            self.selection_set = self.selection_set.without_defer(DeferFilter::Labels(labels), named_fragments)?;
+            let named_fragments = self.named_fragments.without_defer(DeferFilter::Labels(labels))?;
+            self.selection_set = self.selection_set.without_defer(DeferFilter::Labels(labels), &named_fragments)?;
+            self.named_fragments = named_fragments;
         }
         Ok(self)
     }
