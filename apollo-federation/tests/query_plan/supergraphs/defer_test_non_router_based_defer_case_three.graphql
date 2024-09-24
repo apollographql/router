@@ -1,14 +1,16 @@
-# Composed from subgraphs with hash: 4f34d97066066e236d3289e49357b55e3eb8980f
+# Composed from subgraphs with hash: c6019a1bd80338506615bb1b60a44fc384586a47
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
-  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+  @link(url: "https://specs.apollo.dev/join/v0.4", for: EXECUTION)
 {
   query: Query
 }
 
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
 directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
-directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 
 directive @join__graph(name: String!, url: String!) on ENUM_VALUE
 
@@ -20,12 +22,13 @@ directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
+scalar join__DirectiveArguments
+
 scalar join__FieldSet
 
 enum join__Graph {
   SUBGRAPH1 @join__graph(name: "Subgraph1", url: "none")
   SUBGRAPH2 @join__graph(name: "Subgraph2", url: "none")
-  SUBGRAPH3 @join__graph(name: "Subgraph3", url: "none")
 }
 
 scalar link__Import
@@ -45,7 +48,6 @@ enum link__Purpose {
 type Query
   @join__type(graph: SUBGRAPH1)
   @join__type(graph: SUBGRAPH2)
-  @join__type(graph: SUBGRAPH3)
 {
   t: T @join__field(graph: SUBGRAPH1)
 }
@@ -55,17 +57,20 @@ type T
   @join__type(graph: SUBGRAPH2, key: "id")
 {
   id: ID!
-  v0: String @join__field(graph: SUBGRAPH1)
-  v1: String @join__field(graph: SUBGRAPH1)
-  v2: String @join__field(graph: SUBGRAPH2)
-  v3: U @join__field(graph: SUBGRAPH2)
+  v: V @join__field(graph: SUBGRAPH2)
 }
 
 type U
+  @join__type(graph: SUBGRAPH1, key: "id")
   @join__type(graph: SUBGRAPH2, key: "id")
-  @join__type(graph: SUBGRAPH3, key: "id")
 {
   id: ID!
-  x: Int @join__field(graph: SUBGRAPH3)
-  y: Int @join__field(graph: SUBGRAPH3)
+  x: Int @join__field(graph: SUBGRAPH1)
+}
+
+type V
+  @join__type(graph: SUBGRAPH2)
+{
+  a: Int
+  u: U
 }

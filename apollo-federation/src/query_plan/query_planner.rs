@@ -416,7 +416,7 @@ impl QueryPlanner {
                     assigned_defer_labels,
                     defer_conditions,
                     has_defers,
-                } = normalized_operation.with_normalized_defer();
+                } = normalized_operation.with_normalized_defer()?;
                 if has_defers && is_subscription {
                     return Err(SingleFederationError::DeferredSubscriptionUnsupported.into());
                 }
@@ -833,7 +833,6 @@ fn compute_plan_internal(
     }
 }
 
-// TODO: FED-95
 fn compute_plan_for_defer_conditionals(
     parameters: &mut QueryPlanningParameters,
     processor: &mut FetchDependencyGraphToQueryPlanProcessor,

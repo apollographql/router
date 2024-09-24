@@ -1,4 +1,4 @@
-# Composed from subgraphs with hash: 355f15f0f2699fd21731b0403286c513357860d3
+# Composed from subgraphs with hash: f7c59d88291d4be94f4c484dc849118a08361e69
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.4", for: EXECUTION)
@@ -49,15 +49,14 @@ type Query
   @join__type(graph: SUBGRAPH1)
   @join__type(graph: SUBGRAPH2)
 {
-  me: User @join__field(graph: SUBGRAPH1)
+  t: T @join__field(graph: SUBGRAPH1)
 }
 
-type User
+type T
   @join__type(graph: SUBGRAPH1, key: "id")
   @join__type(graph: SUBGRAPH2, key: "id")
 {
   id: ID!
-  name: String @join__field(graph: SUBGRAPH1)
-  age: Int @join__field(graph: SUBGRAPH2)
-  address: String @join__field(graph: SUBGRAPH2)
+  v1: Int @join__field(graph: SUBGRAPH2)
+  v2: Int @join__field(graph: SUBGRAPH2)
 }

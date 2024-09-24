@@ -303,6 +303,8 @@ impl DeferredDeferBlock {
             if let Some(sub_selection) = sub_selection {
                 write_selections(state, &sub_selection.selections)?;
                 state.write(":")?;
+            }
+            if sub_selection.is_some() && node.is_some() {
                 state.new_line()?;
             }
             if let Some(node) = node {
