@@ -502,7 +502,6 @@ fn defer_test_non_router_based_defer_case_two() {
     );
 }
 
-
 #[test]
 fn defer_test_non_router_based_defer_case_three() {
     // @defer on value type but with entity afterwards

@@ -430,7 +430,7 @@ impl QueryPlanner {
                 // If defer is not enabled, we remove all @defer from the query. This feels cleaner do this once here than
                 // having to guard all the code dealing with defer later, and is probably less error prone too (less likely
                 // to end up passing through a @defer to a subgraph by mistake).
-                (normalized_operation.without_defer(), None, None, false)
+                (normalized_operation.without_defer()?, None, None, false)
             };
 
         if normalized_operation.selection_set.is_empty() {
@@ -856,7 +856,7 @@ fn generate_condition_nodes<'a>(
     match conditions.next() {
         None => on_final_operation(op),
         Some((cond, labels)) => {
-            let else_op = Arc::unwrap_or_clone(op.clone()).reduce_defer(labels);
+            let else_op = Arc::unwrap_or_clone(op.clone()).reduce_defer(labels)?;
             let if_op = op;
             let node = ConditionNode {
                 condition_variable: cond.clone(),
