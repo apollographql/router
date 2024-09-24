@@ -866,7 +866,11 @@ impl Telemetry {
         // Only apply things if we were executing in the context of a vanilla the Apollo executable.
         // Users that are rolling their own routers will need to set up telemetry themselves.
         if let Some(hot_tracer) = OPENTELEMETRY_TRACER_HANDLE.get() {
-            otel::layer::configure(&self.sampling_filter_ratio);
+            if self.config.exporters.tracing.common.datadog_agent_sampling {
+                otel::layer::configure(&SamplerOption::Always(Sampler::AlwaysOn));
+            } else {
+                otel::layer::configure(&self.sampling_filter_ratio);
+            }
 
             // The reason that this has to happen here is that we are interacting with global state.
             // If we do this logic during plugin init then if a subsequent plugin fails to init then we
@@ -935,10 +939,6 @@ impl Telemetry {
         if propagation.zipkin || tracing.zipkin.enabled {
             propagators.push(Box::<opentelemetry_zipkin::Propagator>::default());
         }
-        // TODO: put it at the end and add a comment saying IT MUST BE THE LAST ONE
-        if propagation.datadog || tracing.datadog.enabled() {
-            propagators.push(Box::<tracing::datadog_exporter::DatadogPropagator>::default());
-        }
         if propagation.aws_xray {
             propagators.push(Box::<opentelemetry_aws::XrayPropagator>::default());
         }
@@ -947,6 +947,9 @@ impl Telemetry {
                 from_request_header.to_string(),
                 propagation.request.format.clone(),
             )));
+        }
+        if propagation.datadog || tracing.datadog.enabled() {
+            propagators.push(Box::<tracing::datadog_exporter::DatadogPropagator>::default());
         }
 
         TextMapCompositePropagator::new(propagators)
@@ -959,9 +962,16 @@ impl Telemetry {
         let spans_config = &config.instrumentation.spans;
         let mut common = tracing_config.common.clone();
         let mut sampler = common.sampler.clone();
-        // set it to AlwaysOn: it is now done in the SamplingFilter, so whatever is sent to an exporter
-        // should be accepted
-        common.sampler = SamplerOption::Always(Sampler::AlwaysOn);
+
+        // This should be enforced because it has different rules for sampling
+        if tracing_config.datadog.enabled() {
+            common.datadog_agent_sampling = true;
+        }
+        if !common.datadog_agent_sampling {
+            // set it to AlwaysOn: it is now done in the SamplingFilter, so whatever is sent to an exporter
+            // should be accepted
+            common.sampler = SamplerOption::Always(Sampler::AlwaysOn);
+        }
 
         let mut builder =
             opentelemetry::sdk::trace::TracerProvider::builder().with_config((&common).into());

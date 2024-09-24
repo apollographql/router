@@ -11,7 +11,6 @@ telemetry:
       common:
         service_name: router
         parent_based_sampler: false
-        datadog_agent_sampling: true
         resource:
           env: local1
           service.version: router_version_override

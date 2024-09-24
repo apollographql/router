@@ -207,6 +207,7 @@ impl TracingConfigurator for Config {
         _spans_config: &Spans,
     ) -> Result<Builder, BoxError> {
         tracing::info!("Configuring Datadog tracing: {}", self.batch_processor);
+
         let common: sdk::trace::Config = trace.into();
 
         // Precompute representation otel Keys for the mappings so that we don't do heap allocation for each span
