@@ -1,9 +1,8 @@
 use apollo_compiler::Node;
 
-use crate::operation::Selection;
-
-use super::parse_schema;
 use super::parse_operation;
+use super::parse_schema;
+use crate::operation::Selection;
 
 const DEFAULT_SCHEMA: &str = r#"
 type A {
@@ -35,14 +34,17 @@ directive @defer(if: Boolean! = true, label: String) on FRAGMENT_SPREAD | INLINE
 fn without_defer_simple() {
     let schema = parse_schema(DEFAULT_SCHEMA);
 
-    let operation = parse_operation(&schema, r#"
+    let operation = parse_operation(
+        &schema,
+        r#"
       {
         ... @defer { a { one } }
         b {
           ... @defer { two }
         }
       }
-    "#);
+    "#,
+    );
 
     let without_defer = operation.without_defer().unwrap();
 
@@ -62,7 +64,9 @@ fn without_defer_simple() {
 fn without_defer_named_fragment() {
     let schema = parse_schema(DEFAULT_SCHEMA);
 
-    let operation = parse_operation(&schema, r#"
+    let operation = parse_operation(
+        &schema,
+        r#"
       {
         b { ...frag @defer }
         either { ...frag }
@@ -70,7 +74,8 @@ fn without_defer_named_fragment() {
       fragment frag on B {
         two
       }
-    "#);
+    "#,
+    );
 
     let without_defer = operation.without_defer().unwrap();
 
@@ -94,7 +99,9 @@ fn without_defer_named_fragment() {
 fn without_defer_merges_fragment() {
     let schema = parse_schema(DEFAULT_SCHEMA);
 
-    let operation = parse_operation(&schema, r#"
+    let operation = parse_operation(
+        &schema,
+        r#"
       {
         a { one }
         either {
@@ -106,7 +113,8 @@ fn without_defer_merges_fragment() {
           }
         }
       }
-    "#);
+    "#,
+    );
 
     let without_defer = operation.without_defer().unwrap();
 
@@ -129,7 +137,9 @@ fn without_defer_merges_fragment() {
 fn without_defer_fragment_references() {
     let schema = parse_schema(DEFAULT_SCHEMA);
 
-    let operation = parse_operation(&schema, r#"
+    let operation = parse_operation(
+        &schema,
+        r#"
       fragment a on A {
         ... @defer { ...b }
       }
@@ -147,7 +157,8 @@ fn without_defer_fragment_references() {
       }
 
       { ...entry }
-    "#);
+    "#,
+    );
 
     let without_defer = operation.without_defer().unwrap();
 
@@ -181,9 +192,14 @@ fn without_defer_fragment_references() {
     let frag_a = without_defer.named_fragments.get("a").unwrap();
     let frag_b = without_defer.named_fragments.get("b").unwrap();
 
-    let (_, Selection::FragmentSpread(frag_a_spread)) = frag_a.selection_set.selections.first().unwrap() else {
+    let (_, Selection::FragmentSpread(frag_a_spread)) =
+        frag_a.selection_set.selections.first().unwrap()
+    else {
         panic!("first selection from frag a should be ...b");
     };
 
-    assert_eq!(frag_a_spread.selection_set, frag_b.selection_set, "FragmentSpreadSelection's selection set should be updated");
+    assert_eq!(
+        frag_a_spread.selection_set, frag_b.selection_set,
+        "FragmentSpreadSelection's selection set should be updated"
+    );
 }
