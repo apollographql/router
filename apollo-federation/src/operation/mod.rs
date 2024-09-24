@@ -233,11 +233,7 @@ impl DeferNormalizer {
             // TODO: Does this need to be checking FragmentSpread + InlineFragment or just
             // spreads? The JS code checks "FragmentSelection"
             if let Selection::InlineFragment(inline) = selection {
-                if let Some(args) = inline
-                    .inline_fragment
-                    .data()
-                    .defer_directive_arguments()?
-                {
+                if let Some(args) = inline.inline_fragment.data().defer_directive_arguments()? {
                     let DeferDirectiveArguments { label, if_ } = args;
                     if let Some(label) = label {
                         digest.used_labels.insert(label);
@@ -3667,7 +3663,7 @@ impl DeferFilter<'_> {
         match self {
             Self::All => {
                 directive_list.remove_one(DEFER_DIRECTIVE_NAME);
-            },
+            }
             Self::Labels(set) => {
                 let label = directive_list
                     .get(DEFER_DIRECTIVE_NAME)
@@ -3687,7 +3683,11 @@ impl Fragment {
         self.selection_set.has_defer()
     }
 
-    fn without_defer(&self, filter: DeferFilter<'_>, named_fragments: &NamedFragments) -> Result<Self, FederationError> {
+    fn without_defer(
+        &self,
+        filter: DeferFilter<'_>,
+        named_fragments: &NamedFragments,
+    ) -> Result<Self, FederationError> {
         let selection_set = self.selection_set.without_defer(filter, named_fragments)?;
         Ok(Fragment {
             schema: self.schema.clone(),
@@ -3872,18 +3872,26 @@ impl Selection {
         }
     }
 
-    fn without_defer(&self, filter: DeferFilter<'_>, named_fragments: &NamedFragments) -> Result<Self, FederationError> {
+    fn without_defer(
+        &self,
+        filter: DeferFilter<'_>,
+        named_fragments: &NamedFragments,
+    ) -> Result<Self, FederationError> {
         match self {
             Selection::Field(field) => {
                 let Some(selection_set) = field
                     .selection_set
                     .as_ref()
-                    .filter(|selection_set| selection_set.has_defer()) 
+                    .filter(|selection_set| selection_set.has_defer())
                 else {
                     return Ok(Selection::Field(Arc::clone(field)));
                 };
 
-                Ok(field.with_updated_selection_set(Some(selection_set.without_defer(filter, named_fragments)?)).into())
+                Ok(field
+                    .with_updated_selection_set(Some(
+                        selection_set.without_defer(filter, named_fragments)?,
+                    ))
+                    .into())
             }
             Selection::FragmentSpread(frag) => {
                 let spread = frag.spread.without_defer(filter)?;
@@ -3923,10 +3931,16 @@ impl Selection {
 
 impl SelectionSet {
     /// Create a new selection set without @defer directive applications.
-    fn without_defer(&self, filter: DeferFilter<'_>, named_fragments: &NamedFragments) -> Result<Self, FederationError> {
-        let mut without_defer = SelectionSet::empty(self.schema.clone(), self.type_position.clone());
+    fn without_defer(
+        &self,
+        filter: DeferFilter<'_>,
+        named_fragments: &NamedFragments,
+    ) -> Result<Self, FederationError> {
+        let mut without_defer =
+            SelectionSet::empty(self.schema.clone(), self.type_position.clone());
         for selection in self.selections.values() {
-            without_defer.add_local_selection(&selection.without_defer(filter, named_fragments)?, true)?;
+            without_defer
+                .add_local_selection(&selection.without_defer(filter, named_fragments)?, true)?;
         }
         debug_assert!(!without_defer.has_defer());
         Ok(without_defer)
@@ -3968,7 +3982,9 @@ impl Operation {
     pub(crate) fn without_defer(mut self) -> Result<Self, FederationError> {
         if self.has_defer() {
             let named_fragments = self.named_fragments.without_defer(DeferFilter::All)?;
-            self.selection_set = self.selection_set.without_defer(DeferFilter::All, &named_fragments)?;
+            self.selection_set = self
+                .selection_set
+                .without_defer(DeferFilter::All, &named_fragments)?;
             self.named_fragments = named_fragments;
         }
         debug_assert!(!self.has_defer());
@@ -3976,10 +3992,17 @@ impl Operation {
     }
 
     /// Create a new operation without specific @defer(label:) directive applications.
-    pub(crate) fn reduce_defer(mut self, labels: &IndexSet<String>) -> Result<Self, FederationError> {
+    pub(crate) fn reduce_defer(
+        mut self,
+        labels: &IndexSet<String>,
+    ) -> Result<Self, FederationError> {
         if self.has_defer() {
-            let named_fragments = self.named_fragments.without_defer(DeferFilter::Labels(labels))?;
-            self.selection_set = self.selection_set.without_defer(DeferFilter::Labels(labels), &named_fragments)?;
+            let named_fragments = self
+                .named_fragments
+                .without_defer(DeferFilter::Labels(labels))?;
+            self.selection_set = self
+                .selection_set
+                .without_defer(DeferFilter::Labels(labels), &named_fragments)?;
             self.named_fragments = named_fragments;
         }
         Ok(self)
