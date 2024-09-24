@@ -587,7 +587,7 @@ jobs:
           condition:
             and:
               - equal: [ true, << parameters.fuzz >> ]
-              - equal: [ *amd_linux_test_executor, << parameters.platform >> ]
+              - equal: [ *arm_linux_test_executor, << parameters.platform >> ]
           steps:
             - fuzz_build
 
@@ -976,6 +976,7 @@ workflows:
               platform:
                 [ amd_linux_test ]
       - test:
+          fuzz: true
           requires:
             - lint
             - check_helm
@@ -984,8 +985,6 @@ workflows:
             parameters:
               platform:
                 [ macos_test, windows_test, amd_linux_test, arm_linux_test ]
-              fuzz:
-                [ true ]
 
   quick-nightly:
     when: << pipeline.parameters.quick_nightly >>
