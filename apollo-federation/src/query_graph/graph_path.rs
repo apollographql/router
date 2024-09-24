@@ -367,7 +367,7 @@ impl OpPathElement {
         ] {
             let directive_name: &'static str = (&kind).into();
             if let Some(application) = self.directives().get(directive_name) {
-                let Some(arg) = application.argument_by_name("if") else {
+                let Some(arg) = application.specified_argument_by_name("if") else {
                     return Err(FederationError::internal(format!(
                         "@{} missing required argument \"if\"",
                         directive_name

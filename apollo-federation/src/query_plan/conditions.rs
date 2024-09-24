@@ -99,7 +99,7 @@ impl Conditions {
                 "skip" => true,
                 _ => continue,
             };
-            let value = directive.argument_by_name("if").ok_or_else(|| {
+            let value = directive.specified_argument_by_name("if").ok_or_else(|| {
                 FederationError::internal(format!(
                     "missing if argument on @{}",
                     if negated { "skip" } else { "include" },
@@ -346,7 +346,7 @@ fn matches_condition_for_kind(
         return false;
     }
 
-    let value = directive.argument_by_name("if");
+    let value = directive.specified_argument_by_name("if");
 
     let matches_if_negated = match kind {
         ConditionKind::Include => false,

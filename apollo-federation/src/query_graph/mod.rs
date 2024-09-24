@@ -906,7 +906,10 @@ impl QueryGraph {
 
         ty.directives()
             .get_all(&key_directive_definition.name)
-            .filter_map(|key| key.argument_by_name("fields").and_then(|arg| arg.as_str()))
+            .filter_map(|key| {
+                key.specified_argument_by_name("fields")
+                    .and_then(|arg| arg.as_str())
+            })
             .map(|value| parse_field_set(schema, ty.name().clone(), value))
             .find_ok(|selection| {
                 !metadata
