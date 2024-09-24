@@ -355,7 +355,7 @@ pub struct QueryGraph {
     /// significantly faster (and pretty easy). FWIW, when originally introduced, this optimization
     /// lowered composition validation on a big composition (100+ subgraphs) from ~4 minutes to
     /// ~10 seconds.
-    non_trivial_followup_edges: IndexMap<EdgeIndex, IndexSet<EdgeIndex>>,
+    non_trivial_followup_edges: IndexMap<EdgeIndex, Vec<EdgeIndex>>,
 }
 
 impl QueryGraph {
@@ -528,7 +528,7 @@ impl QueryGraph {
             })
     }
 
-    pub(crate) fn non_trivial_followup_edges(&self) -> &IndexMap<EdgeIndex, IndexSet<EdgeIndex>> {
+    pub(crate) fn non_trivial_followup_edges(&self) -> &IndexMap<EdgeIndex, Vec<EdgeIndex>> {
         &self.non_trivial_followup_edges
     }
 
