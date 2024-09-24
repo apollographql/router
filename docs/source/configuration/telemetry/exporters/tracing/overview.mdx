@@ -113,7 +113,8 @@ telemetry:
 
 ### `datadog_agent_sampling`
 
-If you are sending traces to the Datadog agent, you must set `datadog_agent_sampling: true` in `router.yaml` to ensure that APM metrics display correctly.
+If you are sending traces to the Datadog agent using the OTLP exporter `datadog_agent_sampling: true` in `router.yaml` to ensure that APM metrics display correctly.
+This is automatically set if you are using the Datadog native exporter.
 
 ```yaml title="router.yaml"
 telemetry:

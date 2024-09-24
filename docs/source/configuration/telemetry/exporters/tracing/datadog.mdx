@@ -74,9 +74,6 @@ The router can be configured to connect to either the native, default Datadog ag
 telemetry:
   exporters:
     tracing:
-      common:
-        # Important! APM metrics will not display correctly without this setting.
-        datadog_agent_sampling: true
       datadog:
         enabled: true
         # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:8126)
@@ -90,6 +87,8 @@ telemetry:
         attributes:
           graphql.operation.name: true
 ```
+
+Note that `datadog_agent_sampling` is automatically enabled wen using the native Datadog exporter and cannot be disabled.
 
 ### `enabled`
 
