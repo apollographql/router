@@ -3997,6 +3997,7 @@ impl Operation {
     ///    `@defer` application that has `if: false`.
     pub(crate) fn with_normalized_defer(mut self) -> Result<NormalizedDefer, FederationError> {
         if self.has_defer() {
+            // TODO(@goto-bus-stop): does this need named fragment handling?
             let mut normalizer = DeferNormalizer::new(&self.selection_set)?;
             if !normalizer.problems.is_empty() {
                 self.selection_set = self.selection_set.normalize_defer(&mut normalizer)?;
