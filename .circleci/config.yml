@@ -587,7 +587,7 @@ jobs:
           condition:
             and:
               - equal: [ true, << parameters.fuzz >> ]
-              - equal: [ *amd_linux_test_executor, << parameters.platform >> ]
+              - equal: [ *arm_linux_test_executor, << parameters.platform >> ]
           steps:
             - fuzz_build
 
