@@ -585,6 +585,7 @@ mod tests {
     use tower::Service;
 
     use super::*;
+    use crate::introspection::default_cache_storage;
     use crate::query_planner::BridgeQueryPlanner;
     use crate::services::layers::query_analysis::ParsedDocument;
     use crate::services::QueryPlannerContent;
@@ -671,9 +672,15 @@ mod tests {
             .unwrap_or_default();
         let supergraph_schema = schema.supergraph_schema().clone();
 
-        let mut planner = BridgeQueryPlanner::new(schema.into(), config.clone(), None, None)
-            .await
-            .unwrap();
+        let mut planner = BridgeQueryPlanner::new(
+            schema.into(),
+            config.clone(),
+            None,
+            None,
+            default_cache_storage().await,
+        )
+        .await
+        .unwrap();
 
         let ctx = Context::new();
         ctx.extensions()
@@ -718,7 +725,9 @@ mod tests {
         let planner =
             QueryPlanner::new(schema.federation_supergraph(), Default::default()).unwrap();
 
-        let query_plan = planner.build_query_plan(&query.executable, None).unwrap();
+        let query_plan = planner
+            .build_query_plan(&query.executable, None, Default::default())
+            .unwrap();
 
         let schema =
             DemandControlledSchema::new(Arc::new(schema.supergraph_schema().clone())).unwrap();
