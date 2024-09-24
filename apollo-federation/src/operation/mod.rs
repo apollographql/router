@@ -228,8 +228,6 @@ impl DeferNormalizer {
             .map(|(_, sel)| sel)
             .collect::<Vec<_>>();
         while let Some(selection) = stack.pop() {
-            // TODO: Does this need to be checking FragmentSpread + InlineFragment or just
-            // spreads? The JS code checks "FragmentSelection"
             if let Selection::InlineFragment(inline) = selection {
                 if let Some(args) = inline.inline_fragment.data().defer_directive_arguments()? {
                     let DeferDirectiveArguments { label, if_: _ } = args;
