@@ -4018,9 +4018,13 @@ impl Operation {
     ///    will be a variable and not an hard-coded `true` or `false`. To do this, this method will
     ///    remove the condition of any `@defer` that has `if: true`, and will completely remove any
     ///    `@defer` application that has `if: false`.
+    ///
+    /// Defer normalization does not support named fragment definitions, so it must only be called
+    /// if the operation had its fragments expanded. In effect, it means that this method may
+    /// modify the operation in a way that prevents fragments from being reused in
+    /// `.reuse_fragments()`.
     pub(crate) fn with_normalized_defer(mut self) -> Result<NormalizedDefer, FederationError> {
         if self.has_defer() {
-            // TODO(@goto-bus-stop): does this need named fragment handling?
             let mut normalizer = DeferNormalizer::new(&self.selection_set)?;
             if !normalizer.problems.is_empty() {
                 self.selection_set = self.selection_set.normalize_defer(&mut normalizer)?;
