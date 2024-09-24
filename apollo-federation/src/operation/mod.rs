@@ -3942,7 +3942,6 @@ impl SelectionSet {
             without_defer
                 .add_local_selection(&selection.without_defer(filter, named_fragments)?, true)?;
         }
-        debug_assert!(!without_defer.has_defer());
         Ok(without_defer)
     }
 
