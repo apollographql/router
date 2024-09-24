@@ -574,6 +574,9 @@ jobs:
     parameters:
       platform:
         type: executor
+      fuzz:
+        type: boolean
+        default: false
     executor: << parameters.platform >>
     steps:
       - checkout
@@ -582,7 +585,9 @@ jobs:
       - xtask_test
       - when:
           condition:
-            equal: [ *arm_linux_test_executor, << parameters.platform >> ]
+            and:
+              - equal: [ true, << parameters.fuzz >> ]
+              - equal: [ *amd_linux_test_executor, << parameters.platform >> ]
           steps:
             - fuzz_build
 
@@ -967,6 +972,7 @@ workflows:
               platform:
                 [ amd_linux_test ]
       - test:
+          fuzz: true
           requires:
             - lint
             - check_helm
