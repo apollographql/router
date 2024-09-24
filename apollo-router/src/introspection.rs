@@ -14,25 +14,25 @@ use crate::query_planner::QueryPlanResult;
 const DEFAULT_INTROSPECTION_CACHE_CAPACITY: NonZeroUsize =
     unsafe { NonZeroUsize::new_unchecked(5) };
 
+pub(crate) async fn default_cache_storage() -> CacheStorage<String, Response> {
+    // This cannot fail as redis is not used.
+    CacheStorage::new(DEFAULT_INTROSPECTION_CACHE_CAPACITY, None, "introspection")
+        .await
+        .expect("failed to create cache storage")
+}
+
 /// A cache containing our well known introspection queries.
 pub(crate) struct Introspection {
     cache: CacheStorage<String, Response>,
-    planner: Arc<Planner<QueryPlanResult>>,
+    pub(crate) planner: Arc<Planner<QueryPlanResult>>,
 }
 
 impl Introspection {
-    pub(crate) async fn with_capacity(
+    pub(crate) async fn with_cache(
         planner: Arc<Planner<QueryPlanResult>>,
-        capacity: NonZeroUsize,
+        cache: CacheStorage<String, Response>,
     ) -> Result<Self, BoxError> {
-        Ok(Self {
-            cache: CacheStorage::new(capacity, None, "introspection").await?,
-            planner,
-        })
-    }
-
-    pub(crate) async fn new(planner: Arc<Planner<QueryPlanResult>>) -> Result<Self, BoxError> {
-        Self::with_capacity(planner, DEFAULT_INTROSPECTION_CACHE_CAPACITY).await
+        Ok(Self { cache, planner })
     }
 
     #[cfg(test)]
@@ -40,7 +40,11 @@ impl Introspection {
         planner: Arc<Planner<QueryPlanResult>>,
         cache: HashMap<String, Response>,
     ) -> Result<Self, BoxError> {
-        let this = Self::with_capacity(planner, cache.len().try_into().unwrap()).await?;
+        let this = Self::with_cache(
+            planner,
+            CacheStorage::new(cache.len().try_into().unwrap(), None, "introspection").await?,
+        )
+        .await?;
 
         for (query, response) in cache.into_iter() {
             this.cache.insert(query, response).await;

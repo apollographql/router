@@ -48,9 +48,7 @@ supergraph:
 
 When loading a new schema, a query plan might change for some queries, so cached query plans cannot be reused. 
 
-To prevent increased latency upon query plan cache invalidation, the router precomputes query plans for:
-* The most used queries from the cache.
-* The entire list of persisted queries.
+To prevent increased latency upon query plan cache invalidation, the router precomputes query plans for the most used queries from the cache when a new schema is loaded.
 
 Precomputed plans will be cached before the router switches traffic over to the new schema.
 
@@ -62,6 +60,8 @@ supergraph:
     # Pre-plan the 100 most used operations when the supergraph changes
     warmed_up_queries: 100
 ```
+
+(In addition, the router can use the contents of the [persisted query list](./persisted-queries) to prewarm the cache. By default, it does this when loading a new schema but not on startup; you can [configure](./persisted-queries#persisted-queries#experimental_prewarm_query_plan_cache) it to change either of these defaults.)
 
 To get more information on the planning and warm-up process use the following metrics (where `<storage>` can be `redis` for distributed cache or `memory`):
 

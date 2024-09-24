@@ -39,6 +39,20 @@ pub(crate) struct InvalidationEndpointConfig {
     pub(crate) path: String,
     /// Listen address on which the invalidation endpoint must listen.
     pub(crate) listen: ListenAddr,
+    #[serde(default = "default_scan_count")]
+    /// Number of keys to return at once from a redis SCAN command
+    pub(crate) scan_count: u32,
+    #[serde(default = "concurrent_requests_count")]
+    /// Number of concurrent invalidation requests
+    pub(crate) concurrent_requests: u32,
+}
+
+fn default_scan_count() -> u32 {
+    1000
+}
+
+fn concurrent_requests_count() -> u32 {
+    10
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -82,7 +96,7 @@ impl Service<router::Request> for InvalidationService {
     }
 
     fn call(&mut self, req: router::Request) -> Self::Future {
-        let mut invalidation = self.invalidation.clone();
+        let invalidation = self.invalidation.clone();
         let config = self.config.clone();
         Box::pin(
             async move {
@@ -203,16 +217,23 @@ fn valid_shared_key(
 mod tests {
     use std::collections::HashMap;
 
-    use tokio::sync::broadcast;
     use tower::ServiceExt;
 
     use super::*;
-    use crate::plugins::cache::invalidation::InvalidationError;
+    use crate::cache::redis::RedisCacheStorage;
+    use crate::plugins::cache::entity::Storage;
+    use crate::plugins::cache::tests::MockStore;
 
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key() {
-        let (handle, _rx) = tokio::sync::mpsc::channel(128);
-        let invalidation = Invalidation { handle };
+        let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
+            .await
+            .unwrap();
+        let storage = Arc::new(Storage {
+            all: Some(redis_cache),
+            subgraphs: HashMap::new(),
+        });
+        let invalidation = Invalidation::new(storage.clone(), 1000, 10).await.unwrap();
 
         let config = Arc::new(SubgraphConfiguration {
             all: Subgraph {
@@ -250,108 +271,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_invalidation_service_good_sub_shared_key() {
-        let (handle, mut rx) = tokio::sync::mpsc::channel::<(
-            Vec<InvalidationRequest>,
-            InvalidationOrigin,
-            broadcast::Sender<Result<u64, InvalidationError>>,
-        )>(128);
-        tokio::task::spawn(async move {
-            let mut called = false;
-            while let Some((requests, origin, response_tx)) = rx.recv().await {
-                called = true;
-                if requests
-                    != [
-                        InvalidationRequest::Subgraph {
-                            subgraph: String::from("test"),
-                        },
-                        InvalidationRequest::Type {
-                            subgraph: String::from("test"),
-                            r#type: String::from("Test"),
-                        },
-                    ]
-                {
-                    response_tx
-                        .send(Err(InvalidationError::Custom(format!(
-                            "it's not the right invalidation requests : {requests:?}"
-                        ))))
-                        .unwrap();
-                    return;
-                }
-                if origin != InvalidationOrigin::Endpoint {
-                    response_tx
-                        .send(Err(InvalidationError::Custom(format!(
-                            "it's not the right invalidation origin : {origin:?}"
-                        ))))
-                        .unwrap();
-                    return;
-                }
-                response_tx.send(Ok(0)).unwrap();
-            }
-            assert!(called);
-        });
-
-        let invalidation = Invalidation {
-            handle: handle.clone(),
-        };
-        let config = Arc::new(SubgraphConfiguration {
-            all: Subgraph {
-                ttl: None,
-                enabled: true,
-                redis: None,
-                private_id: None,
-                invalidation: Some(SubgraphInvalidationConfig {
-                    enabled: true,
-                    shared_key: String::from("test"),
-                }),
-            },
-            subgraphs: [(
-                String::from("test"),
-                Subgraph {
-                    ttl: None,
-                    redis: None,
-                    enabled: true,
-                    private_id: None,
-                    invalidation: Some(SubgraphInvalidationConfig {
-                        enabled: true,
-                        shared_key: String::from("test_test"),
-                    }),
-                },
-            )]
-            .into_iter()
-            .collect(),
-        });
-        let service = InvalidationService::new(config, invalidation);
-        let req = router::Request::fake_builder()
-            .method(http::Method::POST)
-            .header(AUTHORIZATION, "test_test")
-            .body(
-                serde_json::to_vec(&[
-                    InvalidationRequest::Subgraph {
-                        subgraph: String::from("test"),
-                    },
-                    InvalidationRequest::Type {
-                        subgraph: String::from("test"),
-                        r#type: String::from("Test"),
-                    },
-                ])
-                .unwrap(),
-            )
-            .build()
-            .unwrap();
-        let res = service.oneshot(req).await.unwrap();
-        assert_eq!(res.response.status(), StatusCode::ACCEPTED);
-    }
-
-    #[tokio::test]
     async fn test_invalidation_service_bad_shared_key_subgraph() {
-        #[allow(clippy::type_complexity)]
-        let (handle, _rx) = tokio::sync::mpsc::channel::<(
-            Vec<InvalidationRequest>,
-            InvalidationOrigin,
-            broadcast::Sender<Result<u64, InvalidationError>>,
-        )>(128);
-        let invalidation = Invalidation { handle };
+        let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
+            .await
+            .unwrap();
+        let storage = Arc::new(Storage {
+            all: Some(redis_cache),
+            subgraphs: HashMap::new(),
+        });
+        let invalidation = Invalidation::new(storage.clone(), 1000, 10).await.unwrap();
+
         let config = Arc::new(SubgraphConfiguration {
             all: Subgraph {
                 ttl: None,
@@ -394,93 +323,5 @@ mod tests {
             .unwrap();
         let res = service.oneshot(req).await.unwrap();
         assert_eq!(res.response.status(), StatusCode::UNAUTHORIZED);
-    }
-
-    #[tokio::test]
-    async fn test_invalidation_service() {
-        let (handle, mut rx) = tokio::sync::mpsc::channel::<(
-            Vec<InvalidationRequest>,
-            InvalidationOrigin,
-            broadcast::Sender<Result<u64, InvalidationError>>,
-        )>(128);
-        let invalidation = Invalidation { handle };
-
-        tokio::task::spawn(async move {
-            let mut called = false;
-            while let Some((requests, origin, response_tx)) = rx.recv().await {
-                called = true;
-                if requests
-                    != [
-                        InvalidationRequest::Subgraph {
-                            subgraph: String::from("test"),
-                        },
-                        InvalidationRequest::Type {
-                            subgraph: String::from("test"),
-                            r#type: String::from("Test"),
-                        },
-                    ]
-                {
-                    response_tx
-                        .send(Err(InvalidationError::Custom(format!(
-                            "it's not the right invalidation requests : {requests:?}"
-                        ))))
-                        .unwrap();
-                    return;
-                }
-                if origin != InvalidationOrigin::Endpoint {
-                    response_tx
-                        .send(Err(InvalidationError::Custom(format!(
-                            "it's not the right invalidation origin : {origin:?}"
-                        ))))
-                        .unwrap();
-                    return;
-                }
-                response_tx.send(Ok(2)).unwrap();
-            }
-            assert!(called);
-        });
-
-        let config = Arc::new(SubgraphConfiguration {
-            all: Subgraph {
-                ttl: None,
-                enabled: true,
-                private_id: None,
-                redis: None,
-                invalidation: Some(SubgraphInvalidationConfig {
-                    enabled: true,
-                    shared_key: String::from("test"),
-                }),
-            },
-            subgraphs: HashMap::new(),
-        });
-        let service = InvalidationService::new(config, invalidation);
-        let req = router::Request::fake_builder()
-            .method(http::Method::POST)
-            .header(AUTHORIZATION, "test")
-            .body(
-                serde_json::to_vec(&[
-                    InvalidationRequest::Subgraph {
-                        subgraph: String::from("test"),
-                    },
-                    InvalidationRequest::Type {
-                        subgraph: String::from("test"),
-                        r#type: String::from("Test"),
-                    },
-                ])
-                .unwrap(),
-            )
-            .build()
-            .unwrap();
-        let res = service.oneshot(req).await.unwrap();
-        assert_eq!(res.response.status(), StatusCode::ACCEPTED);
-        assert_eq!(
-            serde_json::from_slice::<serde_json::Value>(
-                &hyper::body::to_bytes(res.response.into_body())
-                    .await
-                    .unwrap()
-            )
-            .unwrap(),
-            serde_json::json!({"count": 2})
-        );
     }
 }

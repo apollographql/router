@@ -362,6 +362,10 @@ Router.APOLLO_AUTHENTICATION_JWT_CLAIMS // Context key to access authentication 
 Router.APOLLO_SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS // Context key to modify or access the custom connection params when using subscriptions in WebSocket to subgraphs (cf subscription docs)
 Router.APOLLO_ENTITY_CACHE_KEY // Context key to access the entity cache key
 Router.APOLLO_OPERATION_ID // Context key to get the value of apollo operation id (studio trace id) from the context
+Router.APOLLO_COST_ESTIMATED_KEY // Context key to get the estimated cost of an operation
+Router.APOLLO_COST_ACTUAL_KEY // Context key to get the actual cost of an operation
+Router.APOLLO_COST_STRATEGY_KEY // Context key to get the strategy used to calculate cost
+Router.APOLLO_COST_RESULT_KEY // Context key to get the cost result of an operation
 ```
 
 ## `Request` interface

@@ -10,6 +10,7 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower_service::Service;
 
+use crate::introspection::default_cache_storage;
 use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -95,10 +96,15 @@ impl<T: Plugin> PluginTestHarness<T> {
             let sdl = schema.raw_sdl.clone();
             let supergraph = schema.supergraph_schema().clone();
             let rust_planner = PlannerMode::maybe_rust(&schema, &config).unwrap();
-            let planner =
-                BridgeQueryPlanner::new(schema.into(), Arc::new(config), None, rust_planner)
-                    .await
-                    .unwrap();
+            let planner = BridgeQueryPlanner::new(
+                schema.into(),
+                Arc::new(config),
+                None,
+                rust_planner,
+                default_cache_storage().await,
+            )
+            .await
+            .unwrap();
             (sdl, supergraph, planner.subgraph_schemas())
         } else {
             (
