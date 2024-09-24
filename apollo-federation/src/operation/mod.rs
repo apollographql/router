@@ -1670,6 +1670,17 @@ mod inline_fragment_selection {
                 selection_set: self.selection_set.clone(),
             }
         }
+
+        pub(crate) fn with_updated_directives_and_selection_set(
+            &self,
+            directives: impl Into<DirectiveList>,
+            selection_set: SelectionSet,
+        ) -> Self {
+            Self {
+                inline_fragment: self.inline_fragment.with_updated_directives(directives),
+                selection_set,
+            }
+        }
     }
 
     impl HasSelectionKey for InlineFragmentSelection {
@@ -2879,34 +2890,45 @@ impl SelectionSet {
         }
     }
 
+    /// Using path-based updates along with selection sets may result in some inefficiencies.
+    /// Specifically, we may end up with some unnecessary top-level inline fragment selections, i.e.
+    /// fragments without any directives and with the type condition equal to (or a supertype of)
+    /// the parent type of the fragment. This method inlines those unnecessary top-level fragments.
+    ///
     /// JS PORT NOTE: In Rust implementation we are doing the selection set updates in-place whereas
     /// JS code was pooling the updates and only apply those when building the final selection set.
     /// See `makeSelectionSet` method for details.
-    ///
-    /// Manipulating selection sets may result in some inefficiencies. As a result we may end up with
-    /// some unnecessary top level inline fragment selections, i.e. fragments without any directives
-    /// and with the type condition same as the parent type that should be inlined.
-    ///
-    /// This method inlines those unnecessary top level fragments only. While the JS code was applying
-    /// this logic recursively, since we are manipulating selections sets in-place we only need to
-    /// apply this normalization at the top level.
     fn without_unnecessary_fragments(&self) -> SelectionSet {
         let parent_type = &self.type_position;
         let mut final_selections = SelectionMap::new();
-        for selection in self.selections.values() {
-            match selection {
-                Selection::InlineFragment(inline_fragment) => {
-                    if inline_fragment.is_unnecessary(parent_type) {
-                        final_selections.extend_ref(&inline_fragment.selection_set.selections);
-                    } else {
+        fn process_selection_set(
+            selection_set: &SelectionSet,
+            final_selections: &mut SelectionMap,
+            parent_type: &CompositeTypeDefinitionPosition,
+            schema: &ValidFederationSchema,
+        ) {
+            for selection in selection_set.selections.values() {
+                match selection {
+                    Selection::InlineFragment(inline_fragment) => {
+                        if inline_fragment.is_unnecessary(parent_type, schema) {
+                            process_selection_set(
+                                &inline_fragment.selection_set,
+                                final_selections,
+                                parent_type,
+                                schema,
+                            );
+                        } else {
+                            final_selections.insert(selection.clone());
+                        }
+                    }
+                    _ => {
                         final_selections.insert(selection.clone());
                     }
                 }
-                _ => {
-                    final_selections.insert(selection.clone());
-                }
             }
         }
+        process_selection_set(self, &mut final_selections, parent_type, &self.schema);
+
         SelectionSet {
             schema: self.schema.clone(),
             type_position: parent_type.clone(),
@@ -3416,12 +3438,22 @@ impl InlineFragmentSelection {
     ///
     /// Fragment is unnecessary if following are true:
     /// * it has no applied directives
-    /// * has no type condition OR type condition is same as passed in `maybe_parent`
-    fn is_unnecessary(&self, maybe_parent: &CompositeTypeDefinitionPosition) -> bool {
-        let inline_fragment_type_condition = self.inline_fragment.type_condition_position.clone();
-        self.inline_fragment.directives.is_empty()
-            && (inline_fragment_type_condition.is_none()
-                || inline_fragment_type_condition.is_some_and(|t| t == *maybe_parent))
+    /// * has no type condition OR type condition is equal to (or a supertype of) `parent`
+    fn is_unnecessary(
+        &self,
+        parent: &CompositeTypeDefinitionPosition,
+        schema: &ValidFederationSchema,
+    ) -> bool {
+        if !self.inline_fragment.directives.is_empty() {
+            return false;
+        }
+        let Some(type_condition) = &self.inline_fragment.type_condition_position else {
+            return true;
+        };
+        type_condition == parent
+            || schema
+                .schema()
+                .is_subtype(type_condition.type_name(), parent.type_name())
     }
 
     pub(crate) fn any_element(

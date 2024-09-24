@@ -1,6 +1,4 @@
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure (redundant inline spread)
 fn it_handles_a_simple_at_requires_triggered_within_a_conditional() {
     let planner = planner!(
         Subgraph1: r#"
@@ -135,8 +133,6 @@ fn it_handles_an_at_requires_triggered_conditionally() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure (redundant inline spread)
 fn it_handles_an_at_requires_where_multiple_conditional_are_involved() {
     let planner = planner!(
         Subgraph1: r#"
@@ -232,9 +228,9 @@ fn it_handles_an_at_requires_where_multiple_conditional_are_involved() {
                         }
                       },
                     },
-                  }
+                  },
                 },
-              }
+              },
             },
           }
         "###
