@@ -19,9 +19,9 @@ use sha2::Sha256;
 
 use crate::error::ParseErrors;
 use crate::error::SchemaError;
+use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::OperationKind;
 use crate::Configuration;
-
 /// A GraphQL schema.
 pub(crate) struct Schema {
     pub(crate) raw_sdl: Arc<String>,
@@ -29,7 +29,7 @@ pub(crate) struct Schema {
     subgraphs: HashMap<String, Uri>,
     pub(crate) implementers_map: apollo_compiler::collections::HashMap<Name, Implementers>,
     api_schema: ApiSchema,
-    pub(crate) schema_id: Arc<String>,
+    pub(crate) hash: Arc<QueryHash>,
 }
 
 /// Wrapper type to distinguish from `Schema::definitions` for the supergraph schema
@@ -108,8 +108,6 @@ impl Schema {
         let implementers_map = definitions.implementers_map();
         let supergraph = Supergraph::from_schema(definitions)?;
 
-        let schema_id = Arc::new(Schema::schema_id(&raw_sdl));
-
         let api_schema = supergraph
             .to_api_schema(ApiSchemaOptions {
                 include_defer: config.supergraph.defer_support,
@@ -121,13 +119,17 @@ impl Schema {
                 ))
             })?;
 
+        let mut hasher = Sha256::new();
+        hasher.update(raw_sdl.as_bytes());
+        let hash = Arc::new(QueryHash(hasher.finalize().to_vec()));
+
         Ok(Schema {
             raw_sdl,
             supergraph,
             subgraphs,
             implementers_map,
             api_schema: ApiSchema(api_schema),
-            schema_id,
+            hash,
         })
     }
 
@@ -330,11 +332,11 @@ impl std::fmt::Debug for Schema {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self {
             raw_sdl,
+            hash: _,
             supergraph: _, // skip
             subgraphs,
             implementers_map,
             api_schema: _, // skip
-            schema_id: _,
         } = self;
         f.debug_struct("Schema")
             .field("raw_sdl", raw_sdl)
