@@ -4,6 +4,133 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.55.0] - 2024-09-24
+
+## 🚀 Features
+
+### Support aliasing standard attributes for telemetry ([Issue #5930](https://github.com/apollographql/router/issues/5930))
+
+The router now supports creating aliases for standard attributes for telemetry.
+
+This fixes issues where standard attribute names collide with reserved attribute names. For example, the standard attribute name `entity.type` is a [reserved attribute](https://docs.newrelic.com/docs/new-relic-solutions/new-relic-one/core-concepts/what-entity-new-relic/#reserved-attributes) name for New Relic, so it won't work properly. Moreover `entity.type` is inconsistent with our other GraphQL attributes prefixed with `graphql.`
+
+The example configuration below renames `entity.type` to `graphql.type.name`:
+
+```yaml
+telemetry:
+  instrumentation:
+    spans:
+      mode: spec_compliant # Docs state this significantly improves performance: https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/spans#spec_compliant
+    instruments:
+      cache: # Cache instruments configuration
+        apollo.router.operations.entity.cache: # A counter which counts the number of cache hit and miss for subgraph requests
+          attributes:
+            graphql.type.name: # renames entity.type
+              alias: entity_type # ENABLED and aliased to entity_type
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5957
+
+### Enable router customizations to access demand control info ([PR #5972](https://github.com/apollographql/router/pull/5972))
+
+Rhai scripts and coprocessors can now access demand control information via the context. For more information on Rhai constants to access demand control info, see [available Rhai API constants](https://apollographql.com/docs/router/customizations/rhai-api#available-constants).
+
+By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/5972
+
+### Support Redis connection pooling ([PR #5942](https://github.com/apollographql/router/pull/5942))
+
+The router now supports Redis connection pooling for APQs, query planners and entity caches. This can improve performance when there is contention on Redis connections or latency in Redis calls.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/5942
+
+
+## 🐛 Fixes
+
+### Remove unused fragments and input arguments when filtering operations ([PR #5952](https://github.com/apollographql/router/pull/5952))
+
+This release fixes the authorization plugin's query filtering to remove unused fragments and input arguments if the related parts of the query are removed. Previously the plugin's query filtering generated validation errors when planning certain queries.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/5952
+
+### Hot-reloads will no longer interrupt certain gauges ([PR #5996](https://github.com/apollographql/router/pull/5996), [PR #5999](https://github.com/apollographql/router/pull/5999), [PR #5999](https://github.com/apollographql/router/pull/6012))
+
+Previously when the router hot-reloaded a schema or a configuration file, the following gauges stopped working:
+
+* `apollo.router.cache.storage.estimated_size`
+* `apollo_router_cache_size`
+* `apollo.router.v8.heap.used`
+* `apollo.router.v8.heap.total`
+* `apollo.router.query_planning.queued`
+
+This issue has been fixed in this release, and the gauges now continue to function after a router hot-reloads.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/5996 and https://github.com/apollographql/router/pull/5999 and https://github.com/apollographql/router/pull/6012
+
+### Datadog sample propagation will respect previous sampling decisions ([PR #6005](https://github.com/apollographql/router/pull/6005))
+
+[PR #5788](https://github.com/apollographql/router/pull/5788) introduced a regression where sampling was set on propagated headers regardless of the sampling decision in the router or upstream.
+
+This PR reverts the code in question and adds a test to check that a non-sampled request doesn't result in sampling in the downstream subgraph service.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/6005
+
+### Include request variables when scoring for demand control ([PR #5995](https://github.com/apollographql/router/pull/5995))
+
+Demand control scoring in the router now accounts for variables in queries.
+
+By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/5995
+
+## 📃 Configuration
+
+### Enable new and old schema introspection implementations by default ([PR #6014](https://github.com/apollographql/router/pull/6014))
+
+Starting with this release, if schema introspection is enabled, the router runs both the old Javascript implementation and a new Rust implementation of its introspection logic by default.
+
+The more performant Rust implementation will eventually replace the Javascript implementation. For now, both implementations are run by default so we can definitively assess the reliability and stability of the Rust implementation before removing the Javascript one.
+
+You can still toggle between implementations using the `experimental_introspection_mode` configuration key. Its valid values:
+
+- `new` runs only Rust-based validation
+- `legacy` runs only Javascript-based validation
+- `both` (default) runs both in comparison and logs errors if differences arise
+
+Having `both` as the default causes no client-facing impact. It will record and output the metrics of its comparison as a `apollo.router.operations.introspection.both` counter. (Note: if this counter in your metrics has `rust_error = true` or `is_matched = false`, please open an issue with Apollo.)
+
+Note: schema introspection itself is disabled by default, so its implementation(s) are run only if it's enabled in your configuration:
+
+```yaml
+supergraph:
+  introspection: true
+```
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/6014
+
+## 🧪 Experimental
+
+### Allow disabling persisted-queries-based query plan cache prewarm on schema reload
+
+The router supports the new `persisted_queries.experimental_prewarm_query_plan_cache.on_reload` configuration option. It toggles whether a query plan cache that's prewarmed upon loading a new schema includes operations from persisted query lists. Its default is `true`. Setting it `false` precludes operations from persisted query lists from being added to the prewarmed query plan cache.
+
+Some background about the development of this option:
+
+- In router v1.31.0, we started including operations from persisted query lists when the router prewarms the query plan cache when loading a new schema.
+
+- Then in router v1.49.0, we let you also prewarm the query plan cache from the persisted query list during router startup by setting `persisted_queries.experimental_prewarm_query_plan_cache` to true.
+
+- In this release, we now allow you to disable the original feature so that the router can prewarm only recent operations from the query planning cache (and not operations from persisted query lists) when loading a new schema.
+
+Note: the option added in v1.49.0 has been renamed from `persisted_queries.experimental_prewarm_query_plan_cache` to `persisted_queries.experimental_prewarm_query_plan_cache.on_startup`. Existing configuration files will keep working as before, but with a warning that can be resolved by updating your config file:
+
+```diff
+ persisted_queries:
+   enabled: true
+-  experimental_prewarm_query_plan_cache: true
++  experimental_prewarm_query_plan_cache:
++    on_startup: true
+```
+
+By [@glasser](https://github.com/glasser) in https://github.com/apollographql/router/pull/5990
+
 # [1.54.0] - 2024-09-10
 
 ## 🚀 Features
