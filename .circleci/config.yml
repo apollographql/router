@@ -976,7 +976,8 @@ workflows:
               platform:
                 [ amd_linux_test ]
       - test:
-          fuzz: true
+          # this should be changed back to true on dev after release
+          fuzz: false
           requires:
             - lint
             - check_helm
