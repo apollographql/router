@@ -6,6 +6,7 @@ use petgraph::graph::NodeIndex;
 use serde::Serialize;
 use tracing::trace;
 
+use super::fetch_dependency_graph::FetchIdGenerator;
 use crate::error::FederationError;
 use crate::operation::Operation;
 use crate::operation::Selection;
@@ -46,8 +47,6 @@ use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::ValidFederationSchema;
 use crate::utils::logging::snapshot;
-
-use super::fetch_dependency_graph::FetchIdGenerator;
 
 // PORT_NOTE: Named `PlanningParameters` in the JS codebase, but there was no particular reason to
 // leave out to the `Query` prefix, so it's been added for consistency. Similar to `GraphPath`, we
