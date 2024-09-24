@@ -144,7 +144,7 @@ async fn test_untraced_request_no_sample_datadog_agent() -> Result<(), BoxError>
     router.assert_started().await;
 
     let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    let (id, _) = router.execute_query(&query).await;
+    let (id, _) = router.execute_untraced_query(&query).await;
     Spec::builder()
         .services(["router"].into())
         .priority_sampled("0")
@@ -166,7 +166,7 @@ async fn test_untraced_request_sample_datadog_agent() -> Result<(), BoxError> {
     router.assert_started().await;
 
     let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    let (id, _) = router.execute_query(&query).await;
+    let (id, _) = router.execute_untraced_query(&query).await;
     Spec::builder()
         .services(["router"].into())
         .priority_sampled("1")
