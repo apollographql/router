@@ -4,6 +4,7 @@
   "sidebar": {
     "Introduction": "/",
     "Quickstart": "/quickstart",
+    "Moving from Router Version 1.x": "/migrating-from-version-1.x",
     "Moving from @apollo/gateway": "/migrating-from-gateway",
     "Federation Version Support": "/federation-version-support",
     "Enterprise Features": ["/enterprise-features", ["enterprise"]],
