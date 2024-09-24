@@ -1568,7 +1568,7 @@ fn defer_test_defer_on_mutation_in_same_subgraph() {
               v1
             }
           }:
-          Fetch(service: "Subgraph1", id: 0) {
+          Fetch(service: "Subgraph1", id: 2) {
             {
               update1 {
                 __typename
@@ -1583,7 +1583,7 @@ fn defer_test_defer_on_mutation_in_same_subgraph() {
             }
           },
         }, [
-          Deferred(depends: [0], path: "update1") {
+          Deferred(depends: [2], path: "update1") {
             {
               v1
             }:
@@ -1603,7 +1603,7 @@ fn defer_test_defer_on_mutation_in_same_subgraph() {
               },
             },
           },
-          Deferred(depends: [0], path: "update2") {
+          Deferred(depends: [2], path: "update2") {
             {
               v0
               v2
