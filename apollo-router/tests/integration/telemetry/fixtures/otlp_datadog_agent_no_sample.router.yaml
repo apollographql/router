@@ -1,0 +1,42 @@
+telemetry:
+  apollo:
+    field_level_instrumentation_sampler: always_off
+  exporters:
+    tracing:
+      propagation:
+        datadog: true
+      experimental_response_trace_id:
+        enabled: true
+        header_name: apollo-custom-trace-id
+      common:
+        service_name: router
+        datadog_agent_sampling: true
+        sampler: 0.0
+      otlp:
+        enabled: true
+        protocol: http
+        endpoint: <otel-collector-endpoint>
+        batch_processor:
+          scheduled_delay: 10ms
+    metrics:
+      common:
+        service_name: router
+      otlp:
+        enabled: true
+        endpoint: <otel-collector-endpoint>/metrics
+        protocol: http
+        batch_processor:
+          scheduled_delay: 10ms
+
+
+  instrumentation:
+    spans:
+      mode: spec_compliant
+      supergraph:
+        attributes:
+          graphql.operation.name: true
+
+      subgraph:
+        attributes:
+          otel.name:
+            subgraph_operation_name: string

@@ -134,6 +134,50 @@ async fn test_otlp_request_with_datadog_propagator_no_agent() -> Result<(), BoxE
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_untraced_request_no_sample_datadog_agent() -> Result<(), BoxError> {
+    let mock_server = mock_otlp_server().await;
+    let config = include_str!("fixtures/otlp_datadog_agent_no_sample.router.yaml")
+        .replace("<otel-collector-endpoint>", &mock_server.uri());
+    let mut router = IntegrationTest::builder().config(&config).build().await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
+    let (id, _) = router.execute_query(&query).await;
+    Spec::builder()
+        .services(["router"].into())
+        .priority_sampled("0")
+        .build()
+        .validate_trace(id, &mock_server)
+        .await?;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_untraced_request_sample_datadog_agent() -> Result<(), BoxError> {
+    let mock_server = mock_otlp_server().await;
+    let config = include_str!("fixtures/otlp_datadog_agent_sample.router.yaml")
+        .replace("<otel-collector-endpoint>", &mock_server.uri());
+    let mut router = IntegrationTest::builder().config(&config).build().await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
+    let (id, _) = router.execute_query(&query).await;
+    Spec::builder()
+        .services(["router"].into())
+        .priority_sampled("1")
+        .build()
+        .validate_trace(id, &mock_server)
+        .await?;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_priority_sampling_propagated() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());
