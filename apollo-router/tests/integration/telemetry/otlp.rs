@@ -107,6 +107,33 @@ async fn test_otlp_request_with_datadog_propagator() -> Result<(), BoxError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_otlp_request_with_datadog_propagator_no_agent() -> Result<(), BoxError> {
+    let mock_server = mock_otlp_server().await;
+    let config = include_str!("fixtures/otlp_datadog_propagation_no_agent.router.yaml")
+        .replace("<otel-collector-endpoint>", &mock_server.uri());
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Otlp {
+            endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
+        })
+        .config(&config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
+    let (id, _) = router.execute_query(&query).await;
+    Spec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .build()
+        .validate_trace(id, &mock_server)
+        .await?;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_priority_sampling_propagated() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());
@@ -530,6 +557,8 @@ impl Spec {
                     psr
                 );
             }
+        } else {
+            assert!(trace.select_path("$..[?(@.name == 'execution')]..[?(@.key == 'sampling.priority')].value.stringValue")?.is_empty())
         }
         Ok(())
     }
