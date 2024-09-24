@@ -114,6 +114,7 @@ impl ShouldSample for DatadogAgentSampling {
         // We always want to measure
         result.trace_state = result.trace_state.with_measuring(true);
         // We always want to set the sampling.priority attribute in case we are communicating with the agent via otlp.
+        // Reverse engineered from https://github.com/DataDog/datadog-agent/blob/c692f62423f93988b008b669008f9199a5ad196b/pkg/trace/api/otlp.go#L502
         result.attributes.push(KeyValue::new(
             "sampling.priority",
             Value::I64(

@@ -41,6 +41,7 @@ telemetry:
         # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317)
         endpoint: "${env.DATADOG_AGENT_HOST}:4317"
 ```
+Note that if `datadog_agent_sampling: true` is not set in `router.yaml` APM metrics will not display correctly.
 
 For more details about Datadog configuration, see [Datadog Agent configuration](https://docs.datadoghq.com/opentelemetry/otlp_ingest_in_the_agent/?tab=host).
 
@@ -88,7 +89,7 @@ telemetry:
           graphql.operation.name: true
 ```
 
-Note that `datadog_agent_sampling` is automatically enabled wen using the native Datadog exporter and cannot be disabled.
+Note that `datadog_agent_sampling` is automatically enabled when using the native Datadog exporter and cannot be disabled.
 
 ### `enabled`
 
