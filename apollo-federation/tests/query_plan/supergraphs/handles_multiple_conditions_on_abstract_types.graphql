@@ -1,14 +1,16 @@
-# Composed from subgraphs with hash: 1b8ed03436d12bd5fe1dc3487873cc027b7f81da
+# Composed from subgraphs with hash: 2bb5218456c710b3aeaf9c5a9a7d87eee258917f
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
-  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+  @link(url: "https://specs.apollo.dev/join/v0.4", for: EXECUTION)
 {
   query: Query
 }
 
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
 directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
-directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 
 directive @join__graph(name: String!, url: String!) on ENUM_VALUE
 
@@ -33,6 +35,8 @@ type Book implements Product
   dimensions: ProductDimension @join__field(graph: PRODUCTS)
   reviews: [Review!]! @join__field(graph: REVIEWS)
 }
+
+scalar join__DirectiveArguments
 
 scalar join__FieldSet
 

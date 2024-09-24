@@ -46,6 +46,7 @@ use crate::query_graph::path_tree::OpPathTree;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphEdgeTransition;
 use crate::query_graph::QueryGraphNodeType;
+use crate::query_plan::query_planner::EnabledOverrideConditions;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::QueryPathElement;
 use crate::query_plan::QueryPlanCost;
@@ -1406,17 +1407,24 @@ where
         feature = "snapshot_tracing",
         tracing::instrument(skip_all, level = "trace")
     )]
+    #[allow(clippy::too_many_arguments)]
     fn advance_with_non_collecting_and_type_preserving_transitions(
         self: &Arc<Self>,
         context: &OpGraphPathContext,
         condition_resolver: &mut impl ConditionResolver,
         excluded_destinations: &ExcludedDestinations,
         excluded_conditions: &ExcludedConditions,
+        override_conditions: &EnabledOverrideConditions,
         transition_and_context_to_trigger: impl Fn(
             &QueryGraphEdgeTransition,
             &OpGraphPathContext,
         ) -> TTrigger,
-        node_and_trigger_to_edge: impl Fn(&Arc<QueryGraph>, NodeIndex, &Arc<TTrigger>) -> Option<TEdge>,
+        node_and_trigger_to_edge: impl Fn(
+            &Arc<QueryGraph>,
+            NodeIndex,
+            &Arc<TTrigger>,
+            &EnabledOverrideConditions,
+        ) -> Option<TEdge>,
     ) -> Result<IndirectPaths<TTrigger, TEdge>, FederationError> {
         // If we're asked for indirect paths after an "@interfaceObject fake down cast" but that
         // down cast comes just after non-collecting edge(s), then we can ignore the ask (skip
@@ -1675,6 +1683,7 @@ where
                                         direct_path_start_node,
                                         edge_tail_type_pos,
                                         &node_and_trigger_to_edge,
+                                        override_conditions,
                                     )?
                                 } else {
                                     None
@@ -1797,12 +1806,20 @@ where
         start_index: usize,
         start_node: NodeIndex,
         end_type_position: &OutputTypeDefinitionPosition,
-        node_and_trigger_to_edge: impl Fn(&Arc<QueryGraph>, NodeIndex, &Arc<TTrigger>) -> Option<TEdge>,
+        node_and_trigger_to_edge: impl Fn(
+            &Arc<QueryGraph>,
+            NodeIndex,
+            &Arc<TTrigger>,
+            &EnabledOverrideConditions,
+        ) -> Option<TEdge>,
+        override_conditions: &EnabledOverrideConditions,
     ) -> Result<Option<NodeIndex>, FederationError> {
         let mut current_node = start_node;
         for index in start_index..self.edges.len() {
             let trigger = &self.edge_triggers[index];
-            let Some(edge) = node_and_trigger_to_edge(&self.graph, current_node, trigger) else {
+            let Some(edge) =
+                node_and_trigger_to_edge(&self.graph, current_node, trigger, override_conditions)
+            else {
                 return Ok(None);
             };
 
@@ -1892,8 +1909,13 @@ where
 }
 
 impl OpGraphPath {
-    fn next_edge_for_field(&self, field: &Field) -> Option<EdgeIndex> {
-        self.graph.edge_for_field(self.tail, field)
+    fn next_edge_for_field(
+        &self,
+        field: &Field,
+        override_conditions: &EnabledOverrideConditions,
+    ) -> Option<EdgeIndex> {
+        self.graph
+            .edge_for_field(self.tail, field, override_conditions)
     }
 
     fn next_edge_for_inline_fragment(&self, inline_fragment: &InlineFragment) -> Option<EdgeIndex> {
@@ -2027,6 +2049,7 @@ impl OpGraphPath {
 
     pub(crate) fn terminate_with_non_requested_typename_field(
         &self,
+        override_conditions: &EnabledOverrideConditions,
     ) -> Result<OpGraphPath, FederationError> {
         // If the last step of the path was a fragment/type-condition, we want to remove it before
         // we get __typename. The reason is that this avoid cases where this method would make us
@@ -2066,7 +2089,10 @@ impl OpGraphPath {
             &tail_type_pos,
             None,
         );
-        let Some(edge) = self.graph.edge_for_field(path.tail, &typename_field) else {
+        let Some(edge) = self
+            .graph
+            .edge_for_field(path.tail, &typename_field, override_conditions)
+        else {
             return Err(FederationError::internal(
                 "Unexpectedly missing edge for __typename field",
             ));
@@ -2169,7 +2195,7 @@ impl OpGraphPath {
         let Some(self_edge) = self.edges[diff_pos] else {
             return Ok(false);
         };
-        let Some(other_edge) = self.edges[diff_pos] else {
+        let Some(other_edge) = other.edges[diff_pos] else {
             return Ok(false);
         };
         let other_edge_weight = other.graph.edge_weight(other_edge)?;
@@ -2190,7 +2216,7 @@ impl OpGraphPath {
         // from the interface while the other one from an implementation, they won't be technically
         // the "same" edge index. So we check that both are key-resolution edges, to the same
         // subgraph and type, and with the same condition.
-        let Some(other_next_edge) = self.edges[diff_pos + 1] else {
+        let Some(other_next_edge) = other.edges[diff_pos + 1] else {
             return Ok(false);
         };
         let (_, self_edge_tail) = other.graph.edge_endpoints(self_edge)?;
@@ -2401,6 +2427,7 @@ impl OpGraphPath {
         operation_element: &OpPathElement,
         context: &OpGraphPathContext,
         condition_resolver: &mut impl ConditionResolver,
+        override_conditions: &EnabledOverrideConditions,
     ) -> Result<(Option<Vec<SimultaneousPaths>>, Option<bool>), FederationError> {
         let span = debug_span!("Trying to advance {self} directly with {operation_element}");
         let _guard = span.enter();
@@ -2417,7 +2444,9 @@ impl OpGraphPath {
                     OutputTypeDefinitionPosition::Object(tail_type_pos) => {
                         // Just take the edge corresponding to the field, if it exists and can be
                         // used.
-                        let Some(edge) = self.next_edge_for_field(operation_field) else {
+                        let Some(edge) =
+                            self.next_edge_for_field(operation_field, override_conditions)
+                        else {
                             debug!(
                                 "No edge for field {operation_field} on object type {tail_weight}"
                             );
@@ -2504,7 +2533,7 @@ impl OpGraphPath {
                         let interface_edge = if field_is_of_an_implementation {
                             None
                         } else {
-                            self.next_edge_for_field(operation_field)
+                            self.next_edge_for_field(operation_field, override_conditions)
                         };
                         let interface_path = if let Some(interface_edge) = &interface_edge {
                             let field_path = self.add_field_edge(
@@ -2668,6 +2697,7 @@ impl OpGraphPath {
                                     supergraph_schema.clone(),
                                     &implementation_inline_fragment.into(),
                                     condition_resolver,
+                                    override_conditions,
                                 )?;
                             // If we find no options for that implementation, we bail (as we need to
                             // simultaneously advance all implementations).
@@ -2697,6 +2727,7 @@ impl OpGraphPath {
                                         supergraph_schema.clone(),
                                         operation_element,
                                         condition_resolver,
+                                        override_conditions,
                                     )?;
                                 let Some(field_options_for_implementation) =
                                     field_options_for_implementation
@@ -2756,7 +2787,9 @@ impl OpGraphPath {
                         }
                     }
                     OutputTypeDefinitionPosition::Union(_) => {
-                        let Some(typename_edge) = self.next_edge_for_field(operation_field) else {
+                        let Some(typename_edge) =
+                            self.next_edge_for_field(operation_field, override_conditions)
+                        else {
                             return Err(FederationError::internal(
                                 "Should always have an edge for __typename edge on an union",
                             ));
@@ -2871,6 +2904,7 @@ impl OpGraphPath {
                                     supergraph_schema.clone(),
                                     &implementation_inline_fragment.into(),
                                     condition_resolver,
+                                    override_conditions,
                                 )?;
                             let Some(implementation_options) = implementation_options else {
                                 drop(guard);
@@ -3277,6 +3311,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
         updated_context: &OpGraphPathContext,
         path_index: usize,
         condition_resolver: &mut impl ConditionResolver,
+        override_conditions: &EnabledOverrideConditions,
     ) -> Result<OpIndirectPaths, FederationError> {
         // Note that the provided context will usually be one we had during construction (the
         // `updated_context` will be `self.context` updated by whichever operation we're looking at,
@@ -3284,12 +3319,13 @@ impl SimultaneousPathsWithLazyIndirectPaths {
         // rare), which is why we save recomputation by caching the computed value in that case, but
         // in case it's different, we compute without caching.
         if *updated_context != self.context {
-            self.compute_indirect_paths(path_index, condition_resolver)?;
+            self.compute_indirect_paths(path_index, condition_resolver, override_conditions)?;
         }
         if let Some(indirect_paths) = &self.lazily_computed_indirect_paths[path_index] {
             Ok(indirect_paths.clone())
         } else {
-            let new_indirect_paths = self.compute_indirect_paths(path_index, condition_resolver)?;
+            let new_indirect_paths =
+                self.compute_indirect_paths(path_index, condition_resolver, override_conditions)?;
             self.lazily_computed_indirect_paths[path_index] = Some(new_indirect_paths.clone());
             Ok(new_indirect_paths)
         }
@@ -3299,17 +3335,21 @@ impl SimultaneousPathsWithLazyIndirectPaths {
         &self,
         path_index: usize,
         condition_resolver: &mut impl ConditionResolver,
+        overridden_conditions: &EnabledOverrideConditions,
     ) -> Result<OpIndirectPaths, FederationError> {
         self.paths.0[path_index].advance_with_non_collecting_and_type_preserving_transitions(
             &self.context,
             condition_resolver,
             &self.excluded_destinations,
             &self.excluded_conditions,
+            overridden_conditions,
             // The transitions taken by this method are non-collecting transitions, in which case
             // the trigger is the context (which is really a hack to provide context information for
             // keys during fetch dependency graph updating).
             |_, context| OpGraphPathTrigger::Context(context.clone()),
-            |graph, node, trigger| graph.edge_for_op_graph_path_trigger(node, trigger),
+            |graph, node, trigger, overridden_conditions| {
+                graph.edge_for_op_graph_path_trigger(node, trigger, overridden_conditions)
+            },
         )
     }
 
@@ -3345,6 +3385,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
         supergraph_schema: ValidFederationSchema,
         operation_element: &OpPathElement,
         condition_resolver: &mut impl ConditionResolver,
+        override_conditions: &EnabledOverrideConditions,
     ) -> Result<Option<Vec<SimultaneousPathsWithLazyIndirectPaths>>, FederationError> {
         debug!(
             "Trying to advance paths for operation: path = {}, operation = {operation_element}",
@@ -3375,6 +3416,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
                         operation_element,
                         &updated_context,
                         condition_resolver,
+                        override_conditions,
                     )?;
                 debug!("{advance_options:?}");
                 drop(gaurd);
@@ -3422,25 +3464,31 @@ impl SimultaneousPathsWithLazyIndirectPaths {
             if let OpPathElement::Field(operation_field) = operation_element {
                 // Add whatever options can be obtained by taking some non-collecting edges first.
                 let paths_with_non_collecting_edges = self
-                    .indirect_options(&updated_context, path_index, condition_resolver)?
+                    .indirect_options(
+                        &updated_context,
+                        path_index,
+                        condition_resolver,
+                        override_conditions,
+                    )?
                     .filter_non_collecting_paths_for_field(operation_field)?;
                 if !paths_with_non_collecting_edges.paths.is_empty() {
                     debug!(
                         "{} indirect paths",
                         paths_with_non_collecting_edges.paths.len()
                     );
-                    for paths_with_non_collecting_edges in
+                    for path_with_non_collecting_edges in
                         paths_with_non_collecting_edges.paths.iter()
                     {
-                        debug!("For indirect path {paths_with_non_collecting_edges}:");
+                        debug!("For indirect path {path_with_non_collecting_edges}:");
                         let span = debug_span!(" |");
                         let _gaurd = span.enter();
-                        let (advance_options, _) = paths_with_non_collecting_edges
+                        let (advance_options, _) = path_with_non_collecting_edges
                             .advance_with_operation_element(
                                 supergraph_schema.clone(),
                                 operation_element,
                                 &updated_context,
                                 condition_resolver,
+                                override_conditions,
                             )?;
                         // If we can't advance the operation element after that path, ignore it,
                         // it's just not an option.
@@ -3458,7 +3506,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
                         if advance_options.is_empty() {
                             return Err(FederationError::internal(format!(
                                 "Unexpected empty options after non-collecting path {} for {}",
-                                paths_with_non_collecting_edges, operation_element,
+                                path_with_non_collecting_edges, operation_element,
                             )));
                         }
                         // There is a special case we can deal with now. Namely, suppose we have a
@@ -3485,7 +3533,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
                         // the new path renders unnecessary. Do note that we only make that check
                         // when the new option is a single-path option, because this gets kind of
                         // complicated otherwise.
-                        if paths_with_non_collecting_edges.tail_is_interface_object()? {
+                        if path_with_non_collecting_edges.tail_is_interface_object()? {
                             for indirect_option in &advance_options {
                                 if indirect_option.0.len() == 1 {
                                     let mut new_options = vec![];
@@ -3528,6 +3576,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
                     operation_element,
                     &updated_context,
                     condition_resolver,
+                    override_conditions,
                 )?;
                 options = advance_options.unwrap_or_else(Vec::new);
                 debug!("{options:?}");
@@ -3552,11 +3601,6 @@ impl SimultaneousPathsWithLazyIndirectPaths {
 
 // PORT_NOTE: JS passes a ConditionResolver here, we do not: see port note for
 // `SimultaneousPathsWithLazyIndirectPaths`
-// TODO(@goto-bus-stop): JS passes `override_conditions` here and maintains stores
-// references to it in the created paths. AFAICT override conditions
-// are shared mutable state among different query graphs, so having references to
-// it in many structures would require synchronization. We should likely pass it as
-// an argument to exactly the functionality that uses it.
 pub fn create_initial_options(
     initial_path: GraphPath<OpGraphPathTrigger, Option<EdgeIndex>>,
     initial_type: &QueryGraphNodeType,
@@ -3564,6 +3608,7 @@ pub fn create_initial_options(
     condition_resolver: &mut impl ConditionResolver,
     excluded_edges: ExcludedDestinations,
     excluded_conditions: ExcludedConditions,
+    override_conditions: &EnabledOverrideConditions,
 ) -> Result<Vec<SimultaneousPathsWithLazyIndirectPaths>, FederationError> {
     let initial_paths = SimultaneousPaths::from(initial_path);
     let mut lazy_initial_path = SimultaneousPathsWithLazyIndirectPaths::new(
@@ -3574,8 +3619,12 @@ pub fn create_initial_options(
     );
 
     if initial_type.is_federated_root_type() {
-        let initial_options =
-            lazy_initial_path.indirect_options(&initial_context, 0, condition_resolver)?;
+        let initial_options = lazy_initial_path.indirect_options(
+            &initial_context,
+            0,
+            condition_resolver,
+            override_conditions,
+        )?;
         let options = initial_options
             .paths
             .iter()
