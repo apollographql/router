@@ -33,10 +33,10 @@ pub fn links_metadata(schema: &Schema) -> Result<Option<LinksMetadata>, LinkErro
         return Err(LinkError::BootstrapError(format!(
             "the @link specification itself (\"{}\") is applied multiple times",
             extraneous_directive
-                .argument_by_name("url")
+                .specified_argument_by_name("url")
                 // XXX(@goto-bus-stop): @core compatibility is primarily to support old tests in other projects,
                 // and should be removed when those are updated.
-                .or(extraneous_directive.argument_by_name("feature"))
+                .or(extraneous_directive.specified_argument_by_name("feature"))
                 .and_then(|value| value.as_str().map(Cow::Borrowed))
                 .unwrap_or_else(|| Cow::Owned(Identity::link_identity().to_string()))
         )));
@@ -184,13 +184,13 @@ fn is_bootstrap_directive(schema: &Schema, directive: &Directive) -> bool {
     };
     if is_link_directive_definition(definition) {
         if let Some(url) = directive
-            .argument_by_name("url")
+            .specified_argument_by_name("url")
             .and_then(|value| value.as_str())
         {
             let url = url.parse::<Url>();
             let default_link_name = DEFAULT_LINK_NAME;
             let expected_name = directive
-                .argument_by_name("as")
+                .specified_argument_by_name("as")
                 .and_then(|value| value.as_str())
                 .unwrap_or(default_link_name.as_str());
             return url.map_or(false, |url| {
@@ -201,12 +201,12 @@ fn is_bootstrap_directive(schema: &Schema, directive: &Directive) -> bool {
         // XXX(@goto-bus-stop): @core compatibility is primarily to support old tests--should be
         // removed when those are updated.
         if let Some(url) = directive
-            .argument_by_name("feature")
+            .specified_argument_by_name("feature")
             .and_then(|value| value.as_str())
         {
             let url = url.parse::<Url>();
             let expected_name = directive
-                .argument_by_name("as")
+                .specified_argument_by_name("as")
                 .and_then(|value| value.as_str())
                 .unwrap_or("core");
             return url.map_or(false, |url| {

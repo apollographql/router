@@ -367,7 +367,7 @@ impl OpPathElement {
         ] {
             let directive_name: &'static str = (&kind).into();
             if let Some(application) = self.directives().get(directive_name) {
-                let Some(arg) = application.argument_by_name("if") else {
+                let Some(arg) = application.specified_argument_by_name("if") else {
                     return Err(FederationError::internal(format!(
                         "@{} missing required argument \"if\"",
                         directive_name
@@ -501,16 +501,18 @@ impl OpGraphPathContext {
         &self,
         operation_element: &OpPathElement,
     ) -> Result<OpGraphPathContext, FederationError> {
-        let mut new_context = self.clone();
         if operation_element.directives().is_empty() {
-            return Ok(new_context);
+            return Ok(self.clone());
         }
 
-        let new_conditionals = operation_element.extract_operation_conditionals()?;
-        if !new_conditionals.is_empty() {
-            Arc::make_mut(&mut new_context.conditionals).extend(new_conditionals);
+        let mut new_conditionals = operation_element.extract_operation_conditionals()?;
+        if new_conditionals.is_empty() {
+            return Ok(self.clone());
         }
-        Ok(new_context)
+        new_conditionals.extend(self.iter().cloned());
+        Ok(OpGraphPathContext {
+            conditionals: Arc::new(new_conditionals),
+        })
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -3867,15 +3869,12 @@ fn is_useless_followup_element(
             };
 
             let are_useless_directives = fragment.directives.is_empty()
-                || fragment
-                    .directives
-                    .iter()
-                    .any(|d| !conditionals.contains(d));
+                || fragment.directives.iter().all(|d| conditionals.contains(d));
             let is_same_type = type_of_first.type_name() == type_of_second.type_name();
             let is_subtype = first
                 .schema()
                 .schema()
-                .is_subtype(type_of_first.type_name(), type_of_second.type_name());
+                .is_subtype(type_of_second.type_name(), type_of_first.type_name());
             Ok(are_useless_directives && (is_same_type || is_subtype))
         }
     };

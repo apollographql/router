@@ -1259,8 +1259,8 @@ fn handles_multiple_conditions_on_abstract_types() {
                     }
                   } =>
                   {
-                    ... on Book @skip(if: $title) {
-                      ... on Book @include(if: $title) {
+                    ... on Book @include(if: $title) {
+                      ... on Book @skip(if: $title) {
                         sku
                       }
                     }
