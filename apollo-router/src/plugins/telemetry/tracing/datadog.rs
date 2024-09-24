@@ -116,12 +116,12 @@ impl ShouldSample for DatadogAgentSampling {
         // We always want to set the sampling.priority attribute in case we are communicating with the agent via otlp.
         result.attributes.push(KeyValue::new(
             "sampling.priority",
-            Value::from(
+            Value::I64(
                 result
                     .trace_state
                     .sampling_priority()
                     .expect("sampling priority")
-                    .as_str(),
+                    .as_i64(),
             ),
         ));
         result

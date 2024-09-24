@@ -587,22 +587,23 @@ impl Spec {
 
     fn verify_priority_sampled(&self, trace: &Value) -> Result<(), BoxError> {
         if let Some(psr) = self.priority_sampled {
-            let binding =
-                trace.select_path("$..[?(@.name == 'execution')]..[?(@.key == 'sampling.priority')].value.stringValue")?;
+            let binding = trace.select_path(
+                "$..[?(@.name == 'execution')]..[?(@.key == 'sampling.priority')].value.intValue",
+            )?;
             if binding.is_empty() {
                 return Err(BoxError::from("missing sampling priority"));
             }
             for sampling_priority in binding {
                 assert_eq!(
                     sampling_priority
-                        .as_str()
-                        .expect("psr not string")
+                        .as_i64()
+                        .expect("psr not an integer")
                         .to_string(),
                     psr
                 );
             }
         } else {
-            assert!(trace.select_path("$..[?(@.name == 'execution')]..[?(@.key == 'sampling.priority')].value.stringValue")?.is_empty())
+            assert!(trace.select_path("$..[?(@.name == 'execution')]..[?(@.key == 'sampling.priority')].value.intValue")?.is_empty())
         }
         Ok(())
     }

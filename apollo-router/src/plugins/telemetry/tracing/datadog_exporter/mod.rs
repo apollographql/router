@@ -290,6 +290,17 @@ pub(crate) mod propagator {
         UserKeep = 2,
     }
 
+    impl SamplingPriority {
+        pub(crate) fn as_i64(&self) -> i64 {
+            match self {
+                SamplingPriority::UserReject => -1,
+                SamplingPriority::AutoReject => 0,
+                SamplingPriority::AutoKeep => 1,
+                SamplingPriority::UserKeep => 2,
+            }
+        }
+    }
+
     impl Display for SamplingPriority {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             let value = match self {
