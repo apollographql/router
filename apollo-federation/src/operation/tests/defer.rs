@@ -1,5 +1,3 @@
-use apollo_compiler::Node;
-
 use super::parse_operation;
 use super::parse_schema;
 use crate::operation::Selection;
