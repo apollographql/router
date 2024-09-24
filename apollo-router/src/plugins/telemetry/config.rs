@@ -700,6 +700,16 @@ fn parent_based(sampler: opentelemetry::sdk::trace::Sampler) -> opentelemetry::s
 
 impl Conf {
     pub(crate) fn calculate_field_level_instrumentation_ratio(&self) -> Result<f64, Error> {
+        // Because when datadog is enabled the global sampling is overriden to always_on
+        if self.exporters.tracing.common.datadog_agent_sampling {
+            let field_ratio = match &self.apollo.field_level_instrumentation_sampler {
+                SamplerOption::TraceIdRatioBased(ratio) => *ratio,
+                SamplerOption::Always(Sampler::AlwaysOn) => 1.0,
+                SamplerOption::Always(Sampler::AlwaysOff) => 0.0,
+            };
+
+            return Ok(field_ratio);
+        }
         Ok(
             match (
                 &self.exporters.tracing.common.sampler,
