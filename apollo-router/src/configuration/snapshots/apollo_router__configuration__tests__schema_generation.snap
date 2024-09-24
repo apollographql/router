@@ -6557,8 +6557,8 @@ expression: "&schema"
           "type": "boolean"
         },
         "generate_query_fragments": {
-          "default": false,
-          "description": "Enable QP generation of fragments for subgraph requests Default: false",
+          "default": true,
+          "description": "Enable QP generation of fragments for subgraph requests Default: true",
           "type": "boolean"
         },
         "introspection": {
