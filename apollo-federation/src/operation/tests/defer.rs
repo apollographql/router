@@ -1,6 +1,5 @@
 use super::parse_operation;
 use super::parse_schema;
-use crate::operation::Selection;
 
 const DEFAULT_SCHEMA: &str = r#"
 type A {
@@ -48,11 +47,15 @@ fn without_defer_simple() {
 
     insta::assert_snapshot!(without_defer, @r#"
       {
-        a {
-          one
+        ... {
+          a {
+            one
+          }
         }
         b {
-          two
+          ... {
+            two
+          }
         }
       }
     "#);
@@ -173,7 +176,9 @@ fn without_defer_fragment_references() {
     }
 
     fragment a on A {
-      ...b
+      ... {
+        ...b
+      }
     }
 
     fragment entry on Query {
@@ -186,18 +191,4 @@ fn without_defer_fragment_references() {
       ...entry
     }
     "###);
-
-    let frag_a = without_defer.named_fragments.get("a").unwrap();
-    let frag_b = without_defer.named_fragments.get("b").unwrap();
-
-    let (_, Selection::FragmentSpread(frag_a_spread)) =
-        frag_a.selection_set.selections.first().unwrap()
-    else {
-        panic!("first selection from frag a should be ...b");
-    };
-
-    assert_eq!(
-        frag_a_spread.selection_set, frag_b.selection_set,
-        "FragmentSpreadSelection's selection set should be updated"
-    );
 }

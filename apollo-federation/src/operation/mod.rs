@@ -3627,7 +3627,7 @@ enum DeferFilter<'a> {
 }
 
 impl DeferFilter<'_> {
-    fn remove_defer(&self, directive_list: &mut DirectiveList) {
+    fn remove_defer(&self, directive_list: &mut DirectiveList, schema: &apollo_compiler::Schema) {
         match self {
             Self::All => {
                 directive_list.remove_one(DEFER_DIRECTIVE_NAME);
@@ -3635,7 +3635,7 @@ impl DeferFilter<'_> {
             Self::Labels(set) => {
                 let label = directive_list
                     .get(DEFER_DIRECTIVE_NAME)
-                    .and_then(|directive| directive.argument_by_name("label"))
+                    .and_then(|directive| directive.argument_by_name("label", schema).ok())
                     .and_then(|arg| arg.as_str());
                 if label.is_some_and(|label| set.contains(label)) {
                     directive_list.remove_one(DEFER_DIRECTIVE_NAME);
@@ -3708,7 +3708,7 @@ impl FragmentSpread {
 
     fn without_defer(&self, filter: DeferFilter<'_>) -> Result<Self, FederationError> {
         let mut data = self.data().clone();
-        filter.remove_defer(&mut data.directives);
+        filter.remove_defer(&mut data.directives, data.schema.schema());
         Ok(Self::new(data))
     }
 }
@@ -3727,7 +3727,7 @@ impl InlineFragment {
 
     fn without_defer(&self, filter: DeferFilter<'_>) -> Result<Self, FederationError> {
         let mut data = self.data().clone();
-        filter.remove_defer(&mut data.directives);
+        filter.remove_defer(&mut data.directives, data.schema.schema());
         Ok(Self::new(data))
     }
 }
