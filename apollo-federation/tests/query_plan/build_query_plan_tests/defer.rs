@@ -2673,11 +2673,9 @@ fn defer_test_defer_with_conditions_and_labels() {
                           id
                         }
                       }
-                    }
+                    },
                   }, [
-                    Deferred(depends: [0], path: "t"${
-                      label ? `, label: "${label}"` : ''
-                    }) {
+                    Deferred(depends: [0], path: "t", label: "testLabel") {
                       {
                         y
                       }:
@@ -2695,10 +2693,10 @@ fn defer_test_defer_with_conditions_and_labels() {
                             }
                           }
                         },
-                      }
+                      },
                     },
                   ]
-                }
+                },
               } Else {
                 Sequence {
                   Fetch(service: "Subgraph1") {
@@ -2725,8 +2723,8 @@ fn defer_test_defer_with_conditions_and_labels() {
                       }
                     },
                   },
-                }
-              }
+                },
+              },
             },
           }
         "###
@@ -2895,7 +2893,7 @@ fn defer_test_defer_with_mutliple_conditions_and_labels() {
                               id
                             }
                           }
-                        }
+                        },
                       }, [
                         Deferred(depends: [0], path: "t", label: "bar") {
                           Defer {
@@ -2923,7 +2921,7 @@ fn defer_test_defer_with_mutliple_conditions_and_labels() {
                                     }
                                   }
                                 },
-                              }
+                              },
                             }, [
                               Deferred(depends: [1], path: "t/u") {
                                 {
@@ -2943,10 +2941,10 @@ fn defer_test_defer_with_mutliple_conditions_and_labels() {
                                       }
                                     }
                                   },
-                                }
+                                },
                               },
                             ]
-                          }
+                          },
                         },
                         Deferred(depends: [0], path: "t", label: "foo") {
                           {
@@ -2966,10 +2964,10 @@ fn defer_test_defer_with_mutliple_conditions_and_labels() {
                                 }
                               }
                             },
-                          }
+                          },
                         },
                       ]
-                    }
+                    },
                   } Else {
                     Defer {
                       Primary {
@@ -2981,7 +2979,7 @@ fn defer_test_defer_with_mutliple_conditions_and_labels() {
                             }
                           }
                         }:
-                        Fetch(service: "Subgraph1", id: 0) {
+                        Fetch(service: "Subgraph1", id: 2) {
                           {
                             t {
                               __typename
@@ -2994,9 +2992,9 @@ fn defer_test_defer_with_mutliple_conditions_and_labels() {
                               }
                             }
                           }
-                        }
+                        },
                       }, [
-                        Deferred(depends: [0], path: "t", label: "foo") {
+                        Deferred(depends: [2], path: "t", label: "foo") {
                           {
                             y
                           }:
@@ -3014,9 +3012,9 @@ fn defer_test_defer_with_mutliple_conditions_and_labels() {
                                 }
                               }
                             },
-                          }
+                          },
                         },
-                        Deferred(depends: [0], path: "t/u") {
+                        Deferred(depends: [2], path: "t/u") {
                           {
                             b
                           }:
@@ -3034,12 +3032,12 @@ fn defer_test_defer_with_mutliple_conditions_and_labels() {
                                 }
                               }
                             },
-                          }
+                          },
                         },
                       ]
-                    }
-                  }
-                }
+                    },
+                  },
+                },
               } Else {
                 Condition(if: $cond2) {
                   Then {
@@ -3052,7 +3050,7 @@ fn defer_test_defer_with_mutliple_conditions_and_labels() {
                           }
                         }:
                         Sequence {
-                          Fetch(service: "Subgraph1", id: 0) {
+                          Fetch(service: "Subgraph1", id: 3) {
                             {
                               t {
                                 __typename
@@ -3076,9 +3074,9 @@ fn defer_test_defer_with_mutliple_conditions_and_labels() {
                               }
                             },
                           },
-                        }
+                        },
                       }, [
-                        Deferred(depends: [0], path: "t", label: "bar") {
+                        Deferred(depends: [3], path: "t", label: "bar") {
                           {
                             u {
                               a
@@ -3120,10 +3118,10 @@ fn defer_test_defer_with_mutliple_conditions_and_labels() {
                                 }
                               },
                             },
-                          }
+                          },
                         },
                       ]
-                    }
+                    },
                   } Else {
                     Sequence {
                       Fetch(service: "Subgraph1") {
@@ -3141,21 +3139,6 @@ fn defer_test_defer_with_mutliple_conditions_and_labels() {
                         }
                       },
                       Parallel {
-                        Flatten(path: "t") {
-                          Fetch(service: "Subgraph2") {
-                            {
-                              ... on T {
-                                __typename
-                                id
-                              }
-                            } =>
-                            {
-                              ... on T {
-                                y
-                              }
-                            }
-                          },
-                        },
                         Flatten(path: "t.u") {
                           Fetch(service: "Subgraph3") {
                             {
@@ -3171,11 +3154,26 @@ fn defer_test_defer_with_mutliple_conditions_and_labels() {
                             }
                           },
                         },
+                        Flatten(path: "t") {
+                          Fetch(service: "Subgraph2") {
+                            {
+                              ... on T {
+                                __typename
+                                id
+                              }
+                            } =>
+                            {
+                              ... on T {
+                                y
+                              }
+                            }
+                          },
+                        },
                       },
-                    }
-                  }
-                }
-              }
+                    },
+                  },
+                },
+              },
             },
           }
         "###

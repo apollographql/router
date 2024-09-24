@@ -211,7 +211,6 @@ pub(crate) struct NormalizedDefer {
 struct DeferNormalizer {
     used_labels: HashSet<String>,
     assigned_labels: IndexSet<String>,
-    problems: HashSet<SelectionKey>,
     conditions: IndexMap<Name, IndexSet<String>>,
     label_offset: usize,
 }
@@ -220,7 +219,6 @@ impl DeferNormalizer {
     fn new(selection_set: &SelectionSet) -> Result<Self, FederationError> {
         let mut digest = Self {
             used_labels: HashSet::default(),
-            problems: HashSet::default(),
             label_offset: 0,
             assigned_labels: IndexSet::default(),
             conditions: IndexMap::default(),
@@ -234,14 +232,9 @@ impl DeferNormalizer {
             // spreads? The JS code checks "FragmentSelection"
             if let Selection::InlineFragment(inline) = selection {
                 if let Some(args) = inline.inline_fragment.data().defer_directive_arguments()? {
-                    let DeferDirectiveArguments { label, if_ } = args;
+                    let DeferDirectiveArguments { label, if_: _ } = args;
                     if let Some(label) = label {
                         digest.used_labels.insert(label);
-                    } else {
-                        digest.problems.insert(inline.key());
-                    }
-                    if matches!(if_, Some(BooleanOrVariable::Boolean(_))) {
-                        digest.problems.insert(inline.key());
                     }
                 }
             }
@@ -254,10 +247,6 @@ impl DeferNormalizer {
             );
         }
         Ok(digest)
-    }
-
-    fn is_problem(&self, key: &SelectionKey) -> bool {
-        self.problems.contains(key)
     }
 
     fn get_label(&mut self) -> String {
@@ -3757,10 +3746,6 @@ impl InlineFragmentSelection {
     }
 
     fn normalize_defer(self, normalizer: &mut DeferNormalizer) -> Result<Self, FederationError> {
-        if !normalizer.is_problem(&self.key()) {
-            return Ok(self);
-        }
-
         // This should always be `Some`
         let Some(args) = self.inline_fragment.defer_directive_arguments()? else {
             return Ok(self);
@@ -4006,9 +3991,7 @@ impl Operation {
     pub(crate) fn with_normalized_defer(mut self) -> Result<NormalizedDefer, FederationError> {
         if self.has_defer() {
             let mut normalizer = DeferNormalizer::new(&self.selection_set)?;
-            if !normalizer.problems.is_empty() {
-                self.selection_set = self.selection_set.normalize_defer(&mut normalizer)?;
-            }
+            self.selection_set = self.selection_set.normalize_defer(&mut normalizer)?;
             Ok(NormalizedDefer {
                 operation: self,
                 has_defers: true,
