@@ -318,40 +318,6 @@ impl Operation {
             named_fragments,
         })
     }
-
-    /// Returns this operation but modified to "normalize" all the @defer applications.
-    ///
-    /// "Normalized" in this context means that all the `@defer` application in the resulting
-    /// operation will:
-    ///  - have a (unique) label. Which implies that this method generates a label for any `@defer`
-    ///    not having a label.
-    ///  - have a non-trivial `if` condition, if any. By non-trivial, we mean that the condition
-    ///    will be a variable and not an hard-coded `true` or `false`. To do this, this method will
-    ///    remove the condition of any `@defer` that has `if: true`, and will completely remove any
-    ///    `@defer` application that has `if: false`.
-    // PORT_NOTE(@goto-bus-stop): It might make sense for the returned data structure to *be* the
-    // `DeferNormalizer` from the JS side
-    pub(crate) fn with_normalized_defer(mut self) -> Result<NormalizedDefer, FederationError> {
-        if self.has_defer() {
-            let mut normalizer = DeferNormalizer::new(&self.selection_set)?;
-            if !normalizer.problems.is_empty() {
-                self.selection_set = self.selection_set.normalize_defer(&mut normalizer)?;
-            }
-            Ok(NormalizedDefer {
-                operation: self,
-                has_defers: true,
-                assigned_defer_labels: normalizer.assigned_labels,
-                defer_conditions: normalizer.conditions,
-            })
-        } else {
-            Ok(NormalizedDefer {
-                operation: self,
-                has_defers: false,
-                assigned_defer_labels: IndexSet::default(),
-                defer_conditions: IndexMap::default(),
-            })
-        }
-    }
 }
 
 /// An analogue of the apollo-compiler type `SelectionSet` with these changes:
@@ -999,29 +965,6 @@ impl Selection {
                     "Unexpected fragment spread in Selection::conditions()",
                 )),
             }
-        }
-    }
-
-    fn normalize_defer(self, normalizer: &mut DeferNormalizer) -> Result<Self, FederationError> {
-        match self {
-            Selection::Field(field) => Ok(Self::Field(Arc::new(
-                field.with_updated_selection_set(
-                    field
-                        .selection_set
-                        .clone()
-                        .map(|set| set.normalize_defer(normalizer))
-                        .transpose()?,
-                ),
-            ))),
-            Selection::FragmentSpread(_spread) => {
-                Err(FederationError::internal("unexpected fragment spread"))
-            }
-            Selection::InlineFragment(inline) => inline
-                .with_updated_selection_set(
-                    inline.selection_set.clone().normalize_defer(normalizer)?,
-                )
-                .normalize_defer(normalizer)
-                .map(|inline| Self::InlineFragment(Arc::new(inline))),
         }
     }
 
@@ -3505,88 +3448,6 @@ impl InlineFragmentSelection {
             .unwrap_or(&self.inline_fragment.parent_type_position)
     }
 
-    fn normalize_defer(self, normalizer: &mut DeferNormalizer) -> Result<Self, FederationError> {
-        if !normalizer.is_problem(&self.key()) {
-            return Ok(self);
-        }
-
-        // This should always be `Some`
-        let Some(args) = self.inline_fragment.defer_directive_arguments()? else {
-            return Ok(self);
-        };
-
-        let mut remove_defer = false;
-        let mut args_copy = args.clone();
-        if let Some(BooleanOrVariable::Boolean(b)) = &args.if_ {
-            if *b {
-                args_copy.if_ = None;
-            } else {
-                remove_defer = true;
-            }
-        }
-
-        if args_copy.label.is_none() {
-            args_copy.label = Some(normalizer.get_label());
-        }
-
-        if remove_defer {
-            let directives: DirectiveList = self
-                .inline_fragment
-                .directives
-                .iter()
-                .filter(|dir| dir.name != "defer")
-                .cloned()
-                .collect();
-            return Ok(self.with_updated_directives(directives));
-        }
-
-        // NOTE: If this is `Some`, it will be a variable.
-        if let Some(BooleanOrVariable::Variable(cond)) = args_copy.if_.clone() {
-            normalizer.register_condition(args_copy.label.clone().unwrap(), cond);
-        }
-
-        if args_copy == args {
-            Ok(self)
-        } else {
-            let directives: DirectiveList = self
-                .inline_fragment
-                .directives
-                .iter()
-                .map(|dir| {
-                    if dir.name == "defer" {
-                        let mut dir: Directive = (**dir).clone();
-                        dir.arguments
-                            .retain(|arg| !["label", "if"].contains(&&*arg.name));
-                        let arg = Node::new(Argument {
-                            name: name!("label"),
-                            value: Node::new(apollo_compiler::ast::Value::String(
-                                args_copy.label.clone().unwrap(),
-                            )),
-                        });
-                        dir.arguments.push(arg);
-                        if let Some(cond) = args_copy.if_.clone() {
-                            let name = name!("if");
-                            let value = match cond {
-                                BooleanOrVariable::Boolean(b) => {
-                                    Node::new(apollo_compiler::ast::Value::Boolean(b))
-                                }
-                                BooleanOrVariable::Variable(var) => {
-                                    Node::new(apollo_compiler::ast::Value::Variable(var))
-                                }
-                            };
-                            let arg = Node::new(Argument { value, name });
-                            dir.arguments.push(arg);
-                        }
-                        Node::new(dir)
-                    } else {
-                        dir.clone()
-                    }
-                })
-                .collect();
-            Ok(self.with_updated_directives(directives))
-        }
-    }
-
     /// Returns true if this inline fragment selection is "unnecessary" and should be inlined.
     ///
     /// Fragment is unnecessary if following are true:
@@ -3913,6 +3774,88 @@ impl InlineFragmentSelection {
                 .values()
                 .any(|s| s.has_defer())
     }
+
+    fn normalize_defer(self, normalizer: &mut DeferNormalizer) -> Result<Self, FederationError> {
+        if !normalizer.is_problem(&self.key()) {
+            return Ok(self);
+        }
+
+        // This should always be `Some`
+        let Some(args) = self.inline_fragment.defer_directive_arguments()? else {
+            return Ok(self);
+        };
+
+        let mut remove_defer = false;
+        let mut args_copy = args.clone();
+        if let Some(BooleanOrVariable::Boolean(b)) = &args.if_ {
+            if *b {
+                args_copy.if_ = None;
+            } else {
+                remove_defer = true;
+            }
+        }
+
+        if args_copy.label.is_none() {
+            args_copy.label = Some(normalizer.get_label());
+        }
+
+        if remove_defer {
+            let directives: DirectiveList = self
+                .inline_fragment
+                .directives
+                .iter()
+                .filter(|dir| dir.name != "defer")
+                .cloned()
+                .collect();
+            return Ok(self.with_updated_directives(directives));
+        }
+
+        // NOTE: If this is `Some`, it will be a variable.
+        if let Some(BooleanOrVariable::Variable(cond)) = args_copy.if_.clone() {
+            normalizer.register_condition(args_copy.label.clone().unwrap(), cond);
+        }
+
+        if args_copy == args {
+            Ok(self)
+        } else {
+            let directives: DirectiveList = self
+                .inline_fragment
+                .directives
+                .iter()
+                .map(|dir| {
+                    if dir.name == "defer" {
+                        let mut dir: Directive = (**dir).clone();
+                        dir.arguments
+                            .retain(|arg| !["label", "if"].contains(&&*arg.name));
+                        let arg = Node::new(Argument {
+                            name: name!("label"),
+                            value: Node::new(apollo_compiler::ast::Value::String(
+                                args_copy.label.clone().unwrap(),
+                            )),
+                        });
+                        dir.arguments.push(arg);
+                        if let Some(cond) = args_copy.if_.clone() {
+                            let name = name!("if");
+                            let value = match cond {
+                                BooleanOrVariable::Boolean(b) => {
+                                    Node::new(apollo_compiler::ast::Value::Boolean(b))
+                                }
+                                BooleanOrVariable::Variable(var) => {
+                                    Node::new(apollo_compiler::ast::Value::Variable(var))
+                                }
+                            };
+                            let arg = Node::new(Argument { value, name });
+                            dir.arguments.push(arg);
+                        }
+                        Node::new(dir)
+                    } else {
+                        dir.clone()
+                    }
+                })
+                .collect();
+            Ok(self.with_updated_directives(directives))
+        }
+    }
 }
 
 impl Selection {
@@ -3951,6 +3894,29 @@ impl Selection {
                 let selection_set = frag.selection_set.without_defer(filter, named_fragments)?;
                 Ok(InlineFragmentSelection::new(inline_fragment, selection_set).into())
             }
+        }
+    }
+
+    fn normalize_defer(self, normalizer: &mut DeferNormalizer) -> Result<Self, FederationError> {
+        match self {
+            Selection::Field(field) => Ok(Self::Field(Arc::new(
+                field.with_updated_selection_set(
+                    field
+                        .selection_set
+                        .clone()
+                        .map(|set| set.normalize_defer(normalizer))
+                        .transpose()?,
+                ),
+            ))),
+            Selection::FragmentSpread(_spread) => {
+                Err(FederationError::internal("unexpected fragment spread"))
+            }
+            Selection::InlineFragment(inline) => inline
+                .with_updated_selection_set(
+                    inline.selection_set.clone().normalize_defer(normalizer)?,
+                )
+                .normalize_defer(normalizer)
+                .map(|inline| Self::InlineFragment(Arc::new(inline))),
         }
     }
 }
@@ -4017,6 +3983,38 @@ impl Operation {
             self.named_fragments = named_fragments;
         }
         Ok(self)
+    }
+
+    /// Returns this operation but modified to "normalize" all the @defer applications.
+    ///
+    /// "Normalized" in this context means that all the `@defer` application in the resulting
+    /// operation will:
+    ///  - have a (unique) label. Which implies that this method generates a label for any `@defer`
+    ///    not having a label.
+    ///  - have a non-trivial `if` condition, if any. By non-trivial, we mean that the condition
+    ///    will be a variable and not an hard-coded `true` or `false`. To do this, this method will
+    ///    remove the condition of any `@defer` that has `if: true`, and will completely remove any
+    ///    `@defer` application that has `if: false`.
+    pub(crate) fn with_normalized_defer(mut self) -> Result<NormalizedDefer, FederationError> {
+        if self.has_defer() {
+            let mut normalizer = DeferNormalizer::new(&self.selection_set)?;
+            if !normalizer.problems.is_empty() {
+                self.selection_set = self.selection_set.normalize_defer(&mut normalizer)?;
+            }
+            Ok(NormalizedDefer {
+                operation: self,
+                has_defers: true,
+                assigned_defer_labels: normalizer.assigned_labels,
+                defer_conditions: normalizer.conditions,
+            })
+        } else {
+            Ok(NormalizedDefer {
+                operation: self,
+                has_defers: false,
+                assigned_defer_labels: IndexSet::default(),
+                defer_conditions: IndexMap::default(),
+            })
+        }
     }
 }
 
