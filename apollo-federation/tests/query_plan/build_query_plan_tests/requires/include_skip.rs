@@ -236,3 +236,155 @@ fn it_handles_an_at_requires_where_multiple_conditional_are_involved() {
         "###
     );
 }
+
+#[test]
+fn unnecessary_include_is_stripped_from_fragments() {
+    let planner = planner!(
+        Subgraph1: r#"
+            type Query {
+              foo: Foo,
+            }
+            type Foo @key(fields: "id") {
+              id: ID,
+              bar: Bar,
+            }
+            type Bar @key(fields: "id") {
+              id: ID,
+            }
+        "#,
+        Subgraph2: r#"
+            type Bar @key(fields: "id") {
+              id: ID,
+              a: Int,
+            }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+        query foo($test: Boolean!) {
+          foo @include(if: $test) {
+            ... on Foo @include(if: $test) {
+              id
+            }
+          }
+        }
+        "#,
+        @r###"
+        QueryPlan {
+          Include(if: $test) {
+            Fetch(service: "Subgraph1") {
+              {
+                foo {
+                  ... on Foo {
+                    id
+                  }
+                }
+              }
+            },
+          },
+        }
+        "###
+    );
+    assert_plan!(
+        &planner,
+        r#"
+        query foo($test: Boolean!) {
+          foo @include(if: $test) {
+            ... on Foo @include(if: $test) {
+              id
+              bar {
+                ... on Bar @include(if: $test) {
+                  id
+                }
+              }
+            }
+          }
+        }
+        "#,
+        @r###"
+        QueryPlan {
+          Include(if: $test) {
+            Fetch(service: "Subgraph1") {
+              {
+                foo {
+                  ... on Foo {
+                    id
+                    bar {
+                      ... on Bar {
+                        id
+                      }
+                    }
+                  }
+                }
+              }
+            },
+          },
+        }
+        "###
+    );
+}
+
+#[test]
+fn selections_are_not_overwritten_after_removing_directives() {
+    let planner = planner!(
+        Subgraph1: r#"
+            type Query {
+              foo: Foo,
+            }
+            type Foo @key(fields: "id") {
+              id: ID,
+              foo: Foo,
+              bar: Bar,
+            }
+            type Bar @key(fields: "id") {
+              id: ID,
+            }
+        "#,
+        Subgraph2: r#"
+            type Bar @key(fields: "id") {
+              id: ID,
+              a: Int,
+            }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          query foo($test: Boolean!) {
+            foo @include(if: $test) {
+              ... on Foo {
+                id
+                foo {
+                  ... on Foo @include(if: $test) {
+                    bar {
+                      id
+                    }
+                  }
+                }
+              }
+            }
+          }
+          "#,
+        @r###"
+        QueryPlan {
+          Include(if: $test) {
+            Fetch(service: "Subgraph1") {
+              {
+                foo {
+                  id
+                  foo {
+                    ... on Foo {
+                      bar {
+                        id
+                      }
+                    }
+                  }
+                }
+              }
+            },
+          },
+        }
+        "###
+    );
+}
