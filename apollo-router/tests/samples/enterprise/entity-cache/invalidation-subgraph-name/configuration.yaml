@@ -14,7 +14,6 @@ preview_entity_cache:
   subgraph:
     all:
       enabled: true
-
     subgraphs:
       reviews:
         ttl: 120s
