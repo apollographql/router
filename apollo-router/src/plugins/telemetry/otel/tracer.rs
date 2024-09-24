@@ -81,13 +81,10 @@ impl PreSampledTracer for SdkTracer {
         let builder = &mut data.builder;
 
         // If we have a parent span that means we have a parent span coming from a propagator
-
         // Gather trace state
         let (trace_id, parent_trace_flags) = current_trace_state(builder, parent_cx, &provider);
 
         // Sample or defer to existing sampling decisions
-        // TODO: If the datadog trace state on the parent has PSR set then populate it on "sampling.priority" attribute
-        // If the datadog trace state is NOT present then populate "sampling.priority" with 1 if the trace flags indicate that the trace is sample or 0 if it's not.
         let (flags, trace_state) = if let Some(result) = &builder.sampling_result {
             process_sampling_result(result, parent_trace_flags)
         } else {
