@@ -132,28 +132,20 @@ pub(crate) struct FetchDependencyGraphNode {
 
 /// Safely generate IDs for fetch dependency nodes without mutable access.
 #[derive(Debug)]
-struct FetchIdGenerator {
+pub(crate) struct FetchIdGenerator {
     next: AtomicU64,
 }
 impl FetchIdGenerator {
     /// Create an ID generator, starting at the given value.
-    pub fn new(start_at: u64) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
-            next: AtomicU64::new(start_at),
+            next: AtomicU64::new(0),
         }
     }
 
     /// Generate a new ID for a fetch dependency node.
     pub fn next_id(&self) -> u64 {
         self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-    }
-}
-
-impl Clone for FetchIdGenerator {
-    fn clone(&self) -> Self {
-        Self {
-            next: AtomicU64::new(self.next.load(std::sync::atomic::Ordering::Relaxed)),
-        }
     }
 }
 
@@ -221,11 +213,9 @@ pub(crate) struct FetchDependencyGraph {
     // serialized output will be needed.
     #[serde(skip)]
     pub(crate) defer_tracking: DeferTracking,
-    /// The initial fetch ID generation (used when handling `@defer`).
-    starting_id_generation: u64,
     /// The current fetch ID generation (used when handling `@defer`).
     #[serde(skip)]
-    fetch_id_generation: FetchIdGenerator,
+    pub(crate) fetch_id_generation: Arc<FetchIdGenerator>,
     /// Whether this fetch dependency graph has undergone a transitive reduction.
     is_reduced: bool,
     /// Whether this fetch dependency graph has undergone optimization (e.g. transitive reduction,
@@ -648,7 +638,7 @@ impl FetchDependencyGraph {
         supergraph_schema: ValidFederationSchema,
         federated_query_graph: Arc<QueryGraph>,
         root_type_for_defer: Option<CompositeTypeDefinitionPosition>,
-        starting_id_generation: u64,
+        fetch_id_generation: Arc<FetchIdGenerator>,
     ) -> Self {
         Self {
             defer_tracking: DeferTracking::empty(&supergraph_schema, root_type_for_defer),
@@ -656,8 +646,7 @@ impl FetchDependencyGraph {
             federated_query_graph,
             graph: Default::default(),
             root_nodes_by_subgraph: Default::default(),
-            starting_id_generation,
-            fetch_id_generation: FetchIdGenerator::new(starting_id_generation),
+            fetch_id_generation,
             is_reduced: false,
             is_optimized: false,
         }

@@ -13,6 +13,7 @@ use itertools::Itertools;
 use serde::Serialize;
 
 use super::ConditionNode;
+use super::fetch_dependency_graph::FetchIdGenerator;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
@@ -497,6 +498,7 @@ impl QueryPlanner {
             override_conditions: EnabledOverrideConditions(HashSet::from_iter(
                 options.override_conditions,
             )),
+            fetch_id_generator: Arc::new(FetchIdGenerator::new()),
         };
 
         let root_node = match defer_conditions {
@@ -619,7 +621,6 @@ fn compute_root_serial_dependency_graph(
     // We have to serially compute a plan for each top-level selection.
     let mut split_roots = operation.selection_set.clone().split_top_level_fields();
     let mut digest = Vec::new();
-    let mut starting_fetch_id = 0;
     let selection_set = split_roots
         .next()
         .ok_or_else(|| FederationError::internal("Empty top level fields"))?;
@@ -651,7 +652,7 @@ fn compute_root_serial_dependency_graph(
                 supergraph_schema.clone(),
                 federated_query_graph.clone(),
                 root_type.clone(),
-                starting_fetch_id,
+                fetch_dependency_graph.fetch_id_generation.clone(),
             );
             compute_root_fetch_groups(
                 operation.root_kind,
@@ -664,7 +665,6 @@ fn compute_root_serial_dependency_graph(
             // the current ID that is inside the fetch dep graph's ID generator, or to use the
             // starting ID. Because this method ensure uniqueness between IDs, this approach was
             // taken; however, it could be the case that this causes unforseen issues.
-            starting_fetch_id = fetch_dependency_graph.next_fetch_id();
             digest.push(std::mem::replace(
                 &mut fetch_dependency_graph,
                 new_dep_graph,

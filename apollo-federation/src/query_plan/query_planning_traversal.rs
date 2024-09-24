@@ -47,6 +47,8 @@ use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::ValidFederationSchema;
 use crate::utils::logging::snapshot;
 
+use super::fetch_dependency_graph::FetchIdGenerator;
+
 // PORT_NOTE: Named `PlanningParameters` in the JS codebase, but there was no particular reason to
 // leave out to the `Query` prefix, so it's been added for consistency. Similar to `GraphPath`, we
 // don't have a distinguished type for when the head is a root vertex, so we instead check this at
@@ -60,6 +62,7 @@ pub(crate) struct QueryPlanningParameters<'a> {
     pub(crate) federated_query_graph: Arc<QueryGraph>,
     /// The operation to be query planned.
     pub(crate) operation: Arc<Operation>,
+    pub(crate) fetch_id_generator: Arc<FetchIdGenerator>,
     /// The query graph node at which query planning begins.
     pub(crate) head: NodeIndex,
     /// Whether the head must be a root node for query planning.
@@ -84,8 +87,9 @@ pub(crate) struct QueryPlanningTraversal<'a, 'b> {
     /// True if query planner `@defer` support is enabled and the operation contains some `@defer`
     /// application.
     has_defers: bool,
-    /// The initial fetch ID generation (used when handling `@defer`).
-    starting_id_generation: u64,
+    /// A handle to the sole generator of fetch IDs. While planning an operation, only one of
+    /// generator can be used.
+    id_generator: Arc<FetchIdGenerator>,
     /// A processor for converting fetch dependency graphs to cost.
     cost_processor: FetchDependencyGraphToCostProcessor,
     /// True if this query planning is at top-level (note that query planning can recursively start
@@ -146,7 +150,7 @@ impl BestQueryPlanInfo {
                 parameters.supergraph_schema.clone(),
                 parameters.federated_query_graph.clone(),
                 None,
-                0,
+                parameters.fetch_id_generator.clone(),
             ),
             path_tree: OpPathTree::new(parameters.federated_query_graph.clone(), parameters.head)
                 .into(),
@@ -174,8 +178,8 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         Self::new_inner(
             parameters,
             selection_set,
-            0,
             has_defers,
+            parameters.fetch_id_generator.clone(),
             root_kind,
             cost_processor,
             Default::default(),
@@ -193,8 +197,8 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
     fn new_inner(
         parameters: &'a QueryPlanningParameters,
         selection_set: SelectionSet,
-        starting_id_generation: u64,
         has_defers: bool,
+        id_generator: Arc<FetchIdGenerator>,
         root_kind: SchemaRootDefinitionKind,
         cost_processor: FetchDependencyGraphToCostProcessor,
         initial_context: OpGraphPathContext,
@@ -233,7 +237,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             parameters,
             root_kind,
             has_defers,
-            starting_id_generation,
+            id_generator,
             cost_processor,
             is_top_level,
             open_branches: Default::default(),
@@ -958,7 +962,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             self.parameters.supergraph_schema.clone(),
             self.parameters.federated_query_graph.clone(),
             root_type,
-            self.starting_id_generation,
+            self.id_generator.clone(),
         )
     }
 
@@ -1061,12 +1065,13 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             config: self.parameters.config.clone(),
             statistics: self.parameters.statistics,
             override_conditions: self.parameters.override_conditions.clone(),
+            fetch_id_generator: self.parameters.fetch_id_generator.clone(),
         };
         let best_plan_opt = QueryPlanningTraversal::new_inner(
             &parameters,
             edge_conditions.clone(),
-            self.starting_id_generation,
             self.has_defers,
+            self.id_generator.clone(),
             self.root_kind,
             self.cost_processor,
             context.clone(),
