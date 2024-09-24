@@ -12,8 +12,8 @@ use apollo_compiler::Name;
 use itertools::Itertools;
 use serde::Serialize;
 
-use super::ConditionNode;
 use super::fetch_dependency_graph::FetchIdGenerator;
+use super::ConditionNode;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
