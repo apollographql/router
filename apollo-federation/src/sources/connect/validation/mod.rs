@@ -17,6 +17,7 @@
 mod coordinates;
 mod entity;
 mod extended_type;
+mod graphql;
 mod http;
 mod selection;
 mod source_name;
@@ -59,6 +60,8 @@ use crate::sources::connect::spec::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
 use crate::sources::connect::spec::schema::SOURCE_NAME_ARGUMENT_NAME;
 use crate::sources::connect::validation::coordinates::BaseUrlCoordinate;
 use crate::sources::connect::validation::coordinates::HttpHeadersCoordinate;
+use crate::sources::connect::validation::graphql::GraphQLString;
+use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::validation::http::headers;
 use crate::sources::connect::ConnectSpecDefinition;
 use crate::subgraph::spec::CONTEXT_DIRECTIVE_NAME;
@@ -70,7 +73,11 @@ use crate::subgraph::spec::INTF_OBJECT_DIRECTIVE_NAME;
 ///
 /// This function attempts to collect as many validation errors as possible, so it does not bail
 /// out as soon as it encounters one.
-pub fn validate(schema: Schema) -> Vec<Message> {
+pub fn validate(source_text: &str, file_name: &str) -> Vec<Message> {
+    // TODO: Use parse_and_validate (adding in directives as needed)
+    // TODO: Handle schema errors rather than relying on JavaScript to catch it later
+    let schema = Schema::parse(source_text, file_name)
+        .unwrap_or_else(|schema_with_errors| schema_with_errors.partial);
     let connect_identity = ConnectSpecDefinition::identity();
     let Some((link, link_directive)) = Link::for_identity(&schema, &connect_identity) else {
         return Vec::new(); // There are no connectors-related directives to validate
@@ -83,15 +90,21 @@ pub fn validate(schema: Schema) -> Vec<Message> {
 
     let mut messages = check_conflicting_directives(&schema);
 
-    let source_map = &schema.sources;
     let source_directive_name = ConnectSpecDefinition::source_directive_name(&link);
     let connect_directive_name = ConnectSpecDefinition::connect_directive_name(&link);
+    let schema_info = SchemaInfo::new(
+        &schema,
+        source_text,
+        &connect_directive_name,
+        &source_directive_name,
+    );
+
     let source_directives: Vec<SourceDirective> = schema
         .schema_definition
         .directives
         .iter()
         .filter(|directive| directive.name == source_directive_name)
-        .map(|directive| validate_source(directive, source_map))
+        .map(|directive| validate_source(directive, &schema_info))
         .collect();
 
     let mut valid_source_names = HashMap::new();
@@ -101,12 +114,17 @@ pub fn validate(schema: Schema) -> Vec<Message> {
         .collect_vec();
     for directive in source_directives {
         messages.extend(directive.errors);
-        match directive.name.into_value_or_error(source_map) {
+        match directive.name.into_value_or_error(&schema_info.sources) {
             Err(error) => messages.push(error),
             Ok(name) => valid_source_names
                 .entry(name)
                 .or_insert_with(Vec::new)
-                .extend(directive.directive.node.line_column_range(source_map)),
+                .extend(
+                    directive
+                        .directive
+                        .node
+                        .line_column_range(&schema_info.sources),
+                ),
         }
     }
     for (name, locations) in valid_source_names {
@@ -124,11 +142,8 @@ pub fn validate(schema: Schema) -> Vec<Message> {
     let connect_errors = schema.types.values().flat_map(|extended_type| {
         validate_extended_type(
             extended_type,
-            &schema,
-            &connect_directive_name,
-            &source_directive_name,
+            &schema_info,
             &all_source_names,
-            source_map,
             &mut seen_fields,
         )
     });
@@ -136,10 +151,8 @@ pub fn validate(schema: Schema) -> Vec<Message> {
 
     if should_check_seen_fields(&messages) {
         messages.extend(check_seen_fields(
-            &schema,
+            &schema_info,
             &seen_fields,
-            source_map,
-            &connect_directive_name,
             &external_directive_name,
         ));
     }
@@ -152,7 +165,7 @@ pub fn validate(schema: Schema) -> Vec<Message> {
         messages.push(Message {
             code: Code::NoSourceImport,
             message: format!("The `@{SOURCE_DIRECTIVE_NAME_IN_SPEC}` directive is not imported. Try adding `@{SOURCE_DIRECTIVE_NAME_IN_SPEC}` to `import` for `@{link_name}(url: \"{connect_identity}\")`", link_name=link_directive.name),
-            locations: link_directive.line_column_range(source_map)
+            locations: link_directive.line_column_range(&schema.sources)
                 .into_iter()
                 .collect(),
         });
@@ -179,10 +192,8 @@ fn should_check_seen_fields(messages: &[Message]) -> bool {
 
 /// Check that all fields defined in the schema are resolved by a connector.
 fn check_seen_fields(
-    schema: &Schema,
+    schema: &SchemaInfo,
     seen_fields: &IndexSet<(Name, Name)>,
-    source_map: &SourceMap,
-    connect_directive_name: &Name,
     external_directive_name: &Name,
 ) -> Vec<Message> {
     let all_fields: IndexSet<_> = schema
@@ -235,8 +246,9 @@ fn check_seen_fields(
             code: Code::UnresolvedField,
             message: format!(
                 "No connector resolves field `{parent_type}.{field_name}`. It must have a `@{connect_directive_name}` directive or appear in `@{connect_directive_name}(selection:)`.",
+                connect_directive_name = schema.connect_directive_name
             ),
-            locations: field_def.line_column_range(source_map).into_iter().collect(),
+            locations: field_def.line_column_range(&schema.sources).into_iter().collect(),
         }
     }).collect()
 }
@@ -290,7 +302,7 @@ fn check_conflicting_directives(schema: &Schema) -> Vec<Message> {
 const DEFAULT_SOURCE_DIRECTIVE_NAME: &str = "connect__source";
 const DEFAULT_CONNECT_DIRECTIVE_NAME: &str = "connect__connect";
 
-fn validate_source(directive: &Component<Directive>, sources: &SourceMap) -> SourceDirective {
+fn validate_source(directive: &Component<Directive>, schema: &SchemaInfo) -> SourceDirective {
     let name = SourceName::from_directive(directive);
     let mut errors = Vec::new();
 
@@ -308,7 +320,7 @@ fn validate_source(directive: &Component<Directive>, sources: &SourceMap) -> Sou
                 BaseUrlCoordinate {
                     source_directive_name: &directive.name,
                 },
-                sources,
+                schema,
             )
             .err()
             {
@@ -319,7 +331,7 @@ fn validate_source(directive: &Component<Directive>, sources: &SourceMap) -> Sou
         errors.extend(
             headers::validate_arg(
                 http_arg,
-                sources,
+                &schema.sources,
                 HttpHeadersCoordinate::Source {
                     directive_name: &directive.name,
                 },
@@ -334,7 +346,10 @@ fn validate_source(directive: &Component<Directive>, sources: &SourceMap) -> Sou
                 "{coordinate} must have a `{HTTP_ARGUMENT_NAME}` argument.",
                 coordinate = source_http_argument_coordinate(&directive.name),
             ),
-            locations: directive.line_column_range(sources).into_iter().collect(),
+            locations: directive
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
         })
     }
 
@@ -355,15 +370,25 @@ struct SourceDirective {
 fn parse_url<Coordinate: Display + Copy>(
     value: &Node<Value>,
     coordinate: Coordinate,
-    sources: &SourceMap,
+    schema: &SchemaInfo,
 ) -> Result<(), Message> {
-    let str_value = require_value_is_str(value, coordinate, sources)?;
-    let url = Url::parse(str_value).map_err(|inner| Message {
+    let str_value = GraphQLString::new(value, &schema.sources).map_err(|_| Message {
+        code: Code::GraphQLError,
+        message: format!("The value for {coordinate} must be a string."),
+        locations: value
+            .line_column_range(&schema.sources)
+            .into_iter()
+            .collect(),
+    })?;
+    let url = Url::parse(str_value.as_str()).map_err(|inner| Message {
         code: Code::InvalidUrl,
         message: format!("The value {value} for {coordinate} is not a valid URL: {inner}."),
-        locations: value.line_column_range(sources).into_iter().collect(),
+        locations: value
+            .line_column_range(&schema.sources)
+            .into_iter()
+            .collect(),
     })?;
-    http::url::validate_base_url(&url, coordinate, value, str_value, sources)
+    http::url::validate_base_url(&url, coordinate, value, str_value, schema)
 }
 
 fn require_value_is_str<'a, Coordinate: Display>(
@@ -550,8 +575,7 @@ mod test_validate_source {
         insta::with_settings!({prepend_module_to_snapshot => false}, {
             glob!("test_data", "*.graphql", |path| {
                 let schema = read_to_string(path).unwrap();
-                let schema = Schema::parse(schema, path).unwrap();
-                let errors = validate(schema);
+                let errors = validate(&schema, path.to_str().unwrap());
                 assert_snapshot!(format!("{:#?}", errors));
             });
         });
