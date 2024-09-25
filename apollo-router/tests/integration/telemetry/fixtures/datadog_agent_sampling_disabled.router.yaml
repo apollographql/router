@@ -1,4 +1,6 @@
 telemetry:
+  apollo:
+    field_level_instrumentation_sampler: always_off
   exporters:
     tracing:
       experimental_response_trace_id:
@@ -14,6 +16,7 @@ telemetry:
           env: local1
           service.version: router_version_override
         datadog_agent_sampling: false
+        sampler: always_off
       datadog:
         enabled: true
         batch_processor:
