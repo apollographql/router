@@ -21,9 +21,6 @@
     unused_qualifications,
     dead_code,
     while_true,
-    trivial_casts,
-    trivial_bounds,
-    trivial_numeric_casts,
     unconditional_panic,
     clippy::all
 )]
