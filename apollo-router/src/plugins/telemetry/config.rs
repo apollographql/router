@@ -350,7 +350,8 @@ pub(crate) struct TracingCommon {
     pub(crate) sampler: SamplerOption,
     /// Use datadog agent sampling. This means that all spans will be sent to the Datadog agent
     /// and the `sampling.priority` attribute will be used to control if the span will then be sent to Datadog.
-    pub(crate) datadog_agent_sampling: bool,
+    /// This option is true if you are using the Datadog native exporter.
+    pub(crate) datadog_agent_sampling: Option<bool>,
     /// Whether to use parent based sampling
     pub(crate) parent_based_sampler: bool,
     /// The maximum events per span before discarding
@@ -405,7 +406,7 @@ impl Default for TracingCommon {
             service_name: Default::default(),
             service_namespace: Default::default(),
             sampler: default_sampler(),
-            datadog_agent_sampling: false,
+            datadog_agent_sampling: None,
             parent_based_sampler: default_parent_based_sampler(),
             max_events_per_span: default_max_events_per_span(),
             max_attributes_per_span: default_max_attributes_per_span(),
@@ -673,7 +674,7 @@ impl From<&TracingCommon> for opentelemetry::sdk::trace::Config {
         if config.parent_based_sampler {
             sampler = parent_based(sampler);
         }
-        if config.datadog_agent_sampling {
+        if config.datadog_agent_sampling.unwrap_or_default() {
             common = common.with_sampler(DatadogAgentSampling::new(
                 sampler,
                 config.parent_based_sampler,
@@ -701,7 +702,13 @@ fn parent_based(sampler: opentelemetry::sdk::trace::Sampler) -> opentelemetry::s
 impl Conf {
     pub(crate) fn calculate_field_level_instrumentation_ratio(&self) -> Result<f64, Error> {
         // Because when datadog is enabled the global sampling is overriden to always_on
-        if self.exporters.tracing.common.datadog_agent_sampling {
+        if self
+            .exporters
+            .tracing
+            .common
+            .datadog_agent_sampling
+            .unwrap_or_default()
+        {
             let field_ratio = match &self.apollo.field_level_instrumentation_sampler {
                 SamplerOption::TraceIdRatioBased(ratio) => *ratio,
                 SamplerOption::Always(Sampler::AlwaysOn) => 1.0,

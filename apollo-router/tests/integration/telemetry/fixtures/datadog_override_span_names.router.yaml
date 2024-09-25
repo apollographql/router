@@ -7,7 +7,6 @@ telemetry:
         format: datadog
       common:
         service_name: router
-        datadog_agent_sampling: true
       datadog:
         enabled: true
         # Span mapping will always override the span name as far as the test agent is concerned

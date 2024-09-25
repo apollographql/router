@@ -288,8 +288,15 @@ impl Plugin for Telemetry {
         let mut config = init.config;
         // If the datadog exporter is enabled then enable the agent sampler.
         // If users are using otlp export then they will need to set this explicitly in their config.
-        if config.exporters.tracing.datadog.enabled() {
-            config.exporters.tracing.common.datadog_agent_sampling = true;
+        if config.exporters.tracing.datadog.enabled()
+            && config
+                .exporters
+                .tracing
+                .common
+                .datadog_agent_sampling
+                .is_none()
+        {
+            config.exporters.tracing.common.datadog_agent_sampling = Some(true);
         }
         config.instrumentation.spans.update_defaults();
         config.instrumentation.instruments.update_defaults();
@@ -874,7 +881,14 @@ impl Telemetry {
             // If the datadog agent sampling is enabled, then we cannot presample the spans
             // Therefore we set presampling to always on and let the regular sampler do the work.
             // Effectively, we are disabling the presampling.
-            if self.config.exporters.tracing.common.datadog_agent_sampling {
+            if self
+                .config
+                .exporters
+                .tracing
+                .common
+                .datadog_agent_sampling
+                .unwrap_or_default()
+            {
                 otel::layer::configure(&SamplerOption::Always(Sampler::AlwaysOn));
             } else {
                 otel::layer::configure(&self.sampling_filter_ratio);
@@ -975,7 +989,7 @@ impl Telemetry {
         // This is because the pre-sampler will sample the spans before they sent to the regular sampler
         // If the datadog agent sampling is enabled, then we cannot pre-sample the spans because even if the sampling decision is made to drop
         // DatadogAgentSampler will modify the decision to RecordAndSample and instead use the sampling.priority attribute to decide if the span should be sampled or not.
-        if !common.datadog_agent_sampling {
+        if !common.datadog_agent_sampling.unwrap_or_default() {
             common.sampler = SamplerOption::Always(Sampler::AlwaysOn);
         }
 

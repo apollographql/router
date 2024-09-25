@@ -74,6 +74,45 @@ async fn test_no_sample() -> Result<(), BoxError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_priority_sampling_disabled() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let context = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let context_clone = context.clone();
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Datadog)
+        .config(include_str!(
+            "fixtures/datadog_agent_sampling_disabled.router.yaml"
+        ))
+        .responder(ResponseTemplate::new(200).set_body_json(
+            json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}),
+        ))
+        .subgraph_callback(Box::new(move || {
+            let context = Context::current();
+            let span = context.span();
+            let span_context = span.span_context();
+            *context_clone.lock().expect("poisoned") = Some(span_context.clone());
+        }))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
+    let (id, result) = router.execute_untraced_query(&query).await;
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .not_priority_sampled()
+        .build()
+        .validate_trace(id)
+        .await?;
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_priority_sampling_propagated() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());

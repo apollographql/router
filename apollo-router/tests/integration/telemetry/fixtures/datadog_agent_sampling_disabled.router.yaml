@@ -5,16 +5,23 @@ telemetry:
         enabled: true
         header_name: apollo-custom-trace-id
         format: datadog
+      propagation:
+        trace_context: true
+        jaeger: true
       common:
         service_name: router
+        resource:
+          env: local1
+          service.version: router_version_override
+        datadog_agent_sampling: false
       datadog:
         enabled: true
         batch_processor:
           scheduled_delay: 100ms
-        fixed_span_names: false
-        enable_span_mapping: false
   instrumentation:
     spans:
       mode: spec_compliant
-
+      supergraph:
+        attributes:
+          graphql.operation.name: true
 
