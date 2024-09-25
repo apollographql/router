@@ -350,7 +350,7 @@ pub(crate) struct TracingCommon {
     pub(crate) sampler: SamplerOption,
     /// Use datadog agent sampling. This means that all spans will be sent to the Datadog agent
     /// and the `sampling.priority` attribute will be used to control if the span will then be sent to Datadog.
-    /// This option is true if you are using the Datadog native exporter.
+    /// This option is enabled by default if you are using the Datadog native exporter but can be explicitly disabled.
     pub(crate) datadog_agent_sampling: Option<bool>,
     /// Whether to use parent based sampling
     pub(crate) parent_based_sampler: bool,
