@@ -3640,7 +3640,11 @@ impl DeferFilter<'_> {
             Self::Labels(set) => {
                 let label = directive_list
                     .get(&DEFER_DIRECTIVE_NAME)
-                    .and_then(|directive| directive.argument_by_name(&DEFER_LABEL_ARGUMENT_NAME, schema).ok())
+                    .and_then(|directive| {
+                        directive
+                            .argument_by_name(&DEFER_LABEL_ARGUMENT_NAME, schema)
+                            .ok()
+                    })
                     .and_then(|arg| arg.as_str());
                 if label.is_some_and(|label| set.contains(label)) {
                     directive_list.remove_one(&DEFER_DIRECTIVE_NAME);
@@ -3794,9 +3798,12 @@ impl InlineFragmentSelection {
                 .map(|dir| {
                     if dir.name == "defer" {
                         let mut dir: Directive = (**dir).clone();
-                        dir.arguments
-                            .retain(|arg| ![DEFER_LABEL_ARGUMENT_NAME, DEFER_IF_ARGUMENT_NAME].contains(&arg.name));
-                        dir.arguments.push((DEFER_LABEL_ARGUMENT_NAME, args_copy.label.clone().unwrap()).into());
+                        dir.arguments.retain(|arg| {
+                            ![DEFER_LABEL_ARGUMENT_NAME, DEFER_IF_ARGUMENT_NAME].contains(&arg.name)
+                        });
+                        dir.arguments.push(
+                            (DEFER_LABEL_ARGUMENT_NAME, args_copy.label.clone().unwrap()).into(),
+                        );
                         if let Some(cond) = args_copy.if_.clone() {
                             dir.arguments.push((DEFER_IF_ARGUMENT_NAME, cond).into());
                         }
