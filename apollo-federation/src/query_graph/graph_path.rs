@@ -48,7 +48,6 @@ use crate::query_graph::QueryGraphEdgeTransition;
 use crate::query_graph::QueryGraphNodeType;
 use crate::query_plan::query_planner::EnabledOverrideConditions;
 use crate::query_plan::FetchDataPathElement;
-use crate::query_plan::QueryPathElement;
 use crate::query_plan::QueryPlanCost;
 use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
@@ -426,12 +425,12 @@ impl OpPathElement {
     /// ignored).
     pub(crate) fn without_defer(&self) -> Option<Self> {
         match self {
-            Self::Field(_) => Some(self.clone()), // unchanged
+            Self::Field(_) => Some(self.clone()),
             Self::InlineFragment(inline_fragment) => {
-                // TODO(@goto-bus-stop): is this not exactly the wrong way around?
                 let updated_directives: DirectiveList = inline_fragment
                     .directives
-                    .get_all("defer")
+                    .iter()
+                    .filter(|directive| directive.name != "defer")
                     .cloned()
                     .collect();
                 if inline_fragment.type_condition_position.is_none()
@@ -3781,25 +3780,6 @@ impl OpPath {
         self.0
             .iter()
             .all(|p| matches!(p.as_ref(), OpPathElement::InlineFragment(_)))
-    }
-}
-
-impl TryFrom<&'_ OpPath> for Vec<QueryPathElement> {
-    type Error = FederationError;
-
-    fn try_from(value: &'_ OpPath) -> Result<Self, Self::Error> {
-        value
-            .0
-            .iter()
-            .map(|path_element| {
-                Ok(match path_element.as_ref() {
-                    OpPathElement::Field(field) => QueryPathElement::Field(field.try_into()?),
-                    OpPathElement::InlineFragment(inline) => {
-                        QueryPathElement::InlineFragment(inline.try_into()?)
-                    }
-                })
-            })
-            .collect()
     }
 }
 

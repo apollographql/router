@@ -9,6 +9,7 @@ use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::OperationType;
 use apollo_compiler::ast::Type;
+use apollo_compiler::collections::HashMap;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
@@ -27,6 +28,7 @@ use petgraph::visit::IntoNodeReferences;
 use serde::Serialize;
 
 use super::query_planner::SubgraphOperationCompression;
+use crate::display_helpers::DisplayOption;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::graphql_definition::DeferDirectiveArguments;
@@ -82,7 +84,65 @@ use crate::utils::logging::snapshot;
 type DeferRef = String;
 
 /// Map of defer labels to nodes of the fetch dependency graph.
-type DeferredNodes = multimap::MultiMap<DeferRef, NodeIndex<u32>>;
+///
+/// Like a multimap with a Set instead of a Vec for value storage.
+#[derive(Debug, Clone, Default)]
+struct DeferredNodes {
+    inner: HashMap<DeferRef, IndexSet<NodeIndex<u32>>>,
+}
+impl DeferredNodes {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    fn insert(&mut self, defer_ref: DeferRef, node: NodeIndex<u32>) {
+        self.inner.entry(defer_ref).or_default().insert(node);
+    }
+
+    fn get_all<'map>(&'map self, defer_ref: &DeferRef) -> Option<&'map IndexSet<NodeIndex<u32>>> {
+        self.inner.get(defer_ref)
+    }
+
+    fn iter(&self) -> impl Iterator<Item = (&'_ DeferRef, NodeIndex<u32>)> {
+        self.inner
+            .iter()
+            .flat_map(|(defer_ref, nodes)| std::iter::repeat(defer_ref).zip(nodes.iter().copied()))
+    }
+
+    /// Consume the map and yield each element. This is provided as a standalone method and not an
+    /// `IntoIterator` implementation because it's hard to type :)
+    fn into_iter(self) -> impl Iterator<Item = (DeferRef, NodeIndex<u32>)> {
+        self.inner.into_iter().flat_map(|(defer_ref, nodes)| {
+            // Cloning the key is a bit wasteful, but keys are typically very small,
+            // and this map is also very small.
+            std::iter::repeat_with(move || defer_ref.clone()).zip(nodes)
+        })
+    }
+}
+impl Extend<(DeferRef, NodeIndex<u32>)> for DeferredNodes {
+    fn extend<T: IntoIterator<Item = (DeferRef, NodeIndex<u32>)>>(&mut self, iter: T) {
+        for (defer_ref, node) in iter.into_iter() {
+            self.insert(defer_ref, node);
+        }
+    }
+}
+impl FromIterator<(DeferRef, NodeIndex<u32>)> for DeferredNodes {
+    fn from_iter<T: IntoIterator<Item = (DeferRef, NodeIndex<u32>)>>(iter: T) -> Self {
+        let mut nodes = Self::new();
+        nodes.extend(iter);
+        nodes
+    }
+}
+impl FromIterator<(DeferRef, IndexSet<NodeIndex<u32>>)> for DeferredNodes {
+    fn from_iter<T: IntoIterator<Item = (DeferRef, IndexSet<NodeIndex<u32>>)>>(iter: T) -> Self {
+        let inner = iter.into_iter().collect();
+        Self { inner }
+    }
+}
 
 /// Represents a subgraph fetch of a query plan.
 // PORT_NOTE: The JS codebase called this `FetchGroup`, but this naming didn't make it apparent that
@@ -131,28 +191,20 @@ pub(crate) struct FetchDependencyGraphNode {
 
 /// Safely generate IDs for fetch dependency nodes without mutable access.
 #[derive(Debug)]
-struct FetchIdGenerator {
+pub(crate) struct FetchIdGenerator {
     next: AtomicU64,
 }
 impl FetchIdGenerator {
     /// Create an ID generator, starting at the given value.
-    pub fn new(start_at: u64) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
-            next: AtomicU64::new(start_at),
+            next: AtomicU64::new(0),
         }
     }
 
     /// Generate a new ID for a fetch dependency node.
     pub fn next_id(&self) -> u64 {
         self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-    }
-}
-
-impl Clone for FetchIdGenerator {
-    fn clone(&self) -> Self {
-        Self {
-            next: AtomicU64::new(self.next.load(std::sync::atomic::Ordering::Relaxed)),
-        }
     }
 }
 
@@ -220,11 +272,9 @@ pub(crate) struct FetchDependencyGraph {
     // serialized output will be needed.
     #[serde(skip)]
     pub(crate) defer_tracking: DeferTracking,
-    /// The initial fetch ID generation (used when handling `@defer`).
-    starting_id_generation: u64,
     /// The current fetch ID generation (used when handling `@defer`).
     #[serde(skip)]
-    fetch_id_generation: FetchIdGenerator,
+    pub(crate) fetch_id_generation: Arc<FetchIdGenerator>,
     /// Whether this fetch dependency graph has undergone a transitive reduction.
     is_reduced: bool,
     /// Whether this fetch dependency graph has undergone optimization (e.g. transitive reduction,
@@ -647,7 +697,7 @@ impl FetchDependencyGraph {
         supergraph_schema: ValidFederationSchema,
         federated_query_graph: Arc<QueryGraph>,
         root_type_for_defer: Option<CompositeTypeDefinitionPosition>,
-        starting_id_generation: u64,
+        fetch_id_generation: Arc<FetchIdGenerator>,
     ) -> Self {
         Self {
             defer_tracking: DeferTracking::empty(&supergraph_schema, root_type_for_defer),
@@ -655,8 +705,7 @@ impl FetchDependencyGraph {
             federated_query_graph,
             graph: Default::default(),
             root_nodes_by_subgraph: Default::default(),
-            starting_id_generation,
-            fetch_id_generation: FetchIdGenerator::new(starting_id_generation),
+            fetch_id_generation,
             is_reduced: false,
             is_optimized: false,
         }
@@ -1691,11 +1740,12 @@ impl FetchDependencyGraph {
             if node.defer_ref == child.defer_ref {
                 children.push(child_index);
             } else {
-                let parent_defer_ref = node.defer_ref.as_ref().unwrap();
                 let Some(child_defer_ref) = &child.defer_ref else {
-                    panic!("{} has defer_ref `{parent_defer_ref}`, so its child {} cannot have a top-level defer_ref.",
-                           node.display(node_index),
-                           child.display(child_index),
+                    panic!(
+                        "{} has defer_ref `{}`, so its child {} cannot have a top-level defer_ref.",
+                        node.display(node_index),
+                        DisplayOption(node.defer_ref.as_ref()),
+                        child.display(child_index),
                     );
                 };
 
@@ -1814,7 +1864,7 @@ impl FetchDependencyGraph {
             let (main, deferred_nodes, state_after_node) =
                 self.process_node(processor, *node_index, handled_conditions.clone())?;
             processed_nodes.push(main);
-            all_deferred_nodes.extend(deferred_nodes);
+            all_deferred_nodes.extend(deferred_nodes.into_iter());
             new_state = new_state.merge_with(state_after_node);
         }
 
@@ -1859,7 +1909,7 @@ impl FetchDependencyGraph {
             process_in_parallel = true;
             main_sequence.push(processed);
             state = new_state;
-            all_deferred_nodes.extend(deferred_nodes);
+            all_deferred_nodes.extend(deferred_nodes.into_iter());
         }
 
         Ok((main_sequence, all_deferred_nodes, state))
@@ -1897,7 +1947,7 @@ impl FetchDependencyGraph {
                 .join(", "),
         );
         let mut all_deferred_nodes = other_defer_nodes.cloned().unwrap_or_default();
-        all_deferred_nodes.extend(deferred_nodes);
+        all_deferred_nodes.extend(deferred_nodes.into_iter());
 
         // We're going to handle all `@defer`s at our "current" level (eg. at the top level, that's all the non-nested @defer),
         // and the "starting" node for those defers, if any, are in `all_deferred_nodes`. However, `all_deferred_nodes`
@@ -1913,14 +1963,9 @@ impl FetchDependencyGraph {
             .map(|info| info.label.clone())
             .collect::<IndexSet<_>>();
         let unhandled_defer_nodes = all_deferred_nodes
-            .keys()
-            .filter(|label| !handled_defers_in_current.contains(*label))
-            .map(|label| {
-                (
-                    label.clone(),
-                    all_deferred_nodes.get_vec(label).cloned().unwrap(),
-                )
-            })
+            .iter()
+            .filter(|(label, _index)| !handled_defers_in_current.contains(*label))
+            .map(|(label, index)| (label.clone(), index))
             .collect::<DeferredNodes>();
         let unhandled_defer_node = if unhandled_defer_nodes.is_empty() {
             None
@@ -1938,9 +1983,10 @@ impl FetchDependencyGraph {
         let defers_in_current = defers_in_current.into_iter().cloned().collect::<Vec<_>>();
         for defer in defers_in_current {
             let nodes = all_deferred_nodes
-                .get_vec(&defer.label)
-                .cloned()
-                .unwrap_or_default();
+                .get_all(&defer.label)
+                .map_or_else(Default::default, |indices| {
+                    indices.iter().copied().collect()
+                });
             let (main_sequence_of_defer, deferred_of_defer) = self.process_root_nodes(
                 processor,
                 nodes,
@@ -3209,7 +3255,8 @@ impl DeferTracking {
             .label
             .as_ref()
             .expect("All @defer should have been labeled at this point");
-        let _deferred_block = self.deferred.entry(label.clone()).or_insert_with(|| {
+
+        self.deferred.entry(label.clone()).or_insert_with(|| {
             DeferredInfo::empty(
                 primary_selection.schema.clone(),
                 label.clone(),
@@ -3444,7 +3491,7 @@ fn compute_nodes_for_key_resolution<'a>(
         conditions,
         stack_item.node_id,
         stack_item.node_path.clone(),
-        stack_item.defer_context.clone(),
+        stack_item.defer_context.for_conditions(),
         &Default::default(),
     )?;
     created_nodes.extend(conditions_nodes.iter().copied());
@@ -3675,12 +3722,12 @@ fn compute_nodes_for_root_type_resolution<'a>(
     })
 }
 
-#[cfg_attr(feature = "snapshot_tracing", tracing::instrument(skip_all, level = "trace", fields(label = operation.to_string())))]
+#[cfg_attr(feature = "snapshot_tracing", tracing::instrument(skip_all, level = "trace", fields(label = operation_element.to_string())))]
 fn compute_nodes_for_op_path_element<'a>(
     dependency_graph: &mut FetchDependencyGraph,
     stack_item: &ComputeNodesStackItem<'a>,
     child: &'a Arc<PathTreeChild<OpGraphPathTrigger, Option<EdgeIndex>>>,
-    operation: &OpPathElement,
+    operation_element: &OpPathElement,
     created_nodes: &mut IndexSet<NodeIndex>,
 ) -> Result<ComputeNodesStackItem<'a>, FederationError> {
     let Some(edge_id) = child.edge else {
@@ -3691,7 +3738,7 @@ fn compute_nodes_for_op_path_element<'a>(
         // to one for the defer in question.
         let (updated_operation, updated_defer_context) = extract_defer_from_operation(
             dependency_graph,
-            operation,
+            operation_element,
             &stack_item.defer_context,
             &stack_item.node_path,
         )?;
@@ -3718,19 +3765,19 @@ fn compute_nodes_for_op_path_element<'a>(
     let dest = stack_item.tree.graph.node_weight(dest_id)?;
     if source.source != dest.source {
         return Err(FederationError::internal(format!(
-            "Collecting edge {edge_id:?} for {operation:?} \
-                                 should not change the underlying subgraph"
+            "Collecting edge {edge_id:?} for {operation_element:?} \
+                 should not change the underlying subgraph"
         )));
     }
 
     // We have a operation element, field or inline fragment.
     // We first check if it's been "tagged" to remember that __typename must be queried.
     // See the comment on the `optimize_sibling_typenames()` method to see why this exists.
-    if let Some(sibling_typename) = operation.sibling_typename() {
+    if let Some(sibling_typename) = operation_element.sibling_typename() {
         // We need to add the query __typename for the current type in the current node.
         let typename_field = Arc::new(OpPathElement::Field(Field::new_introspection_typename(
-            operation.schema(),
-            &operation.parent_type_position(),
+            operation_element.schema(),
+            &operation_element.parent_type_position(),
             sibling_typename.alias().cloned(),
         )));
         let typename_path = stack_item
@@ -3755,12 +3802,12 @@ fn compute_nodes_for_op_path_element<'a>(
     }
     let Ok((Some(updated_operation), updated_defer_context)) = extract_defer_from_operation(
         dependency_graph,
-        operation,
+        operation_element,
         &stack_item.defer_context,
         &stack_item.node_path,
     ) else {
         return Err(FederationError::internal(format!(
-            "Extracting @defer from {operation:?} should not have resulted in no operation"
+            "Extracting @defer from {operation_element:?} should not have resulted in no operation"
         )));
     };
     let mut updated = ComputeNodesStackItem {
@@ -3993,15 +4040,15 @@ fn compute_input_rewrites_on_key_fetch(
 /// - The updated operation can be `None`, if operation is no longer necessary.
 fn extract_defer_from_operation(
     dependency_graph: &mut FetchDependencyGraph,
-    operation: &OpPathElement,
+    operation_element: &OpPathElement,
     defer_context: &DeferContext,
     node_path: &FetchDependencyGraphNodePath,
 ) -> Result<(Option<OpPathElement>, DeferContext), FederationError> {
-    let defer_args = operation.defer_directive_args();
+    let defer_args = operation_element.defer_directive_args();
     let Some(defer_args) = defer_args else {
         let updated_path_to_defer_parent = defer_context
             .path_to_defer_parent
-            .with_pushed(operation.clone().into());
+            .with_pushed(operation_element.clone().into());
         let updated_context = DeferContext {
             path_to_defer_parent: updated_path_to_defer_parent.into(),
             // Following fields are identical to those of `defer_context`.
@@ -4009,16 +4056,16 @@ fn extract_defer_from_operation(
             active_defer_ref: defer_context.active_defer_ref.clone(),
             is_part_of_query: defer_context.is_part_of_query,
         };
-        return Ok((Some(operation.clone()), updated_context));
+        return Ok((Some(operation_element.clone()), updated_context));
     };
 
-    let updated_defer_ref = defer_args.label.as_ref().ok_or_else(||
-        // PORT_NOTE: The original TypeScript code has an assertion here.
-        FederationError::internal(
-                    "All defers should have a label at this point",
-                ))?;
-    let updated_operation = operation.without_defer();
-    let updated_path_to_defer_parent = match updated_operation {
+    // PORT_NOTE: The original TypeScript code has an assertion here.
+    let updated_defer_ref = defer_args
+        .label
+        .as_ref()
+        .ok_or_else(|| FederationError::internal("All defers should have a label at this point"))?;
+    let updated_operation_element = operation_element.without_defer();
+    let updated_path_to_defer_parent = match updated_operation_element {
         None => Default::default(), // empty OpPath
         Some(ref updated_operation) => OpPath(vec![Arc::new(updated_operation.clone())]),
     };
@@ -4027,7 +4074,7 @@ fn extract_defer_from_operation(
         defer_context,
         &defer_args,
         node_path.clone(),
-        operation.parent_type_position(),
+        operation_element.parent_type_position(),
     )?;
 
     let updated_context = DeferContext {
@@ -4037,7 +4084,7 @@ fn extract_defer_from_operation(
         active_defer_ref: defer_context.active_defer_ref.clone(),
         is_part_of_query: defer_context.is_part_of_query,
     };
-    Ok((updated_operation, updated_context))
+    Ok((updated_operation_element, updated_context))
 }
 
 fn handle_requires(
@@ -4112,7 +4159,7 @@ fn handle_requires(
             requires_conditions,
             new_node_id,
             fetch_node_path.clone(),
-            defer_context_for_conditions(defer_context),
+            defer_context.for_conditions(),
             &OpGraphPathContext::default(),
         )?;
         if newly_created_node_ids.is_empty() {
@@ -4344,7 +4391,7 @@ fn handle_requires(
             requires_conditions,
             fetch_node_id,
             fetch_node_path.clone(),
-            defer_context_for_conditions(defer_context),
+            defer_context.for_conditions(),
             &OpGraphPathContext::default(),
         )?;
         // If we didn't create any node, that means the whole condition was fetched from the current node
@@ -4413,11 +4460,14 @@ fn handle_requires(
     }
 }
 
-fn defer_context_for_conditions(base_context: &DeferContext) -> DeferContext {
-    let mut context = base_context.clone();
-    context.is_part_of_query = false;
-    context.current_defer_ref = base_context.active_defer_ref.clone();
-    context
+impl DeferContext {
+    /// Create a sub-context for use in resolving conditions inside an @defer block.
+    fn for_conditions(&self) -> Self {
+        let mut context = self.clone();
+        context.is_part_of_query = false;
+        context.current_defer_ref = self.active_defer_ref.clone();
+        context
+    }
 }
 
 fn inputs_for_require(
