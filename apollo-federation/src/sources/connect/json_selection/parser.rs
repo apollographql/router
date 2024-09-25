@@ -201,18 +201,17 @@ impl NamedSelection {
             .map(|(input, (alias, group))| (input, Self::Group(alias, group)))
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn name(&self) -> &str {
+    pub(crate) fn names(&self) -> Vec<&str> {
         match self {
             Self::Field(alias, name, _) => {
                 if let Some(alias) = alias {
-                    alias.name.as_str()
+                    vec![alias.name.as_str()]
                 } else {
-                    name.as_str()
+                    vec![name.as_str()]
                 }
             }
-            Self::Path(alias, _) => alias.name.as_str(),
-            Self::Group(alias, _) => alias.name.as_str(),
+            Self::Path(alias, _) => vec![alias.name.as_str()],
+            Self::Group(alias, _) => vec![alias.name.as_str()],
         }
     }
 
@@ -712,36 +711,6 @@ impl SubSelection {
     pub fn last_selection_mut(&mut self) -> Option<&mut NamedSelection> {
         self.selections.last_mut()
     }
-
-    // Since we enforce that new selections may only be appended to
-    // self.selections, we can provide an index-based search method that returns
-    // an unforgeable NamedSelectionIndex, which can later be used to access the
-    // selection using either get_at_index or get_at_index_mut.
-    // TODO In the future, this method could make use of an internal lookup
-    // table to avoid linear search.
-    pub fn index_of_named_selection(&self, name: &str) -> Option<NamedSelectionIndex> {
-        self.selections
-            .iter()
-            .position(|selection| selection.name() == name)
-            .map(|pos| NamedSelectionIndex { pos })
-    }
-
-    pub fn get_at_index(&self, index: &NamedSelectionIndex) -> &NamedSelection {
-        self.selections
-            .get(index.pos)
-            .expect("NamedSelectionIndex out of bounds")
-    }
-
-    pub fn get_at_index_mut(&mut self, index: &NamedSelectionIndex) -> &mut NamedSelection {
-        self.selections
-            .get_mut(index.pos)
-            .expect("NamedSelectionIndex out of bounds")
-    }
-}
-
-pub struct NamedSelectionIndex {
-    // Intentionally private so NamedSelectionIndex cannot be forged.
-    pos: usize,
 }
 
 impl ExternalVarPaths for SubSelection {
@@ -1158,12 +1127,12 @@ mod tests {
 
     #[test]
     fn test_named_selection() {
-        fn assert_result_and_name(input: &str, expected: NamedSelection, name: &str) {
+        fn assert_result_and_names(input: &str, expected: NamedSelection, names: &[&str]) {
             let (remainder, selection) = NamedSelection::parse(Span::new(input)).unwrap();
             assert!(span_is_all_spaces_or_comments(remainder));
             let selection = selection.strip_ranges();
             assert_eq!(selection, expected);
-            assert_eq!(selection.name(), name);
+            assert_eq!(selection.names(), names);
             assert_eq!(
                 selection!(input).strip_ranges(),
                 JSONSelection::Named(SubSelection {
@@ -1173,13 +1142,13 @@ mod tests {
             );
         }
 
-        assert_result_and_name(
+        assert_result_and_names(
             "hello",
             NamedSelection::Field(None, Key::field("hello").into_with_range(), None),
-            "hello",
+            &["hello"],
         );
 
-        assert_result_and_name(
+        assert_result_and_names(
             "hello { world }",
             NamedSelection::Field(
                 None,
@@ -1193,30 +1162,30 @@ mod tests {
                     ..Default::default()
                 }),
             ),
-            "hello",
+            &["hello"],
         );
 
-        assert_result_and_name(
+        assert_result_and_names(
             "hi: hello",
             NamedSelection::Field(
                 Some(Alias::new("hi")),
                 Key::field("hello").into_with_range(),
                 None,
             ),
-            "hi",
+            &["hi"],
         );
 
-        assert_result_and_name(
+        assert_result_and_names(
             "hi: 'hello world'",
             NamedSelection::Field(
                 Some(Alias::new("hi")),
                 Key::quoted("hello world").into_with_range(),
                 None,
             ),
-            "hi",
+            &["hi"],
         );
 
-        assert_result_and_name(
+        assert_result_and_names(
             "hi: hello { world }",
             NamedSelection::Field(
                 Some(Alias::new("hi")),
@@ -1230,10 +1199,10 @@ mod tests {
                     ..Default::default()
                 }),
             ),
-            "hi",
+            &["hi"],
         );
 
-        assert_result_and_name(
+        assert_result_and_names(
             "hey: hello { world again }",
             NamedSelection::Field(
                 Some(Alias::new("hey")),
@@ -1246,10 +1215,10 @@ mod tests {
                     ..Default::default()
                 }),
             ),
-            "hey",
+            &["hey"],
         );
 
-        assert_result_and_name(
+        assert_result_and_names(
             "hey: 'hello world' { again }",
             NamedSelection::Field(
                 Some(Alias::new("hey")),
@@ -1263,27 +1232,27 @@ mod tests {
                     ..Default::default()
                 }),
             ),
-            "hey",
+            &["hey"],
         );
 
-        assert_result_and_name(
+        assert_result_and_names(
             "leggo: 'my ego'",
             NamedSelection::Field(
                 Some(Alias::new("leggo")),
                 Key::quoted("my ego").into_with_range(),
                 None,
             ),
-            "leggo",
+            &["leggo"],
         );
 
-        assert_result_and_name(
+        assert_result_and_names(
             "'let go': 'my ego'",
             NamedSelection::Field(
                 Some(Alias::quoted("let go")),
                 Key::quoted("my ego").into_with_range(),
                 None,
             ),
-            "let go",
+            &["let go"],
         );
     }
 
