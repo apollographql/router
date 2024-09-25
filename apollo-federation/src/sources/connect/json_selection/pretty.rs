@@ -285,10 +285,11 @@ impl PrettyPrintable for NamedSelection {
                     result.push_str(sub.as_str());
                 }
             }
-            Self::Path(alias, path) => {
-                result.push_str(alias.name.as_str());
-                result.push_str(": ");
-
+            Self::Path(alias_opt, path) => {
+                if let Some(alias) = alias_opt {
+                    result.push_str(alias.name.as_str());
+                    result.push_str(": ");
+                }
                 let path = path.pretty_print_with_indentation(true, indentation);
                 result.push_str(path.trim_start());
             }

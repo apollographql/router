@@ -248,19 +248,21 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
                     SubSelection {
                         selections: [
                             Path(
-                                Alias {
-                                    name: WithRange {
-                                        node: Field(
-                                            "with_b",
-                                        ),
+                                Some(
+                                    Alias {
+                                        name: WithRange {
+                                            node: Field(
+                                                "with_b",
+                                            ),
+                                            range: Some(
+                                                0..6,
+                                            ),
+                                        },
                                         range: Some(
-                                            0..6,
+                                            0..7,
                                         ),
                                     },
-                                    range: Some(
-                                        0..7,
-                                    ),
-                                },
+                                ),
                                 PathSelection {
                                     path: WithRange {
                                         node: Var(

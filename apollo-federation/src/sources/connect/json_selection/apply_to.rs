@@ -256,12 +256,25 @@ impl ApplyToInternal for NamedSelection {
                     ));
                 }
             }
-            Self::Path(alias, path_selection) => {
+            Self::Path(alias_opt, path_selection) => {
                 let (value_opt, apply_errors) =
                     path_selection.apply_to_path(data, vars, input_path);
                 errors.extend(apply_errors);
-                if let Some(value) = value_opt {
-                    output.insert(alias.name(), value);
+
+                if let Some(alias) = alias_opt {
+                    // Handle the NamedPathSelection case.
+                    if let Some(value) = value_opt {
+                        output.insert(alias.name(), value);
+                    }
+                } else if let Some(JSON::Object(value)) = value_opt {
+                    // Handle the PathWithSubSelection case.
+                    output.extend(value);
+                } else {
+                    errors.push(ApplyToError::new(
+                        "Unnamed path selection did not return an object".to_string(),
+                        input_path.to_vec(),
+                        path_selection.range(),
+                    ));
                 }
             }
             Self::Group(alias, sub_selection) => {
