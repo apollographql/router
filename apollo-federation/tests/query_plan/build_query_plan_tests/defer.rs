@@ -1979,83 +1979,83 @@ fn defer_test_defer_on_multi_dependency_deferred_section() {
           }
         "#,
         @r###"
-        QueryPlan {
-          Defer {
-            Primary {
+    QueryPlan {
+      Defer {
+        Primary {
+          {
+            t {
+              v1
+            }
+          }:
+          Sequence {
+            Fetch(service: "Subgraph1") {
               {
                 t {
+                  __typename
                   v1
+                  id0
                 }
-              }:
-              Sequence {
-                Fetch(service: "Subgraph1") {
+              }
+            },
+            Parallel {
+              Flatten(path: "t") {
+                Fetch(service: "Subgraph2", id: 0) {
                   {
-                    t {
+                    ... on T {
                       __typename
-                      v1
                       id0
+                    }
+                  } =>
+                  {
+                    ... on T {
+                      id1
                     }
                   }
                 },
-                Parallel {
-                  Flatten(path: "t") {
-                    Fetch(service: "Subgraph3", id: 0) {
-                      {
-                        ... on T {
-                          __typename
-                          id0
-                        }
-                      } =>
-                      {
-                        ... on T {
-                          id2
-                        }
-                      }
-                    },
-                  },
-                  Flatten(path: "t") {
-                    Fetch(service: "Subgraph2", id: 1) {
-                      {
-                        ... on T {
-                          __typename
-                          id0
-                        }
-                      } =>
-                      {
-                        ... on T {
-                          id1
-                        }
-                      }
-                    },
-                  },
-                },
-              }
-            }, [
-              Deferred(depends: [0, 1], path: "t") {
-                {
-                  v4
-                }:
-                Flatten(path: "t") {
-                  Fetch(service: "Subgraph4") {
-                    {
-                      ... on T {
-                        __typename
-                        id1
-                        id2
-                      }
-                    } =>
-                    {
-                      ... on T {
-                        v4
-                      }
+              },
+              Flatten(path: "t") {
+                Fetch(service: "Subgraph3", id: 1) {
+                  {
+                    ... on T {
+                      __typename
+                      id0
                     }
-                  },
+                  } =>
+                  {
+                    ... on T {
+                      id2
+                    }
+                  }
+                },
+              },
+            },
+          },
+        }, [
+          Deferred(depends: [0, 1], path: "t") {
+            {
+              v4
+            }:
+            Flatten(path: "t") {
+              Fetch(service: "Subgraph4") {
+                {
+                  ... on T {
+                    __typename
+                    id1
+                    id2
+                  }
+                } =>
+                {
+                  ... on T {
+                    v4
+                  }
                 }
               },
-            ]
+            },
           },
-        }
-        "###
+        ]
+      },
+    }
+    "###
     );
 }
 
