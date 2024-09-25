@@ -5463,7 +5463,7 @@ mod tests {
         .unwrap();
 
         let position = InterfaceTypeDefinitionPosition {
-            type_name: name!("UserProfile")
+            type_name: name!("UserProfile"),
         };
         position.remove_recursive(&mut schema).unwrap();
 

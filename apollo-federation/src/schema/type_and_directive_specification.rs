@@ -341,9 +341,10 @@ type ArgumentMergerFactory =
     dyn Fn(&FederationSchema) -> Result<ArgumentMerger, SingleFederationError>;
 
 pub(crate) struct DirectiveCompositionSpecification {
-    pub(crate) supergraph_specification: fn(
-        federation_version: crate::link::spec::Version,
-    ) -> Box<dyn crate::link::spec_definition::SpecDefinition>,
+    pub(crate) supergraph_specification:
+        fn(
+            federation_version: crate::link::spec::Version,
+        ) -> Box<dyn crate::link::spec_definition::SpecDefinition>,
     /// Factory function returning an actual argument merger for given federation schema.
     pub(crate) argument_merger: Option<Box<ArgumentMergerFactory>>,
 }

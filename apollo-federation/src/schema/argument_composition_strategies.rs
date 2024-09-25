@@ -39,7 +39,11 @@ impl ArgumentCompositionStrategy {
         }
     }
 
-    pub(crate) fn is_type_supported(&self, schema: &FederationSchema, ty: &Type) -> Result<(), String> {
+    pub(crate) fn is_type_supported(
+        &self,
+        schema: &FederationSchema,
+        ty: &Type,
+    ) -> Result<(), String> {
         match self {
             Self::Max => MAX_STRATEGY.is_type_supported(schema, ty),
             Self::Min => MIN_STRATEGY.is_type_supported(schema, ty),

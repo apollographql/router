@@ -51,7 +51,11 @@ impl Containment {
 }
 
 impl Selection {
-    pub(crate) fn containment(&self, other: &Selection, options: ContainmentOptions) -> Containment {
+    pub(crate) fn containment(
+        &self,
+        other: &Selection,
+        options: ContainmentOptions,
+    ) -> Containment {
         match (self, other) {
             (Selection::Field(self_field), Selection::Field(other_field)) => {
                 self_field.containment(other_field, options)
@@ -75,7 +79,11 @@ impl Selection {
 }
 
 impl FieldSelection {
-    pub(crate) fn containment(&self, other: &FieldSelection, options: ContainmentOptions) -> Containment {
+    pub(crate) fn containment(
+        &self,
+        other: &FieldSelection,
+        options: ContainmentOptions,
+    ) -> Containment {
         if self.field.name() != other.field.name()
             || self.field.alias != other.field.alias
             || self.field.arguments != other.field.arguments
@@ -98,7 +106,11 @@ impl FieldSelection {
 }
 
 impl FragmentSpreadSelection {
-    pub(crate) fn containment(&self, other: &Selection, options: ContainmentOptions) -> Containment {
+    pub(crate) fn containment(
+        &self,
+        other: &Selection,
+        options: ContainmentOptions,
+    ) -> Containment {
         match other {
             // Using keys here means that @defer fragments never compare equal.
             // This is a bit odd but it is consistent: the selection set data structure would not
@@ -112,7 +124,11 @@ impl FragmentSpreadSelection {
 }
 
 impl InlineFragmentSelection {
-    pub(crate) fn containment(&self, other: &Selection, options: ContainmentOptions) -> Containment {
+    pub(crate) fn containment(
+        &self,
+        other: &Selection,
+        options: ContainmentOptions,
+    ) -> Containment {
         match other {
             // Using keys here means that @defer fragments never compare equal.
             // This is a bit odd but it is consistent: the selection set data structure would not

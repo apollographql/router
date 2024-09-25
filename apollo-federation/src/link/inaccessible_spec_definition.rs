@@ -78,7 +78,10 @@ impl InaccessibleSpecDefinition {
         ))
     }
 
-    pub(crate) fn validate_inaccessible(&self, schema: &FederationSchema) -> Result<(), FederationError> {
+    pub(crate) fn validate_inaccessible(
+        &self,
+        schema: &FederationSchema,
+    ) -> Result<(), FederationError> {
         validate_inaccessible(schema, self)
     }
 
