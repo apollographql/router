@@ -61,7 +61,10 @@ impl ConnectSpecDefinition {
     pub(crate) fn from_directive(
         directive: &Directive,
     ) -> Result<Option<&'static Self>, FederationError> {
-        let Some(url) = directive.argument_by_name("url").and_then(|a| a.as_str()) else {
+        let Some(url) = directive
+            .specified_argument_by_name("url")
+            .and_then(|a| a.as_str())
+        else {
             return Ok(None);
         };
 

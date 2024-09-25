@@ -250,7 +250,7 @@ fn check_conflicting_directives(schema: &Schema) -> Vec<Message> {
 
     // TODO: make the `Link` code retain locations directly instead of reparsing stuff for validation
     let imports = fed_link_directive
-        .argument_by_name(&name!("import"))
+        .specified_argument_by_name(&name!("import"))
         .and_then(|arg| arg.as_list())
         .into_iter()
         .flatten()
@@ -295,7 +295,7 @@ fn validate_source(directive: &Component<Directive>, sources: &SourceMap) -> Sou
     let mut errors = Vec::new();
 
     if let Some(http_arg) = directive
-        .argument_by_name(&HTTP_ARGUMENT_NAME)
+        .specified_argument_by_name(&HTTP_ARGUMENT_NAME)
         .and_then(|arg| arg.as_object())
     {
         // Validate URL argument

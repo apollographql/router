@@ -191,7 +191,7 @@ pub(super) fn carryover_directives(
                             .iter()
                             .any(|d| {
                                 d.name == DEFAULT_LINK_NAME
-                                    && d.argument_by_name("url")
+                                    && d.specified_argument_by_name("url")
                                         .and_then(|url| url.as_str())
                                         .map(|url| link.url.to_string() == *url)
                                         .unwrap_or_default()

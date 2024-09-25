@@ -200,4 +200,3 @@ downloader() {
 }
 
 download_binary "$@" || exit 1
-
