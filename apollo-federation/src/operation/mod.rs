@@ -24,7 +24,6 @@ use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
-use apollo_compiler::executable::Argument;
 use apollo_compiler::name;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::validation::Valid;
@@ -3556,7 +3555,9 @@ impl NamedFragments {
 
 // @defer handling: removing and normalization
 
-const DEFER_DIRECTIVE_NAME: &str = "defer";
+const DEFER_DIRECTIVE_NAME: Name = name!("defer");
+const DEFER_LABEL_ARGUMENT_NAME: Name = name!("label");
+const DEFER_IF_ARGUMENT_NAME: Name = name!("if");
 
 pub(crate) struct NormalizedDefer {
     /// The operation modified to normalize @defer applications.
@@ -3634,15 +3635,15 @@ impl DeferFilter<'_> {
     fn remove_defer(&self, directive_list: &mut DirectiveList, schema: &apollo_compiler::Schema) {
         match self {
             Self::All => {
-                directive_list.remove_one(DEFER_DIRECTIVE_NAME);
+                directive_list.remove_one(&DEFER_DIRECTIVE_NAME);
             }
             Self::Labels(set) => {
                 let label = directive_list
-                    .get(DEFER_DIRECTIVE_NAME)
-                    .and_then(|directive| directive.argument_by_name("label", schema).ok())
+                    .get(&DEFER_DIRECTIVE_NAME)
+                    .and_then(|directive| directive.argument_by_name(&DEFER_LABEL_ARGUMENT_NAME, schema).ok())
                     .and_then(|arg| arg.as_str());
                 if label.is_some_and(|label| set.contains(label)) {
-                    directive_list.remove_one(DEFER_DIRECTIVE_NAME);
+                    directive_list.remove_one(&DEFER_DIRECTIVE_NAME);
                 }
             }
         }
@@ -3707,7 +3708,7 @@ impl FieldSelection {
 impl FragmentSpread {
     /// Returns true if the fragment spread has a @defer directive.
     fn has_defer(&self) -> bool {
-        self.directives.has(DEFER_DIRECTIVE_NAME)
+        self.directives.has(&DEFER_DIRECTIVE_NAME)
     }
 
     fn without_defer(&self, filter: DeferFilter<'_>) -> Result<Self, FederationError> {
@@ -3726,7 +3727,7 @@ impl FragmentSpreadSelection {
 impl InlineFragment {
     /// Returns true if the fragment has a @defer directive.
     fn has_defer(&self) -> bool {
-        self.directives.has(DEFER_DIRECTIVE_NAME)
+        self.directives.has(&DEFER_DIRECTIVE_NAME)
     }
 
     fn without_defer(&self, filter: DeferFilter<'_>) -> Result<Self, FederationError> {
@@ -3794,26 +3795,10 @@ impl InlineFragmentSelection {
                     if dir.name == "defer" {
                         let mut dir: Directive = (**dir).clone();
                         dir.arguments
-                            .retain(|arg| !["label", "if"].contains(&&*arg.name));
-                        let arg = Node::new(Argument {
-                            name: name!("label"),
-                            value: Node::new(apollo_compiler::ast::Value::String(
-                                args_copy.label.clone().unwrap(),
-                            )),
-                        });
-                        dir.arguments.push(arg);
+                            .retain(|arg| ![DEFER_LABEL_ARGUMENT_NAME, DEFER_IF_ARGUMENT_NAME].contains(&arg.name));
+                        dir.arguments.push((DEFER_LABEL_ARGUMENT_NAME, args_copy.label.clone().unwrap()).into());
                         if let Some(cond) = args_copy.if_.clone() {
-                            let name = name!("if");
-                            let value = match cond {
-                                BooleanOrVariable::Boolean(b) => {
-                                    Node::new(apollo_compiler::ast::Value::Boolean(b))
-                                }
-                                BooleanOrVariable::Variable(var) => {
-                                    Node::new(apollo_compiler::ast::Value::Variable(var))
-                                }
-                            };
-                            let arg = Node::new(Argument { value, name });
-                            dir.arguments.push(arg);
+                            dir.arguments.push((DEFER_IF_ARGUMENT_NAME, cond).into());
                         }
                         Node::new(dir)
                     } else {
