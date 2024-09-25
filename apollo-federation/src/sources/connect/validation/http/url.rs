@@ -46,7 +46,7 @@ pub(crate) fn validate_template(
                     ),
                     locations: str_value.line_col_for_subslice(
                         variable.location.clone(),
-                        &schema.lookup,
+                        schema,
                     ).into_iter().collect(),
                 });
             }
@@ -71,22 +71,21 @@ fn parse_template<'schema>(
     coordinate: HttpMethodCoordinate<'schema>,
     schema: &'schema SchemaInfo,
 ) -> Result<(URLTemplate, GraphQLString<'schema>), Message> {
-    let str_value =
-        GraphQLString::new(coordinate.node, &schema.sources).ok_or_else(|| Message {
-            code: Code::GraphQLError,
-            message: format!("The value for {coordinate} must be a string."),
-            locations: coordinate
-                .node
-                .line_column_range(&schema.sources)
-                .into_iter()
-                .collect(),
-        })?;
+    let str_value = GraphQLString::new(coordinate.node, &schema.sources).map_err(|_| Message {
+        code: Code::GraphQLError,
+        message: format!("The value for {coordinate} must be a string."),
+        locations: coordinate
+            .node
+            .line_column_range(&schema.sources)
+            .into_iter()
+            .collect(),
+    })?;
     let template = URLTemplate::from_str(str_value.as_str()).map_err(
         |url_template::Error { message, location }| Message {
             code: Code::InvalidUrl,
             message: format!("{coordinate} must be a valid URL template. {message}"),
             locations: location
-                .and_then(|location| str_value.line_col_for_subslice(location, &schema.lookup))
+                .and_then(|location| str_value.line_col_for_subslice(location, schema))
                 .into_iter()
                 .collect(),
         },
@@ -110,7 +109,7 @@ pub(crate) fn validate_base_url(
                 "The value {value} for {coordinate} must be http or https, got {scheme}.",
             ),
             locations: str_value
-                .line_col_for_subslice(scheme_location, &schema.lookup)
+                .line_col_for_subslice(scheme_location, schema)
                 .into_iter()
                 .collect(),
         })
@@ -144,7 +143,7 @@ fn validate_variable<'schema>(
                     ),
                     locations: url_value.line_col_for_subslice(
                         path_component_start..path_component_end,
-                        &schema.lookup,
+                        schema,
                     ).into_iter().collect()
                 }
             }).map(|arg| arg.ty.as_ref().clone())?
@@ -158,7 +157,7 @@ fn validate_variable<'schema>(
                     ),
                     locations: url_value.line_col_for_subslice(
                         path_component_start..path_component_end,
-                        &schema.lookup,
+                        schema,
                     ).into_iter().collect()
                 }).map(|field| field.ty.clone())?
         }
@@ -197,7 +196,7 @@ fn validate_variable<'schema>(
                         ),
                         locations: url_value.line_col_for_subslice(
                             path_component_start..path_component_end,
-                            &schema.lookup,
+                            schema,
                         ).into_iter().collect(),
                     })
             })?.clone();

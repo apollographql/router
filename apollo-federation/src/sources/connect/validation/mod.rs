@@ -45,7 +45,6 @@ use apollo_compiler::Schema;
 use coordinates::source_http_argument_coordinate;
 use extended_type::validate_extended_type;
 use itertools::Itertools;
-use line_col::LineColLookup;
 use source_name::SourceName;
 use url::Url;
 
@@ -93,13 +92,12 @@ pub fn validate(source_text: &str, file_name: &str) -> Vec<Message> {
 
     let source_directive_name = ConnectSpecDefinition::source_directive_name(&link);
     let connect_directive_name = ConnectSpecDefinition::connect_directive_name(&link);
-    let lookup = LineColLookup::new(source_text);
-    let schema_info = SchemaInfo {
-        schema: &schema,
-        lookup,
-        connect_directive_name: &connect_directive_name,
-        source_directive_name: &source_directive_name,
-    };
+    let schema_info = SchemaInfo::new(
+        &schema,
+        source_text,
+        &connect_directive_name,
+        &source_directive_name,
+    );
 
     let source_directives: Vec<SourceDirective> = schema
         .schema_definition
@@ -374,7 +372,7 @@ fn parse_url<Coordinate: Display + Copy>(
     coordinate: Coordinate,
     schema: &SchemaInfo,
 ) -> Result<(), Message> {
-    let str_value = GraphQLString::new(value, &schema.sources).ok_or_else(|| Message {
+    let str_value = GraphQLString::new(value, &schema.sources).map_err(|_| Message {
         code: Code::GraphQLError,
         message: format!("The value for {coordinate} must be a string."),
         locations: value
