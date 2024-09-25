@@ -2596,18 +2596,29 @@ impl SelectionSet {
                         self.add_local_selection(&selection)?
                     }
                 } else {
+                    let sub_selection_type_pos = element.sub_selection_type_position()?.ok_or_else(|| {
+                        FederationError::internal("unexpected: Element has a selection set with non-composite base type")
+                    })?;
                     let selection_set = selection_set
                         .map(|selection_set| {
-                            selection_set.rebase_on(
-                                &element.sub_selection_type_position()?.ok_or_else(|| {
-                                    FederationError::internal("unexpected: Element has a selection set with non-composite base type")
-                                })?,
-                                &NamedFragments::default(),
+                            let selections = selection_set.without_unnecessary_fragments(
+                                &sub_selection_type_pos,
                                 &self.schema,
-                            )
+                            );
+                            let mut selection_set = SelectionSet::empty(
+                                self.schema.clone(),
+                                sub_selection_type_pos.clone(),
+                            );
+                            for selection in selections.iter() {
+                                selection_set.add_local_selection(&selection.rebase_on(
+                                    &sub_selection_type_pos,
+                                    &NamedFragments::default(),
+                                    &self.schema,
+                                )?)?;
+                            }
+                            Ok::<_, FederationError>(selection_set)
                         })
-                        .transpose()?
-                        .map(|selection_set| selection_set.without_unnecessary_fragments());
+                        .transpose()?;
                     let selection = Selection::from_element(element, selection_set)?;
                     self.add_local_selection(&selection)?
                 }
@@ -2812,12 +2823,15 @@ impl SelectionSet {
     /// JS PORT NOTE: In Rust implementation we are doing the selection set updates in-place whereas
     /// JS code was pooling the updates and only apply those when building the final selection set.
     /// See `makeSelectionSet` method for details.
-    fn without_unnecessary_fragments(&self) -> SelectionSet {
-        let parent_type = &self.type_position;
-        let mut final_selections = SelectionMap::new();
+    fn without_unnecessary_fragments(
+        &self,
+        parent_type: &CompositeTypeDefinitionPosition,
+        schema: &ValidFederationSchema,
+    ) -> Vec<Selection> {
+        let mut final_selections = vec![];
         fn process_selection_set(
             selection_set: &SelectionSet,
-            final_selections: &mut SelectionMap,
+            final_selections: &mut Vec<Selection>,
             parent_type: &CompositeTypeDefinitionPosition,
             schema: &ValidFederationSchema,
         ) {
@@ -2832,22 +2846,18 @@ impl SelectionSet {
                                 schema,
                             );
                         } else {
-                            final_selections.insert(selection.clone());
+                            final_selections.push(selection.clone());
                         }
                     }
                     _ => {
-                        final_selections.insert(selection.clone());
+                        final_selections.push(selection.clone());
                     }
                 }
             }
         }
-        process_selection_set(self, &mut final_selections, parent_type, &self.schema);
+        process_selection_set(self, &mut final_selections, parent_type, schema);
 
-        SelectionSet {
-            schema: self.schema.clone(),
-            type_position: parent_type.clone(),
-            selections: Arc::new(final_selections),
-        }
+        final_selections
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = &Selection> {
@@ -3355,7 +3365,7 @@ impl InlineFragmentSelection {
         let Some(type_condition) = &self.inline_fragment.type_condition_position else {
             return true;
         };
-        type_condition == parent
+        type_condition.type_name() == parent.type_name()
             || schema
                 .schema()
                 .is_subtype(type_condition.type_name(), parent.type_name())
