@@ -618,7 +618,6 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         if self.closed_branches.is_empty() {
             return Ok(());
         }
-        self.prune_closed_branches();
         self.sort_options_in_closed_branches()?;
         self.reduce_options_if_needed();
 
@@ -733,50 +732,6 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
 
         snapshot!(self.best_plan, "best_plan");
         Ok(())
-    }
-
-    /// Remove closed branches that are known to be overridden by others.
-    ///
-    /// We've computed all branches and need to compare all the possible plans to pick the best.
-    /// Note however that "all the possible plans" is essentially a cartesian product of all
-    /// the closed branches options, and if a lot of branches have multiple options, this can
-    /// exponentially explode.
-    /// So first, we check if we can preemptively prune some branches based on
-    /// those branches having options that are known to be overriden by other ones.
-    fn prune_closed_branches(&mut self) {
-        for branch in &mut self.closed_branches {
-            if branch.0.len() <= 1 {
-                continue;
-            }
-
-            let mut pruned = ClosedBranch(Vec::new());
-            for (i, to_check) in branch.0.iter().enumerate() {
-                if !Self::option_is_overriden(i, &to_check.paths, branch) {
-                    pruned.0.push(to_check.clone());
-                }
-            }
-
-            *branch = pruned
-        }
-    }
-
-    fn option_is_overriden(
-        index: usize,
-        to_check: &SimultaneousPaths,
-        all_options: &ClosedBranch,
-    ) -> bool {
-        all_options
-            .0
-            .iter()
-            .enumerate()
-            // Don’t compare `to_check` with itself
-            .filter(|&(i, _)| i != index)
-            .any(|(_i, option)| {
-                to_check
-                    .0
-                    .iter()
-                    .all(|p| option.paths.0.iter().any(|o| p.is_overridden_by(o)))
-            })
     }
 
     /// We now sort the options within each branch,
