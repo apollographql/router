@@ -12,13 +12,19 @@ use opentelemetry::sdk;
 use opentelemetry::sdk::trace::BatchSpanProcessor;
 use opentelemetry::sdk::trace::Builder;
 use opentelemetry::Value;
+use opentelemetry_api::trace::Link;
+use opentelemetry_api::trace::SamplingDecision;
+use opentelemetry_api::trace::SamplingResult;
 use opentelemetry_api::trace::SpanContext;
 use opentelemetry_api::trace::SpanKind;
+use opentelemetry_api::trace::TraceId;
 use opentelemetry_api::Key;
 use opentelemetry_api::KeyValue;
+use opentelemetry_api::OrderMap;
 use opentelemetry_sdk::export::trace::ExportResult;
 use opentelemetry_sdk::export::trace::SpanData;
 use opentelemetry_sdk::export::trace::SpanExporter;
+use opentelemetry_sdk::trace::ShouldSample;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
 use schemars::JsonSchema;
@@ -39,10 +45,89 @@ use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
 use crate::plugins::telemetry::tracing::datadog_exporter;
+use crate::plugins::telemetry::tracing::datadog_exporter::propagator::SamplingPriority;
 use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
+
+/// The Datadog agent sampler will override the sampling decision to record and sample.
+/// It makes sure that the appropriate trace state is set and also adds the sampling.priority attribute to the span.
+///
+#[derive(Debug, Clone)]
+pub(crate) struct DatadogAgentSampling {
+    pub(crate) sampler: opentelemetry::sdk::trace::Sampler,
+    pub(crate) parent_based_sampler: bool,
+}
+
+impl DatadogAgentSampling {
+    pub(crate) fn new(
+        sampler: opentelemetry::sdk::trace::Sampler,
+        parent_based_sampler: bool,
+    ) -> Self {
+        Self {
+            sampler,
+            parent_based_sampler,
+        }
+    }
+}
+
+impl ShouldSample for DatadogAgentSampling {
+    fn should_sample(
+        &self,
+        parent_context: Option<&opentelemetry_api::Context>,
+        trace_id: TraceId,
+        name: &str,
+        span_kind: &SpanKind,
+        attributes: &OrderMap<Key, Value>,
+        links: &[Link],
+    ) -> SamplingResult {
+        let mut result = self.sampler.should_sample(
+            parent_context,
+            trace_id,
+            name,
+            span_kind,
+            attributes,
+            links,
+        );
+        // Override the sampling decision to record and sample and make sure that the trace state is set correctly
+        // if either parent sampling is disabled or it has not been populated by a propagator.
+        // The propagator gets first dibs on setting the trace state, so if it sets it, we don't override it unless we are not parent based.
+        match result.decision {
+            SamplingDecision::Drop | SamplingDecision::RecordOnly => {
+                result.decision = SamplingDecision::RecordAndSample;
+                if !self.parent_based_sampler || result.trace_state.sampling_priority().is_none() {
+                    result.trace_state = result
+                        .trace_state
+                        .with_priority_sampling(SamplingPriority::AutoReject)
+                }
+            }
+            SamplingDecision::RecordAndSample => {
+                if !self.parent_based_sampler || result.trace_state.sampling_priority().is_none() {
+                    result.trace_state = result
+                        .trace_state
+                        .with_priority_sampling(SamplingPriority::AutoKeep)
+                }
+            }
+        }
+
+        // We always want to measure
+        result.trace_state = result.trace_state.with_measuring(true);
+        // We always want to set the sampling.priority attribute in case we are communicating with the agent via otlp.
+        // Reverse engineered from https://github.com/DataDog/datadog-agent/blob/c692f62423f93988b008b669008f9199a5ad196b/pkg/trace/api/otlp.go#L502
+        result.attributes.push(KeyValue::new(
+            "sampling.priority",
+            Value::I64(
+                result
+                    .trace_state
+                    .sampling_priority()
+                    .expect("sampling priority")
+                    .as_i64(),
+            ),
+        ));
+        result
+    }
+}
 
 fn default_resource_mappings() -> HashMap<String, String> {
     let mut map = HashMap::with_capacity(7);
@@ -123,6 +208,7 @@ impl TracingConfigurator for Config {
         _spans_config: &Spans,
     ) -> Result<Builder, BoxError> {
         tracing::info!("Configuring Datadog tracing: {}", self.batch_processor);
+
         let common: sdk::trace::Config = trace.into();
 
         // Precompute representation otel Keys for the mappings so that we don't do heap allocation for each span

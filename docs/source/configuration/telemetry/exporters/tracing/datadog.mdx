@@ -26,21 +26,38 @@ otlp_config:
         endpoint: <dd-agent-ip>:4317
 ```
 
-To configure the router, enable the [OTLP exporter](./otlp) and set `endpoint: <datadog-agent-endpoint>`. For example: 
+To configure the router, enable the [OTLP exporter](./otlp) and set `endpoint: <datadog-agent-endpoint>` and enable `datadog_agent_sampling`. For example:
 
 ```yaml title="router.yaml"
 telemetry:
   exporters:
     tracing:
+      common:
+        # Only 10 percent of spans will be forwarded from the Datadog agent to Datadog. Experiment to find a value that is good for you!
+        sampler: 0.1
+        # Important! APM metrics will not display correctly without this setting.
+        datadog_agent_sampling: true
       otlp:
         enabled: true
-   
         # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317)
         endpoint: "${env.DATADOG_AGENT_HOST}:4317"
 
+        # Optional batch processor setting, this will enable the batch processor to send concurrent requests in a high load scenario.
+        batch_processor:
+          max_concurrent_exports: 100
 ```
+Note that if `datadog_agent_sampling: true` is not set in `router.yaml` APM metrics will not display correctly.
 
 For more details about Datadog configuration, see [Datadog Agent configuration](https://docs.datadoghq.com/opentelemetry/otlp_ingest_in_the_agent/?tab=host).
+
+By using these options, you can decrease your Datadog bill as you will only be sending a percentage of spans from the Datadog agent to datadog.
+
+> [!IMPORTANT]
+> Users using OTLP exporter must enable `datadog_agent_sampling` option to get accurate APM metrics.
+
+> [!IMPORTANT]
+> Sending all spans to the datadog agent may require that you tweak the batch_processor settings in your exporter config. This applies to both OTLP and the Datadog native exporter.
+
 
 ### Enabling log correlation
 
@@ -72,10 +89,17 @@ The router can be configured to connect to either the native, default Datadog ag
 telemetry:
   exporters:
     tracing:
-     datadog:
-       enabled: true
-       # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:8126)
-       endpoint: "http://${env.DATADOG_AGENT_HOST}:8126"
+      common:
+        # Only 10 percent of spans will be forwarded from the Datadog agent to Datadog. Experiment to find a value that is good for you!
+        sampler: 0.1
+      datadog:
+        enabled: true
+        # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:8126)
+        endpoint: "http://${env.DATADOG_AGENT_HOST}:8126"
+
+        # Optional batch processor setting, this will enable the batch processor to send concurrent requests in a high load scenario.
+        batch_processor:
+          max_concurrent_exports: 100
 
   # Enable graphql.operation.name attribute on supergraph spans.
   instrumentation:
@@ -85,6 +109,11 @@ telemetry:
         attributes:
           graphql.operation.name: true
 ```
+
+Note that `datadog_agent_sampling` is automatically enabled when using the native Datadog exporter and cannot be disabled.
+
+> [!IMPORTANT]
+> Sending all spans to the datadog agent may require that you tweak the `batch_processor` settings in your exporter config. This applies to both OTLP and the Datadog native exporter.
 
 ### `enabled`
 

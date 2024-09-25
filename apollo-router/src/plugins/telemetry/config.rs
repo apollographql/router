@@ -24,6 +24,7 @@ use super::*;
 use crate::plugin::serde::deserialize_option_header_name;
 use crate::plugins::telemetry::metrics;
 use crate::plugins::telemetry::resource::ConfigResource;
+use crate::plugins::telemetry::tracing::datadog::DatadogAgentSampling;
 use crate::Configuration;
 
 #[derive(thiserror::Error, Debug)]
@@ -347,6 +348,9 @@ pub(crate) struct TracingCommon {
     pub(crate) service_namespace: Option<String>,
     /// The sampler, always_on, always_off or a decimal between 0.0 and 1.0
     pub(crate) sampler: SamplerOption,
+    /// Use datadog agent sampling. This means that all spans will be sent to the Datadog agent
+    /// and the `sampling.priority` attribute will be used to control if the span will then be sent to Datadog.
+    pub(crate) datadog_agent_sampling: bool,
     /// Whether to use parent based sampling
     pub(crate) parent_based_sampler: bool,
     /// The maximum events per span before discarding
@@ -401,6 +405,7 @@ impl Default for TracingCommon {
             service_name: Default::default(),
             service_namespace: Default::default(),
             sampler: default_sampler(),
+            datadog_agent_sampling: false,
             parent_based_sampler: default_parent_based_sampler(),
             max_events_per_span: default_max_events_per_span(),
             max_attributes_per_span: default_max_attributes_per_span(),
@@ -668,8 +673,15 @@ impl From<&TracingCommon> for opentelemetry::sdk::trace::Config {
         if config.parent_based_sampler {
             sampler = parent_based(sampler);
         }
+        if config.datadog_agent_sampling {
+            common = common.with_sampler(DatadogAgentSampling::new(
+                sampler,
+                config.parent_based_sampler,
+            ));
+        } else {
+            common = common.with_sampler(sampler);
+        }
 
-        common = common.with_sampler(sampler);
         common = common.with_max_events_per_span(config.max_events_per_span);
         common = common.with_max_attributes_per_span(config.max_attributes_per_span);
         common = common.with_max_links_per_span(config.max_links_per_span);
@@ -688,6 +700,16 @@ fn parent_based(sampler: opentelemetry::sdk::trace::Sampler) -> opentelemetry::s
 
 impl Conf {
     pub(crate) fn calculate_field_level_instrumentation_ratio(&self) -> Result<f64, Error> {
+        // Because when datadog is enabled the global sampling is overriden to always_on
+        if self.exporters.tracing.common.datadog_agent_sampling {
+            let field_ratio = match &self.apollo.field_level_instrumentation_sampler {
+                SamplerOption::TraceIdRatioBased(ratio) => *ratio,
+                SamplerOption::Always(Sampler::AlwaysOn) => 1.0,
+                SamplerOption::Always(Sampler::AlwaysOff) => 0.0,
+            };
+
+            return Ok(field_ratio);
+        }
         Ok(
             match (
                 &self.exporters.tracing.common.sampler,

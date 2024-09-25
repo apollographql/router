@@ -1,7 +1,5 @@
 version: 2.1
 
-# TODO Remove this line.
-
 # These "CircleCI Orbs" are reusable bits of configuration that can be shared
 # across projects.  See https://circleci.com/orbs/ for more information.
 orbs:
@@ -55,9 +53,9 @@ executors:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
       # at https://circleci.com/docs/using-macos#supported-xcode-versions.
       # We use the major.minor notation to bring in compatible patches.
-      # 
+      #
       # TODO: remove workaround added in https://github.com/apollographql/router/pull/5462
-      # once we update to Xcode >= 15.1.0 
+      # once we update to Xcode >= 15.1.0
       # See: https://github.com/apollographql/router/pull/5462
       xcode: "14.2.0"
     resource_class: macos.m1.large.gen1
@@ -504,7 +502,7 @@ commands:
             # Use the settings from the "ci" profile in nextest configuration.
             NEXTEST_PROFILE: ci
             # Temporary disable lib backtrace since it crashing on MacOS
-            # TODO: remove this workaround once we update to Xcode >= 15.1.0 
+            # TODO: remove this workaround once we update to Xcode >= 15.1.0
             # See: https://github.com/apollographql/router/pull/5462
             RUST_LIB_BACKTRACE: 0
           command: xtask test --workspace --locked --features ci
@@ -750,20 +748,20 @@ jobs:
                 command: |
                   # Source of the new image will be ser to the repo URL.
                   # This will have the effect of setting org.opencontainers.image.source and org.opencontainers.image.author to the originating pipeline
-                  # Therefore the docker image will have the same permissions as the originating project. 
+                  # Therefore the docker image will have the same permissions as the originating project.
                   # See: https://docs.github.com/en/packages/learn-github-packages/connecting-a-repository-to-a-package#connecting-a-repository-to-a-container-image-using-the-command-line
-                  
+
                   BASE_VERSION=$(cargo metadata --format-version=1 --no-deps | jq --raw-output '.packages[0].version')
                   ARTIFACT_URL="https://output.circle-artifacts.com/output/job/${CIRCLE_WORKFLOW_JOB_ID}/artifacts/0/artifacts/router-v${BASE_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
                   VERSION="v$(echo "${BASE_VERSION}" | tr "+" "-")"
                   ROUTER_TAG=ghcr.io/apollographql/nightly/router
-                  
+
                   echo "REPO_URL: ${REPO_URL}"
                   echo "BASE_VERSION: ${BASE_VERSION}"
                   echo "ARTIFACT_URL: ${ARTIFACT_URL}"
                   echo "VERSION: ${VERSION}"
                   echo "ROUTER_TAG: ${ROUTER_TAG}"
-                  
+
                   # Create a multi-arch builder which works properly under qemu
                   docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
                   docker context create buildx-build

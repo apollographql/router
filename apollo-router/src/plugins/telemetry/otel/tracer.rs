@@ -16,7 +16,6 @@ use opentelemetry_sdk::trace::Tracer as SdkTracer;
 use opentelemetry_sdk::trace::TracerProvider as SdkTracerProvider;
 
 use super::OtelData;
-use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
 
 /// An interface for authors of OpenTelemetry SDKs to build pre-sampled tracers.
 ///
@@ -81,6 +80,7 @@ impl PreSampledTracer for SdkTracer {
         let parent_cx = &data.parent_cx;
         let builder = &mut data.builder;
 
+        // If we have a parent span that means we have a parent span coming from a propagator
         // Gather trace state
         let (trace_id, parent_trace_flags) = current_trace_state(builder, parent_cx, &provider);
 
@@ -103,7 +103,6 @@ impl PreSampledTracer for SdkTracer {
             )
         }
         .unwrap_or_default();
-
         let span_id = builder.span_id.unwrap_or(SpanId::INVALID);
         let span_context = SpanContext::new(trace_id, span_id, flags, false, trace_state);
         parent_cx.with_remote_span_context(span_context)
@@ -159,12 +158,7 @@ fn process_sampling_result(
             decision: SamplingDecision::RecordAndSample,
             trace_state,
             ..
-        } => Some((
-            trace_flags | TraceFlags::SAMPLED,
-            trace_state
-                .with_priority_sampling(true)
-                .with_measuring(true),
-        )),
+        } => Some((trace_flags | TraceFlags::SAMPLED, trace_state.clone())),
     }
 }
 
