@@ -1493,7 +1493,7 @@ impl FetchDependencyGraph {
                         input_selection_set.contains(sub_selection_set)
                     }))
                 } else if !implementation_input_selections.is_empty() {
-                    Ok(interface_input_selections.iter().all(|input| {
+                    Ok(implementation_input_selections.iter().all(|input| {
                         let Some(input_selection_set) = input.selection_set() else {
                             return false;
                         };

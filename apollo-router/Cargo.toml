@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "1.54.0"
+version = "1.55.0"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 repository = "https://github.com/apollographql/router/"
 documentation = "https://docs.rs/apollo-router"
@@ -68,7 +68,7 @@ askama = "0.12.1"
 access-json = "0.1.0"
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
-apollo-federation = { path = "../apollo-federation", version = "=1.54.0" }
+apollo-federation = { path = "../apollo-federation", version = "=1.55.0" }
 arc-swap = "1.6.0"
 async-channel = "1.9.0"
 async-compression = { version = "0.4.6", features = [
@@ -197,7 +197,7 @@ regex = "1.10.5"
 reqwest.workspace = true
 
 # note: this dependency should _always_ be pinned, prefix the version with an `=`
-router-bridge = "=0.6.1+v2.9.0"
+router-bridge = "=0.6.2+v2.9.1"
 
 rust-embed = { version = "8.4.0", features = ["include-exclude"] }
 rustls = "0.21.12"
@@ -268,9 +268,9 @@ aws-credential-types = "1.1.6"
 aws-config = "1.1.6"
 aws-types = "1.1.6"
 aws-smithy-runtime-api = { version = "1.1.6", features = ["client"] }
-aws-sdk-sso = "=1.39.0" # TODO: unpin when on Rust 1.78+
-aws-sdk-ssooidc = "=1.40.0" # TODO: unpin when on Rust 1.78+
-aws-sdk-sts = "=1.39.0" # TODO: unpin when on Rust 1.78+
+aws-sdk-sso = "=1.39.0"                                               # TODO: unpin when on Rust 1.78+
+aws-sdk-ssooidc = "=1.40.0"                                           # TODO: unpin when on Rust 1.78+
+aws-sdk-sts = "=1.39.0"                                               # TODO: unpin when on Rust 1.78+
 sha1.workspace = true
 tracing-serde = "0.1.3"
 time = { version = "0.3.36", features = ["serde"] }
@@ -336,7 +336,6 @@ tempfile.workspace = true
 test-log = { version = "0.2.16", default-features = false, features = [
     "trace",
 ] }
-test-span = "0.8.0"
 basic-toml = "0.1.9"
 tower-test = "0.4.0"
 
