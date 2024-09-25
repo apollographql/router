@@ -528,10 +528,6 @@ impl QueryGraph {
             })
     }
 
-    pub(crate) fn non_trivial_followup_edges(&self) -> &IndexMap<EdgeIndex, Vec<EdgeIndex>> {
-        &self.non_trivial_followup_edges
-    }
-
     /// All outward edges from the given node (including self-key and self-root-type-resolution
     /// edges). Primarily used by `@defer`, when needing to re-enter a subgraph for a deferred
     /// section.

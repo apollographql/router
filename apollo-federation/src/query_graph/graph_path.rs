@@ -769,14 +769,7 @@ impl Display for Unadvanceable {
 }
 
 #[derive(Debug, Clone, strum_macros::Display, serde::Serialize)]
-enum UnadvanceableReason {
-    UnsatisfiableKeyCondition,
-    UnsatisfiableRequiresCondition,
-    UnresolvableInterfaceObject,
-    NoMatchingTransition,
-    UnreachableType,
-    IgnoredIndirectPath,
-}
+enum UnadvanceableReason {}
 
 /// One of the options for a `ClosedBranch` (see the documentation of that struct for details). Note
 /// there is an optimization here, in that if some ending section of the path within the GraphQL
@@ -1983,12 +1976,6 @@ impl OpGraphPath {
             })
             .collect();
         (new_self, new_others)
-    }
-
-    pub(crate) fn is_overridden_by(&self, other: &Self) -> bool {
-        self.overriding_path_ids
-            .iter()
-            .any(|overriding_id| other.own_path_ids.contains(overriding_id))
     }
 
     pub(crate) fn subgraph_jumps(&self) -> Result<u32, FederationError> {
@@ -3712,7 +3699,7 @@ impl OpPath {
     }
 
     pub(crate) fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.len() == 0
     }
 
     pub(crate) fn strip_prefix(&self, maybe_prefix: &Self) -> Option<Self> {

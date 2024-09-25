@@ -26,12 +26,6 @@ pub(crate) enum Conditions {
     Boolean(bool),
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum Condition {
-    Variable(VariableCondition),
-    Boolean(bool),
-}
-
 /// A list of variable conditions, represented as a map from variable names to whether that variable
 /// is negated in the condition. We maintain the invariant that there's at least one condition (i.e.
 /// the map is non-empty), and that there's at most one condition per variable name.
@@ -45,23 +39,6 @@ impl VariableConditions {
     fn new_unchecked(map: IndexMap<Name, bool>) -> Self {
         debug_assert!(!map.is_empty());
         Self(Arc::new(map))
-    }
-
-    pub fn insert(&mut self, name: Name, negated: bool) {
-        Arc::make_mut(&mut self.0).insert(name, negated);
-    }
-
-    /// Returns true if there are no conditions.
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    /// Returns a variable condition by name.
-    pub fn get(&self, name: &str) -> Option<VariableCondition> {
-        self.0.get_key_value(name).map(|(variable, &negated)| {
-            let variable = variable.clone();
-            VariableCondition { variable, negated }
-        })
     }
 
     /// Returns whether a variable condition is negated, or None if there is no condition for the variable name.
@@ -182,13 +159,6 @@ impl Conditions {
                 Conditions::Variables(self_vars)
             }
         }
-    }
-}
-
-fn is_constant_condition(condition: &Conditions) -> bool {
-    match condition {
-        Conditions::Variables(_) => false,
-        Conditions::Boolean(_) => true,
     }
 }
 

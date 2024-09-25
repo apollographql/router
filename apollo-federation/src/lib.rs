@@ -13,10 +13,7 @@
 //! See [Router documentation](https://www.apollographql.com/docs/router/federation-version-support/)
 //! for which Federation versions are supported by which Router versions.
 
-// TODO: This is fine while we're iterating, but should be removed later.
-#![allow(dead_code)]
-// TODO: silence false positives (apollo_compiler::Name) and investigate the rest
-#![allow(clippy::mutable_key_type)]
+#![deny(dead_code)]
 
 mod api_schema;
 mod compat;

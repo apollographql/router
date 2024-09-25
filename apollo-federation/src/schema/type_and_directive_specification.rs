@@ -1,3 +1,9 @@
+#![allow(dead_code)]
+// NOTE: There are several (technically) unused fields, type aliases, and methods in this module.
+// Unfortunely, there is not a good way to clean this up because of how `` it is used for testing.
+// Rather than littering this module with `#[allow(dead_code)]`s or adding a config_atr to the
+// crate wide directive, allowing dead code here seems like the best options
+
 use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::Value;
@@ -20,8 +26,6 @@ use apollo_compiler::Node;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
-use crate::link::spec::Version;
-use crate::link::spec_definition::SpecDefinition;
 use crate::schema::argument_composition_strategies::ArgumentCompositionStrategy;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::EnumTypeDefinitionPosition;
@@ -337,7 +341,9 @@ type ArgumentMergerFactory =
     dyn Fn(&FederationSchema) -> Result<ArgumentMerger, SingleFederationError>;
 
 pub(crate) struct DirectiveCompositionSpecification {
-    pub supergraph_specification: fn(federation_version: Version) -> Box<dyn SpecDefinition>,
+    pub supergraph_specification: fn(
+        federation_version: crate::link::spec::Version,
+    ) -> Box<dyn crate::link::spec_definition::SpecDefinition>,
     /// Factory function returning an actual argument merger for given federation schema.
     pub argument_merger: Option<Box<ArgumentMergerFactory>>,
 }
@@ -361,7 +367,9 @@ impl DirectiveSpecification {
         locations: &[DirectiveLocation],
         composes: bool,
         supergraph_specification: Option<
-            fn(federation_version: Version) -> Box<dyn SpecDefinition>,
+            fn(
+                federation_version: crate::link::spec::Version,
+            ) -> Box<dyn crate::link::spec_definition::SpecDefinition>,
         >,
     ) -> Self {
         let mut composition: Option<DirectiveCompositionSpecification> = None;
@@ -777,6 +785,9 @@ mod tests {
     use crate::schema::argument_composition_strategies::ArgumentCompositionStrategy;
     use crate::schema::type_and_directive_specification::DirectiveSpecification;
     use crate::schema::FederationSchema;
+
+    #[test]
+    fn dead_code_filter() {}
 
     #[test]
     #[should_panic(

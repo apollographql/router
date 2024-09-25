@@ -711,10 +711,6 @@ impl FetchDependencyGraph {
         }
     }
 
-    pub(crate) fn next_fetch_id(&self) -> u64 {
-        self.fetch_id_generation.next_id()
-    }
-
     pub(crate) fn root_node_by_subgraph_iter(
         &self,
     ) -> impl Iterator<Item = (&Arc<str>, &NodeIndex)> {
@@ -817,25 +813,6 @@ impl FetchDependencyGraph {
     ) -> Result<&mut FetchDependencyGraphNode, FederationError> {
         Ok(Arc::make_mut(graph.node_weight_mut(node).ok_or_else(
             || FederationError::internal("Node unexpectedly missing".to_owned()),
-        )?))
-    }
-
-    pub(crate) fn edge_weight(
-        &self,
-        edge: EdgeIndex,
-    ) -> Result<&Arc<FetchDependencyGraphEdge>, FederationError> {
-        self.graph
-            .edge_weight(edge)
-            .ok_or_else(|| FederationError::internal("Edge unexpectedly missing".to_owned()))
-    }
-
-    /// Does not take `&mut self` so that other fields can be mutated while this borrow lasts
-    fn edge_weight_mut(
-        graph: &mut FetchDependencyGraphPetgraph,
-        edge: EdgeIndex,
-    ) -> Result<&mut FetchDependencyGraphEdge, FederationError> {
-        Ok(Arc::make_mut(graph.edge_weight_mut(edge).ok_or_else(
-            || FederationError::internal("Edge unexpectedly missing"),
         )?))
     }
 
@@ -985,10 +962,6 @@ impl FetchDependencyGraph {
 
     fn is_parent_of(&self, node_id: NodeIndex, maybe_child_id: NodeIndex) -> bool {
         self.parents_of(maybe_child_id).any(|id| id == node_id)
-    }
-
-    fn is_child_of(&self, node_id: NodeIndex, maybe_parent_id: NodeIndex) -> bool {
-        self.parent_relation(node_id, maybe_parent_id).is_some()
     }
 
     fn is_descendant_of(&self, node_id: NodeIndex, maybe_ancestor_id: NodeIndex) -> bool {
@@ -2493,7 +2466,9 @@ impl std::fmt::Display for FetchDependencyGraphEdge {
 }
 
 impl FetchDependencyGraph {
-    // GraphViz output for FetchDependencyGraph
+    // NOTE: This method is not used during query planning. Rather, it is used during debugging.
+    #[allow(dead_code)]
+    /// GraphViz output for FetchDependencyGraph
     pub fn to_dot(&self) -> String {
         fn label_node(node_id: NodeIndex, node: &FetchDependencyGraphNode) -> String {
             let label_str = node.multiline_display(node_id).to_string();
@@ -4665,7 +4640,6 @@ fn path_for_parent(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::position::InterfaceTypeDefinitionPosition;
 
     #[test]
     fn type_condition_fetching_disabled() {
@@ -4799,23 +4773,6 @@ mod tests {
         OpPathElement::Field(super::Field::new(super::FieldData {
             schema: schema.clone(),
             field_position: ObjectTypeDefinitionPosition::new(object)
-                .field(field)
-                .into(),
-            alias: None,
-            arguments: Default::default(),
-            directives: Default::default(),
-            sibling_typename: None,
-        }))
-    }
-
-    fn interface_field_element(
-        schema: &ValidFederationSchema,
-        interface: apollo_compiler::Name,
-        field: apollo_compiler::Name,
-    ) -> OpPathElement {
-        OpPathElement::Field(super::Field::new(super::FieldData {
-            schema: schema.clone(),
-            field_position: InterfaceTypeDefinitionPosition::new(interface)
                 .field(field)
                 .into(),
             alias: None,

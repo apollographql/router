@@ -95,11 +95,6 @@ impl FieldSelection {
             }
         }
     }
-
-    /// Returns true if this selection is a superset of the other selection.
-    pub fn contains(&self, other: &FieldSelection) -> bool {
-        self.containment(other, Default::default()).is_contained()
-    }
 }
 
 impl FragmentSpreadSelection {
@@ -113,11 +108,6 @@ impl FragmentSpreadSelection {
                 .containment(&other.selection_set, options),
             _ => Containment::NotContained,
         }
-    }
-
-    /// Returns true if this selection is a superset of the other selection.
-    pub fn contains(&self, other: &Selection) -> bool {
-        self.containment(other, Default::default()).is_contained()
     }
 }
 
@@ -135,11 +125,6 @@ impl InlineFragmentSelection {
             }
             _ => Containment::NotContained,
         }
-    }
-
-    /// Returns true if this selection is a superset of the other selection.
-    pub fn contains(&self, other: &Selection) -> bool {
-        self.containment(other, Default::default()).is_contained()
     }
 }
 

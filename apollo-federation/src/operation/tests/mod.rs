@@ -1506,7 +1506,9 @@ fn add_at_path_collapses_unnecessary_fragments() {
             Some(
                 &SelectionSet::parse(
                     schema.clone(),
-                    InterfaceTypeDefinitionPosition::new(name!("X")).into(),
+                    InterfaceTypeDefinitionPosition {
+                        type_name: name!("X"),
+                    }.into(),
                     "... on C { d }",
                 )
                 .unwrap()

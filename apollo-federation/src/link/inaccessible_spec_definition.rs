@@ -5,7 +5,6 @@ use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
-use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::DirectiveLocation;
 use apollo_compiler::schema::ExtendedType;
@@ -52,21 +51,6 @@ impl InaccessibleSpecDefinition {
             },
             minimum_federation_version,
         }
-    }
-
-    pub(crate) fn inaccessible_directive(
-        &self,
-        schema: &FederationSchema,
-    ) -> Result<Directive, FederationError> {
-        let name_in_schema = self
-            .directive_name_in_schema(schema, &INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC)?
-            .ok_or_else(|| SingleFederationError::Internal {
-                message: "Unexpectedly could not find inaccessible spec in schema".to_owned(),
-            })?;
-        Ok(Directive {
-            name: name_in_schema,
-            arguments: Vec::new(),
-        })
     }
 
     /// Returns the `@inaccessible` spec used in the given schema, if any.

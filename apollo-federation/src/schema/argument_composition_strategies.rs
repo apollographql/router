@@ -5,6 +5,7 @@ use lazy_static::lazy_static;
 
 use crate::schema::FederationSchema;
 
+#[allow(dead_code)]
 #[derive(Clone, Copy)]
 pub(crate) enum ArgumentCompositionStrategy {
     Max,
@@ -55,17 +56,6 @@ impl ArgumentCompositionStrategy {
             Self::Sum => SUM_STRATEGY.merge_values(values),
             Self::Intersection => INTERSECTION_STRATEGY.merge_values(values),
             Self::Union => UNION_STRATEGY.merge_values(values),
-        }
-    }
-
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "MAX" => Some(Self::Max),
-            "MIN" => Some(Self::Min),
-            "SUM" => Some(Self::Sum),
-            "INTERSECTION" => Some(Self::Intersection),
-            "UNION" => Some(Self::Union),
-            _ => None,
         }
     }
 }

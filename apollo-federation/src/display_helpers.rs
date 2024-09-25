@@ -1,7 +1,6 @@
 use std::fmt;
 use std::fmt::Debug;
 use std::fmt::Display;
-use std::ops::Deref;
 
 use serde::Serializer;
 
@@ -23,7 +22,7 @@ impl<'a, 'b> State<'a, 'b> {
     }
 
     pub(crate) fn write<T: fmt::Display>(&mut self, value: T) -> fmt::Result {
-        write!(self.output, "{}", value)
+        write!(self.output, "{value}")
     }
 
     pub(crate) fn write_fmt(&mut self, args: fmt::Arguments<'_>) -> fmt::Result {
@@ -114,23 +113,6 @@ where
     S: Serializer,
 {
     ser.serialize_str(&data.to_string())
-}
-
-pub(crate) fn serialize_option_as_string<T, S>(data: &Option<T>, ser: S) -> Result<S::Ok, S::Error>
-where
-    T: Display,
-    S: Serializer,
-{
-    serialize_as_string(&DisplayOption(data.as_ref()), ser)
-}
-
-pub(crate) fn serialize_vec_as_string<P, T, S>(data: &P, ser: S) -> Result<S::Ok, S::Error>
-where
-    P: Deref<Target = Vec<T>>,
-    T: Display,
-    S: Serializer,
-{
-    serialize_as_string(&DisplaySlice(data), ser)
 }
 
 pub(crate) fn serialize_optional_vec_as_string<T, S>(
