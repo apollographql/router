@@ -2148,6 +2148,8 @@ mod tests {
     use std::collections::HashMap;
     use std::fmt::Debug;
     use std::ops::DerefMut;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
     use std::sync::Arc;
     use std::sync::Mutex;
     use std::time::Duration;
@@ -2205,6 +2207,7 @@ mod tests {
     use crate::plugins::demand_control::COST_STRATEGY_KEY;
     use crate::plugins::telemetry::config::TraceIdFormat;
     use crate::plugins::telemetry::handle_error_internal;
+    use crate::plugins::telemetry::EnableSubgraphFtv1;
     use crate::services::router::body::get_body_bytes;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
@@ -2848,6 +2851,63 @@ mod tests {
         }
         .with_metrics()
         .await;
+    }
+
+    #[tokio::test]
+    async fn test_field_instrumentation_sampler_with_datadog_agent_sampling() {
+        let plugin = create_plugin_with_config(include_str!(
+            "testdata/config.field_instrumentation_sampler.router.yaml"
+        ))
+        .await;
+
+        let ftv1_counter = Arc::new(AtomicUsize::new(0));
+        let ftv1_counter_cloned = ftv1_counter.clone();
+
+        let mut mock_request_service = MockSupergraphService::new();
+        mock_request_service
+            .expect_call()
+            .times(10)
+            .returning(move |req: SupergraphRequest| {
+                if req
+                    .context
+                    .extensions()
+                    .with_lock(|lock| lock.contains_key::<EnableSubgraphFtv1>())
+                {
+                    ftv1_counter_cloned.fetch_add(1, Ordering::Relaxed);
+                }
+                Ok(SupergraphResponse::fake_builder()
+                    .context(req.context)
+                    .status_code(StatusCode::OK)
+                    .header("content-type", "application/json")
+                    .data(json!({"errors": [{"message": "nope"}]}))
+                    .build()
+                    .unwrap())
+            });
+        let mut request_supergraph_service =
+            plugin.supergraph_service(BoxService::new(mock_request_service));
+
+        for _ in 0..10 {
+            let supergraph_req = SupergraphRequest::fake_builder()
+                .header("x-custom", "TEST")
+                .header("conditional-custom", "X")
+                .header("custom-length", "55")
+                .header("content-length", "55")
+                .header("content-type", "application/graphql")
+                .query("Query test { me {name} }")
+                .operation_name("test".to_string());
+            let _router_response = request_supergraph_service
+                .ready()
+                .await
+                .unwrap()
+                .call(supergraph_req.build().unwrap())
+                .await
+                .unwrap()
+                .next_response()
+                .await
+                .unwrap();
+        }
+        // It should be 100% because when we set datadog_agent_sampling, we only take the value of field_level_instrumentation_sampler
+        assert_eq!(ftv1_counter.load(Ordering::Relaxed), 10);
     }
 
     #[tokio::test]
