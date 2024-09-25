@@ -95,7 +95,7 @@ impl DeferredNodes {
         Self::default()
     }
 
-    fn is_empty(&self)->bool {
+    fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
 
@@ -110,22 +110,17 @@ impl DeferredNodes {
     fn iter(&self) -> impl Iterator<Item = (&'_ DeferRef, NodeIndex<u32>)> {
         self.inner
             .iter()
-            .flat_map(|(defer_ref, nodes)| {
-                std::iter::repeat(defer_ref).zip(nodes.iter().copied())
-            })
+            .flat_map(|(defer_ref, nodes)| std::iter::repeat(defer_ref).zip(nodes.iter().copied()))
     }
 
     /// Consume the map and yield each element. This is provided as a standalone method and not an
     /// `IntoIterator` implementation because it's hard to type :)
     fn into_iter(self) -> impl Iterator<Item = (DeferRef, NodeIndex<u32>)> {
-        self.inner
-            .into_iter()
-            .flat_map(|(defer_ref, nodes)| {
-                // Cloning the key is a bit wasteful, but keys are typically very small,
-                // and this map is also very small.
-                std::iter::repeat_with(move || defer_ref.clone())
-                    .zip(nodes)
-            })
+        self.inner.into_iter().flat_map(|(defer_ref, nodes)| {
+            // Cloning the key is a bit wasteful, but keys are typically very small,
+            // and this map is also very small.
+            std::iter::repeat_with(move || defer_ref.clone()).zip(nodes)
+        })
     }
 }
 impl Extend<(DeferRef, NodeIndex<u32>)> for DeferredNodes {
@@ -1989,10 +1984,9 @@ impl FetchDependencyGraph {
         for defer in defers_in_current {
             let nodes = all_deferred_nodes
                 .get_all(&defer.label)
-                .map_or_else(
-                    Default::default,
-                    |indices| indices.iter().copied().collect(),
-                );
+                .map_or_else(Default::default, |indices| {
+                    indices.iter().copied().collect()
+                });
             let (main_sequence_of_defer, deferred_of_defer) = self.process_root_nodes(
                 processor,
                 nodes,
