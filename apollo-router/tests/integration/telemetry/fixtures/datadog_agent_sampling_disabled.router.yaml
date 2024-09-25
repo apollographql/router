@@ -1,23 +1,30 @@
 telemetry:
+  apollo:
+    field_level_instrumentation_sampler: always_off
   exporters:
     tracing:
       experimental_response_trace_id:
         enabled: true
         header_name: apollo-custom-trace-id
         format: datadog
+      propagation:
+        trace_context: true
+        jaeger: true
       common:
         service_name: router
+        resource:
+          env: local1
+          service.version: router_version_override
+        datadog_agent_sampling: false
+        sampler: always_off
       datadog:
         enabled: true
-        # Span mapping will always override the span name as far as the test agent is concerned
-        enable_span_mapping: false
         batch_processor:
           scheduled_delay: 100ms
   instrumentation:
     spans:
       mode: spec_compliant
-      router:
+      supergraph:
         attributes:
-          otel.name: overridden
-
+          graphql.operation.name: true
 

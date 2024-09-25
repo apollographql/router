@@ -30,6 +30,8 @@ struct TraceSpec {
     measured_spans: HashSet<&'static str>,
     unmeasured_spans: HashSet<&'static str>,
     priority_sampled: Option<&'static str>,
+    // Not the metrics but the otel attribute
+    no_priority_sampled_attribute: Option<bool>,
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -69,6 +71,49 @@ async fn test_no_sample() -> Result<(), BoxError> {
         .clone();
     assert!(context.is_sampled());
     assert_eq!(context.trace_state().get("psr"), Some("0"));
+
+    Ok(())
+}
+
+// We want to check we're able to override the behavior of datadog_agent_sampling configuration even if we set a datadog exporter
+#[tokio::test(flavor = "multi_thread")]
+async fn test_sampling_datadog_agent_disabled() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let context = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let context_clone = context.clone();
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Datadog)
+        .config(include_str!(
+            "fixtures/datadog_agent_sampling_disabled.router.yaml"
+        ))
+        .responder(ResponseTemplate::new(200).set_body_json(
+            json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}),
+        ))
+        .subgraph_callback(Box::new(move || {
+            let context = Context::current();
+            let span = context.span();
+            let span_context = span.span_context();
+            *context_clone.lock().expect("poisoned") = Some(span_context.clone());
+        }))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
+    let (id, result) = router.execute_query(&query).await;
+    assert!(result.status().is_success());
+
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .no_priority_sampled_attribute(true)
+        .build()
+        .validate_trace(id)
+        .await?;
+
+    router.graceful_shutdown().await;
 
     Ok(())
 }
@@ -795,6 +840,7 @@ impl TraceSpec {
         self.verify_measured_spans(&trace)?;
         self.verify_operation_name(&trace)?;
         self.verify_priority_sampled(&trace)?;
+        self.verify_priority_sampled_attribute(&trace)?;
         self.verify_version(&trace)?;
         self.verify_span_kinds(&trace)?;
         Ok(())
@@ -963,6 +1009,19 @@ impl TraceSpec {
                         .to_string(),
                     psr
                 );
+            }
+        }
+        Ok(())
+    }
+
+    fn verify_priority_sampled_attribute(&self, trace: &Value) -> Result<(), BoxError> {
+        if self.no_priority_sampled_attribute.unwrap_or_default() {
+            let binding =
+                trace.select_path("$..[?(@.service=='router')].meta['sampling.priority']")?;
+            if binding.is_empty() {
+                return Ok(());
+            } else {
+                return Err(BoxError::from("sampling priority attribute exists"));
             }
         }
         Ok(())

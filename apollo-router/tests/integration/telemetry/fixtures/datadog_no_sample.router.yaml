@@ -11,7 +11,6 @@ telemetry:
         service_name: router
         # NOT always_off to allow us to test a sampling probability of zero
         sampler: 0.0
-        datadog_agent_sampling: true
       datadog:
         enabled: true
         batch_processor:

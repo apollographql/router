@@ -13,7 +13,6 @@ telemetry:
         resource:
           env: local1
           service.version: router_version_override
-        datadog_agent_sampling: true
       datadog:
         enabled: true
         batch_processor:

@@ -125,6 +125,7 @@ telemetry:
          sampler: 0.1
 
          # Send all spans to the Datadog agent.
+         # This is enabled by default Datadog exporter is enabled, but may be overridden to false if you want to only have sampled traces.
          datadog_agent_sampling: true
 ```
 

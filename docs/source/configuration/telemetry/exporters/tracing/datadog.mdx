@@ -92,6 +92,10 @@ telemetry:
       common:
         # Only 10 percent of spans will be forwarded from the Datadog agent to Datadog. Experiment to find a value that is good for you!
         sampler: 0.1
+
+        # This is set to true by default if the Datadog exporter is enabled.
+        datadog_agent_sampling: true
+
       datadog:
         enabled: true
         # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:8126)
@@ -110,7 +114,7 @@ telemetry:
           graphql.operation.name: true
 ```
 
-Note that `datadog_agent_sampling` is automatically enabled when using the native Datadog exporter and cannot be disabled.
+Note that `datadog_agent_sampling` is automatically enabled when using the native Datadog exporter but can be overridden if sampled APM metrics are desired.
 
 > [!IMPORTANT]
 > Sending all spans to the datadog agent may require that you tweak the `batch_processor` settings in your exporter config. This applies to both OTLP and the Datadog native exporter.
