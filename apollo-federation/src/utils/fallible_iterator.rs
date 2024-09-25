@@ -410,7 +410,7 @@ pub(crate) trait FallibleIterator: Sized + Itertools {
 impl<I: Itertools> FallibleIterator for I {}
 
 /// The struct returned by [fallible_filter](FallibleIterator::fallible_filter).
-pub struct FallibleFilter<I, F> {
+pub(crate) struct FallibleFilter<I, F> {
     iter: I,
     predicate: F,
 }
@@ -435,7 +435,7 @@ where
 }
 
 /// The struct returned by [and_then_filter](FallibleIterator::and_then_filter).
-pub struct AndThenFilter<I, F> {
+pub(crate) struct AndThenFilter<I, F> {
     iter: I,
     predicate: F,
 }
@@ -462,7 +462,7 @@ where
     }
 }
 
-pub struct AndThen<I, F> {
+pub(crate) struct AndThen<I, F> {
     iter: I,
     map: F,
 }
@@ -479,7 +479,7 @@ where
     }
 }
 
-pub struct OrElse<I, F> {
+pub(crate) struct OrElse<I, F> {
     iter: I,
     map: F,
 }

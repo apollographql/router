@@ -13,7 +13,20 @@
 //! See [Router documentation](https://www.apollographql.com/docs/router/federation-version-support/)
 //! for which Federation versions are supported by which Router versions.
 
-#![deny(dead_code)]
+#![deny(
+    rustdoc::broken_intra_doc_links,
+    unreachable_pub,
+    unreachable_patterns,
+    unused,
+    unused_qualifications,
+    dead_code,
+    while_true,
+    trivial_casts,
+    trivial_bounds,
+    trivial_numeric_casts,
+    unconditional_panic,
+    clippy::all
+)]
 
 mod api_schema;
 mod compat;

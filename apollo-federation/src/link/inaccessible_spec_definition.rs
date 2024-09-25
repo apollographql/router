@@ -58,7 +58,7 @@ impl InaccessibleSpecDefinition {
     /// # Errors
     /// Returns an error if the schema specifies an `@inaccessible` spec version that is not
     /// supported by this version of the apollo-federation crate.
-    pub fn get_from_schema(
+    pub(crate) fn get_from_schema(
         schema: &FederationSchema,
     ) -> Result<Option<&'static Self>, FederationError> {
         let inaccessible_link = match schema
@@ -78,11 +78,11 @@ impl InaccessibleSpecDefinition {
         ))
     }
 
-    pub fn validate_inaccessible(&self, schema: &FederationSchema) -> Result<(), FederationError> {
+    pub(crate) fn validate_inaccessible(&self, schema: &FederationSchema) -> Result<(), FederationError> {
         validate_inaccessible(schema, self)
     }
 
-    pub fn remove_inaccessible_elements(
+    pub(crate) fn remove_inaccessible_elements(
         &self,
         schema: &mut FederationSchema,
     ) -> Result<(), FederationError> {
@@ -519,7 +519,7 @@ impl IsInaccessibleExt for position::ObjectTypeDefinitionPosition {
         Ok(object.directives.has(inaccessible_directive))
     }
 }
-impl IsInaccessibleExt for position::ObjectFieldDefinitionPosition {
+impl IsInaccessibleExt for ObjectFieldDefinitionPosition {
     fn is_inaccessible(
         &self,
         schema: &FederationSchema,
@@ -533,7 +533,7 @@ impl IsInaccessibleExt for position::ObjectFieldDefinitionPosition {
                 .is_inaccessible(schema, inaccessible_directive)?)
     }
 }
-impl IsInaccessibleExt for position::ObjectFieldArgumentDefinitionPosition {
+impl IsInaccessibleExt for ObjectFieldArgumentDefinitionPosition {
     fn is_inaccessible(
         &self,
         schema: &FederationSchema,
@@ -557,7 +557,7 @@ impl IsInaccessibleExt for position::InterfaceTypeDefinitionPosition {
         Ok(interface.directives.has(inaccessible_directive))
     }
 }
-impl IsInaccessibleExt for position::InterfaceFieldDefinitionPosition {
+impl IsInaccessibleExt for InterfaceFieldDefinitionPosition {
     fn is_inaccessible(
         &self,
         schema: &FederationSchema,
@@ -571,7 +571,7 @@ impl IsInaccessibleExt for position::InterfaceFieldDefinitionPosition {
                 .is_inaccessible(schema, inaccessible_directive)?)
     }
 }
-impl IsInaccessibleExt for position::InterfaceFieldArgumentDefinitionPosition {
+impl IsInaccessibleExt for InterfaceFieldArgumentDefinitionPosition {
     fn is_inaccessible(
         &self,
         schema: &FederationSchema,
@@ -595,7 +595,7 @@ impl IsInaccessibleExt for position::InputObjectTypeDefinitionPosition {
         Ok(input_object.directives.has(inaccessible_directive))
     }
 }
-impl IsInaccessibleExt for position::InputObjectFieldDefinitionPosition {
+impl IsInaccessibleExt for InputObjectFieldDefinitionPosition {
     fn is_inaccessible(
         &self,
         schema: &FederationSchema,
@@ -639,7 +639,7 @@ impl IsInaccessibleExt for position::EnumTypeDefinitionPosition {
         Ok(enum_.directives.has(inaccessible_directive))
     }
 }
-impl IsInaccessibleExt for position::EnumValueDefinitionPosition {
+impl IsInaccessibleExt for EnumValueDefinitionPosition {
     fn is_inaccessible(
         &self,
         schema: &FederationSchema,

@@ -69,7 +69,7 @@ pub(crate) struct QueryGraphNode {
 }
 
 impl QueryGraphNode {
-    pub fn is_root_node(&self) -> bool {
+    pub(crate) fn is_root_node(&self) -> bool {
         matches!(self.type_, QueryGraphNodeType::FederatedRootType(_))
     }
 }

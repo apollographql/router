@@ -42,11 +42,11 @@ impl VariableConditions {
     }
 
     /// Returns whether a variable condition is negated, or None if there is no condition for the variable name.
-    pub fn is_negated(&self, name: &str) -> Option<bool> {
+    pub(crate) fn is_negated(&self, name: &str) -> Option<bool> {
         self.0.get(name).copied()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&Name, bool)> {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&Name, bool)> {
         self.0.iter().map(|(name, &negated)| (name, negated))
     }
 }

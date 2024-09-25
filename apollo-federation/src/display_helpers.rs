@@ -21,7 +21,7 @@ impl<'a, 'b> State<'a, 'b> {
         self.indent_level
     }
 
-    pub(crate) fn write<T: fmt::Display>(&mut self, value: T) -> fmt::Result {
+    pub(crate) fn write<T: Display>(&mut self, value: T) -> fmt::Result {
         write!(self.output, "{value}")
     }
 

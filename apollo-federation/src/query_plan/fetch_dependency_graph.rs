@@ -203,7 +203,7 @@ impl FetchIdGenerator {
     }
 
     /// Generate a new ID for a fetch dependency node.
-    pub fn next_id(&self) -> u64 {
+    pub(crate) fn next_id(&self) -> u64 {
         self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     }
 }
@@ -369,10 +369,10 @@ struct ProcessingState {
     /// Nodes that can be handled (because all their parents/dependencies have been processed before).
     // TODO(@goto-bus-stop): Seems like this should be an IndexSet, since every `.push()` first
     // checks if the element is unique.
-    pub next: Vec<NodeIndex>,
+    pub(crate) next: Vec<NodeIndex>,
     /// Nodes that needs some parents/dependencies to be processed first before they can be themselves.
     /// Note that we make sure that this never hold node with no "edges".
-    pub unhandled: Vec<UnhandledNode>,
+    pub(crate) unhandled: Vec<UnhandledNode>,
 }
 
 impl DeferContext {
@@ -399,14 +399,14 @@ impl Default for DeferContext {
 }
 
 impl ProcessingState {
-    pub fn empty() -> Self {
+    pub(crate) fn empty() -> Self {
         Self {
             next: vec![],
             unhandled: vec![],
         }
     }
 
-    pub fn of_ready_nodes(nodes: Vec<NodeIndex>) -> Self {
+    pub(crate) fn of_ready_nodes(nodes: Vec<NodeIndex>) -> Self {
         Self {
             next: nodes,
             unhandled: vec![],
@@ -417,7 +417,7 @@ impl ProcessingState {
     // structure as `create_state_for_children_of_processed_node`, because it needs access to the
     // graph.
 
-    pub fn merge_with(self, other: ProcessingState) -> ProcessingState {
+    pub(crate) fn merge_with(self, other: ProcessingState) -> ProcessingState {
         let mut next = self.next;
         for g in other.next {
             if !next.contains(&g) {
@@ -471,7 +471,7 @@ impl ProcessingState {
         ProcessingState { next, unhandled }
     }
 
-    pub fn update_for_processed_nodes(self, processed: &[NodeIndex]) -> ProcessingState {
+    pub(crate) fn update_for_processed_nodes(self, processed: &[NodeIndex]) -> ProcessingState {
         let mut next = self.next;
         let mut unhandled = vec![];
         for UnhandledNode {
@@ -2469,7 +2469,7 @@ impl FetchDependencyGraph {
     // NOTE: This method is not used during query planning. Rather, it is used during debugging.
     #[allow(dead_code)]
     /// GraphViz output for FetchDependencyGraph
-    pub fn to_dot(&self) -> String {
+    pub(crate) fn to_dot(&self) -> String {
         fn label_node(node_id: NodeIndex, node: &FetchDependencyGraphNode) -> String {
             let label_str = node.multiline_display(node_id).to_string();
             format!("label=\"{}\"", label_str.replace('"', "\\\""))
@@ -2820,7 +2820,7 @@ impl FetchDependencyGraphNode {
 
     // A variation of `fn display` with multiline output, which is more suitable for
     // GraphViz output.
-    pub fn multiline_display(&self, index: NodeIndex) -> impl std::fmt::Display + '_ {
+    pub(crate) fn multiline_display(&self, index: NodeIndex) -> impl std::fmt::Display + '_ {
         use std::fmt;
         use std::fmt::Display;
         use std::fmt::Formatter;
@@ -4767,10 +4767,10 @@ mod tests {
 
     fn object_field_element(
         schema: &ValidFederationSchema,
-        object: apollo_compiler::Name,
-        field: apollo_compiler::Name,
+        object: Name,
+        field: Name,
     ) -> OpPathElement {
-        OpPathElement::Field(super::Field::new(super::FieldData {
+        OpPathElement::Field(super::Field::new(FieldData {
             schema: schema.clone(),
             field_position: ObjectTypeDefinitionPosition::new(object)
                 .field(field)
@@ -4784,8 +4784,8 @@ mod tests {
 
     fn inline_fragment_element(
         schema: &ValidFederationSchema,
-        parent_type_name: apollo_compiler::Name,
-        type_condition_name: Option<apollo_compiler::Name>,
+        parent_type_name: Name,
+        type_condition_name: Option<Name>,
     ) -> OpPathElement {
         let parent_type = schema
             .get_type(parent_type_name)

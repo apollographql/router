@@ -18,7 +18,7 @@ use apollo_compiler::executable::SelectionSet;
 // TODO: we should define this as part as some more generic "FederationSpec" definition, but need
 // to define the ground work for that in `apollo-at-link` first.
 #[cfg(test)]
-pub fn federation_link_identity() -> crate::link::spec::Identity {
+pub(crate) fn federation_link_identity() -> crate::link::spec::Identity {
     crate::link::spec::Identity {
         domain: crate::link::spec::APOLLO_SPEC_DOMAIN.to_string(),
         name: apollo_compiler::name!("federation"),
@@ -26,8 +26,8 @@ pub fn federation_link_identity() -> crate::link::spec::Identity {
 }
 
 #[derive(Eq, PartialEq, Debug, Clone)]
-pub struct Key {
-    pub type_name: apollo_compiler::Name,
+pub(crate) struct Key {
+    pub(crate) type_name: apollo_compiler::Name,
     // TODO: this should _not_ be an Option below; but we don't know how to build the SelectionSet,
     // so until we have a solution, we use None to have code that compiles.
     selections: Option<Arc<SelectionSet>>,
@@ -37,7 +37,7 @@ impl Key {
     // TODO: same remark as above: not meant to be `Option`
     // TODO remove suppression OR use method in final version
     #[allow(dead_code)]
-    pub fn selections(&self) -> Option<Arc<SelectionSet>> {
+    pub(crate) fn selections(&self) -> Option<Arc<SelectionSet>> {
         self.selections.clone()
     }
 
@@ -60,7 +60,7 @@ impl Key {
 }
 
 #[cfg(test)]
-pub fn federation_link(schema: &apollo_compiler::Schema) -> Arc<crate::link::Link> {
+pub(crate) fn federation_link(schema: &apollo_compiler::Schema) -> Arc<crate::link::Link> {
     crate::link::database::links_metadata(schema)
         // TODO: error handling?
         .unwrap_or_default()
@@ -73,12 +73,15 @@ pub fn federation_link(schema: &apollo_compiler::Schema) -> Arc<crate::link::Lin
 /// This will either return 'federation__key' if the `@key` directive is not imported,
 /// or whatever never it is imported under otherwise. Commonly, this would just be `key`.
 #[cfg(test)]
-pub fn key_directive_name(schema: &apollo_compiler::Schema) -> apollo_compiler::Name {
+pub(crate) fn key_directive_name(schema: &apollo_compiler::Schema) -> apollo_compiler::Name {
     federation_link(schema).directive_name_in_schema(&apollo_compiler::name!("key"))
 }
 
 #[cfg(test)]
-pub fn keys(schema: &apollo_compiler::Schema, type_name: &apollo_compiler::Name) -> Vec<Key> {
+pub(crate) fn keys(
+    schema: &apollo_compiler::Schema,
+    type_name: &apollo_compiler::Name,
+) -> Vec<Key> {
     let key_name = key_directive_name(schema);
     if let Some(type_def) = schema.types.get(type_name) {
         type_def

@@ -747,7 +747,7 @@ impl SelectionSet {
 
     /// Returns true if the selection set would select cleanly from the given type in the given
     /// schema.
-    pub fn can_rebase_on(
+    pub(crate) fn can_rebase_on(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         schema: &ValidFederationSchema,

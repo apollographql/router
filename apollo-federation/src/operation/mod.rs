@@ -35,7 +35,6 @@ use serde::Serialize;
 use crate::compat::coerce_executable_values;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::error::SingleFederationError::Internal;
 use crate::link::graphql_definition::BooleanOrVariable;
 use crate::link::graphql_definition::DeferDirectiveArguments;
 use crate::query_graph::graph_path::OpPathElement;
@@ -553,7 +552,7 @@ mod selection_map {
     }
 
     impl<'a> Entry<'a> {
-        pub fn or_insert(
+        pub(crate) fn or_insert(
             self,
             produce: impl FnOnce() -> Result<Selection, FederationError>,
         ) -> Result<SelectionValue<'a>, FederationError> {
@@ -788,7 +787,7 @@ impl Selection {
             Selection::Field(field_selection) => {
                 Ok(OpPathElement::Field(field_selection.field.clone()))
             }
-            Selection::FragmentSpread(_) => Err(Internal {
+            Selection::FragmentSpread(_) => Err(SingleFederationError::Internal {
                 message: "Fragment spread does not have element".to_owned(),
             }
             .into()),
@@ -1221,7 +1220,7 @@ mod field_selection {
     impl FieldData {
         #[cfg(test)]
         /// Create a trivial field selection without any arguments or directives.
-        pub fn from_position(
+        pub(crate) fn from_position(
             schema: &ValidFederationSchema,
             field_position: FieldDefinitionPosition,
         ) -> Self {
@@ -1814,7 +1813,7 @@ impl SelectionSet {
     }
 
     #[cfg(any(doc, test))]
-    pub fn parse(
+    pub(crate) fn parse(
         schema: ValidFederationSchema,
         type_position: CompositeTypeDefinitionPosition,
         source_text: &str,
@@ -1835,7 +1834,7 @@ impl SelectionSet {
     pub(crate) fn contains_top_level_field(&self, field: &Field) -> Result<bool, FederationError> {
         if let Some(selection) = self.selections.get(&field.key()) {
             let Selection::Field(field_selection) = selection else {
-                return Err(Internal {
+                return Err(SingleFederationError::Internal {
                     message: format!(
                         "Field selection key for field \"{}\" references non-field selection",
                         field.field_position,
@@ -1909,7 +1908,7 @@ impl SelectionSet {
                 executable::Selection::FragmentSpread(fragment_spread_selection) => {
                     let Some(fragment) = fragments.get(&fragment_spread_selection.fragment_name)
                     else {
-                        return Err(Internal {
+                        return Err(SingleFederationError::Internal {
                             message: format!(
                                 "Fragment spread referenced non-existent fragment \"{}\"",
                                 fragment_spread_selection.fragment_name,
@@ -3456,13 +3455,13 @@ const DEFER_IF_ARGUMENT_NAME: Name = name!("if");
 
 pub(crate) struct NormalizedDefer {
     /// The operation modified to normalize @defer applications.
-    pub operation: Operation,
+    pub(crate) operation: Operation,
     /// True if the operation contains any @defer applications.
-    pub has_defers: bool,
+    pub(crate) has_defers: bool,
     /// `@defer(label:)` values assigned by normalization.
-    pub assigned_defer_labels: IndexSet<String>,
+    pub(crate) assigned_defer_labels: IndexSet<String>,
     /// Map of variable conditions to the @defer labels depending on those conditions.
-    pub defer_conditions: IndexMap<Name, IndexSet<String>>,
+    pub(crate) defer_conditions: IndexMap<Name, IndexSet<String>>,
 }
 
 struct DeferNormalizer {
@@ -3968,7 +3967,7 @@ impl<'s> VariableCollector<'s> {
         }
     }
 
-    fn visit_directive(&mut self, directive: &'s executable::Directive) {
+    fn visit_directive(&mut self, directive: &'s Directive) {
         for arg in directive.arguments.iter() {
             self.visit_value(&arg.value);
         }

@@ -29,7 +29,7 @@ lazy_static! {
 }
 
 impl ArgumentCompositionStrategy {
-    pub fn name(&self) -> &str {
+    pub(crate) fn name(&self) -> &str {
         match self {
             Self::Max => MAX_STRATEGY.name(),
             Self::Min => MIN_STRATEGY.name(),
@@ -39,7 +39,7 @@ impl ArgumentCompositionStrategy {
         }
     }
 
-    pub fn is_type_supported(&self, schema: &FederationSchema, ty: &Type) -> Result<(), String> {
+    pub(crate) fn is_type_supported(&self, schema: &FederationSchema, ty: &Type) -> Result<(), String> {
         match self {
             Self::Max => MAX_STRATEGY.is_type_supported(schema, ty),
             Self::Min => MIN_STRATEGY.is_type_supported(schema, ty),
@@ -49,7 +49,7 @@ impl ArgumentCompositionStrategy {
         }
     }
 
-    pub fn merge_values(&self, values: &[Value]) -> Value {
+    pub(crate) fn merge_values(&self, values: &[Value]) -> Value {
         match self {
             Self::Max => MAX_STRATEGY.merge_values(values),
             Self::Min => MIN_STRATEGY.merge_values(values),
@@ -78,7 +78,7 @@ pub(crate) trait ArgumentComposition {
 
 #[derive(Clone)]
 pub(crate) struct FixedTypeSupportValidator {
-    pub supported_types: Vec<Type>,
+    pub(crate) supported_types: Vec<Type>,
 }
 
 impl FixedTypeSupportValidator {
