@@ -93,8 +93,8 @@ use crate::layers::ServiceBuilderExt;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::filter::FilterMeterProvider;
 use crate::metrics::meter_provider;
-use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugin::PluginPrivate;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::node::Id::ResponseName;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
@@ -103,6 +103,7 @@ use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::TracingCommon;
 use crate::plugins::telemetry::config_new::cost::add_cost_attributes;
 use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
+use crate::plugins::telemetry::config_new::instruments::ConnectorInstruments;
 use crate::plugins::telemetry::config_new::instruments::SupergraphInstruments;
 use crate::plugins::telemetry::config_new::trace_id;
 use crate::plugins::telemetry::config_new::DatadogId;
@@ -133,8 +134,8 @@ use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATI
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::plugins::telemetry::utils::TracingUtils;
 use crate::query_planner::OperationKind;
-use crate::register_plugin;
 use crate::router_factory::Endpoint;
+use crate::services::connector_service::CONNECTOR_INFO_CONTEXT_KEY;
 use crate::services::execution;
 use crate::services::router;
 use crate::services::subgraph;
@@ -205,6 +206,7 @@ pub(crate) struct Telemetry {
     router_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
     supergraph_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
     subgraph_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
+    connector_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
     cache_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
     activation: Mutex<TelemetryActivation>,
 }
@@ -264,6 +266,7 @@ struct BuiltinInstruments {
     router_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
     supergraph_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
     subgraph_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
+    connector_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
     cache_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
 }
 
@@ -273,12 +276,13 @@ fn create_builtin_instruments(config: &InstrumentsConfig) -> BuiltinInstruments 
         router_custom_instruments: Arc::new(config.new_builtin_router_instruments()),
         supergraph_custom_instruments: Arc::new(config.new_builtin_supergraph_instruments()),
         subgraph_custom_instruments: Arc::new(config.new_builtin_subgraph_instruments()),
+        connector_custom_instruments: Arc::new(config.new_builtin_connector_instruments()),
         cache_custom_instruments: Arc::new(config.new_builtin_cache_instruments()),
     }
 }
 
 #[async_trait::async_trait]
-impl Plugin for Telemetry {
+impl PluginPrivate for Telemetry {
     type Config = config::Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
@@ -308,7 +312,9 @@ impl Plugin for Telemetry {
             router_custom_instruments,
             supergraph_custom_instruments,
             subgraph_custom_instruments,
+            connector_custom_instruments,
             cache_custom_instruments,
+            ..
         } = create_builtin_instruments(&config.instrumentation.instruments);
 
         Ok(Telemetry {
@@ -332,6 +338,7 @@ impl Plugin for Telemetry {
             router_custom_instruments: RwLock::new(router_custom_instruments),
             supergraph_custom_instruments: RwLock::new(supergraph_custom_instruments),
             subgraph_custom_instruments: RwLock::new(subgraph_custom_instruments),
+            connector_custom_instruments: RwLock::new(connector_custom_instruments),
             cache_custom_instruments: RwLock::new(cache_custom_instruments),
             sampling_filter_ratio,
             config: Arc::new(config),
@@ -851,6 +858,55 @@ impl Plugin for Telemetry {
             .boxed()
     }
 
+    fn http_client_service(
+        &self,
+        _subgraph_name: &str,
+        service: crate::services::http::BoxService,
+    ) -> crate::services::http::BoxService {
+        let req_fn_config = self.config.clone();
+        let static_connector_instruments = self.connector_custom_instruments.read().clone();
+        ServiceBuilder::new()
+            .map_future_with_request_data(
+                move |http_request: &crate::services::http::HttpRequest| {
+                    if http_request
+                        .context
+                        .contains_key(CONNECTOR_INFO_CONTEXT_KEY)
+                    {
+                        let custom_instruments = req_fn_config
+                            .instrumentation
+                            .instruments
+                            .new_connector_instruments(static_connector_instruments.clone());
+                        custom_instruments.on_request(http_request);
+                        (http_request.context.clone(), Some(custom_instruments))
+                    } else {
+                        (http_request.context.clone(), None)
+                    }
+                },
+                move |(context, custom_instruments): (Context, Option<ConnectorInstruments>),
+                      f: BoxFuture<
+                    'static,
+                    Result<crate::services::http::HttpResponse, BoxError>,
+                >| {
+                    async move {
+                        let result = f.await;
+                        if let Some(custom_instruments) = custom_instruments {
+                            match &result {
+                                Ok(resp) => {
+                                    custom_instruments.on_response(resp);
+                                }
+                                Err(err) => {
+                                    custom_instruments.on_error(err, &context);
+                                }
+                            }
+                        }
+                        result
+                    }
+                },
+            )
+            .service(service)
+            .boxed()
+    }
+
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         self.custom_endpoints.clone()
     }
@@ -899,6 +955,7 @@ impl Telemetry {
             router_custom_instruments,
             supergraph_custom_instruments,
             subgraph_custom_instruments,
+            connector_custom_instruments,
             cache_custom_instruments,
         } = create_builtin_instruments(&self.config.instrumentation.instruments);
 
@@ -906,6 +963,7 @@ impl Telemetry {
         *self.router_custom_instruments.write() = router_custom_instruments;
         *self.supergraph_custom_instruments.write() = supergraph_custom_instruments;
         *self.subgraph_custom_instruments.write() = subgraph_custom_instruments;
+        *self.connector_custom_instruments.write() = connector_custom_instruments;
         *self.cache_custom_instruments.write() = cache_custom_instruments;
 
         reload_fmt(create_fmt_layer(&self.config));
@@ -1980,7 +2038,7 @@ fn handle_error_internal<T: Into<opentelemetry::global::Error>>(
     }
 }
 
-register_plugin!("apollo", "telemetry", Telemetry);
+register_private_plugin!("apollo", "telemetry", Telemetry);
 
 fn request_ftv1(mut req: SubgraphRequest) -> SubgraphRequest {
     if req

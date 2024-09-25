@@ -20,6 +20,7 @@ use serde_json_bytes::Value;
 use tokio::time::Instant;
 use tower::BoxError;
 
+use super::attributes::ConnectorAttributes;
 use super::attributes::HttpServerAttributes;
 use super::cache::attributes::CacheAttributes;
 use super::cache::CacheInstruments;
@@ -30,6 +31,8 @@ use super::graphql::GraphQLInstruments;
 use super::graphql::FIELD_EXECUTION;
 use super::graphql::FIELD_LENGTH;
 use super::selectors::CacheKind;
+use super::selectors::ConnectorSelector;
+use super::selectors::ConnectorValue;
 use super::DefaultForLevel;
 use super::Selector;
 use crate::metrics;
@@ -53,6 +56,8 @@ use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
 use crate::plugins::telemetry::config_new::selectors::SupergraphValue;
 use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
+use crate::services::http::HttpRequest;
+use crate::services::http::HttpResponse;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
@@ -80,6 +85,11 @@ pub(crate) struct InstrumentsConfig {
     pub(crate) subgraph: Extendable<
         SubgraphInstrumentsConfig,
         Instrument<SubgraphAttributes, SubgraphSelector, SubgraphValue>,
+    >,
+    /// Connector service instruments. For more information see documentation on Router lifecycle.
+    pub(crate) connector: Extendable<
+        ConnectorInstrumentsConfig,
+        Instrument<ConnectorAttributes, ConnectorSelector, ConnectorValue>,
     >,
     /// GraphQL response field instruments.
     pub(crate) graphql: Extendable<
@@ -685,6 +695,227 @@ impl InstrumentsConfig {
         }
     }
 
+    pub(crate) fn new_connector_instruments(
+        &self,
+        static_instruments: Arc<HashMap<String, StaticInstrument>>,
+    ) -> ConnectorInstruments {
+        let http_client_request_duration =
+            self.connector
+                .attributes
+                .http_client_request_duration
+                .is_enabled()
+                .then(|| {
+                    let mut nb_attributes = 0;
+                    let selectors = match &self.connector.attributes.http_client_request_duration {
+                        DefaultedStandardInstrument::Bool(_)
+                        | DefaultedStandardInstrument::Unset => None,
+                        DefaultedStandardInstrument::Extendable { attributes } => {
+                            nb_attributes = attributes.custom.len();
+                            Some(attributes.clone())
+                        }
+                    };
+                    CustomHistogram {
+                        inner: Mutex::new(CustomHistogramInner {
+                            increment: Increment::Duration(Instant::now()),
+                            condition: Condition::True,
+                            histogram: Some(static_instruments
+                                .get(HTTP_CLIENT_REQUEST_DURATION_METRIC)
+                                .expect(
+                                    "cannot get static instrument for connector; this should not happen",
+                                )
+                                .as_histogram()
+                                .cloned()
+                                .expect(
+                                    "cannot convert instrument to histogram for connector; this should not happen",
+                                )
+                            ),
+                            attributes: Vec::with_capacity(nb_attributes),
+                            selector: None,
+                            selectors,
+                            updated: false,
+                        }),
+                    }
+                });
+        let http_client_request_body_size =
+            self.connector
+                .attributes
+                .http_client_request_body_size
+                .is_enabled()
+                .then(|| {
+                    let mut nb_attributes = 0;
+                    let selectors = match &self.connector.attributes.http_client_request_body_size {
+                        DefaultedStandardInstrument::Bool(_)
+                        | DefaultedStandardInstrument::Unset => None,
+                        DefaultedStandardInstrument::Extendable { attributes } => {
+                            nb_attributes = attributes.custom.len();
+                            Some(attributes.clone())
+                        }
+                    };
+                    CustomHistogram {
+                        inner: Mutex::new(CustomHistogramInner {
+                            increment: Increment::Custom(None),
+                            condition: Condition::True,
+                            histogram: Some(static_instruments
+                                .get(HTTP_CLIENT_REQUEST_BODY_SIZE_METRIC)
+                                .expect(
+                                    "cannot get static instrument for connector; this should not happen",
+                                )
+                                .as_histogram()
+                                .cloned()
+                                .expect(
+                                    "cannot convert instrument to histogram for connector; this should not happen",
+                                )
+                            ),
+                            attributes: Vec::with_capacity(nb_attributes),
+                            selector: Some(Arc::new(ConnectorSelector::ConnectorRequestHeader {
+                                connector_request_header: "content-length".to_string(),
+                                redact: None,
+                                default: None,
+                            })),
+                            selectors,
+                            updated: false,
+                        }),
+                    }
+                });
+        let http_client_response_body_size =
+            self.connector
+                .attributes
+                .http_client_response_body_size
+                .is_enabled()
+                .then(|| {
+                    let mut nb_attributes = 0;
+                    let selectors = match &self.connector.attributes.http_client_response_body_size {
+                        DefaultedStandardInstrument::Bool(_)
+                        | DefaultedStandardInstrument::Unset => None,
+                        DefaultedStandardInstrument::Extendable { attributes } => {
+                            nb_attributes = attributes.custom.len();
+                            Some(attributes.clone())
+                        }
+                    };
+                    CustomHistogram {
+                        inner: Mutex::new(CustomHistogramInner {
+                            increment: Increment::Custom(None),
+                            condition: Condition::True,
+                            histogram: Some(static_instruments
+                                .get(HTTP_CLIENT_RESPONSE_BODY_SIZE_METRIC)
+                                .expect(
+                                    "cannot get static instrument for connector; this should not happen",
+                                )
+                                .as_histogram()
+                                .cloned()
+                                .expect(
+                                    "cannot convert instrument to histogram for connector; this should not happen",
+                                )
+                            ),
+                            attributes: Vec::with_capacity(nb_attributes),
+                            selector: Some(Arc::new(ConnectorSelector::ConnectorResponseHeader {
+                                connector_response_header: "content-length".to_string(),
+                                redact: None,
+                                default: None,
+                            })),
+                            selectors,
+                            updated: false,
+                        }),
+                    }
+                });
+        ConnectorInstruments {
+            http_client_request_duration,
+            http_client_request_body_size,
+            http_client_response_body_size,
+            custom: CustomInstruments::new(&self.connector.custom, static_instruments),
+        }
+    }
+
+    pub(crate) fn new_builtin_connector_instruments(&self) -> HashMap<String, StaticInstrument> {
+        let meter = metrics::meter_provider().meter(METER_NAME);
+        let mut static_instruments = HashMap::with_capacity(3);
+
+        if self
+            .connector
+            .attributes
+            .http_client_request_duration
+            .is_enabled()
+        {
+            static_instruments.insert(
+                HTTP_CLIENT_REQUEST_DURATION_METRIC.to_string(),
+                StaticInstrument::Histogram(
+                    meter
+                        .f64_histogram(HTTP_CLIENT_REQUEST_DURATION_METRIC)
+                        .with_unit(Unit::new("s"))
+                        .with_description("Duration of HTTP client requests.")
+                        .init(),
+                ),
+            );
+        }
+
+        if self
+            .connector
+            .attributes
+            .http_client_request_body_size
+            .is_enabled()
+        {
+            static_instruments.insert(
+                HTTP_CLIENT_REQUEST_BODY_SIZE_METRIC.to_string(),
+                StaticInstrument::Histogram(
+                    meter
+                        .f64_histogram(HTTP_CLIENT_REQUEST_BODY_SIZE_METRIC)
+                        .with_unit(Unit::new("By"))
+                        .with_description("Size of HTTP client request bodies.")
+                        .init(),
+                ),
+            );
+        }
+
+        if self
+            .connector
+            .attributes
+            .http_client_response_body_size
+            .is_enabled()
+        {
+            static_instruments.insert(
+                HTTP_CLIENT_RESPONSE_BODY_SIZE_METRIC.to_string(),
+                StaticInstrument::Histogram(
+                    meter
+                        .f64_histogram(HTTP_CLIENT_RESPONSE_BODY_SIZE_METRIC)
+                        .with_unit(Unit::new("By"))
+                        .with_description("Size of HTTP client response bodies.")
+                        .init(),
+                ),
+            );
+        }
+
+        for (instrument_name, instrument) in &self.connector.custom {
+            match instrument.ty {
+                InstrumentType::Counter => {
+                    static_instruments.insert(
+                        instrument_name.clone(),
+                        StaticInstrument::CounterF64(
+                            meter
+                                .f64_counter(instrument_name.clone())
+                                .with_description(instrument.description.clone())
+                                .with_unit(Unit::new(instrument.unit.clone()))
+                                .init(),
+                        ),
+                    );
+                }
+                InstrumentType::Histogram => {
+                    static_instruments.insert(
+                        instrument_name.clone(),
+                        StaticInstrument::Histogram(
+                            meter
+                                .f64_histogram(instrument_name.clone())
+                                .with_description(instrument.description.clone())
+                                .with_unit(Unit::new(instrument.unit.clone()))
+                                .init(),
+                        ),
+                    );
+                }
+            }
+        }
+
+        static_instruments
+    }
+
     pub(crate) fn new_builtin_graphql_instruments(&self) -> HashMap<String, StaticInstrument> {
         let meter = metrics::meter_provider().meter(METER_NAME);
         let mut static_instruments = HashMap::with_capacity(self.graphql.custom.len());
@@ -1130,6 +1361,40 @@ pub(crate) struct SubgraphInstrumentsConfig {
 }
 
 impl DefaultForLevel for SubgraphInstrumentsConfig {
+    fn defaults_for_level(
+        &mut self,
+        requirement_level: DefaultAttributeRequirementLevel,
+        kind: TelemetryDataKind,
+    ) {
+        self.http_client_request_duration
+            .defaults_for_level(requirement_level, kind);
+        self.http_client_request_body_size
+            .defaults_for_level(requirement_level, kind);
+        self.http_client_response_body_size
+            .defaults_for_level(requirement_level, kind);
+    }
+}
+
+#[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct ConnectorInstrumentsConfig {
+    /// Histogram of client request duration
+    #[serde(rename = "http.client.request.duration")]
+    http_client_request_duration:
+        DefaultedStandardInstrument<Extendable<ConnectorAttributes, ConnectorSelector>>,
+
+    /// Histogram of client request body size
+    #[serde(rename = "http.client.request.body.size")]
+    http_client_request_body_size:
+        DefaultedStandardInstrument<Extendable<ConnectorAttributes, ConnectorSelector>>,
+
+    /// Histogram of client response body size
+    #[serde(rename = "http.client.response.body.size")]
+    http_client_response_body_size:
+        DefaultedStandardInstrument<Extendable<ConnectorAttributes, ConnectorSelector>>,
+}
+
+impl DefaultForLevel for ConnectorInstrumentsConfig {
     fn defaults_for_level(
         &mut self,
         requirement_level: DefaultAttributeRequirementLevel,
@@ -1751,6 +2016,61 @@ impl Instrumented for SubgraphInstruments {
     }
 }
 
+pub(crate) struct ConnectorInstruments {
+    http_client_request_duration:
+        Option<CustomHistogram<HttpRequest, HttpResponse, ConnectorAttributes, ConnectorSelector>>,
+    http_client_request_body_size:
+        Option<CustomHistogram<HttpRequest, HttpResponse, ConnectorAttributes, ConnectorSelector>>,
+    http_client_response_body_size:
+        Option<CustomHistogram<HttpRequest, HttpResponse, ConnectorAttributes, ConnectorSelector>>,
+    custom: ConnectorCustomInstruments,
+}
+
+impl Instrumented for ConnectorInstruments {
+    type Request = HttpRequest;
+    type Response = HttpResponse;
+    type EventResponse = ();
+
+    fn on_request(&self, request: &Self::Request) {
+        if let Some(http_client_request_duration) = &self.http_client_request_duration {
+            http_client_request_duration.on_request(request);
+        }
+        if let Some(http_client_request_body_size) = &self.http_client_request_body_size {
+            http_client_request_body_size.on_request(request);
+        }
+        if let Some(http_client_response_body_size) = &self.http_client_response_body_size {
+            http_client_response_body_size.on_request(request);
+        }
+        self.custom.on_request(request);
+    }
+
+    fn on_response(&self, response: &Self::Response) {
+        if let Some(http_client_request_duration) = &self.http_client_request_duration {
+            http_client_request_duration.on_response(response);
+        }
+        if let Some(http_client_request_body_size) = &self.http_client_request_body_size {
+            http_client_request_body_size.on_response(response);
+        }
+        if let Some(http_client_response_body_size) = &self.http_client_response_body_size {
+            http_client_response_body_size.on_response(response);
+        }
+        self.custom.on_response(response);
+    }
+
+    fn on_error(&self, error: &BoxError, ctx: &Context) {
+        if let Some(http_client_request_duration) = &self.http_client_request_duration {
+            http_client_request_duration.on_error(error, ctx);
+        }
+        if let Some(http_client_request_body_size) = &self.http_client_request_body_size {
+            http_client_request_body_size.on_error(error, ctx);
+        }
+        if let Some(http_client_response_body_size) = &self.http_client_response_body_size {
+            http_client_response_body_size.on_error(error, ctx);
+        }
+        self.custom.on_error(error, ctx);
+    }
+}
+
 pub(crate) type RouterCustomInstruments = CustomInstruments<
     router::Request,
     router::Response,
@@ -1773,6 +2093,14 @@ pub(crate) type SubgraphCustomInstruments = CustomInstruments<
     SubgraphAttributes,
     SubgraphSelector,
     SubgraphValue,
+>;
+
+pub(crate) type ConnectorCustomInstruments = CustomInstruments<
+    HttpRequest,
+    HttpResponse,
+    ConnectorAttributes,
+    ConnectorSelector,
+    ConnectorValue,
 >;
 
 // ---------------- Counter -----------------------
