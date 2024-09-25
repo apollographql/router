@@ -1,4 +1,4 @@
-### Don't send `apollo_private.*` attributes to  Jaeger connector ([PR #6033](https://github.com/apollographql/router/pull/6033))
+### Don't send `apollo_private.*` attributes to  Jaeger collector ([PR #6033](https://github.com/apollographql/router/pull/6033))
 
 
 When using Jaeger collector to send traces you will no longer receive useless span attributes prefixed with `apollo_private.`
