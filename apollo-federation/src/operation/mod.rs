@@ -3056,8 +3056,7 @@ impl NamedFragments {
         }
         if selection_set.selections.len() == 1 {
             // true if NOT field selection OR non-leaf field
-            return if let Some((_, Selection::Field(field_selection))) =
-                selection_set.selections.first()
+            return if let Some(Selection::Field(field_selection)) = selection_set.selections.first()
             {
                 field_selection.selection_set.is_some()
             } else {
