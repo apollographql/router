@@ -8,6 +8,7 @@
     "Moving from @apollo/gateway": "/migrating-from-gateway",
     "Federation Version Support": "/federation-version-support",
     "Enterprise Features": ["/enterprise-features", ["enterprise"]],
+    "Release Notes": "/release-notes",
     "Configuring the Router": {
       "Overview": "/configuration/overview",
       "Caching": {
