@@ -99,7 +99,7 @@ impl Conditions {
                 "skip" => true,
                 _ => continue,
             };
-            let value = directive.argument_by_name("if").ok_or_else(|| {
+            let value = directive.specified_argument_by_name("if").ok_or_else(|| {
                 FederationError::internal(format!(
                     "missing if argument on @{}",
                     if negated { "skip" } else { "include" },
@@ -223,12 +223,12 @@ pub(crate) fn remove_conditions_from_selection_set(
                             selection.with_updated_selection_set(Some(updated_selection_set))?
                         }
                     } else {
-                        Selection::from_element(updated_element, Some(updated_selection_set), None)?
+                        Selection::from_element(updated_element, Some(updated_selection_set))?
                     }
                 } else if updated_element == element {
                     selection.clone()
                 } else {
-                    Selection::from_element(updated_element, None, None)?
+                    Selection::from_element(updated_element, None)?
                 };
                 selection_map.insert(new_selection);
             }
@@ -247,7 +247,7 @@ pub(crate) fn remove_conditions_from_selection_set(
 /// "starting" fragments having the unneeded condition/directives removed.
 pub(crate) fn remove_unneeded_top_level_fragment_directives(
     selection_set: &SelectionSet,
-    unneded_directives: &DirectiveList,
+    unneeded_directives: &DirectiveList,
 ) -> Result<SelectionSet, FederationError> {
     let mut selection_map = SelectionMap::new();
 
@@ -265,7 +265,7 @@ pub(crate) fn remove_unneeded_top_level_fragment_directives(
                     let needed_directives: Vec<Node<Directive>> = fragment
                         .directives
                         .iter()
-                        .filter(|directive| !unneded_directives.contains(directive))
+                        .filter(|directive| !unneeded_directives.contains(directive))
                         .cloned()
                         .collect();
 
@@ -273,7 +273,7 @@ pub(crate) fn remove_unneeded_top_level_fragment_directives(
                     // at the "top-level" of the set.
                     let updated_selections = remove_unneeded_top_level_fragment_directives(
                         &inline_fragment.selection_set,
-                        unneded_directives,
+                        unneeded_directives,
                     )?;
                     if needed_directives.len() == fragment.directives.len() {
                         // We need all the directives that the fragment has. Return it unchanged.
@@ -346,7 +346,7 @@ fn matches_condition_for_kind(
         return false;
     }
 
-    let value = directive.argument_by_name("if");
+    let value = directive.specified_argument_by_name("if");
 
     let matches_if_negated = match kind {
         ConditionKind::Include => false,

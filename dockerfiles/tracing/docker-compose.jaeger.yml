@@ -1,6 +1,5 @@
 version: "3.9"
 services:
-
   apollo-router:
     container_name: apollo-router
     #build: ./router
@@ -15,7 +14,7 @@ services:
         "-s",
         "/etc/config/supergraph.graphql",
         "--log",
-        "info"
+        "info",
       ]
     ports:
       - 4000:4000

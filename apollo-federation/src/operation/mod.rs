@@ -25,6 +25,7 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
 use apollo_compiler::name;
+use apollo_compiler::schema::Directive;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
@@ -35,6 +36,8 @@ use crate::compat::coerce_executable_values;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::error::SingleFederationError::Internal;
+use crate::link::graphql_definition::BooleanOrVariable;
+use crate::link::graphql_definition::DeferDirectiveArguments;
 use crate::query_graph::graph_path::OpPathElement;
 use crate::query_plan::conditions::Conditions;
 use crate::query_plan::FetchDataKeyRenamer;
@@ -197,13 +200,6 @@ pub struct Operation {
     pub(crate) named_fragments: NamedFragments,
 }
 
-pub(crate) struct NormalizedDefer {
-    pub operation: Operation,
-    pub has_defers: bool,
-    pub assigned_defer_labels: IndexSet<String>,
-    pub defer_conditions: IndexMap<String, IndexSet<String>>,
-}
-
 impl Operation {
     /// Parse an operation from a source string.
     #[cfg(any(test, doc))]
@@ -241,49 +237,6 @@ impl Operation {
             selection_set,
             named_fragments,
         })
-    }
-
-    // PORT_NOTE(@goto-bus-stop): It might make sense for the returned data structure to *be* the
-    // `DeferNormalizer` from the JS side
-    pub(crate) fn with_normalized_defer(self) -> NormalizedDefer {
-        NormalizedDefer {
-            operation: self,
-            has_defers: false,
-            assigned_defer_labels: IndexSet::default(),
-            defer_conditions: IndexMap::default(),
-        }
-        // TODO(@TylerBloom): Once defer is implement, the above statement needs to be replaced
-        // with the commented-out one below. This is part of FED-95
-        /*
-        if self.has_defer() {
-            todo!("@defer not implemented");
-        } else {
-            NormalizedDefer {
-                operation: self,
-                has_defers: false,
-                assigned_defer_labels: IndexSet::default(),
-                defer_conditions: IndexMap::default(),
-            }
-        }
-        */
-    }
-
-    fn has_defer(&self) -> bool {
-        self.selection_set.has_defer()
-            || self
-                .named_fragments
-                .fragments
-                .values()
-                .any(|f| f.has_defer())
-    }
-
-    /// Removes the @defer directive from all selections without removing that selection.
-    pub(crate) fn without_defer(mut self) -> Self {
-        if self.has_defer() {
-            self.selection_set.without_defer();
-        }
-        debug_assert!(!self.has_defer());
-        self
     }
 }
 
@@ -533,11 +486,11 @@ mod selection_map {
             }
         }
 
-        pub(super) fn get_directives_mut(&mut self) -> &mut DirectiveList {
+        pub(super) fn directives(&self) -> &'_ DirectiveList {
             match self {
-                Self::Field(field) => field.get_directives_mut(),
-                Self::FragmentSpread(spread) => spread.get_directives_mut(),
-                Self::InlineFragment(inline) => inline.get_directives_mut(),
+                Self::Field(field) => &field.get().field.directives,
+                Self::FragmentSpread(frag) => &frag.get().spread.directives,
+                Self::InlineFragment(frag) => &frag.get().inline_fragment.directives,
             }
         }
 
@@ -566,10 +519,6 @@ mod selection_map {
             Arc::make_mut(self.0).field.sibling_typename_mut()
         }
 
-        pub(super) fn get_directives_mut(&mut self) -> &mut DirectiveList {
-            Arc::make_mut(self.0).field.directives_mut()
-        }
-
         pub(crate) fn get_selection_set_mut(&mut self) -> &mut Option<SelectionSet> {
             &mut Arc::make_mut(self.0).selection_set
         }
@@ -581,10 +530,6 @@ mod selection_map {
     impl<'a> FragmentSpreadSelectionValue<'a> {
         pub(crate) fn new(fragment_spread_selection: &'a mut Arc<FragmentSpreadSelection>) -> Self {
             Self(fragment_spread_selection)
-        }
-
-        pub(super) fn get_directives_mut(&mut self) -> &mut DirectiveList {
-            Arc::make_mut(self.0).spread.directives_mut()
         }
 
         pub(crate) fn get_selection_set_mut(&mut self) -> &mut SelectionSet {
@@ -606,10 +551,6 @@ mod selection_map {
 
         pub(crate) fn get(&self) -> &Arc<InlineFragmentSelection> {
             self.0
-        }
-
-        pub(super) fn get_directives_mut(&mut self) -> &mut DirectiveList {
-            Arc::make_mut(self.0).inline_fragment.directives_mut()
         }
 
         pub(crate) fn get_selection_set_mut(&mut self) -> &mut SelectionSet {
@@ -673,8 +614,8 @@ mod selection_map {
             if *self.key() != value.key() {
                 return Err(Internal {
                     message: format!(
-                        "Key mismatch when inserting selection `{value}` into vacant entry. Expected {:?}, found {:?}",
-                        self.key(), value.key()
+                        "Key mismatch when inserting selection {} into vacant entry ",
+                        value
                     ),
                 }
                 .into());
@@ -689,6 +630,15 @@ mod selection_map {
 
         fn into_iter(self) -> Self::IntoIter {
             <IndexMap<SelectionKey, Selection> as IntoIterator>::into_iter(self.0)
+        }
+    }
+
+    impl<'a> IntoIterator for &'a SelectionMap {
+        type Item = <&'a IndexMap<SelectionKey, Selection> as IntoIterator>::Item;
+        type IntoIter = <&'a IndexMap<SelectionKey, Selection> as IntoIterator>::IntoIter;
+
+        fn into_iter(self) -> Self::IntoIter {
+            self.0.iter()
         }
     }
 }
@@ -789,7 +739,6 @@ impl Selection {
     pub(crate) fn from_element(
         element: OpPathElement,
         sub_selections: Option<SelectionSet>,
-        unnecessary_directives: Option<&HashSet<Node<apollo_compiler::ast::Directive>>>,
     ) -> Result<Selection, FederationError> {
         // PORT_NOTE: This is TODO item is copied from the JS `selectionOfElement` function.
         // TODO: validate that the subSelection is ok for the element
@@ -801,21 +750,7 @@ impl Selection {
                         "unexpected inline fragment without sub-selections",
                     ));
                 };
-                if let Some(unnecessary_directives) = unnecessary_directives {
-                    let directives = inline_fragment
-                        .directives
-                        .iter()
-                        .filter(|dir| !unnecessary_directives.contains(dir.as_ref()))
-                        .cloned()
-                        .collect::<DirectiveList>();
-                    Ok(InlineFragmentSelection::new(
-                        inline_fragment.with_updated_directives(directives),
-                        sub_selections,
-                    )
-                    .into())
-                } else {
-                    Ok(InlineFragmentSelection::new(inline_fragment, sub_selections).into())
-                }
+                Ok(InlineFragmentSelection::new(inline_fragment, sub_selections).into())
             }
         }
     }
@@ -934,18 +869,6 @@ impl Selection {
                 Selection::FragmentSpread(_x) => Err(FederationError::internal(
                     "Unexpected fragment spread in Selection::conditions()",
                 )),
-            }
-        }
-    }
-
-    pub(crate) fn has_defer(&self) -> bool {
-        match self {
-            Selection::Field(field_selection) => field_selection.has_defer(),
-            Selection::FragmentSpread(fragment_spread_selection) => {
-                fragment_spread_selection.has_defer()
-            }
-            Selection::InlineFragment(inline_fragment_selection) => {
-                inline_fragment_selection.has_defer()
             }
         }
     }
@@ -1100,10 +1023,6 @@ impl Fragment {
                 schema,
             )?,
         })
-    }
-
-    fn has_defer(&self) -> bool {
-        self.selection_set.has_defer()
     }
 }
 
@@ -1545,10 +1464,6 @@ pub(crate) use fragment_spread_selection::FragmentSpreadData;
 pub(crate) use fragment_spread_selection::FragmentSpreadSelection;
 
 impl FragmentSpreadSelection {
-    pub(crate) fn has_defer(&self) -> bool {
-        self.spread.directives.has("defer") || self.selection_set.has_defer()
-    }
-
     /// Copies fragment spread selection and assigns it a new unique selection ID.
     pub(crate) fn with_unique_id(&self) -> Self {
         let mut data = self.spread.data().clone();
@@ -1686,6 +1601,7 @@ mod inline_fragment_selection {
                 selection_set: self.selection_set.clone(),
             }
         }
+
         pub(crate) fn with_updated_directives_and_selection_set(
             &self,
             directives: impl Into<DirectiveList>,
@@ -1931,7 +1847,7 @@ impl SelectionSet {
                         .flat_map(SelectionSet::split_top_level_fields)
                         .filter_map(move |set| {
                             let parent_type = ele.parent_type_position();
-                            Selection::from_element(ele.clone(), Some(set), None)
+                            Selection::from_element(ele.clone(), Some(set))
                                 .ok()
                                 .map(|sel| SelectionSet::from_selection(parent_type, sel))
                         }),
@@ -2051,7 +1967,7 @@ impl SelectionSet {
             type_position,
             selections: Arc::new(SelectionMap::new()),
         };
-        merged.merge_selections_into(normalized_selections.iter(), false)?;
+        merged.merge_selections_into(normalized_selections.iter())?;
         Ok(merged)
     }
 
@@ -2148,7 +2064,7 @@ impl SelectionSet {
             type_position: self.type_position.clone(),
             selections: Arc::new(SelectionMap::new()),
         };
-        expanded.merge_selections_into(expanded_selections.iter(), false)?;
+        expanded.merge_selections_into(expanded_selections.iter())?;
         Ok(expanded)
     }
 
@@ -2522,7 +2438,7 @@ impl SelectionSet {
                 sibling_typename.alias().cloned(),
             );
             let typename_selection =
-                Selection::from_element(field_element.into(), /*subselection*/ None, None)?;
+                Selection::from_element(field_element.into(), /*subselection*/ None)?;
             Ok([typename_selection, updated].into_iter().collect())
         })
     }
@@ -2627,16 +2543,6 @@ impl SelectionSet {
         path: &[Arc<OpPathElement>],
         selection_set: Option<&Arc<SelectionSet>>,
     ) -> Result<(), FederationError> {
-        let mut unnecessary_directives = HashSet::default();
-        self.add_at_path_inner(path, selection_set, &mut unnecessary_directives)
-    }
-
-    fn add_at_path_inner(
-        &mut self,
-        path: &[Arc<OpPathElement>],
-        selection_set: Option<&Arc<SelectionSet>>,
-        unnecessary_directives: &mut HashSet<Node<apollo_compiler::ast::Directive>>,
-    ) -> Result<(), FederationError> {
         // PORT_NOTE: This method was ported from the JS class `SelectionSetUpdates`. Unlike the
         // JS code, this mutates the selection set map in-place.
         match path.split_first() {
@@ -2646,39 +2552,28 @@ impl SelectionSet {
                 let Some(sub_selection_type) = element.sub_selection_type_position()? else {
                     return Err(FederationError::internal("unexpected error: add_at_path encountered a field that is not of a composite type".to_string()));
                 };
-                let target = Arc::make_mut(&mut self.selections);
-                let mut selection = match target.get_mut(&ele.key()) {
-                    Some(selection) => selection,
-                    None => {
-                        let selection = Selection::from_element(
+                let mut selection = Arc::make_mut(&mut self.selections)
+                    .entry(ele.key())
+                    .or_insert(|| {
+                        Selection::from_element(
                             element,
                             // We immediately add a selection afterward to make this selection set
                             // valid.
                             Some(SelectionSet::empty(self.schema.clone(), sub_selection_type)),
-                            Some(&*unnecessary_directives),
-                        )?;
-                        target.entry(selection.key()).or_insert(|| Ok(selection))?
-                    }
-                };
-                unnecessary_directives.extend(
-                    selection
-                        .get_directives_mut()
-                        .iter()
-                        .filter(|d| d.name == "include" || d.name == "skip")
-                        .cloned(),
-                );
+                        )
+                    })?;
                 match &mut selection {
                     SelectionValue::Field(field) => match field.get_selection_set_mut() {
-                        Some(sub_selection) => sub_selection.add_at_path_inner(path, selection_set, unnecessary_directives),
+                        Some(sub_selection) => sub_selection.add_at_path(path, selection_set)?,
                         None => return Err(FederationError::internal("add_at_path encountered a field without a subselection which should never happen".to_string())),
                     },
                     SelectionValue::InlineFragment(fragment) => fragment
                         .get_selection_set_mut()
-                        .add_at_path_inner(path, selection_set, unnecessary_directives),
+                        .add_at_path(path, selection_set)?,
                     SelectionValue::FragmentSpread(_fragment) => {
-                        return Err(FederationError::internal("add_at_path encountered a named fragment spread which should never happen".to_string()))
+                        return Err(FederationError::internal("add_at_path encountered a named fragment spread which should never happen".to_string()));
                     }
-                }?;
+                };
             }
             // If we have no sub-path, we can add the selection.
             Some((ele, &[])) => {
@@ -2697,9 +2592,8 @@ impl SelectionSet {
                         return Ok(());
                     } else {
                         // add leaf
-                        let selection =
-                            Selection::from_element(element, None, Some(&*unnecessary_directives))?;
-                        self.add_local_selection(&selection, true)?
+                        let selection = Selection::from_element(element, None)?;
+                        self.add_local_selection(&selection)?
                     }
                 } else {
                     let selection_set = selection_set
@@ -2714,12 +2608,8 @@ impl SelectionSet {
                         })
                         .transpose()?
                         .map(|selection_set| selection_set.without_unnecessary_fragments());
-                    let selection = Selection::from_element(
-                        element,
-                        selection_set,
-                        Some(&*unnecessary_directives),
-                    )?;
-                    self.add_local_selection(&selection, true)?;
+                    let selection = Selection::from_element(element, selection_set)?;
+                    self.add_local_selection(&selection)?
                 }
             }
             // If we don't have any path, we rebase and merge in the given sub selections at the root.
@@ -2730,23 +2620,6 @@ impl SelectionSet {
             }
         }
         Ok(())
-    }
-
-    /// Removes the @defer directive from all selections without removing that selection.
-    fn without_defer(&mut self) {
-        for (_key, mut selection) in Arc::make_mut(&mut self.selections).iter_mut() {
-            // TODO(@goto-bus-stop): doing this changes the key of the selection!
-            // We have to rebuild the selection map.
-            selection.get_directives_mut().remove_one("defer");
-            if let Some(set) = selection.get_selection_set_mut() {
-                set.without_defer();
-            }
-        }
-        debug_assert!(!self.has_defer());
-    }
-
-    fn has_defer(&self) -> bool {
-        self.selections.values().any(|s| s.has_defer())
     }
 
     // - `self` must be fragment-spread-free.
@@ -2931,34 +2804,45 @@ impl SelectionSet {
         }
     }
 
+    /// Using path-based updates along with selection sets may result in some inefficiencies.
+    /// Specifically, we may end up with some unnecessary top-level inline fragment selections, i.e.
+    /// fragments without any directives and with the type condition equal to (or a supertype of)
+    /// the parent type of the fragment. This method inlines those unnecessary top-level fragments.
+    ///
     /// JS PORT NOTE: In Rust implementation we are doing the selection set updates in-place whereas
     /// JS code was pooling the updates and only apply those when building the final selection set.
     /// See `makeSelectionSet` method for details.
-    ///
-    /// Manipulating selection sets may result in some inefficiencies. As a result we may end up with
-    /// some unnecessary top level inline fragment selections, i.e. fragments without any directives
-    /// and with the type condition same as the parent type that should be inlined.
-    ///
-    /// This method inlines those unnecessary top level fragments only. While the JS code was applying
-    /// this logic recursively, since we are manipulating selections sets in-place we only need to
-    /// apply this normalization at the top level.
     fn without_unnecessary_fragments(&self) -> SelectionSet {
         let parent_type = &self.type_position;
         let mut final_selections = SelectionMap::new();
-        for selection in self.selections.values() {
-            match selection {
-                Selection::InlineFragment(inline_fragment) => {
-                    if inline_fragment.is_unnecessary(parent_type) {
-                        final_selections.extend_ref(&inline_fragment.selection_set.selections);
-                    } else {
+        fn process_selection_set(
+            selection_set: &SelectionSet,
+            final_selections: &mut SelectionMap,
+            parent_type: &CompositeTypeDefinitionPosition,
+            schema: &ValidFederationSchema,
+        ) {
+            for selection in selection_set.selections.values() {
+                match selection {
+                    Selection::InlineFragment(inline_fragment) => {
+                        if inline_fragment.is_unnecessary(parent_type, schema) {
+                            process_selection_set(
+                                &inline_fragment.selection_set,
+                                final_selections,
+                                parent_type,
+                                schema,
+                            );
+                        } else {
+                            final_selections.insert(selection.clone());
+                        }
+                    }
+                    _ => {
                         final_selections.insert(selection.clone());
                     }
                 }
-                _ => {
-                    final_selections.insert(selection.clone());
-                }
             }
         }
+        process_selection_set(self, &mut final_selections, parent_type, &self.schema);
+
         SelectionSet {
             schema: self.schema.clone(),
             type_position: parent_type.clone(),
@@ -2991,6 +2875,15 @@ impl IntoIterator for SelectionSet {
 
     fn into_iter(self) -> Self::IntoIter {
         Arc::unwrap_or_clone(self.selections).into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a SelectionSet {
+    type Item = <&'a IndexMap<SelectionKey, Selection> as IntoIterator>::Item;
+    type IntoIter = <&'a IndexMap<SelectionKey, Selection> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.selections.as_ref().into_iter()
     }
 }
 
@@ -3285,10 +3178,6 @@ impl FieldSelection {
         }
     }
 
-    pub(crate) fn has_defer(&self) -> bool {
-        self.field.has_defer() || self.selection_set.as_ref().is_some_and(|s| s.has_defer())
-    }
-
     pub(crate) fn any_element(
         &self,
         predicate: &mut impl FnMut(OpPathElement) -> Result<bool, FederationError>,
@@ -3306,11 +3195,6 @@ impl FieldSelection {
 }
 
 impl Field {
-    pub(crate) fn has_defer(&self) -> bool {
-        // @defer cannot be on field at the moment
-        false
-    }
-
     pub(crate) fn parent_type_position(&self) -> CompositeTypeDefinitionPosition {
         self.field_position.parent()
     }
@@ -3455,25 +3339,26 @@ impl InlineFragmentSelection {
             .unwrap_or(&self.inline_fragment.parent_type_position)
     }
 
-    pub(crate) fn has_defer(&self) -> bool {
-        self.inline_fragment.directives.has("defer")
-            || self
-                .selection_set
-                .selections
-                .values()
-                .any(|s| s.has_defer())
-    }
-
     /// Returns true if this inline fragment selection is "unnecessary" and should be inlined.
     ///
     /// Fragment is unnecessary if following are true:
     /// * it has no applied directives
-    /// * has no type condition OR type condition is same as passed in `maybe_parent`
-    fn is_unnecessary(&self, maybe_parent: &CompositeTypeDefinitionPosition) -> bool {
-        let inline_fragment_type_condition = self.inline_fragment.type_condition_position.clone();
-        self.inline_fragment.directives.is_empty()
-            && (inline_fragment_type_condition.is_none()
-                || inline_fragment_type_condition.is_some_and(|t| t == *maybe_parent))
+    /// * has no type condition OR type condition is equal to (or a supertype of) `parent`
+    fn is_unnecessary(
+        &self,
+        parent: &CompositeTypeDefinitionPosition,
+        schema: &ValidFederationSchema,
+    ) -> bool {
+        if !self.inline_fragment.directives.is_empty() {
+            return false;
+        }
+        let Some(type_condition) = &self.inline_fragment.type_condition_position else {
+            return true;
+        };
+        type_condition == parent
+            || schema
+                .schema()
+                .is_subtype(type_condition.type_name(), parent.type_name())
     }
 
     pub(crate) fn any_element(
@@ -3665,6 +3550,456 @@ impl NamedFragments {
             };
         }
         true
+    }
+}
+
+// @defer handling: removing and normalization
+
+const DEFER_DIRECTIVE_NAME: Name = name!("defer");
+const DEFER_LABEL_ARGUMENT_NAME: Name = name!("label");
+const DEFER_IF_ARGUMENT_NAME: Name = name!("if");
+
+pub(crate) struct NormalizedDefer {
+    /// The operation modified to normalize @defer applications.
+    pub operation: Operation,
+    /// True if the operation contains any @defer applications.
+    pub has_defers: bool,
+    /// `@defer(label:)` values assigned by normalization.
+    pub assigned_defer_labels: IndexSet<String>,
+    /// Map of variable conditions to the @defer labels depending on those conditions.
+    pub defer_conditions: IndexMap<Name, IndexSet<String>>,
+}
+
+struct DeferNormalizer {
+    used_labels: HashSet<String>,
+    assigned_labels: IndexSet<String>,
+    conditions: IndexMap<Name, IndexSet<String>>,
+    label_offset: usize,
+}
+
+impl DeferNormalizer {
+    fn new(selection_set: &SelectionSet) -> Result<Self, FederationError> {
+        let mut digest = Self {
+            used_labels: HashSet::default(),
+            label_offset: 0,
+            assigned_labels: IndexSet::default(),
+            conditions: IndexMap::default(),
+        };
+        let mut stack = selection_set
+            .into_iter()
+            .map(|(_, sel)| sel)
+            .collect::<Vec<_>>();
+        while let Some(selection) = stack.pop() {
+            if let Selection::InlineFragment(inline) = selection {
+                if let Some(args) = inline.inline_fragment.data().defer_directive_arguments()? {
+                    let DeferDirectiveArguments { label, if_: _ } = args;
+                    if let Some(label) = label {
+                        digest.used_labels.insert(label);
+                    }
+                }
+            }
+            stack.extend(
+                selection
+                    .selection_set()
+                    .into_iter()
+                    .flatten()
+                    .map(|(_, sel)| sel),
+            );
+        }
+        Ok(digest)
+    }
+
+    fn get_label(&mut self) -> String {
+        loop {
+            let digest = format!("qp__{}", self.label_offset);
+            self.label_offset += 1;
+            if !self.used_labels.contains(&digest) {
+                self.assigned_labels.insert(digest.clone());
+                return digest;
+            }
+        }
+    }
+
+    fn register_condition(&mut self, label: String, cond: Name) {
+        self.conditions.entry(cond).or_default().insert(label);
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum DeferFilter<'a> {
+    All,
+    Labels(&'a IndexSet<String>),
+}
+
+impl DeferFilter<'_> {
+    fn remove_defer(&self, directive_list: &mut DirectiveList, schema: &apollo_compiler::Schema) {
+        match self {
+            Self::All => {
+                directive_list.remove_one(&DEFER_DIRECTIVE_NAME);
+            }
+            Self::Labels(set) => {
+                let label = directive_list
+                    .get(&DEFER_DIRECTIVE_NAME)
+                    .and_then(|directive| {
+                        directive
+                            .argument_by_name(&DEFER_LABEL_ARGUMENT_NAME, schema)
+                            .ok()
+                    })
+                    .and_then(|arg| arg.as_str());
+                if label.is_some_and(|label| set.contains(label)) {
+                    directive_list.remove_one(&DEFER_DIRECTIVE_NAME);
+                }
+            }
+        }
+    }
+}
+
+impl Fragment {
+    /// Returns true if the fragment's selection set contains the @defer directive.
+    fn has_defer(&self) -> bool {
+        self.selection_set.has_defer()
+    }
+
+    fn without_defer(
+        &self,
+        filter: DeferFilter<'_>,
+        named_fragments: &NamedFragments,
+    ) -> Result<Self, FederationError> {
+        let selection_set = self.selection_set.without_defer(filter, named_fragments)?;
+        Ok(Fragment {
+            schema: self.schema.clone(),
+            name: self.name.clone(),
+            type_condition_position: self.type_condition_position.clone(),
+            directives: self.directives.clone(),
+            selection_set,
+        })
+    }
+}
+
+impl NamedFragments {
+    /// Returns true if any fragment uses the @defer directive.
+    fn has_defer(&self) -> bool {
+        self.iter().any(|fragment| fragment.has_defer())
+    }
+
+    /// Creates new fragment definitions with the @defer directive removed.
+    fn without_defer(&self, filter: DeferFilter<'_>) -> Result<Self, FederationError> {
+        let mut new_fragments = NamedFragments {
+            fragments: Default::default(),
+        };
+        // The iteration is in dependency order: when we iterate a fragment A that depends on
+        // fragment B, we know that we have already processed fragment B.
+        // This implies that all references to other fragments will already be part of
+        // `new_fragments`. Note that we must process all fragments that depend on each other, even
+        // if a fragment doesn't actually use @defer itself, to make sure that the `.selection_set`
+        // values on each selection are up to date.
+        for fragment in self.iter() {
+            let fragment = fragment.without_defer(filter, &new_fragments)?;
+            new_fragments.insert(fragment);
+        }
+        Ok(new_fragments)
+    }
+}
+
+impl FieldSelection {
+    /// Returns true if the selection or any of its subselections uses the @defer directive.
+    fn has_defer(&self) -> bool {
+        // Fields don't have @defer, so we only check the subselection.
+        self.selection_set.as_ref().is_some_and(|s| s.has_defer())
+    }
+}
+
+impl FragmentSpread {
+    /// Returns true if the fragment spread has a @defer directive.
+    fn has_defer(&self) -> bool {
+        self.directives.has(&DEFER_DIRECTIVE_NAME)
+    }
+
+    fn without_defer(&self, filter: DeferFilter<'_>) -> Result<Self, FederationError> {
+        let mut data = self.data().clone();
+        filter.remove_defer(&mut data.directives, data.schema.schema());
+        Ok(Self::new(data))
+    }
+}
+
+impl FragmentSpreadSelection {
+    fn has_defer(&self) -> bool {
+        self.spread.has_defer() || self.selection_set.has_defer()
+    }
+}
+
+impl InlineFragment {
+    /// Returns true if the fragment has a @defer directive.
+    fn has_defer(&self) -> bool {
+        self.directives.has(&DEFER_DIRECTIVE_NAME)
+    }
+
+    fn without_defer(&self, filter: DeferFilter<'_>) -> Result<Self, FederationError> {
+        let mut data = self.data().clone();
+        filter.remove_defer(&mut data.directives, data.schema.schema());
+        Ok(Self::new(data))
+    }
+}
+
+impl InlineFragmentSelection {
+    /// Returns true if the selection or any of its subselections uses the @defer directive.
+    fn has_defer(&self) -> bool {
+        self.inline_fragment.has_defer()
+            || self
+                .selection_set
+                .selections
+                .values()
+                .any(|s| s.has_defer())
+    }
+
+    fn normalize_defer(self, normalizer: &mut DeferNormalizer) -> Result<Self, FederationError> {
+        // This should always be `Some`
+        let Some(args) = self.inline_fragment.defer_directive_arguments()? else {
+            return Ok(self);
+        };
+
+        let mut remove_defer = false;
+        let mut args_copy = args.clone();
+        if let Some(BooleanOrVariable::Boolean(b)) = &args.if_ {
+            if *b {
+                args_copy.if_ = None;
+            } else {
+                remove_defer = true;
+            }
+        }
+
+        if args_copy.label.is_none() {
+            args_copy.label = Some(normalizer.get_label());
+        }
+
+        if remove_defer {
+            let directives: DirectiveList = self
+                .inline_fragment
+                .directives
+                .iter()
+                .filter(|dir| dir.name != "defer")
+                .cloned()
+                .collect();
+            return Ok(self.with_updated_directives(directives));
+        }
+
+        // NOTE: If this is `Some`, it will be a variable.
+        if let Some(BooleanOrVariable::Variable(cond)) = args_copy.if_.clone() {
+            normalizer.register_condition(args_copy.label.clone().unwrap(), cond);
+        }
+
+        if args_copy == args {
+            Ok(self)
+        } else {
+            let directives: DirectiveList = self
+                .inline_fragment
+                .directives
+                .iter()
+                .map(|dir| {
+                    if dir.name == "defer" {
+                        let mut dir: Directive = (**dir).clone();
+                        dir.arguments.retain(|arg| {
+                            ![DEFER_LABEL_ARGUMENT_NAME, DEFER_IF_ARGUMENT_NAME].contains(&arg.name)
+                        });
+                        dir.arguments.push(
+                            (DEFER_LABEL_ARGUMENT_NAME, args_copy.label.clone().unwrap()).into(),
+                        );
+                        if let Some(cond) = args_copy.if_.clone() {
+                            dir.arguments.push((DEFER_IF_ARGUMENT_NAME, cond).into());
+                        }
+                        Node::new(dir)
+                    } else {
+                        dir.clone()
+                    }
+                })
+                .collect();
+            Ok(self.with_updated_directives(directives))
+        }
+    }
+}
+
+impl Selection {
+    /// Returns true if the selection or any of its subselections uses the @defer directive.
+    pub(crate) fn has_defer(&self) -> bool {
+        match self {
+            Selection::Field(field_selection) => field_selection.has_defer(),
+            Selection::FragmentSpread(fragment_spread_selection) => {
+                fragment_spread_selection.has_defer()
+            }
+            Selection::InlineFragment(inline_fragment_selection) => {
+                inline_fragment_selection.has_defer()
+            }
+        }
+    }
+
+    fn without_defer(
+        &self,
+        filter: DeferFilter<'_>,
+        named_fragments: &NamedFragments,
+    ) -> Result<Self, FederationError> {
+        match self {
+            Selection::Field(field) => {
+                let Some(selection_set) = field
+                    .selection_set
+                    .as_ref()
+                    .filter(|selection_set| selection_set.has_defer())
+                else {
+                    return Ok(Selection::Field(Arc::clone(field)));
+                };
+
+                Ok(field
+                    .with_updated_selection_set(Some(
+                        selection_set.without_defer(filter, named_fragments)?,
+                    ))
+                    .into())
+            }
+            Selection::FragmentSpread(frag) => {
+                let spread = frag.spread.without_defer(filter)?;
+                Ok(FragmentSpreadSelection::new(spread, named_fragments)?.into())
+            }
+            Selection::InlineFragment(frag) => {
+                let inline_fragment = frag.inline_fragment.without_defer(filter)?;
+                let selection_set = frag.selection_set.without_defer(filter, named_fragments)?;
+                Ok(InlineFragmentSelection::new(inline_fragment, selection_set).into())
+            }
+        }
+    }
+
+    fn normalize_defer(self, normalizer: &mut DeferNormalizer) -> Result<Self, FederationError> {
+        match self {
+            Selection::Field(field) => Ok(Self::Field(Arc::new(
+                field.with_updated_selection_set(
+                    field
+                        .selection_set
+                        .clone()
+                        .map(|set| set.normalize_defer(normalizer))
+                        .transpose()?,
+                ),
+            ))),
+            Selection::FragmentSpread(_spread) => {
+                Err(FederationError::internal("unexpected fragment spread"))
+            }
+            Selection::InlineFragment(inline) => inline
+                .with_updated_selection_set(
+                    inline.selection_set.clone().normalize_defer(normalizer)?,
+                )
+                .normalize_defer(normalizer)
+                .map(|inline| Self::InlineFragment(Arc::new(inline))),
+        }
+    }
+}
+
+impl SelectionSet {
+    /// Create a new selection set without @defer directive applications.
+    fn without_defer(
+        &self,
+        filter: DeferFilter<'_>,
+        named_fragments: &NamedFragments,
+    ) -> Result<Self, FederationError> {
+        let mut without_defer =
+            SelectionSet::empty(self.schema.clone(), self.type_position.clone());
+        for selection in self.selections.values() {
+            without_defer
+                .add_local_selection(&selection.without_defer(filter, named_fragments)?)?;
+        }
+        Ok(without_defer)
+    }
+
+    fn has_defer(&self) -> bool {
+        self.selections.values().any(|s| s.has_defer())
+    }
+
+    fn normalize_defer(self, normalizer: &mut DeferNormalizer) -> Result<Self, FederationError> {
+        let Self {
+            schema,
+            type_position,
+            selections,
+        } = self;
+        Arc::unwrap_or_clone(selections)
+            .into_iter()
+            .map(|(_, sel)| sel.normalize_defer(normalizer))
+            .try_collect()
+            .map(|selections| Self {
+                schema,
+                type_position,
+                selections: Arc::new(selections),
+            })
+    }
+}
+
+impl Operation {
+    fn has_defer(&self) -> bool {
+        self.selection_set.has_defer()
+            || self
+                .named_fragments
+                .fragments
+                .values()
+                .any(|f| f.has_defer())
+    }
+
+    /// Create a new operation without @defer directive applications.
+    pub(crate) fn without_defer(mut self) -> Result<Self, FederationError> {
+        if self.has_defer() {
+            let named_fragments = self.named_fragments.without_defer(DeferFilter::All)?;
+            self.selection_set = self
+                .selection_set
+                .without_defer(DeferFilter::All, &named_fragments)?;
+            self.named_fragments = named_fragments;
+        }
+        debug_assert!(!self.has_defer());
+        Ok(self)
+    }
+
+    /// Create a new operation without specific @defer(label:) directive applications.
+    pub(crate) fn reduce_defer(
+        mut self,
+        labels: &IndexSet<String>,
+    ) -> Result<Self, FederationError> {
+        if self.has_defer() {
+            let named_fragments = self
+                .named_fragments
+                .without_defer(DeferFilter::Labels(labels))?;
+            self.selection_set = self
+                .selection_set
+                .without_defer(DeferFilter::Labels(labels), &named_fragments)?;
+            self.named_fragments = named_fragments;
+        }
+        Ok(self)
+    }
+
+    /// Returns this operation but modified to "normalize" all the @defer applications.
+    ///
+    /// "Normalized" in this context means that all the `@defer` application in the resulting
+    /// operation will:
+    ///  - have a (unique) label. Which implies that this method generates a label for any `@defer`
+    ///    not having a label.
+    ///  - have a non-trivial `if` condition, if any. By non-trivial, we mean that the condition
+    ///    will be a variable and not an hard-coded `true` or `false`. To do this, this method will
+    ///    remove the condition of any `@defer` that has `if: true`, and will completely remove any
+    ///    `@defer` application that has `if: false`.
+    ///
+    /// Defer normalization does not support named fragment definitions, so it must only be called
+    /// if the operation had its fragments expanded. In effect, it means that this method may
+    /// modify the operation in a way that prevents fragments from being reused in
+    /// `.reuse_fragments()`.
+    pub(crate) fn with_normalized_defer(mut self) -> Result<NormalizedDefer, FederationError> {
+        if self.has_defer() {
+            let mut normalizer = DeferNormalizer::new(&self.selection_set)?;
+            self.selection_set = self.selection_set.normalize_defer(&mut normalizer)?;
+            Ok(NormalizedDefer {
+                operation: self,
+                has_defers: true,
+                assigned_defer_labels: normalizer.assigned_labels,
+                defer_conditions: normalizer.conditions,
+            })
+        } else {
+            Ok(NormalizedDefer {
+                operation: self,
+                has_defers: false,
+                assigned_defer_labels: IndexSet::default(),
+                defer_conditions: IndexMap::default(),
+            })
+        }
     }
 }
 
