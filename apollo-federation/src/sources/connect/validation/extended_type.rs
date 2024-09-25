@@ -245,7 +245,7 @@ fn validate_field(
         ));
 
         let Some((http_arg, http_arg_node)) = connect_directive
-            .argument_by_name(&HTTP_ARGUMENT_NAME)
+            .specified_argument_by_name(&HTTP_ARGUMENT_NAME)
             .and_then(|arg| Some((arg.as_object()?, arg)))
         else {
             errors.push(Message {

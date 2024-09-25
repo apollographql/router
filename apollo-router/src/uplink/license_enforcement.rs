@@ -259,13 +259,13 @@ impl LicenseEnforcementReport {
             .directives
             .get_all("join__directive")
             .filter(|join| {
-                join.argument_by_name("name")
+                join.specified_argument_by_name("name")
                     .and_then(|name| name.as_str())
                     .map(|name| name == LINK_DIRECTIVE_NAME)
                     .unwrap_or_default()
             })
             .filter_map(|join| {
-                join.argument_by_name("args")
+                join.specified_argument_by_name("args")
                     .and_then(|arg| arg.as_object())
             })
             .filter_map(|link| {
