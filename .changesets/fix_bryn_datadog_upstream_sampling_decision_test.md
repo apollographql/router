@@ -9,7 +9,7 @@ Previously a `x-datadog-sampling-priority` of `-1` would be converted to `0` for
 
 To get accurate APM metrics all spans must be sent to the datadog agent with a `psr` or `sampling.priority` attribute set appropriately to record the sampling decision.
 
-`datadog_agent_sampling` option in the router.yaml enables this behavior and should be used when exporting to the datadog agent via otlp. 
+`datadog_agent_sampling` option in the router.yaml enables this behavior and should be used when exporting to the datadog agent via OTLP. 
 It is automatically enabled for the Datadog native exporter.
 
 ```yaml
@@ -17,10 +17,33 @@ telemetry:
   exporters:
     tracing:
       common:
-        # Only 10 percent of spans will be sent to the Datadog agent with `psr` or `sampling.priority` 1.
+        # Only 10 percent of spans will be forwarded from the Datadog agent to Datadog.
         sampler: 0.1
         # Send all spans to the Datadog agent. 
         datadog_agent_sampling: true
+      
+      # Example OTLP exporter configuration
+      otlp:
+        enabled: true
+        # Optional batch processor setting, this will enable the batch processor to send concurrent requests in a high load scenario.
+        batch_processor:
+          max_concurrent_exports: 100
+
+      # Example Datadog native exporter configuration 
+      datadog:
+        enabled: true
+        
+        # Optional batch processor setting, this will enable the batch processor to send concurrent requests in a high load scenario.
+        batch_processor:
+          max_concurrent_exports: 100
 ```
+
+By using these options, you can decrease your Datadog bill as you will only be sending a percentage of spans from the Datadog agent to datadog. 
+
+> [!IMPORTANT]
+> Users using OTLP exporter must enable `datadog_agent_sampling` to get accurate APM metrics.
+
+> [!IMPORTANT]
+> Sending all spans to the datadog agent may require that you tweak the `batch_processor` settings in your exporter config. This applies to both OTLP and the Datadog native exporter.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/6017
