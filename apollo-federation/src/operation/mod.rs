@@ -201,68 +201,6 @@ pub struct Operation {
     pub(crate) named_fragments: NamedFragments,
 }
 
-pub(crate) struct NormalizedDefer {
-    pub operation: Operation,
-    pub has_defers: bool,
-    pub assigned_defer_labels: IndexSet<String>,
-    pub defer_conditions: IndexMap<Name, IndexSet<String>>,
-}
-
-struct DeferNormalizer {
-    used_labels: HashSet<String>,
-    assigned_labels: IndexSet<String>,
-    conditions: IndexMap<Name, IndexSet<String>>,
-    label_offset: usize,
-}
-
-impl DeferNormalizer {
-    fn new(selection_set: &SelectionSet) -> Result<Self, FederationError> {
-        let mut digest = Self {
-            used_labels: HashSet::default(),
-            label_offset: 0,
-            assigned_labels: IndexSet::default(),
-            conditions: IndexMap::default(),
-        };
-        let mut stack = selection_set
-            .into_iter()
-            .map(|(_, sel)| sel)
-            .collect::<Vec<_>>();
-        while let Some(selection) = stack.pop() {
-            if let Selection::InlineFragment(inline) = selection {
-                if let Some(args) = inline.inline_fragment.data().defer_directive_arguments()? {
-                    let DeferDirectiveArguments { label, if_: _ } = args;
-                    if let Some(label) = label {
-                        digest.used_labels.insert(label);
-                    }
-                }
-            }
-            stack.extend(
-                selection
-                    .selection_set()
-                    .into_iter()
-                    .flatten()
-                    .map(|(_, sel)| sel),
-            );
-        }
-        Ok(digest)
-    }
-
-    fn get_label(&mut self) -> String {
-        loop {
-            let digest = format!("qp__{}", self.label_offset);
-            self.label_offset += 1;
-            if !self.used_labels.contains(&digest) {
-                self.assigned_labels.insert(digest.clone());
-                return digest;
-            }
-        }
-    }
-
-    fn register_condition(&mut self, label: String, cond: Name) {
-        self.conditions.entry(cond).or_default().insert(label);
-    }
-}
-
 impl Operation {
     /// Parse an operation from a source string.
     #[cfg(any(test, doc))]
@@ -3616,9 +3554,75 @@ impl NamedFragments {
     }
 }
 
-// @defer handling
+// @defer handling: removing and normalization
 
 const DEFER_DIRECTIVE_NAME: &str = "defer";
+
+pub(crate) struct NormalizedDefer {
+    /// The operation modified to normalize @defer applications.
+    pub operation: Operation,
+    /// True if the operation contains any @defer applications.
+    pub has_defers: bool,
+    /// `@defer(label:)` values assigned by normalization.
+    pub assigned_defer_labels: IndexSet<String>,
+    /// Map of variable conditions to the @defer labels depending on those conditions.
+    pub defer_conditions: IndexMap<Name, IndexSet<String>>,
+}
+
+struct DeferNormalizer {
+    used_labels: HashSet<String>,
+    assigned_labels: IndexSet<String>,
+    conditions: IndexMap<Name, IndexSet<String>>,
+    label_offset: usize,
+}
+
+impl DeferNormalizer {
+    fn new(selection_set: &SelectionSet) -> Result<Self, FederationError> {
+        let mut digest = Self {
+            used_labels: HashSet::default(),
+            label_offset: 0,
+            assigned_labels: IndexSet::default(),
+            conditions: IndexMap::default(),
+        };
+        let mut stack = selection_set
+            .into_iter()
+            .map(|(_, sel)| sel)
+            .collect::<Vec<_>>();
+        while let Some(selection) = stack.pop() {
+            if let Selection::InlineFragment(inline) = selection {
+                if let Some(args) = inline.inline_fragment.data().defer_directive_arguments()? {
+                    let DeferDirectiveArguments { label, if_: _ } = args;
+                    if let Some(label) = label {
+                        digest.used_labels.insert(label);
+                    }
+                }
+            }
+            stack.extend(
+                selection
+                    .selection_set()
+                    .into_iter()
+                    .flatten()
+                    .map(|(_, sel)| sel),
+            );
+        }
+        Ok(digest)
+    }
+
+    fn get_label(&mut self) -> String {
+        loop {
+            let digest = format!("qp__{}", self.label_offset);
+            self.label_offset += 1;
+            if !self.used_labels.contains(&digest) {
+                self.assigned_labels.insert(digest.clone());
+                return digest;
+            }
+        }
+    }
+
+    fn register_condition(&mut self, label: String, cond: Name) {
+        self.conditions.entry(cond).or_default().insert(label);
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 enum DeferFilter<'a> {
