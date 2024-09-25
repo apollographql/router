@@ -49,6 +49,12 @@
             "enterprise"
           ]
         ],
+        "Native Query Planner" : [
+          "/executing-operations/native-query-planner",
+          [
+            "preview"
+          ]
+        ],
         "Privacy and Data Collection": "/privacy"
       }
     },
