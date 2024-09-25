@@ -1676,6 +1676,247 @@ mod tests {
     }
 
     #[test]
+    fn test_inline_paths_with_subselections() {
+        let data = json!({
+            "id": 123,
+            "created": "2021-01-01T00:00:00Z",
+            "model": "gpt-4o",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "The capital of Australia is Canberra.",
+                },
+            }, {
+                "index": 1,
+                "message": {
+                    "role": "assistant",
+                    "content": "The capital of Australia is Sydney.",
+                },
+            }],
+        });
+
+        {
+            let expected = (
+                Some(json!({
+                    "id": 123,
+                    "created": "2021-01-01T00:00:00Z",
+                    "model": "gpt-4o",
+                    "role": "assistant",
+                    "content": "The capital of Australia is Canberra.",
+                })),
+                vec![],
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    id
+                    created
+                    model
+                    role: choices->first.message.role
+                    content: choices->first.message.content
+                "#
+                )
+                .apply_to(&data),
+                expected.clone(),
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    id
+                    created
+                    model
+                    choices->first.message {
+                        role
+                        content
+                    }
+                "#
+                )
+                .apply_to(&data),
+                expected.clone(),
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    id
+                    choices->first.message {
+                        role
+                        content
+                    }
+                    created
+                    model
+                "#
+                )
+                .apply_to(&data),
+                expected.clone(),
+            );
+        }
+
+        {
+            let expected = (
+                Some(json!({
+                    "id": 123,
+                    "created": "2021-01-01T00:00:00Z",
+                    "model": "gpt-4o",
+                    "role": "assistant",
+                    "message": "The capital of Australia is Sydney.",
+                })),
+                vec![],
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    id
+                    created
+                    model
+                    role: choices->last.message.role
+                    message: choices->last.message.content
+                "#
+                )
+                .apply_to(&data),
+                expected.clone(),
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    id
+                    created
+                    model
+                    choices->last.message {
+                        role
+                        message: content
+                    }
+                "#
+                )
+                .apply_to(&data),
+                expected.clone(),
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    created
+                    choices->last.message {
+                        message: content
+                        role
+                    }
+                    model
+                    id
+                "#
+                )
+                .apply_to(&data),
+                expected.clone(),
+            );
+        }
+
+        {
+            let expected = (
+                Some(json!({
+                    "id": 123,
+                    "created": "2021-01-01T00:00:00Z",
+                    "model": "gpt-4o",
+                    "role": "assistant",
+                    "correct": "The capital of Australia is Canberra.",
+                    "incorrect": "The capital of Australia is Sydney.",
+                })),
+                vec![],
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    id
+                    created
+                    model
+                    role: choices->first.message.role
+                    correct: choices->first.message.content
+                    incorrect: choices->last.message.content
+                "#
+                )
+                .apply_to(&data),
+                expected.clone(),
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    id
+                    created
+                    model
+                    choices->first.message {
+                        role
+                        correct: content
+                    }
+                    choices->last.message {
+                        incorrect: content
+                    }
+                "#
+                )
+                .apply_to(&data),
+                expected.clone(),
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    id
+                    created
+                    model
+                    choices->first.message {
+                        role
+                        correct: content
+                    }
+                    incorrect: choices->last.message.content
+                "#
+                )
+                .apply_to(&data),
+                expected.clone(),
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    id
+                    created
+                    model
+                    choices->first.message {
+                        correct: content
+                    }
+                    choices->last.message {
+                        role
+                        incorrect: content
+                    }
+                "#
+                )
+                .apply_to(&data),
+                expected.clone(),
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    id
+                    created
+                    correct: choices->first.message.content
+                    choices->last.message {
+                        role
+                        incorrect: content
+                    }
+                    model
+                "#
+                )
+                .apply_to(&data),
+                expected.clone(),
+            );
+        }
+    }
+
+    #[test]
     fn test_apply_to_non_identifier_properties() {
         let data = json!({
             "not an identifier": [

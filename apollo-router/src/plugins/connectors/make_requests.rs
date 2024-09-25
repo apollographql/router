@@ -1054,15 +1054,17 @@ mod tests {
                     SubSelection {
                         selections: [
                             Path(
-                                Alias {
-                                    name: WithRange {
-                                        node: Field(
-                                            "__typename",
-                                        ),
+                                Some(
+                                    Alias {
+                                        name: WithRange {
+                                            node: Field(
+                                                "__typename",
+                                            ),
+                                            range: None,
+                                        },
                                         range: None,
                                     },
-                                    range: None,
-                                },
+                                ),
                                 PathSelection {
                                     path: WithRange {
                                         node: Var(
@@ -1163,15 +1165,17 @@ mod tests {
                     SubSelection {
                         selections: [
                             Path(
-                                Alias {
-                                    name: WithRange {
-                                        node: Field(
-                                            "__typename",
-                                        ),
+                                Some(
+                                    Alias {
+                                        name: WithRange {
+                                            node: Field(
+                                                "__typename",
+                                            ),
+                                            range: None,
+                                        },
                                         range: None,
                                     },
-                                    range: None,
-                                },
+                                ),
                                 PathSelection {
                                     path: WithRange {
                                         node: Var(

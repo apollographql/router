@@ -1,0 +1,228 @@
+---
+source: apollo-federation/src/sources/connect/json_selection/parser.rs
+expression: "selection!(r#\"\n            id\n            created\n            choices->first.message { content role }\n            model\n            choices->last.message { lastContent: content }\n        \"#)"
+---
+Named(
+    SubSelection {
+        selections: [
+            Field(
+                None,
+                WithRange {
+                    node: Field(
+                        "id",
+                    ),
+                    range: Some(
+                        13..15,
+                    ),
+                },
+                None,
+            ),
+            Field(
+                None,
+                WithRange {
+                    node: Field(
+                        "created",
+                    ),
+                    range: Some(
+                        28..35,
+                    ),
+                },
+                None,
+            ),
+            Path(
+                None,
+                PathSelection {
+                    path: WithRange {
+                        node: Key(
+                            WithRange {
+                                node: Field(
+                                    "choices",
+                                ),
+                                range: Some(
+                                    48..55,
+                                ),
+                            },
+                            WithRange {
+                                node: Method(
+                                    WithRange {
+                                        node: "first",
+                                        range: Some(
+                                            57..62,
+                                        ),
+                                    },
+                                    None,
+                                    WithRange {
+                                        node: Key(
+                                            WithRange {
+                                                node: Field(
+                                                    "message",
+                                                ),
+                                                range: Some(
+                                                    63..70,
+                                                ),
+                                            },
+                                            WithRange {
+                                                node: Selection(
+                                                    SubSelection {
+                                                        selections: [
+                                                            Field(
+                                                                None,
+                                                                WithRange {
+                                                                    node: Field(
+                                                                        "content",
+                                                                    ),
+                                                                    range: Some(
+                                                                        73..80,
+                                                                    ),
+                                                                },
+                                                                None,
+                                                            ),
+                                                            Field(
+                                                                None,
+                                                                WithRange {
+                                                                    node: Field(
+                                                                        "role",
+                                                                    ),
+                                                                    range: Some(
+                                                                        81..85,
+                                                                    ),
+                                                                },
+                                                                None,
+                                                            ),
+                                                        ],
+                                                        star: None,
+                                                        range: Some(
+                                                            71..87,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    71..87,
+                                                ),
+                                            },
+                                        ),
+                                        range: Some(
+                                            62..87,
+                                        ),
+                                    },
+                                ),
+                                range: Some(
+                                    55..87,
+                                ),
+                            },
+                        ),
+                        range: Some(
+                            48..87,
+                        ),
+                    },
+                },
+            ),
+            Field(
+                None,
+                WithRange {
+                    node: Field(
+                        "model",
+                    ),
+                    range: Some(
+                        100..105,
+                    ),
+                },
+                None,
+            ),
+            Path(
+                None,
+                PathSelection {
+                    path: WithRange {
+                        node: Key(
+                            WithRange {
+                                node: Field(
+                                    "choices",
+                                ),
+                                range: Some(
+                                    118..125,
+                                ),
+                            },
+                            WithRange {
+                                node: Method(
+                                    WithRange {
+                                        node: "last",
+                                        range: Some(
+                                            127..131,
+                                        ),
+                                    },
+                                    None,
+                                    WithRange {
+                                        node: Key(
+                                            WithRange {
+                                                node: Field(
+                                                    "message",
+                                                ),
+                                                range: Some(
+                                                    132..139,
+                                                ),
+                                            },
+                                            WithRange {
+                                                node: Selection(
+                                                    SubSelection {
+                                                        selections: [
+                                                            Field(
+                                                                Some(
+                                                                    Alias {
+                                                                        name: WithRange {
+                                                                            node: Field(
+                                                                                "lastContent",
+                                                                            ),
+                                                                            range: Some(
+                                                                                142..153,
+                                                                            ),
+                                                                        },
+                                                                        range: Some(
+                                                                            142..154,
+                                                                        ),
+                                                                    },
+                                                                ),
+                                                                WithRange {
+                                                                    node: Field(
+                                                                        "content",
+                                                                    ),
+                                                                    range: Some(
+                                                                        155..162,
+                                                                    ),
+                                                                },
+                                                                None,
+                                                            ),
+                                                        ],
+                                                        star: None,
+                                                        range: Some(
+                                                            140..164,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    140..164,
+                                                ),
+                                            },
+                                        ),
+                                        range: Some(
+                                            131..164,
+                                        ),
+                                    },
+                                ),
+                                range: Some(
+                                    125..164,
+                                ),
+                            },
+                        ),
+                        range: Some(
+                            118..164,
+                        ),
+                    },
+                },
+            ),
+        ],
+        star: None,
+        range: Some(
+            13..164,
+        ),
+    },
+)

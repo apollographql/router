@@ -2394,6 +2394,43 @@ mod tests {
     }
 
     #[test]
+    fn test_path_with_subselection() {
+        assert_debug_snapshot!(selection!(
+            r#"
+            choices->first.message { content role }
+        "#
+        ));
+
+        assert_debug_snapshot!(selection!(
+            r#"
+            id
+            created
+            choices->first.message { content role }
+            model
+        "#
+        ));
+
+        assert_debug_snapshot!(selection!(
+            r#"
+            id
+            created
+            choices->first.message { content role }
+            model
+            choices->last.message { lastContent: content }
+        "#
+        ));
+
+        assert_debug_snapshot!(JSONSelection::parse(
+            r#"
+            id
+            created
+            choices->first.message
+            model
+        "#
+        ));
+    }
+
+    #[test]
     fn test_subselection() {
         fn check_parsed(input: &str, expected: SubSelection) {
             let (remainder, parsed) = SubSelection::parse(Span::new(input)).unwrap();
