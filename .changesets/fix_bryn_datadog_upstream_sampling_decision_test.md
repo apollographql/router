@@ -17,7 +17,7 @@ telemetry:
   exporters:
     tracing:
       common:
-        # Only 10 percent of spans will be forwarded from the Datadog agent to Datadog.
+        # Only 10 percent of spans will be forwarded from the Datadog agent to Datadog. Experiment to find a value that is good for you!
         sampler: 0.1
         # Send all spans to the Datadog agent. 
         datadog_agent_sampling: true

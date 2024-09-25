@@ -33,7 +33,7 @@ telemetry:
   exporters:
     tracing:
       common:
-        # Only 10 percent of spans will be sent to the Datadog agent with `psr` or `sampling.priority` 1. Experiment to see what value works best for you.
+        # Only 10 percent of spans will be forwarded from the Datadog agent to Datadog. Experiment to find a value that is good for you!
         sampler: 0.1
         # Important! APM metrics will not display correctly without this setting.
         datadog_agent_sampling: true
@@ -90,7 +90,7 @@ telemetry:
   exporters:
     tracing:
       common:
-        # Only 10 percent of spans will be sent to the Datadog agent with `psr` or `sampling.priority` 1. Experiment to see what value works best for you.
+        # Only 10 percent of spans will be forwarded from the Datadog agent to Datadog. Experiment to find a value that is good for you!
         sampler: 0.1
       datadog:
         enabled: true

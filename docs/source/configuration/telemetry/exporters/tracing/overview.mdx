@@ -121,9 +121,15 @@ telemetry:
   exporters:
      tracing:
        common:
+         # Only 10 percent of spans will be forwarded from the Datadog agent to Datadog. Experiment to find a value that is good for you!
+         sampler: 0.1
+
+         # Send all spans to the Datadog agent.
          datadog_agent_sampling: true
 ```
+
 This setting will cause the router to send ALL spans to the Datadog agent. The agent will then sample the spans before sending them to datadog.
+
 > [!IMPORTANT]
 > Sending all spans to the datadog agent may require that you tweak the `batch_processor` settings in your exporter config. This applies to both OTLP and the Datadog native exporter.
 
