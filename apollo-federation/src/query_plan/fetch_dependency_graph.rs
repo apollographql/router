@@ -9,6 +9,7 @@ use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::OperationType;
 use apollo_compiler::ast::Type;
+use apollo_compiler::collections::HashMap;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
@@ -83,7 +84,70 @@ use crate::utils::logging::snapshot;
 type DeferRef = String;
 
 /// Map of defer labels to nodes of the fetch dependency graph.
-type DeferredNodes = multimap::MultiMap<DeferRef, NodeIndex<u32>>;
+///
+/// Like a multimap with a Set instead of a Vec for value storage.
+#[derive(Debug, Clone, Default)]
+struct DeferredNodes {
+    inner: HashMap<DeferRef, IndexSet<NodeIndex<u32>>>,
+}
+impl DeferredNodes {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn is_empty(&self)->bool {
+        self.inner.is_empty()
+    }
+
+    fn insert(&mut self, defer_ref: DeferRef, node: NodeIndex<u32>) {
+        self.inner.entry(defer_ref).or_default().insert(node);
+    }
+
+    fn get_all<'map>(&'map self, defer_ref: &DeferRef) -> Option<&'map IndexSet<NodeIndex<u32>>> {
+        self.inner.get(defer_ref)
+    }
+
+    fn iter(&self) -> impl Iterator<Item = (&'_ DeferRef, NodeIndex<u32>)> {
+        self.inner
+            .iter()
+            .flat_map(|(defer_ref, nodes)| {
+                std::iter::repeat(defer_ref).zip(nodes.iter().copied())
+            })
+    }
+
+    /// Consume the map and yield each element. This is provided as a standalone method and not an
+    /// `IntoIterator` implementation because it's hard to type :)
+    fn into_iter(self) -> impl Iterator<Item = (DeferRef, NodeIndex<u32>)> {
+        self.inner
+            .into_iter()
+            .flat_map(|(defer_ref, nodes)| {
+                // Cloning the key is a bit wasteful, but keys are typically very small,
+                // and this map is also very small.
+                std::iter::repeat_with(move || defer_ref.clone())
+                    .zip(nodes)
+            })
+    }
+}
+impl Extend<(DeferRef, NodeIndex<u32>)> for DeferredNodes {
+    fn extend<T: IntoIterator<Item = (DeferRef, NodeIndex<u32>)>>(&mut self, iter: T) {
+        for (defer_ref, node) in iter.into_iter() {
+            self.insert(defer_ref, node);
+        }
+    }
+}
+impl FromIterator<(DeferRef, NodeIndex<u32>)> for DeferredNodes {
+    fn from_iter<T: IntoIterator<Item = (DeferRef, NodeIndex<u32>)>>(iter: T) -> Self {
+        let mut nodes = Self::new();
+        nodes.extend(iter);
+        nodes
+    }
+}
+impl FromIterator<(DeferRef, IndexSet<NodeIndex<u32>>)> for DeferredNodes {
+    fn from_iter<T: IntoIterator<Item = (DeferRef, IndexSet<NodeIndex<u32>>)>>(iter: T) -> Self {
+        let inner = iter.into_iter().collect();
+        Self { inner }
+    }
+}
 
 /// Represents a subgraph fetch of a query plan.
 // PORT_NOTE: The JS codebase called this `FetchGroup`, but this naming didn't make it apparent that
@@ -1805,7 +1869,7 @@ impl FetchDependencyGraph {
             let (main, deferred_nodes, state_after_node) =
                 self.process_node(processor, *node_index, handled_conditions.clone())?;
             processed_nodes.push(main);
-            all_deferred_nodes.extend(deferred_nodes);
+            all_deferred_nodes.extend(deferred_nodes.into_iter());
             new_state = new_state.merge_with(state_after_node);
         }
 
@@ -1850,7 +1914,7 @@ impl FetchDependencyGraph {
             process_in_parallel = true;
             main_sequence.push(processed);
             state = new_state;
-            all_deferred_nodes.extend(deferred_nodes);
+            all_deferred_nodes.extend(deferred_nodes.into_iter());
         }
 
         Ok((main_sequence, all_deferred_nodes, state))
@@ -1888,7 +1952,7 @@ impl FetchDependencyGraph {
                 .join(", "),
         );
         let mut all_deferred_nodes = other_defer_nodes.cloned().unwrap_or_default();
-        all_deferred_nodes.extend(deferred_nodes);
+        all_deferred_nodes.extend(deferred_nodes.into_iter());
 
         // We're going to handle all `@defer`s at our "current" level (eg. at the top level, that's all the non-nested @defer),
         // and the "starting" node for those defers, if any, are in `all_deferred_nodes`. However, `all_deferred_nodes`
@@ -1904,14 +1968,9 @@ impl FetchDependencyGraph {
             .map(|info| info.label.clone())
             .collect::<IndexSet<_>>();
         let unhandled_defer_nodes = all_deferred_nodes
-            .keys()
-            .filter(|label| !handled_defers_in_current.contains(*label))
-            .map(|label| {
-                (
-                    label.clone(),
-                    all_deferred_nodes.get_vec(label).cloned().unwrap(),
-                )
-            })
+            .iter()
+            .filter(|(label, _index)| !handled_defers_in_current.contains(*label))
+            .map(|(label, index)| (label.clone(), index))
             .collect::<DeferredNodes>();
         let unhandled_defer_node = if unhandled_defer_nodes.is_empty() {
             None
@@ -1929,9 +1988,11 @@ impl FetchDependencyGraph {
         let defers_in_current = defers_in_current.into_iter().cloned().collect::<Vec<_>>();
         for defer in defers_in_current {
             let nodes = all_deferred_nodes
-                .get_vec(&defer.label)
-                .cloned()
-                .unwrap_or_default();
+                .get_all(&defer.label)
+                .map_or_else(
+                    Default::default,
+                    |indices| indices.iter().copied().collect(),
+                );
             let (main_sequence_of_defer, deferred_of_defer) = self.process_root_nodes(
                 processor,
                 nodes,

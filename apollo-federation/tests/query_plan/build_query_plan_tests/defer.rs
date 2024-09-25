@@ -1811,11 +1811,7 @@ fn defer_test_defer_on_mutation_on_different_subgraphs() {
     );
 }
 
-// TODO(@TylerBloom): This test fails do to an suboptimal node at the end of the query plan. The
-// actual final node is a `Parallel` node that has two identical `Flatten(Fetch)` nodes that
-// flatten to expect final node.
 #[test]
-#[should_panic(expected = "snapshot assertion")]
 fn defer_test_defer_on_multi_dependency_deferred_section() {
     let planner = planner!(
         config = config_with_defer(),
@@ -1866,87 +1862,87 @@ fn defer_test_defer_on_multi_dependency_deferred_section() {
           }
         "#,
         @r###"
-        QueryPlan {
-          Defer {
-            Primary {
+    QueryPlan {
+      Defer {
+        Primary {
+          {
+            t {
+              v1
+              v2
+              v3
+            }
+          }:
+          Sequence {
+            Fetch(service: "Subgraph1") {
               {
                 t {
+                  __typename
+                  id0
                   v1
-                  v2
-                  v3
                 }
-              }:
-              Sequence {
-                Fetch(service: "Subgraph1") {
+              }
+            },
+            Parallel {
+              Flatten(path: "t") {
+                Fetch(service: "Subgraph2", id: 0) {
                   {
-                    t {
+                    ... on T {
                       __typename
                       id0
-                      v1
+                    }
+                  } =>
+                  {
+                    ... on T {
+                      v2
+                      id1
                     }
                   }
                 },
-                Parallel {
-                  Flatten(path: "t") {
-                    Fetch(service: "Subgraph2", id: 0) {
-                      {
-                        ... on T {
-                          __typename
-                          id0
-                        }
-                      } =>
-                      {
-                        ... on T {
-                          v2
-                          id1
-                        }
-                      }
-                    },
-                  },
-                  Flatten(path: "t") {
-                    Fetch(service: "Subgraph3", id: 1) {
-                      {
-                        ... on T {
-                          __typename
-                          id0
-                        }
-                      } =>
-                      {
-                        ... on T {
-                          v3
-                          id2
-                        }
-                      }
-                    },
-                  },
+              },
+              Flatten(path: "t") {
+                Fetch(service: "Subgraph3", id: 1) {
+                  {
+                    ... on T {
+                      __typename
+                      id0
+                    }
+                  } =>
+                  {
+                    ... on T {
+                      v3
+                      id2
+                    }
+                  }
                 },
               },
-            }, [
-              Deferred(depends: [0, 1], path: "t") {
+            },
+          },
+        }, [
+          Deferred(depends: [0, 1], path: "t") {
+            {
+              v4
+            }:
+            Flatten(path: "t") {
+              Fetch(service: "Subgraph4") {
                 {
-                  v4
-                }:
-                Flatten(path: "t") {
-                  Fetch(service: "Subgraph4") {
-                    {
-                      ... on T {
-                        __typename
-                        id1
-                        id2
-                      }
-                    } =>
-                    {
-                      ... on T {
-                        v4
-                      }
-                    }
-                  },
+                  ... on T {
+                    __typename
+                    id1
+                    id2
+                  }
+                } =>
+                {
+                  ... on T {
+                    v4
+                  }
                 }
               },
-            ]
+            },
           },
-        }
-        "###
+        ]
+      },
+    }
+    "###
     );
 
     // TODO: the following plan is admittedly not as effecient as it could be, as the 2 queries to
