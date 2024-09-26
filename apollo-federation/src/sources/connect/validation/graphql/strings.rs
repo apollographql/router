@@ -91,7 +91,7 @@ mod tests {
         type Query {
           field: String @connect(
             http: {
-                GET: "https://example.com"
+              GET: "https://example.com"
             },
             selection: """
             something
@@ -100,7 +100,7 @@ mod tests {
             }
             """
           )
-        } 
+        }
         "#;
 
     fn connect_argument<'schema>(schema: &'schema Schema, name: &str) -> &'schema Node<Value> {
@@ -109,7 +109,7 @@ mod tests {
         };
         let field = query.fields.get("field").unwrap();
         let directive = field.directives.get("connect").unwrap();
-        directive.argument_by_name(name).unwrap()
+        directive.specified_argument_by_name(name).unwrap()
     }
 
     #[test]
@@ -127,10 +127,10 @@ mod tests {
             Some(
                 LineColumn {
                     line: 5,
-                    column: 25
+                    column: 23
                 }..LineColumn {
                     line: 5,
-                    column: 28
+                    column: 26
                 }
             )
         );
