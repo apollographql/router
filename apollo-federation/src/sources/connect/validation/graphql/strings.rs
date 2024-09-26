@@ -100,7 +100,7 @@ mod tests {
             }
             """
           )
-        } 
+        }
         "#;
 
     fn connect_argument<'schema>(schema: &'schema Schema, name: &str) -> &'schema Node<Value> {
@@ -109,7 +109,7 @@ mod tests {
         };
         let field = query.fields.get("field").unwrap();
         let directive = field.directives.get("connect").unwrap();
-        directive.argument_by_name(name).unwrap()
+        directive.argument_by_name(name, schema).unwrap()
     }
 
     #[test]
