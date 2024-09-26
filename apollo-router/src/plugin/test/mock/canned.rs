@@ -115,6 +115,72 @@ pub(crate) fn reviews_subgraph() -> MockSubgraph {
                     }
                 }}
         ),
+        // same as above but with generate_
+        (
+            json! {{
+                    "query": "query($representations:[_Any!]!){_entities(representations:$representations){..._generated_onProduct1_0}}fragment _generated_onProduct1_0 on Product {reviews{id product{__typename upc}author{__typename id}}}",
+                    "operationName": "TopProducts__reviews__1",
+                    "variables": {
+                        "representations":[
+                            {
+                                "__typename": "Product",
+                                "upc":"1"
+                            },
+                            {
+                                "__typename": "Product",
+                                "upc": "2"
+                            }
+                        ]
+                    }
+                }},
+            json! {{
+                    "data": {
+                        "_entities": [
+                            {
+                                "reviews": [
+                                    {
+                                        "id": "1",
+                                        "product": {
+                                            "__typename": "Product",
+                                            "upc": "1"
+                                        },
+                                        "author": {
+                                            "__typename": "User",
+                                            "id": "1"
+                                        }
+                                    },
+                                    {
+                                        "id": "4",
+                                        "product": {
+                                            "__typename": "Product",
+                                            "upc": "1"
+                                        },
+                                        "author": {
+                                            "__typename": "User",
+                                            "id": "2"
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                "reviews": [
+                                    {
+                                        "id": "2",
+                                        "product": {
+                                            "__typename": "Product",
+                                            "upc": "2"
+                                        },
+                                        "author": {
+                                            "__typename": "User",
+                                            "id": "1"
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }}
+        ),
         (
             json! {{
                     "query": "subscription{reviewAdded{body}}",
@@ -186,7 +252,7 @@ pub(crate) fn products_subgraph() -> MockSubgraph {
                         ]
                     }
                 }}
-        )
+        ),
     ].into_iter().map(|(query, response)| (serde_json::from_value(query).unwrap(), serde_json::from_value(response).unwrap())).collect();
     MockSubgraph::new(product_mocks)
 }
