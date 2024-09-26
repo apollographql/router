@@ -3913,10 +3913,13 @@ mod test {
     }
 
     #[fixture]
-    fn http_response_with_header(context: RouterContext) -> HttpResponse {
+    fn http_response_with_header(
+        context: RouterContext,
+        #[default(StatusCode::OK)] status_code: StatusCode,
+    ) -> HttpResponse {
         HttpResponse {
             http_response: http::Response::builder()
-                .status(StatusCode::OK)
+                .status(status_code)
                 .header(TEST_HEADER_NAME, TEST_HEADER_VALUE)
                 .body("".into())
                 .unwrap(),
@@ -3925,135 +3928,127 @@ mod test {
     }
 
     #[rstest]
-    fn connector_static_field(http_response: HttpResponse) {
-        let selector = ConnectorHttpSelector::StaticField {
-            r#static: TEST_STATIC.to_string().into(),
-        };
-        assert_eq!(
-            selector.on_response(&http_response).unwrap(),
-            TEST_STATIC.into()
-        );
-        assert_eq!(selector.on_drop().unwrap(), TEST_STATIC.into());
-    }
-
-    #[rstest]
-    fn connector_subgraph_name(http_request: HttpRequest, http_response: HttpResponse) {
-        let selector = ConnectorHttpSelector::SubgraphName {
-            subgraph_name: true,
-        };
-        assert_eq!(
-            selector.on_request(&http_request),
-            Some(TEST_SUBGRAPH_NAME.into())
-        );
-        assert_eq!(
-            selector.on_response(&http_response),
-            Some(TEST_SUBGRAPH_NAME.into())
-        );
-    }
-
-    #[rstest]
-    fn connector_request_header(http_request_with_header: HttpRequest) {
-        let selector = ConnectorHttpSelector::ConnectorRequestHeader {
+    #[case(
+        http_request(context(connector_info())),
+        ConnectorHttpSelector::StaticField { r#static: TEST_STATIC.into() },
+        Some(TEST_STATIC.into()),
+    )]
+    #[case(
+        http_request(context(connector_info())),
+        ConnectorHttpSelector::SubgraphName { subgraph_name: true },
+        Some(TEST_SUBGRAPH_NAME.into()),
+    )]
+    #[case(
+        http_request(context(connector_info())),
+        ConnectorHttpSelector::ConnectorSource { connector_source: ConnectorSource::Name },
+        Some(TEST_SOURCE_NAME.into()),
+    )]
+    #[case(
+        http_request(context(connector_info())),
+        ConnectorHttpSelector::ConnectorUrlTemplate { connector_url_template: true },
+        Some(TEST_URL_TEMPLATE.into()),
+    )]
+    #[case(
+        http_request(context(connector_info())),
+        ConnectorHttpSelector::ConnectorRequestHeader {
             connector_http_request_header: TEST_HEADER_NAME.to_string(),
             redact: None,
             default: Some("defaulted".into()),
-        };
-        assert_eq!(
-            selector.on_request(&http_request_with_header).unwrap(),
-            TEST_HEADER_VALUE.into()
-        );
-    }
-
-    #[rstest]
-    fn connector_request_header_defaulted(http_request: HttpRequest) {
-        let selector = ConnectorHttpSelector::ConnectorRequestHeader {
+        },
+        Some("defaulted".into()),
+    )]
+    #[case(
+        http_request_with_header(context(connector_info())),
+        ConnectorHttpSelector::ConnectorRequestHeader {
             connector_http_request_header: TEST_HEADER_NAME.to_string(),
             redact: None,
-            default: Some("defaulted".into()),
-        };
-        assert_eq!(
-            selector.on_request(&http_request).unwrap(),
-            "defaulted".into()
-        );
-    }
-
-    #[rstest]
-    fn connector_response_header(http_response_with_header: HttpResponse) {
-        let selector = ConnectorHttpSelector::ConnectorResponseHeader {
-            connector_http_response_header: TEST_HEADER_NAME.to_string(),
-            redact: None,
-            default: Some("defaulted".into()),
-        };
-        assert_eq!(
-            selector.on_response(&http_response_with_header).unwrap(),
-            TEST_HEADER_VALUE.into()
-        );
-    }
-
-    #[rstest]
-    fn connector_response_header_defaulted(http_response: HttpResponse) {
-        let selector = ConnectorHttpSelector::ConnectorResponseHeader {
-            connector_http_response_header: TEST_HEADER_NAME.to_string(),
-            redact: None,
-            default: Some("defaulted".into()),
-        };
-        assert_eq!(
-            selector.on_response(&http_response).unwrap(),
-            "defaulted".into()
-        );
-    }
-
-    #[rstest]
-    fn connector_response_status(
-        #[with(context(connector_info()), StatusCode::NOT_FOUND)] http_response: HttpResponse,
+            default: None,
+        },
+        Some(TEST_HEADER_VALUE.into()),
+    )]
+    fn connector_on_request(
+        #[case] http_request: HttpRequest,
+        #[case] selector: ConnectorHttpSelector,
+        #[case] expected: Option<opentelemetry::Value>,
     ) {
-        let selector = ConnectorHttpSelector::ConnectorResponseStatus {
+        assert_eq!(expected, selector.on_request(&http_request));
+    }
+
+    #[rstest]
+    #[case(
+        http_response(context(connector_info()), StatusCode::OK),
+        ConnectorHttpSelector::StaticField { r#static: TEST_STATIC.into() },
+        Some(TEST_STATIC.into()),
+    )]
+    #[case(
+        http_response(context(connector_info()), StatusCode::OK),
+        ConnectorHttpSelector::SubgraphName { subgraph_name: true },
+        Some(TEST_SUBGRAPH_NAME.into()),
+    )]
+    #[case(
+        http_response(context(connector_info()), StatusCode::OK),
+        ConnectorHttpSelector::ConnectorSource { connector_source: ConnectorSource::Name },
+        Some(TEST_SOURCE_NAME.into()),
+    )]
+    #[case(
+        http_response(context(connector_info()), StatusCode::OK),
+        ConnectorHttpSelector::ConnectorUrlTemplate { connector_url_template: true },
+        Some(TEST_URL_TEMPLATE.into()),
+    )]
+    #[case(
+        http_response(context(connector_info()), StatusCode::OK),
+        ConnectorHttpSelector::ConnectorResponseHeader {
+            connector_http_response_header: TEST_HEADER_NAME.to_string(),
+            redact: None,
+            default: Some("defaulted".into()),
+        },
+        Some("defaulted".into()),
+    )]
+    #[case(
+        http_response_with_header(context(connector_info()), StatusCode::OK),
+        ConnectorHttpSelector::ConnectorResponseHeader {
+            connector_http_response_header: TEST_HEADER_NAME.to_string(),
+            redact: None,
+            default: None,
+        },
+        Some(TEST_HEADER_VALUE.into()),
+    )]
+    #[case(
+        http_response(context(connector_info()), StatusCode::NOT_FOUND),
+        ConnectorHttpSelector::ConnectorResponseStatus {
             connector_http_response_status: ResponseStatus::Code,
-        };
-        assert_eq!(
-            selector.on_response(&http_response).unwrap(),
-            opentelemetry::Value::I64(404)
-        );
+        },
+        Some(opentelemetry::Value::I64(404)),
+    )]
+    #[case(
+        http_response(context(connector_info()), StatusCode::NOT_FOUND),
+        ConnectorHttpSelector::ConnectorResponseStatus {
+            connector_http_response_status: ResponseStatus::Reason,
+        },
+        Some("Not Found".into()),
+    )]
+    #[case(
+        http_response(context(connector_info()), StatusCode::OK),
+        ConnectorHttpSelector::ConnectorHttpMethod { connector_http_method: true },
+        Some(HTTPMethod::Get.as_str().into()),
+    )]
+    fn connector_on_response(
+        #[case] http_response: HttpResponse,
+        #[case] selector: ConnectorHttpSelector,
+        #[case] expected: Option<opentelemetry::Value>,
+    ) {
+        assert_eq!(expected, selector.on_response(&http_response));
     }
 
     #[rstest]
-    fn connector_http_method(http_request: HttpRequest) {
-        let selector = ConnectorHttpSelector::ConnectorHttpMethod {
-            connector_http_method: true,
-        };
-        assert_eq!(
-            selector.on_request(&http_request),
-            Some(HTTPMethod::Get.as_str().into())
-        );
-    }
-
-    #[rstest]
-    fn connector_source_name(http_request: HttpRequest, http_response: HttpResponse) {
-        let selector = ConnectorHttpSelector::ConnectorSource {
-            connector_source: ConnectorSource::Name,
-        };
-        assert_eq!(
-            selector.on_request(&http_request),
-            Some(TEST_SOURCE_NAME.into())
-        );
-        assert_eq!(
-            selector.on_response(&http_response),
-            Some(TEST_SOURCE_NAME.into())
-        );
-    }
-
-    #[rstest]
-    fn connector_url_template(http_request: HttpRequest, http_response: HttpResponse) {
-        let selector = ConnectorHttpSelector::ConnectorUrlTemplate {
-            connector_url_template: true,
-        };
-        assert_eq!(
-            selector.on_request(&http_request),
-            Some(TEST_URL_TEMPLATE.into())
-        );
-        assert_eq!(
-            selector.on_response(&http_response),
-            Some(TEST_URL_TEMPLATE.into())
-        );
+    #[case(
+        RouterSelector::StaticField { r#static: TEST_STATIC.into() },
+        Some(TEST_STATIC.into()),
+    )]
+    fn connector_on_drop(
+        #[case] selector: RouterSelector,
+        #[case] expected: Option<opentelemetry::Value>,
+    ) {
+        assert_eq!(expected, selector.on_drop());
     }
 }
