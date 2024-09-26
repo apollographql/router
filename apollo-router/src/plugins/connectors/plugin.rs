@@ -53,8 +53,8 @@ impl Plugin for Connectors {
             Ordering::Relaxed,
             Ordering::Relaxed,
         );
-        // old value is false, new value is true
-        if matches!(swap_result, Ok(false)) && debug_extensions {
+        // Ok means we swapped value, inner value is old value. Ok(false) means we went false -> true
+        if matches!(swap_result, Ok(false)) {
             tracing::warn!(
                 "Connector debugging is enabled, this may expose sensitive information."
             );
