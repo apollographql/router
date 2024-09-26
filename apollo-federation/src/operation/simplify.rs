@@ -460,7 +460,7 @@ impl SelectionSet {
             {
                 match selection_or_set {
                     SelectionOrSet::Selection(normalized_selection) => {
-                        normalized_selections.add_local_selection(&normalized_selection, false)?;
+                        normalized_selections.add_local_selection(&normalized_selection)?;
                     }
                     SelectionOrSet::SelectionSet(normalized_set) => {
                         // Since the `selection` has been expanded/lifted, we use

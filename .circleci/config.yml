@@ -47,7 +47,7 @@ executors:
       # at https://circleci.com/docs/using-macos#supported-xcode-versions.
       # We use the major.minor notation to bring in compatible patches.
       xcode: "14.2.0"
-    resource_class: macos.m1.medium.gen1
+    resource_class: macos.m1.large.gen1
   macos_test: &macos_test_executor
     macos:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
@@ -58,7 +58,7 @@ executors:
       # once we update to Xcode >= 15.1.0 
       # See: https://github.com/apollographql/router/pull/5462
       xcode: "14.2.0"
-    resource_class: macos.m1.medium.gen1
+    resource_class: macos.m1.large.gen1
   windows_build: &windows_build_executor
     machine:
       image: "windows-server-2019-vs2019:2024.02.21"
@@ -356,9 +356,9 @@ commands:
             equal: [ *arm_linux_test_executor, << parameters.platform >> ]
           steps:
             - run:
-                name: Install nightly Rust to build the fuzzers
+                name: Install nightly-2024-09-22 Rust to build the fuzzers
                 command: |
-                  rustup install nightly
+                  rustup install nightly-2024-09-22
 
   install_extra_tools:
     steps:
@@ -524,7 +524,7 @@ commands:
           path: ./target/nextest/ci/junit.xml
   fuzz_build:
     steps:
-      - run: cargo +nightly fuzz build
+      - run: cargo +nightly-2024-09-22 fuzz build
 
 jobs:
   lint:
@@ -574,6 +574,9 @@ jobs:
     parameters:
       platform:
         type: executor
+      fuzz:
+        type: boolean
+        default: false
     executor: << parameters.platform >>
     steps:
       - checkout
@@ -582,7 +585,9 @@ jobs:
       - xtask_test
       - when:
           condition:
-            equal: [ *arm_linux_test_executor, << parameters.platform >> ]
+            and:
+              - equal: [ true, << parameters.fuzz >> ]
+              - equal: [ *arm_linux_test_executor, << parameters.platform >> ]
           steps:
             - fuzz_build
 
@@ -971,6 +976,8 @@ workflows:
               platform:
                 [ amd_linux_test ]
       - test:
+          # this should be changed back to true on dev after release
+          fuzz: false
           requires:
             - lint
             - check_helm
