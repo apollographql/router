@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use apollo_federation::sources::connect::ApplyToError;
@@ -45,16 +47,14 @@ impl Plugin for Connectors {
             || std::env::var(CONNECTORS_DEBUG_ENV).as_deref() == Ok("true");
 
         let last_value = LAST_DEBUG_ENABLED_VALUE.load(Ordering::Relaxed);
-        if LAST_DEBUG_ENABLED_VALUE
-            .compare_exchange(
-                last_value,
-                debug_extensions,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            )
-            .is_ok()
-            && debug_extensions
-        {
+        let swap_result = LAST_DEBUG_ENABLED_VALUE.compare_exchange(
+            last_value,
+            debug_extensions,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        );
+        // old value is false, new value is true
+        if matches!(swap_result, Ok(false)) && debug_extensions {
             tracing::warn!(
                 "Connector debugging is enabled, this may expose sensitive information."
             );
