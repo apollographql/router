@@ -8,7 +8,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_s
         code: IncorrectArity,
         message: "`@connect(selection:)` on `Query.me` calls method `size` with the wrong number of arguments - expected 0, found 1",
         locations: [
-            11:20..14:12,
+            13:27..13:31,
         ],
     },
     Message {

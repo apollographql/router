@@ -8,7 +8,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_s
         code: UnknownMethod,
         message: "`@connect(selection:)` on `Query.me` has a call to an unknown method `doesnotexist`",
         locations: [
-            11:20..14:12,
+            13:40..13:52,
         ],
     },
     Message {

@@ -59,19 +59,6 @@ enum SelectionGroup<'schema> {
         parent: SelectionPart<'schema>,
         children: Vec<SelectionPart<'schema>>,
     },
-    Empty {
-        parent: SelectionPart<'schema>,
-    },
-}
-
-impl<'schema> SelectionGroup<'schema> {
-    fn children(&self) -> Vec<SelectionPart<'schema>> {
-        match self {
-            SelectionGroup::Root { children } => children.clone(),
-            SelectionGroup::Child { children, .. } => children.clone(),
-            SelectionGroup::Empty { .. } => vec![],
-        }
-    }
 }
 
 impl<'schema> SelectionGroup<'schema> {
@@ -80,7 +67,17 @@ impl<'schema> SelectionGroup<'schema> {
     }
 
     fn empty(parent: SelectionPart<'schema>) -> Self {
-        SelectionGroup::Empty { parent }
+        SelectionGroup::Child {
+            parent,
+            children: vec![],
+        }
+    }
+
+    fn children(&self) -> Vec<SelectionPart<'schema>> {
+        match self {
+            SelectionGroup::Root { children } => children.clone(),
+            SelectionGroup::Child { children, .. } => children.clone(),
+        }
     }
 }
 
@@ -196,8 +193,9 @@ impl<'schema, V: Visitor> GroupVisitor<SelectionGroup<'schema>, SelectionPart<'s
         &mut self,
         group: &SelectionGroup<'schema>,
     ) -> Result<Vec<SelectionPart<'schema>>, Self::Error> {
-        if let SelectionGroup::Child { parent, .. } = group {
-            self.stack.push(parent.clone());
+        match group {
+            SelectionGroup::Child { parent, .. } => self.stack.push(parent.clone()),
+            SelectionGroup::Root { .. } => {}
         }
         Ok(group.children())
     }

@@ -1,7 +1,6 @@
 use std::iter::once;
 use std::ops::Range;
 
-use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
@@ -30,6 +29,7 @@ use crate::sources::connect::json_selection::PathList;
 use crate::sources::connect::json_selection::Ranged;
 use crate::sources::connect::spec::schema::CONNECT_SELECTION_ARGUMENT_NAME;
 use crate::sources::connect::validation::coordinates::connect_directive_http_body_coordinate;
+use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::validation::selection::visitor::visit;
 use crate::sources::connect::validation::selection::visitor::SelectionPart;
@@ -153,11 +153,12 @@ fn get_json_selection<'a>(
     visit(
         &selection,
         ArrowMethodValidator {
+            schema_info,
             source_map,
             connect_directive,
+            selection_str: &selection_str,
             object,
             field_name,
-            selection_arg,
         },
     )?;
 
@@ -166,7 +167,6 @@ fn get_json_selection<'a>(
             code: Code::InvalidJsonSelection,
             message: format!("{coordinate} is empty",),
             locations: selection_arg
-                .value
                 .line_column_range(source_map)
                 .into_iter()
                 .collect(),
@@ -188,17 +188,18 @@ struct SelectionArg<'schema> {
 }
 
 struct ArrowMethodValidator<'a> {
+    schema_info: &'a SchemaInfo<'a>,
     source_map: &'a SourceMap,
     connect_directive: &'a Node<Directive>,
+    selection_str: &'a GraphQLString<'a>,
     object: &'a Node<ObjectType>,
     field_name: &'a Name,
-    selection_arg: &'a Node<Argument>,
 }
 
 // TODO: validation requires significant knowledge about arrow methods - need a better mechanism
 //   to provide it
 lazy_static! {
-    static ref ARROW_METHODS: IndexMap<&'static str, Option<usize>> = {
+    static ref ARROW_METHOD_ARITIES: IndexMap<&'static str, Option<usize>> = {
         let mut arrow_methods = IndexMap::default();
         arrow_methods.insert("echo", Some(1));
         arrow_methods.insert("map", Some(1));
@@ -217,7 +218,16 @@ impl<'a> Visitor for ArrowMethodValidator<'a> {
 
     fn visit(&mut self, part: &SelectionPart) -> Result<(), Self::Error> {
         if let SelectionPart::PathList(PathList::Method(name, args, _)) = part {
-            match ARROW_METHODS.get(name.as_str()) {
+            let locations = name
+                .range()
+                .and_then(|range| {
+                    self.selection_str
+                        .line_col_for_subslice(range, self.schema_info)
+                })
+                .into_iter()
+                .collect();
+
+            match ARROW_METHOD_ARITIES.get(name.as_str()) {
                 None => {
                     return Err(Message {
                         code: Code::UnknownMethod,
@@ -230,13 +240,7 @@ impl<'a> Visitor for ArrowMethodValidator<'a> {
                             ),
                             name = name.as_str(),
                         ),
-                        // TODO: convert the offset range of the method name to line/column
-                        locations: self
-                            .selection_arg
-                            .value
-                            .line_column_range(self.source_map)
-                            .into_iter()
-                            .collect(),
+                        locations,
                     });
                 }
                 Some(Some(arity)) => {
@@ -253,13 +257,7 @@ impl<'a> Visitor for ArrowMethodValidator<'a> {
                                 ),
                                 name = name.as_str(),
                             ),
-                            // TODO: convert the offset range of the method name to line/column
-                            locations: self
-                                .selection_arg
-                                .value
-                                .line_column_range(self.source_map)
-                                .into_iter()
-                                .collect(),
+                            locations
                         });
                     }
                 }
