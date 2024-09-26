@@ -12,11 +12,16 @@ For general tracing configuration, refer to [Router Tracing Configuration](./ove
 
 ## OTLP configuration
 
-To export traces to Datadog via OTLP, you must do the following:
-- Configure the Datadog agent to accept OTLP traces.
-- Configure the router to send traces to the Datadog agent.
+OTLP is the [OpenTelemetry protocol](https://opentelemetry.io/docs/specs/otel/protocol/), and is the recommended protocol for transmitting telemetry, including traces, to Datadog.
 
-To configure the Datadog agent, add OTLP configuration to your `datadog.yaml`. For example:
+To setup traces to Datadog via OTLP, you must do the following:
+
+- Modify the default configuration of the Datadog Agent to accept OTLP traces submitted to it by the router.
+- Configure the router to send traces to the configured Datadog Agent.
+
+### Datadog Agent configuration
+
+To configure the Datadog Agent, add OTLP configuration to your `datadog.yaml`. For example:
 
 ```yaml title="datadog.yaml"
 otlp_config:
@@ -26,7 +31,11 @@ otlp_config:
         endpoint: <dd-agent-ip>:4317
 ```
 
-To configure the router, enable the [OTLP exporter](./otlp) and set `endpoint: <datadog-agent-endpoint>` and enable `datadog_agent_sampling`. For example:
+For additional Datadog Agent configuration details, review Datadog's [Enabling OTLP Ingestion on the Datadog Agent](https://docs.datadoghq.com/opentelemetry/interoperability/otlp_ingest_in_the_agent/?tab=host#enabling-otlp-ingestion-on-the-datadog-agent) documentation.
+
+### Router configuration
+
+To configure the router, enable the [OTLP exporter](./otlp) and set `endpoint: <datadog-agent-endpoint>`. For example:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -35,8 +44,7 @@ telemetry:
       common:
         # Only 10 percent of spans will be forwarded from the Datadog agent to Datadog. Experiment to find a value that is good for you!
         sampler: 0.1
-        # Important! APM metrics will not display correctly without this setting.
-        datadog_agent_sampling: true
+
       otlp:
         enabled: true
         # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317)
@@ -46,23 +54,19 @@ telemetry:
         batch_processor:
           max_concurrent_exports: 100
 ```
-Note that if `datadog_agent_sampling: true` is not set in `router.yaml` APM metrics will not display correctly.
 
-For more details about Datadog configuration, see [Datadog Agent configuration](https://docs.datadoghq.com/opentelemetry/otlp_ingest_in_the_agent/?tab=host).
+Adjusting the `sampler` will allow you to control the sampling decisions that the router will make on its own and decrease the rate at which you sample, which can have a direct impact on your your Datadog bill.
 
-By using these options, you can decrease your Datadog bill as you will only be sending a percentage of spans from the Datadog agent to datadog.
+<Note>
 
-> [!IMPORTANT]
-> Users using OTLP exporter must enable `datadog_agent_sampling` option to get accurate APM metrics.
+Depending on the volume of spans being created in a router instance, it will be necessary to adjust the `batch_processor` settings in your `exporter` config.  If this is necessary, you will see warning messages from the router regarding the batch span processor.  This applies to both OTLP and the Datadog native exporter.
 
-> [!IMPORTANT]
-> Sending all spans to the datadog agent may require that you tweak the batch_processor settings in your exporter config. This applies to both OTLP and the Datadog native exporter.
-
+</Note>
 
 ### Enabling log correlation
 
 To enable Datadog log correlation, you must configure `dd.trace_id` to appear on the `router` span:
-  
+
 ```yaml title="router.yaml"
 telemetry:
   instrumentation:
@@ -93,9 +97,6 @@ telemetry:
         # Only 10 percent of spans will be forwarded from the Datadog agent to Datadog. Experiment to find a value that is good for you!
         sampler: 0.1
 
-        # This is set to true by default if the Datadog exporter is enabled.
-        datadog_agent_sampling: true
-
       datadog:
         enabled: true
         # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:8126)
@@ -114,10 +115,11 @@ telemetry:
           graphql.operation.name: true
 ```
 
-Note that `datadog_agent_sampling` is automatically enabled when using the native Datadog exporter but can be overridden if sampled APM metrics are desired.
+<Note>
 
-> [!IMPORTANT]
-> Sending all spans to the datadog agent may require that you tweak the `batch_processor` settings in your exporter config. This applies to both OTLP and the Datadog native exporter.
+Depending on the volume of spans being created in a router instance, it will be necessary to adjust the `batch_processor` settings in your `exporter` config. This applies to both OTLP and the Datadog native exporter.
+
+</Note>
 
 ### `enabled`
 
@@ -260,11 +262,11 @@ If you have introduced a new span in a custom build of the Router you can enable
 telemetry:
   exporters:
     tracing:
-      datadog: 
-        batch_processor: 
+      datadog:
+        batch_processor:
           max_export_batch_size: 512
           max_concurrent_exports: 1
-          max_export_timeout: 30s 
+          max_export_timeout: 30s
           max_queue_size: 2048
           scheduled_delay: 5s
 ```
