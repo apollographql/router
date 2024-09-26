@@ -26,7 +26,8 @@
                         {
                             "request": {
                                 "body": {
-                                    "query": "query Variables($a: String, $b: String, $c: String, $d: String) { d(arg: [\"a\", $a, \"b\"]) e(arg: { a: $b}) ...F } fragment F on Query { aa: d(arg: [\"a\", $c, \"b\"]) ab: e(arg: { a: $d})) }"
+                                    "query": "query Variables__products__0($a:String$c:String$b:String$d:String){aa:d(arg:[\"a\"$c \"b\"])ab:e(arg:{a:$d})d(arg:[\"a\"$a \"b\"])e(arg:{a:$b})}",
+                                    "operationName": "Variables__products__0"
                                 }
                             },
                             "response": {
