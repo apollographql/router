@@ -90,7 +90,7 @@ impl CostDirective {
             .get(&COST_DIRECTIVE_NAME)
             .and_then(|name| directives.get(name))
             .or(directives.get(&COST_DIRECTIVE_DEFAULT_NAME))
-            .and_then(|cost| cost.argument_by_name(&COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME))
+            .and_then(|cost| cost.specified_argument_by_name(&COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME))
             .and_then(|weight| weight.to_i32())
             .map(|weight| Self { weight })
     }
@@ -103,7 +103,7 @@ impl CostDirective {
             .get(&COST_DIRECTIVE_NAME)
             .and_then(|name| directives.get(name))
             .or(directives.get(&COST_DIRECTIVE_DEFAULT_NAME))
-            .and_then(|cost| cost.argument_by_name(&COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME))
+            .and_then(|cost| cost.specified_argument_by_name(&COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME))
             .and_then(|weight| weight.to_i32())
             .map(|weight| Self { weight })
     }
@@ -120,7 +120,7 @@ impl IncludeDirective {
         let directive = field
             .directives
             .get("include")
-            .and_then(|skip| skip.argument_by_name("if"))
+            .and_then(|skip| skip.specified_argument_by_name("if"))
             .and_then(|arg| arg.to_bool())
             .map(|cond| Self { is_included: cond });
 
@@ -167,10 +167,10 @@ impl DefinitionListSizeDirective {
             .or(definition.directives.get(&LIST_SIZE_DIRECTIVE_DEFAULT_NAME));
         if let Some(directive) = directive {
             let assumed_size = directive
-                .argument_by_name(&LIST_SIZE_DIRECTIVE_ASSUMED_SIZE_ARGUMENT_NAME)
+                .specified_argument_by_name(&LIST_SIZE_DIRECTIVE_ASSUMED_SIZE_ARGUMENT_NAME)
                 .and_then(|arg| arg.to_i32());
             let slicing_argument_names = directive
-                .argument_by_name(&LIST_SIZE_DIRECTIVE_SLICING_ARGUMENTS_ARGUMENT_NAME)
+                .specified_argument_by_name(&LIST_SIZE_DIRECTIVE_SLICING_ARGUMENTS_ARGUMENT_NAME)
                 .and_then(|arg| arg.as_list())
                 .map(|arg_list| {
                     arg_list
@@ -180,7 +180,7 @@ impl DefinitionListSizeDirective {
                         .collect()
                 });
             let sized_fields = directive
-                .argument_by_name(&LIST_SIZE_DIRECTIVE_SIZED_FIELDS_ARGUMENT_NAME)
+                .specified_argument_by_name(&LIST_SIZE_DIRECTIVE_SIZED_FIELDS_ARGUMENT_NAME)
                 .and_then(|arg| arg.as_list())
                 .map(|arg_list| {
                     arg_list
@@ -190,7 +190,9 @@ impl DefinitionListSizeDirective {
                         .collect()
                 });
             let require_one_slicing_argument = directive
-                .argument_by_name(&LIST_SIZE_DIRECTIVE_REQUIRE_ONE_SLICING_ARGUMENT_ARGUMENT_NAME)
+                .specified_argument_by_name(
+                    &LIST_SIZE_DIRECTIVE_REQUIRE_ONE_SLICING_ARGUMENT_ARGUMENT_NAME,
+                )
                 .and_then(|arg| arg.to_bool())
                 .unwrap_or(true);
 
@@ -275,7 +277,7 @@ impl RequiresDirective {
         let requires_arg = definition
             .directives
             .get("join__field")
-            .and_then(|requires| requires.argument_by_name("requires"))
+            .and_then(|requires| requires.specified_argument_by_name("requires"))
             .and_then(|arg| arg.as_str());
 
         if let Some(arg) = requires_arg {
@@ -302,7 +304,7 @@ impl SkipDirective {
         let directive = field
             .directives
             .get("skip")
-            .and_then(|skip| skip.argument_by_name("if"))
+            .and_then(|skip| skip.specified_argument_by_name("if"))
             .and_then(|arg| arg.to_bool())
             .map(|cond| Self { is_skipped: cond });
 
