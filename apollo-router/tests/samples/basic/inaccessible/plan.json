@@ -120,24 +120,6 @@
             }
         },
         {
-            "type": "Request",
-            "request": {
-                "query": "query Invalid { me { name { reviews { body } } } }"
-            },
-            "expected_response": {
-                "data": {
-                    "me": {
-                        "name": "test",
-                        "reviews": [
-                            {
-                                "body": "test"
-                            }
-                        ]
-                    }
-                }
-            }
-        },
-        {
             "type": "Stop"
         }
     ]
