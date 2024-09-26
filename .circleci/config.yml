@@ -1141,7 +1141,6 @@ workflows:
             - check_compliance
             - pre_verify_release
             - test
-            - test_updated
           filters:
             branches:
               ignore: /.*/
