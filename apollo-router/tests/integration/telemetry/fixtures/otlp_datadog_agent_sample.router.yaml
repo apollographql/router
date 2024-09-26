@@ -10,7 +10,7 @@ telemetry:
         header_name: apollo-custom-trace-id
       common:
         service_name: router
-        datadog_agent_sampling: true
+        preview_datadog_agent_sampling: true
         sampler: 1.0
       otlp:
         enabled: true

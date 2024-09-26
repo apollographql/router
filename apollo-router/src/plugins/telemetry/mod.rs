@@ -295,10 +295,10 @@ impl Plugin for Telemetry {
         //         .exporters
         //         .tracing
         //         .common
-        //         .datadog_agent_sampling
+        //         .preview_datadog_agent_sampling
         //         .is_none()
         // {
-        //     config.exporters.tracing.common.datadog_agent_sampling = Some(true);
+        //     config.exporters.tracing.common.preview_datadog_agent_sampling = Some(true);
         // }
         config.instrumentation.spans.update_defaults();
         config.instrumentation.instruments.update_defaults();
@@ -888,7 +888,7 @@ impl Telemetry {
                 .exporters
                 .tracing
                 .common
-                .datadog_agent_sampling
+                .preview_datadog_agent_sampling
                 .unwrap_or_default()
             {
                 otel::layer::configure(&SamplerOption::Always(Sampler::AlwaysOn));
@@ -991,7 +991,7 @@ impl Telemetry {
         // This is because the pre-sampler will sample the spans before they sent to the regular sampler
         // If the datadog agent sampling is enabled, then we cannot pre-sample the spans because even if the sampling decision is made to drop
         // DatadogAgentSampler will modify the decision to RecordAndSample and instead use the sampling.priority attribute to decide if the span should be sampled or not.
-        if !common.datadog_agent_sampling.unwrap_or_default() {
+        if !common.preview_datadog_agent_sampling.unwrap_or_default() {
             common.sampler = SamplerOption::Always(Sampler::AlwaysOn);
         }
 
@@ -2870,7 +2870,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_field_instrumentation_sampler_with_datadog_agent_sampling() {
+    async fn test_field_instrumentation_sampler_with_preview_datadog_agent_sampling() {
         let plugin = create_plugin_with_config(include_str!(
             "testdata/config.field_instrumentation_sampler.router.yaml"
         ))
@@ -2922,7 +2922,7 @@ mod tests {
                 .await
                 .unwrap();
         }
-        // It should be 100% because when we set datadog_agent_sampling, we only take the value of field_level_instrumentation_sampler
+        // It should be 100% because when we set preview_datadog_agent_sampling, we only take the value of field_level_instrumentation_sampler
         assert_eq!(ftv1_counter.load(Ordering::Relaxed), 10);
     }
 

@@ -7,5 +7,5 @@ telemetry:
   exporters:
     tracing:
       common:
-        datadog_agent_sampling: true
+        preview_datadog_agent_sampling: true
         sampler: 0.5

@@ -7,7 +7,7 @@ telemetry:
         format: datadog
       common:
         service_name: router
-        datadog_agent_sampling: true
+        preview_datadog_agent_sampling: true
       datadog:
         enabled: true
         enable_span_mapping: true

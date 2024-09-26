@@ -75,7 +75,7 @@ async fn test_no_sample() -> Result<(), BoxError> {
     Ok(())
 }
 
-// We want to check we're able to override the behavior of datadog_agent_sampling configuration even if we set a datadog exporter
+// We want to check we're able to override the behavior of preview_datadog_agent_sampling configuration even if we set a datadog exporter
 #[tokio::test(flavor = "multi_thread")]
 async fn test_sampling_datadog_agent_disabled() -> Result<(), BoxError> {
     if !graph_os_enabled() {

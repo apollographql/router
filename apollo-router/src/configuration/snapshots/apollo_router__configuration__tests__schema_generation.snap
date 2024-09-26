@@ -7266,7 +7266,7 @@ expression: "&schema"
     "TracingCommon": {
       "additionalProperties": false,
       "properties": {
-        "datadog_agent_sampling": {
+        "preview_datadog_agent_sampling": {
           "default": null,
           "description": "Use datadog agent sampling. This means that all spans will be sent to the Datadog agent and the `sampling.priority` attribute will be used to control if the span will then be sent to Datadog. This option is enabled by default if you are using the Datadog native exporter but can be explicitly disabled.",
           "nullable": true,
