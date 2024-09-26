@@ -107,7 +107,7 @@ async fn test_sampling_datadog_agent_disabled() -> Result<(), BoxError> {
     let (id, result) = router.execute_untraced_query(&query).await;
     router.graceful_shutdown().await;
     assert!(result.status().is_success());
-    let context = context
+    let _context = context
         .lock()
         .expect("poisoned")
         .as_ref()
