@@ -1120,13 +1120,13 @@ fn converting_operation_types() {
 }
 
 fn contains_field(ss: &SelectionSet, field_name: Name) -> bool {
-    ss.selections.contains_key(&SelectionKey::Field {
-        response_name: field_name,
-        directives: Default::default(),
+    ss.selections.contains_key(SelectionKey::Field {
+        response_name: &field_name,
+        directives: &Default::default(),
     })
 }
 
-fn is_named_field(sk: &SelectionKey, name: Name) -> bool {
+fn is_named_field(sk: SelectionKey, name: Name) -> bool {
     matches!(sk,
             SelectionKey::Field { response_name, directives: _ }
                 if *response_name == name)
@@ -1137,14 +1137,7 @@ fn get_value_at_path<'a>(ss: &'a SelectionSet, path: &[Name]) -> Option<&'a Sele
         // Error: empty path
         return None;
     };
-    let result = ss.selections.get(&SelectionKey::Field {
-        response_name: (*first).clone(),
-        directives: Default::default(),
-    });
-    let Some(value) = result else {
-        // Error: No matching field found.
-        return None;
-    };
+    let value = ss.selections.get(SelectionKey::field_name(first))?;
     if rest.is_empty() {
         // Base case => We are done.
         Some(value)
@@ -1305,14 +1298,14 @@ mod lazy_map_tests {
 
         // Remove `foo`
         let remove_foo =
-            filter_rec(&selection_set, &|s| !is_named_field(&s.key(), name!("foo"))).unwrap();
+            filter_rec(&selection_set, &|s| !is_named_field(s.key(), name!("foo"))).unwrap();
         assert!(contains_field(&remove_foo, name!("some_int")));
         assert!(contains_field(&remove_foo, name!("foo2")));
         assert!(!contains_field(&remove_foo, name!("foo")));
 
         // Remove `bar`
         let remove_bar =
-            filter_rec(&selection_set, &|s| !is_named_field(&s.key(), name!("bar"))).unwrap();
+            filter_rec(&selection_set, &|s| !is_named_field(s.key(), name!("bar"))).unwrap();
         // "foo2" should be removed, since it has no sub-selections left.
         assert!(!contains_field(&remove_bar, name!("foo2")));
     }
@@ -1355,7 +1348,7 @@ mod lazy_map_tests {
 
         // Add __typename next to any "id" field.
         let result =
-            add_typename_if(&selection_set, &|s| is_named_field(&s.key(), name!("id"))).unwrap();
+            add_typename_if(&selection_set, &|s| is_named_field(s.key(), name!("id"))).unwrap();
 
         // The top level won't have __typename, since it doesn't have "id".
         assert!(!contains_field(&result, name!("__typename")));
@@ -1622,7 +1615,7 @@ fn used_variables() {
     let Selection::Field(subquery) = operation
         .selection_set
         .selections
-        .get(&SelectionKey::field_name("subquery"))
+        .get(SelectionKey::field_name(&name!("subquery")))
         .unwrap()
     else {
         unreachable!();

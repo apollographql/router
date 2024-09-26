@@ -74,7 +74,7 @@ static NEXT_ID: atomic::AtomicUsize = atomic::AtomicUsize::new(1);
 ///
 /// Note that we shouldn't add `derive(Serialize, Deserialize)` to this without changing the types
 /// to be something like UUIDs.
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 // NOTE(@TylerBloom): This feature gate can be removed once the condition in the comment above is
 // met. Note that there are `serde(skip)` statements that should be removed once this is removed.
 #[cfg_attr(feature = "snapshot_tracing", derive(Serialize))]
@@ -404,9 +404,19 @@ impl Selection {
         }
     }
 
+    /// Returns true if the selection key is `__typename` *without directives*.
+    ///
     /// # Errors
     /// Returns an error if the selection contains a fragment spread, or if any of the
     /// @skip/@include directives are invalid (per GraphQL validation rules).
+    pub(crate) fn is_typename_field(&self) -> bool {
+        if let Selection::Field(field) = self {
+            *field.field.response_name() == TYPENAME_FIELD && field.field.directives.is_empty()
+        } else {
+            false
+        }
+    }
+
     pub(crate) fn conditions(&self) -> Result<Conditions, FederationError> {
         let self_conditions = Conditions::from_directives(self.directives())?;
         if let Conditions::Boolean(false) = self_conditions {
@@ -519,7 +529,7 @@ impl From<InlineFragmentSelection> for Selection {
 }
 
 impl HasSelectionKey for Selection {
-    fn key(&self) -> SelectionKey {
+    fn key(&self) -> SelectionKey<'_> {
         match self {
             Selection::Field(field_selection) => field_selection.key(),
             Selection::FragmentSpread(fragment_spread_selection) => fragment_spread_selection.key(),
@@ -606,7 +616,7 @@ mod field_selection {
     }
 
     impl HasSelectionKey for FieldSelection {
-        fn key(&self) -> SelectionKey {
+        fn key(&self) -> SelectionKey<'_> {
             self.field.key()
         }
     }
@@ -634,7 +644,6 @@ mod field_selection {
     #[derive(Clone, Serialize)]
     pub(crate) struct Field {
         data: FieldData,
-        key: SelectionKey,
     }
 
     impl std::fmt::Debug for Field {
@@ -646,7 +655,7 @@ mod field_selection {
     impl PartialEq for Field {
         fn eq(&self, other: &Self) -> bool {
             self.data.field_position.field_name() == other.data.field_position.field_name()
-                && self.key == other.key
+                && self.key() == other.key()
                 && self.data.arguments == other.data.arguments
         }
     }
@@ -656,7 +665,7 @@ mod field_selection {
     impl Hash for Field {
         fn hash<H: Hasher>(&self, state: &mut H) {
             self.data.field_position.field_name().hash(state);
-            self.key.hash(state);
+            self.key().hash(state);
             self.data.arguments.hash(state);
         }
     }
@@ -671,10 +680,7 @@ mod field_selection {
 
     impl Field {
         pub(crate) fn new(data: FieldData) -> Self {
-            Self {
-                key: data.key(),
-                data,
-            }
+            Self { data }
         }
 
         // Note: The `schema` argument must be a subgraph schema, so the __typename field won't
@@ -769,13 +775,13 @@ mod field_selection {
         }
 
         pub(crate) fn as_path_element(&self) -> FetchDataPathElement {
-            FetchDataPathElement::Key(self.response_name(), Default::default())
+            FetchDataPathElement::Key(self.response_name().clone(), Default::default())
         }
     }
 
     impl HasSelectionKey for Field {
-        fn key(&self) -> SelectionKey {
-            self.key.clone()
+        fn key(&self) -> SelectionKey<'_> {
+            self.data.key()
         }
     }
 
@@ -831,8 +837,8 @@ mod field_selection {
             self.field_position.field_name()
         }
 
-        pub(crate) fn response_name(&self) -> Name {
-            self.alias.clone().unwrap_or_else(|| self.name().clone())
+        pub(crate) fn response_name(&self) -> &Name {
+            self.alias.as_ref().unwrap_or_else(|| self.name())
         }
 
         pub(crate) fn output_base_type(&self) -> Result<TypeDefinitionPosition, FederationError> {
@@ -851,10 +857,10 @@ mod field_selection {
     }
 
     impl HasSelectionKey for FieldData {
-        fn key(&self) -> SelectionKey {
+        fn key(&self) -> SelectionKey<'_> {
             SelectionKey::Field {
                 response_name: self.response_name(),
-                directives: self.directives.clone(),
+                directives: &self.directives,
             }
         }
     }
@@ -885,7 +891,7 @@ mod fragment_spread_selection {
     }
 
     impl HasSelectionKey for FragmentSpreadSelection {
-        fn key(&self) -> SelectionKey {
+        fn key(&self) -> SelectionKey<'_> {
             self.spread.key()
         }
     }
@@ -896,7 +902,6 @@ mod fragment_spread_selection {
     #[derive(Clone, Serialize)]
     pub(crate) struct FragmentSpread {
         data: FragmentSpreadData,
-        key: SelectionKey,
     }
 
     impl std::fmt::Debug for FragmentSpread {
@@ -907,7 +912,7 @@ mod fragment_spread_selection {
 
     impl PartialEq for FragmentSpread {
         fn eq(&self, other: &Self) -> bool {
-            self.key == other.key
+            self.key() == other.key()
         }
     }
 
@@ -923,10 +928,7 @@ mod fragment_spread_selection {
 
     impl FragmentSpread {
         pub(crate) fn new(data: FragmentSpreadData) -> Self {
-            Self {
-                key: data.key(),
-                data,
-            }
+            Self { data }
         }
 
         pub(crate) fn data(&self) -> &FragmentSpreadData {
@@ -935,8 +937,8 @@ mod fragment_spread_selection {
     }
 
     impl HasSelectionKey for FragmentSpread {
-        fn key(&self) -> SelectionKey {
-            self.key.clone()
+        fn key(&self) -> SelectionKey<'_> {
+            self.data.key()
         }
     }
 
@@ -961,15 +963,15 @@ mod fragment_spread_selection {
     }
 
     impl HasSelectionKey for FragmentSpreadData {
-        fn key(&self) -> SelectionKey {
+        fn key(&self) -> SelectionKey<'_> {
             if is_deferred_selection(&self.directives) {
                 SelectionKey::Defer {
                     deferred_id: self.selection_id,
                 }
             } else {
                 SelectionKey::FragmentSpread {
-                    fragment_name: self.fragment_name.clone(),
-                    directives: self.directives.clone(),
+                    fragment_name: &self.fragment_name,
+                    directives: &self.directives,
                 }
             }
         }
@@ -1122,7 +1124,7 @@ mod inline_fragment_selection {
     }
 
     impl HasSelectionKey for InlineFragmentSelection {
-        fn key(&self) -> SelectionKey {
+        fn key(&self) -> SelectionKey<'_> {
             self.inline_fragment.key()
         }
     }
@@ -1132,7 +1134,6 @@ mod inline_fragment_selection {
     #[derive(Clone, Serialize)]
     pub(crate) struct InlineFragment {
         data: InlineFragmentData,
-        key: SelectionKey,
     }
 
     impl std::fmt::Debug for InlineFragment {
@@ -1143,7 +1144,7 @@ mod inline_fragment_selection {
 
     impl PartialEq for InlineFragment {
         fn eq(&self, other: &Self) -> bool {
-            self.key == other.key
+            self.key() == other.key()
         }
     }
 
@@ -1151,7 +1152,7 @@ mod inline_fragment_selection {
 
     impl Hash for InlineFragment {
         fn hash<H: Hasher>(&self, state: &mut H) {
-            self.key.hash(state);
+            self.key().hash(state);
         }
     }
 
@@ -1165,10 +1166,7 @@ mod inline_fragment_selection {
 
     impl InlineFragment {
         pub(crate) fn new(data: InlineFragmentData) -> Self {
-            Self {
-                key: data.key(),
-                data,
-            }
+            Self { data }
         }
 
         pub(crate) fn schema(&self) -> &ValidFederationSchema {
@@ -1206,8 +1204,8 @@ mod inline_fragment_selection {
     }
 
     impl HasSelectionKey for InlineFragment {
-        fn key(&self) -> SelectionKey {
-            self.key.clone()
+        fn key(&self) -> SelectionKey<'_> {
+            self.data.key()
         }
     }
 
@@ -1242,18 +1240,18 @@ mod inline_fragment_selection {
     }
 
     impl HasSelectionKey for InlineFragmentData {
-        fn key(&self) -> SelectionKey {
+        fn key(&self) -> SelectionKey<'_> {
             if is_deferred_selection(&self.directives) {
                 SelectionKey::Defer {
-                    deferred_id: self.selection_id.clone(),
+                    deferred_id: self.selection_id,
                 }
             } else {
                 SelectionKey::InlineFragment {
                     type_condition: self
                         .type_condition_position
                         .as_ref()
-                        .map(|pos| pos.type_name().clone()),
-                    directives: self.directives.clone(),
+                        .map(|pos| pos.type_name()),
+                    directives: &self.directives,
                 }
             }
         }
@@ -1264,6 +1262,7 @@ pub(crate) use inline_fragment_selection::InlineFragment;
 pub(crate) use inline_fragment_selection::InlineFragmentData;
 pub(crate) use inline_fragment_selection::InlineFragmentSelection;
 
+use self::selection_map::OwnedSelectionKey;
 use crate::schema::position::INTROSPECTION_TYPENAME_FIELD_NAME;
 
 /// A simple MultiMap implementation using IndexMap with Vec<V> as its value type.
@@ -1448,7 +1447,7 @@ impl SelectionSet {
     }
 
     pub(crate) fn contains_top_level_field(&self, field: &Field) -> Result<bool, FederationError> {
-        if let Some(selection) = self.selections.get(&field.key()) {
+        if let Some(selection) = self.selections.get(field.key()) {
             let Selection::Field(field_selection) = selection else {
                 return Err(SingleFederationError::Internal {
                     message: format!(
@@ -1684,21 +1683,21 @@ impl SelectionSet {
             interface_types_with_interface_objects.contains(&InterfaceTypeDefinitionPosition {
                 type_name: self.type_position.type_name().clone(),
             });
-        let mut typename_field_key: Option<SelectionKey> = None;
-        let mut sibling_field_key: Option<SelectionKey> = None;
+        let mut typename_field_key: Option<OwnedSelectionKey> = None;
+        let mut sibling_field_key: Option<OwnedSelectionKey> = None;
 
         let mutable_selection_map = Arc::make_mut(&mut self.selections);
         for entry in mutable_selection_map.values_mut() {
-            let key = entry.key();
+            let key = entry.key().to_owned_key();
             match entry {
                 SelectionValue::Field(mut field_selection) => {
                     if field_selection.get().field.is_plain_typename_field()
                         && !is_interface_object
                         && typename_field_key.is_none()
                     {
-                        typename_field_key = Some(key.clone());
+                        typename_field_key = Some(key);
                     } else if sibling_field_key.is_none() {
-                        sibling_field_key = Some(key.clone());
+                        sibling_field_key = Some(key);
                     }
 
                     if let Some(field_selection_set) = field_selection.get_selection_set_mut() {
@@ -1730,8 +1729,8 @@ impl SelectionSet {
                 Some((_, Selection::Field(typename_field))),
                 Some(SelectionValue::Field(mut sibling_field)),
             ) = (
-                mutable_selection_map.remove(&typename_key),
-                mutable_selection_map.get_mut(&sibling_field_key),
+                mutable_selection_map.remove(typename_key.as_borrowed_key()),
+                mutable_selection_map.get_mut(sibling_field_key.as_borrowed_key()),
             ) {
                 // Note that as we tag the element, we also record the alias used if any since that
                 // needs to be preserved.
@@ -1926,17 +1925,19 @@ impl SelectionSet {
             self.selections
                 .values()
                 .take(index)
-                .map(|v| (v.key(), v.clone())),
+                .map(|v| (v.key().to_owned_key(), v.clone())),
         );
 
         let mut update_new_selection = |selection| match selection {
             SelectionMapperReturn::None => {} // Removed; Skip it.
             SelectionMapperReturn::Selection(new_selection) => {
-                updated_selections.insert(new_selection.key(), new_selection)
+                updated_selections.insert(new_selection.key().to_owned_key(), new_selection)
             }
-            SelectionMapperReturn::SelectionList(new_selections) => {
-                updated_selections.extend(new_selections.into_iter().map(|s| (s.key(), s)))
-            }
+            SelectionMapperReturn::SelectionList(new_selections) => updated_selections.extend(
+                new_selections
+                    .into_iter()
+                    .map(|s| (s.key().to_owned_key(), s)),
+            ),
         };
 
         // Now update the rest of the selections using the `mapper` function.
@@ -2039,11 +2040,11 @@ impl SelectionSet {
 
     fn has_top_level_typename_field(&self) -> bool {
         const TYPENAME_KEY: SelectionKey = SelectionKey::Field {
-            response_name: TYPENAME_FIELD,
-            directives: DirectiveList::new(),
+            response_name: &TYPENAME_FIELD,
+            directives: &DirectiveList::new(),
         };
 
-        self.selections.contains_key(&TYPENAME_KEY)
+        self.selections.contains_key(TYPENAME_KEY)
     }
 
     /// Adds a path, and optional some selections following that path, to this selection map.
@@ -2517,7 +2518,7 @@ fn compute_aliases_for_non_merging_fields(
         let response_name = field.field.response_name();
         let field_type = &field.field.field_position.get(field_schema)?.ty;
 
-        match seen_response_names.get(&response_name) {
+        match seen_response_names.get(response_name) {
             Some(previous) => {
                 if &previous.field_name == field_name
                     && types_can_be_merged(&previous.field_type, field_type, schema.schema())?
@@ -2548,7 +2549,7 @@ fn compute_aliases_for_non_merging_fields(
                                     selections: field.selection_set.clone(),
                                 });
                                 seen_response_names.insert(
-                                    response_name,
+                                    response_name.clone(),
                                     SeenResponseName {
                                         field_name: previous.field_name.clone(),
                                         field_type: previous.field_type.clone(),
@@ -2560,7 +2561,7 @@ fn compute_aliases_for_non_merging_fields(
                     }
                 } else {
                     // We need to alias the new occurence.
-                    let alias = gen_alias_name(&response_name, &seen_response_names);
+                    let alias = gen_alias_name(response_name, &seen_response_names);
 
                     // Given how we generate aliases, it's is very unlikely that the generated alias will conflict with any of the other response name
                     // at the level, but it's theoretically possible. By adding the alias to the seen names, we ensure that in the remote change that
@@ -2590,7 +2591,7 @@ fn compute_aliases_for_non_merging_fields(
 
                     alias_collector.push(FieldToAlias {
                         path,
-                        response_name,
+                        response_name: response_name.clone(),
                         alias,
                     })
                 }
@@ -2611,7 +2612,7 @@ fn compute_aliases_for_non_merging_fields(
                     None => None,
                 };
                 seen_response_names.insert(
-                    response_name,
+                    response_name.clone(),
                     SeenResponseName {
                         field_name: field_name.clone(),
                         field_type: field_type.clone(),

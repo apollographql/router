@@ -29,28 +29,28 @@ use crate::operation::SiblingTypename;
 /// * directives have to be applied in the same order
 /// * directive arguments order does not matter (they get automatically sorted by their names).
 /// * selection cannot specify @defer directive
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
-pub(crate) enum SelectionKey {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+pub(crate) enum SelectionKey<'a> {
     Field {
         /// The field alias (if specified) or field name in the resulting selection set.
-        response_name: Name,
+        response_name: &'a Name,
         /// directives applied on the field
         #[serde(serialize_with = "crate::display_helpers::serialize_as_string")]
-        directives: DirectiveList,
+        directives: &'a DirectiveList,
     },
     FragmentSpread {
         /// The name of the fragment.
-        fragment_name: Name,
+        fragment_name: &'a Name,
         /// Directives applied on the fragment spread (does not contain @defer).
         #[serde(serialize_with = "crate::display_helpers::serialize_as_string")]
-        directives: DirectiveList,
+        directives: &'a DirectiveList,
     },
     InlineFragment {
         /// The optional type condition of the fragment.
-        type_condition: Option<Name>,
+        type_condition: Option<&'a Name>,
         /// Directives applied on the fragment spread (does not contain @defer).
         #[serde(serialize_with = "crate::display_helpers::serialize_as_string")]
-        directives: DirectiveList,
+        directives: &'a DirectiveList,
     },
     Defer {
         /// Unique selection ID used to distinguish deferred fragment spreads that cannot be merged.
@@ -59,28 +59,107 @@ pub(crate) enum SelectionKey {
     },
 }
 
-impl SelectionKey {
-    /// Returns true if the selection key is `__typename` *without directives*.
-    #[deprecated = "Use the Selection type instead"]
-    pub(crate) fn is_typename_field(&self) -> bool {
-        matches!(self, SelectionKey::Field { response_name, directives } if *response_name == super::TYPENAME_FIELD && directives.is_empty())
+impl SelectionKey<'_> {
+    /// Get an owned structure representing the selection key, for use in map keys
+    /// that are not a plain selection map.
+    pub(crate) fn to_owned_key(self) -> OwnedSelectionKey {
+        match self {
+            Self::Field {
+                response_name,
+                directives,
+            } => OwnedSelectionKey::Field {
+                response_name: response_name.clone(),
+                directives: directives.clone(),
+            },
+            Self::FragmentSpread {
+                fragment_name,
+                directives,
+            } => OwnedSelectionKey::FragmentSpread {
+                fragment_name: fragment_name.clone(),
+                directives: directives.clone(),
+            },
+            Self::InlineFragment {
+                type_condition,
+                directives,
+            } => OwnedSelectionKey::InlineFragment {
+                type_condition: type_condition.cloned(),
+                directives: directives.clone(),
+            },
+            Self::Defer { deferred_id } => OwnedSelectionKey::Defer { deferred_id },
+        }
     }
+}
 
+/// An owned structure representing the selection key, for use in map keys
+/// that are not a plain selection map.
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub(crate) enum OwnedSelectionKey {
+    Field {
+        response_name: Name,
+        directives: DirectiveList,
+    },
+    FragmentSpread {
+        fragment_name: Name,
+        directives: DirectiveList,
+    },
+    InlineFragment {
+        type_condition: Option<Name>,
+        directives: DirectiveList,
+    },
+    Defer {
+        deferred_id: SelectionId,
+    },
+}
+
+impl OwnedSelectionKey {
+    /// Get a plain, borrowed selection key, that can be used for indexing into a selection map.
+    pub(crate) fn as_borrowed_key(&self) -> SelectionKey<'_> {
+        match self {
+            OwnedSelectionKey::Field {
+                response_name,
+                directives,
+            } => SelectionKey::Field {
+                response_name,
+                directives,
+            },
+            OwnedSelectionKey::FragmentSpread {
+                fragment_name,
+                directives,
+            } => SelectionKey::FragmentSpread {
+                fragment_name,
+                directives,
+            },
+            OwnedSelectionKey::InlineFragment {
+                type_condition,
+                directives,
+            } => SelectionKey::InlineFragment {
+                type_condition: type_condition.as_ref(),
+                directives,
+            },
+            OwnedSelectionKey::Defer { deferred_id } => SelectionKey::Defer {
+                deferred_id: *deferred_id,
+            },
+        }
+    }
+}
+
+impl<'a> SelectionKey<'a> {
     /// Create a selection key for a specific field name.
     ///
     /// This is available for tests only as selection keys should not normally be created outside of
     /// `HasSelectionKey::key`.
     #[cfg(test)]
-    pub(crate) fn field_name(name: &str) -> Self {
+    pub(crate) fn field_name(name: &'a Name) -> Self {
+        static EMPTY_LIST: DirectiveList = DirectiveList::new();
         SelectionKey::Field {
-            response_name: Name::new(name).unwrap(),
-            directives: Default::default(),
+            response_name: &name,
+            directives: &EMPTY_LIST,
         }
     }
 }
 
 pub(crate) trait HasSelectionKey {
-    fn key(&self) -> SelectionKey;
+    fn key(&self) -> SelectionKey<'_>;
 }
 
 #[derive(Clone)]
@@ -118,7 +197,7 @@ impl PartialEq for SelectionMap {
         self.len() == other.len()
             && self
                 .values()
-                .all(|left| other.get(&left.key()).is_some_and(|right| left == right))
+                .all(|left| other.get(left.key()).is_some_and(|right| left == right))
     }
 }
 
@@ -151,8 +230,8 @@ pub(crate) type IntoValues = std::vec::IntoIter<Selection>;
 /// matches the given key.
 ///
 /// The returned function panics if the index is out of bounds.
-fn key_eq<'a>(selections: &'a [Selection], key: &SelectionKey) -> impl Fn(&Bucket) -> bool + 'a {
-    move |bucket| selections[bucket.index].key() == *key
+fn key_eq<'a>(selections: &'a [Selection], key: SelectionKey<'a>) -> impl Fn(&Bucket) -> bool + 'a {
+    move |bucket| selections[bucket.index].key() == key
 }
 
 impl SelectionMap {
@@ -180,12 +259,12 @@ impl SelectionMap {
     }
 
     /// Computes the hash of a selection key.
-    fn hash(&self, key: SelectionKey) -> u64 {
+    fn hash(&self, key: SelectionKey<'_>) -> u64 {
         self.hash_builder.hash_one(key)
     }
 
     /// Returns true if the given key exists in the map.
-    pub(crate) fn contains_key(&self, key: &SelectionKey) -> bool {
+    pub(crate) fn contains_key(&self, key: SelectionKey<'_>) -> bool {
         let hash = self.hash(key);
         self.table
             .find(hash, key_eq(&self.selections, key))
@@ -193,13 +272,13 @@ impl SelectionMap {
     }
 
     /// Returns true if the given key exists in the map.
-    pub(crate) fn get(&self, key: &SelectionKey) -> Option<&Selection> {
+    pub(crate) fn get(&self, key: SelectionKey<'_>) -> Option<&Selection> {
         let hash = self.hash(key);
         let bucket = self.table.find(hash, key_eq(&self.selections, key))?;
         Some(&self.selections[bucket.index])
     }
 
-    pub(crate) fn get_mut(&mut self, key: &SelectionKey) -> Option<SelectionValue<'_>> {
+    pub(crate) fn get_mut(&mut self, key: SelectionKey<'_>) -> Option<SelectionValue<'_>> {
         let hash = self.hash(key);
         let bucket = self.table.find_mut(hash, key_eq(&self.selections, key))?;
         Some(SelectionValue::new(&mut self.selections[bucket.index]))
@@ -240,12 +319,12 @@ impl SelectionMap {
     }
 
     pub(crate) fn insert(&mut self, value: Selection) {
-        let hash = self.hash(&value.key());
+        let hash = self.hash(value.key());
         self.raw_insert(hash, value);
     }
 
     /// Remove a selection from the map. Returns the selection and its numeric index.
-    pub(crate) fn remove(&mut self, key: &SelectionKey) -> Option<(usize, Selection)> {
+    pub(crate) fn remove(&mut self, key: SelectionKey<'_>) -> Option<(usize, Selection)> {
         let hash = self.hash(key);
         let entry = self
             .table
@@ -257,10 +336,10 @@ impl SelectionMap {
         Some((bucket.index, selection))
     }
 
-    pub(crate) fn retain(&mut self, mut predicate: impl FnMut(&SelectionKey, &Selection) -> bool) {
+    pub(crate) fn retain(&mut self, mut predicate: impl FnMut(SelectionKey<'_>, &Selection) -> bool) {
         self.selections.retain(|selection| {
             let key = selection.key();
-            predicate(&key, selection)
+            predicate(key, selection)
         });
         if self.selections.len() < self.table.len() {
             // In theory, we could track which keys were removed, and adjust the indices based on
@@ -286,7 +365,7 @@ impl SelectionMap {
         self.selections.into_iter()
     }
 
-    pub(super) fn entry<'a>(&'a mut self, key: &SelectionKey) -> Entry<'a> {
+    pub(super) fn entry<'a>(&'a mut self, key: SelectionKey<'_>) -> Entry<'a> {
         let hash = self.hash(key);
         let slot = self.table.find_entry(hash, key_eq(&self.selections, key));
         match slot {
@@ -433,7 +512,7 @@ impl<'a> SelectionValue<'a> {
         }
     }
 
-    pub(super) fn key(&self) -> SelectionKey {
+    pub(super) fn key(&self) -> SelectionKey<'_> {
         match self {
             Self::Field(field) => field.get().key(),
             Self::FragmentSpread(frag) => frag.get().key(),
@@ -537,16 +616,16 @@ impl<'a> OccupiedEntry<'a> {
 pub(crate) struct VacantEntry<'a> {
     map: &'a mut SelectionMap,
     hash: u64,
-    key: SelectionKey,
+    key: SelectionKey<'a>,
 }
 
 impl<'a> VacantEntry<'a> {
-    pub(crate) fn key(&self) -> &SelectionKey {
-        &self.key
+    pub(crate) fn key(&self) -> SelectionKey<'a> {
+        self.key
     }
 
     pub(crate) fn insert(self, value: Selection) -> Result<SelectionValue<'a>, FederationError> {
-        if *self.key() != value.key() {
+        if self.key() != value.key() {
             return Err(Internal {
                 message: format!(
                     "Key mismatch when inserting selection {} into vacant entry ",

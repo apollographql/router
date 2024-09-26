@@ -660,7 +660,7 @@ impl FetchDependencyGraphNodePath {
                 }
 
                 new_path.push(FetchDataPathElement::Key(
-                    field.response_name(),
+                    field.response_name().clone(),
                     Default::default(),
                 ));
 
