@@ -816,7 +816,6 @@ impl TraceSpec {
     async fn validate_trace(&self, id: TraceId) -> Result<(), BoxError> {
         let datadog_id = id.to_datadog();
         let url = format!("http://localhost:8126/test/traces?trace_ids={datadog_id}");
-        println!("validating trace {} {} {}", id, datadog_id, url);
         for _ in 0..20 {
             if self.find_valid_trace(&url).await.is_ok() {
                 return Ok(());
