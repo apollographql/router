@@ -11,7 +11,7 @@ BINARY_DOWNLOAD_PREFIX="https://github.com/apollographql/router/releases/downloa
 
 # Router version defined in apollo-router's Cargo.toml
 # Note: Change this line manually during the release steps.
-PACKAGE_VERSION="v1.55.1-alpha.2"
+PACKAGE_VERSION="v1.55.1-rc.0"
 
 download_binary() {
     downloader --check
