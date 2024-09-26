@@ -9,8 +9,7 @@ Previously a `x-datadog-sampling-priority` of `-1` would be converted to `0` for
 
 To get accurate APM metrics all spans must be sent to the datadog agent with a `psr` or `sampling.priority` attribute set appropriately to record the sampling decision.
 
-`preview_datadog_agent_sampling` option in the router.yaml enables this behavior and should be used when exporting to the datadog agent via OTLP. 
-It is automatically enabled for the Datadog native exporter.
+`preview_datadog_agent_sampling` option in the router.yaml enables this behavior and should be used when exporting to the datadog agent via OTLP or datadog native. 
 
 ```yaml
 telemetry:
@@ -41,7 +40,7 @@ telemetry:
 By using these options, you can decrease your Datadog bill as you will only be sending a percentage of spans from the Datadog agent to datadog. 
 
 > [!IMPORTANT]
-> Users using OTLP exporter must enable `preview_datadog_agent_sampling` to get accurate APM metrics.
+> Users must enable `preview_datadog_agent_sampling` to get accurate APM metrics.
 
 > [!IMPORTANT]
 > Sending all spans to the datadog agent may require that you tweak the `batch_processor` settings in your exporter config. This applies to both OTLP and the Datadog native exporter.

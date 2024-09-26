@@ -349,8 +349,7 @@ pub(crate) struct TracingCommon {
     /// The sampler, always_on, always_off or a decimal between 0.0 and 1.0
     pub(crate) sampler: SamplerOption,
     /// Use datadog agent sampling. This means that all spans will be sent to the Datadog agent
-    /// and the `sampling.priority` attribute will be used to control if the span will then be sent to Datadog.
-    /// This option is enabled by default if you are using the Datadog native exporter but can be explicitly disabled.
+    /// and the `sampling.priority` attribute will be used to control if the span will then be sent to Datadog
     pub(crate) preview_datadog_agent_sampling: Option<bool>,
     /// Whether to use parent based sampling
     pub(crate) parent_based_sampler: bool,
