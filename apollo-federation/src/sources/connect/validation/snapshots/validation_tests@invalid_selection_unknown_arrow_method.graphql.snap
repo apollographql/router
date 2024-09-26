@@ -8,39 +8,21 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_s
         code: UnknownMethod,
         message: "`@connect(selection:)` on `Query.me` has a call to an unknown method `doesnotexist`",
         locations: [
-            LineColumn {
-                line: 11,
-                column: 20,
-            }..LineColumn {
-                line: 14,
-                column: 12,
-            },
+            11:20..14:12,
         ],
     },
     Message {
         code: UnresolvedField,
         message: "No connector resolves field `User.id`. It must have a `@connect` directive or appear in `@connect(selection:)`.",
         locations: [
-            LineColumn {
-                line: 19,
-                column: 5,
-            }..LineColumn {
-                line: 19,
-                column: 12,
-            },
+            19:5..19:12,
         ],
     },
     Message {
         code: UnresolvedField,
         message: "No connector resolves field `User.invalid`. It must have a `@connect` directive or appear in `@connect(selection:)`.",
         locations: [
-            LineColumn {
-                line: 20,
-                column: 5,
-            }..LineColumn {
-                line: 20,
-                column: 20,
-            },
+            20:5..20:20,
         ],
     },
 ]
