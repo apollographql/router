@@ -6,7 +6,6 @@ use apollo_compiler::name;
 use super::runtime_types_intersect;
 use super::DirectiveList;
 use super::Field;
-use super::FieldData;
 use super::FieldSelection;
 use super::FragmentSpreadSelection;
 use super::InlineFragmentSelection;
@@ -62,7 +61,7 @@ impl FieldSelection {
 
         let field_element =
             if self.field.schema() == schema && self.field.field_position == field_position {
-                self.field.data().clone()
+                self.field.clone()
             } else {
                 self.field
                     .with_updated_position(schema.clone(), field_position)
@@ -89,7 +88,7 @@ impl FieldSelection {
                     arguments: vec![(name!("if"), false).into()],
                 });
                 let non_included_typename = Selection::from_field(
-                    Field::new(FieldData {
+                    Field {
                         schema: schema.clone(),
                         field_position: field_composite_type_position
                             .introspection_typename_field(),
@@ -97,7 +96,7 @@ impl FieldSelection {
                         arguments: Default::default(),
                         directives,
                         sibling_typename: None,
-                    }),
+                    },
                     None,
                 );
                 let mut typename_selection = SelectionMap::new();
@@ -229,14 +228,14 @@ impl InlineFragmentSelection {
                     parent_type.introspection_typename_field()
                 };
                 let typename_field_selection = Selection::from_field(
-                    Field::new(FieldData {
+                    Field {
                         schema: schema.clone(),
                         field_position: parent_typename_field,
                         alias: None,
                         arguments: Default::default(),
                         directives,
                         sibling_typename: None,
-                    }),
+                    },
                     None,
                 );
 

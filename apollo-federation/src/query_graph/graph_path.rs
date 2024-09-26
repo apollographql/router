@@ -32,7 +32,6 @@ use crate::link::graphql_definition::OperationConditional;
 use crate::link::graphql_definition::OperationConditionalKind;
 use crate::operation::DirectiveList;
 use crate::operation::Field;
-use crate::operation::FieldData;
 use crate::operation::HasSelectionKey;
 use crate::operation::InlineFragment;
 use crate::operation::InlineFragmentData;
@@ -2503,14 +2502,14 @@ impl OpGraphPath {
                                     operation_field, edge_weight, self,
                                 )));
                             }
-                            operation_field = Field::new(FieldData {
+                            operation_field = Field {
                                 schema: self.graph.schema_by_source(&tail_weight.source)?.clone(),
                                 field_position: field_on_tail_type.into(),
                                 alias: operation_field.alias.clone(),
                                 arguments: operation_field.arguments.clone(),
                                 directives: operation_field.directives.clone(),
                                 sibling_typename: operation_field.sibling_typename.clone(),
-                            })
+                            }
                         }
 
                         let field_path = self.add_field_edge(
@@ -3892,7 +3891,6 @@ mod tests {
     use petgraph::stable_graph::NodeIndex;
 
     use crate::operation::Field;
-    use crate::operation::FieldData;
     use crate::query_graph::build_query_graph::build_query_graph;
     use crate::query_graph::condition_resolver::ConditionResolution;
     use crate::query_graph::graph_path::OpGraphPath;
@@ -3928,8 +3926,8 @@ mod tests {
             type_name: Name::new("T").unwrap(),
             field_name: Name::new("t").unwrap(),
         };
-        let data = FieldData::from_position(&schema, pos.into());
-        let trigger = OpGraphPathTrigger::OpPathElement(OpPathElement::Field(Field::new(data)));
+        let field = Field::from_position(&schema, pos.into());
+        let trigger = OpGraphPathTrigger::OpPathElement(OpPathElement::Field(field));
         let path = path
             .add(
                 trigger,
@@ -3946,8 +3944,8 @@ mod tests {
             type_name: Name::new("ID").unwrap(),
             field_name: Name::new("id").unwrap(),
         };
-        let data = FieldData::from_position(&schema, pos.into());
-        let trigger = OpGraphPathTrigger::OpPathElement(OpPathElement::Field(Field::new(data)));
+        let field = Field::from_position(&schema, pos.into());
+        let trigger = OpGraphPathTrigger::OpPathElement(OpPathElement::Field(field));
         let path = path
             .add(
                 trigger,

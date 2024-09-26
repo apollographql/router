@@ -582,7 +582,6 @@ impl Fragment {
 mod field_selection {
     use std::hash::Hash;
     use std::hash::Hasher;
-    use std::ops::Deref;
 
     use apollo_compiler::Name;
     use serde::Serialize;
@@ -632,31 +631,52 @@ mod field_selection {
             }
         }
 
-        pub(crate) fn with_updated_alias(&self, alias: Name) -> Field {
-            let mut data = self.field.data().clone();
-            data.alias = Some(alias);
-            Field::new(data)
+        pub(crate) fn with_updated_directives(&self, directives: impl Into<DirectiveList>) -> Self {
+            Self {
+                field: self.field.with_updated_directives(directives),
+                selection_set: self.selection_set.clone(),
+            }
+        }
+    }
+
+    // SiblingTypename indicates how the sibling __typename field should be restored.
+    // PORT_NOTE: The JS version used the empty string to indicate unaliased sibling typenames.
+    // Here we use an enum to make the distinction explicit.
+    #[derive(Debug, Clone, Serialize)]
+    pub(crate) enum SiblingTypename {
+        Unaliased,
+        Aliased(Name), // the sibling __typename has been aliased
+    }
+
+    impl SiblingTypename {
+        pub(crate) fn alias(&self) -> Option<&Name> {
+            match self {
+                SiblingTypename::Unaliased => None,
+                SiblingTypename::Aliased(alias) => Some(alias),
+            }
         }
     }
 
     /// The non-selection-set data of `FieldSelection`, used with operation paths and graph
     /// paths.
-    #[derive(Clone, Serialize)]
+    #[derive(Debug, Clone, Serialize)]
     pub(crate) struct Field {
-        data: FieldData,
-    }
-
-    impl std::fmt::Debug for Field {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            self.data.fmt(f)
-        }
+        #[serde(skip)]
+        pub(crate) schema: ValidFederationSchema,
+        pub(crate) field_position: FieldDefinitionPosition,
+        pub(crate) alias: Option<Name>,
+        #[serde(serialize_with = "crate::display_helpers::serialize_as_debug_string")]
+        pub(crate) arguments: ArgumentList,
+        #[serde(serialize_with = "crate::display_helpers::serialize_as_string")]
+        pub(crate) directives: DirectiveList,
+        pub(crate) sibling_typename: Option<SiblingTypename>,
     }
 
     impl PartialEq for Field {
         fn eq(&self, other: &Self) -> bool {
-            self.data.field_position.field_name() == other.data.field_position.field_name()
+            self.field_position.field_name() == other.field_position.field_name()
                 && self.key() == other.key()
-                && self.data.arguments == other.data.arguments
+                && self.arguments == other.arguments
         }
     }
 
@@ -664,23 +684,26 @@ mod field_selection {
 
     impl Hash for Field {
         fn hash<H: Hasher>(&self, state: &mut H) {
-            self.data.field_position.field_name().hash(state);
+            self.field_position.field_name().hash(state);
             self.key().hash(state);
-            self.data.arguments.hash(state);
-        }
-    }
-
-    impl Deref for Field {
-        type Target = FieldData;
-
-        fn deref(&self) -> &Self::Target {
-            &self.data
+            self.arguments.hash(state);
         }
     }
 
     impl Field {
-        pub(crate) fn new(data: FieldData) -> Self {
-            Self { data }
+        /// Create a trivial field selection without any arguments or directives.
+        pub(crate) fn from_position(
+            schema: &ValidFederationSchema,
+            field_position: FieldDefinitionPosition,
+        ) -> Self {
+            Self {
+                schema: schema.clone(),
+                field_position,
+                alias: None,
+                arguments: Default::default(),
+                directives: Default::default(),
+                sibling_typename: None,
+            }
         }
 
         // Note: The `schema` argument must be a subgraph schema, so the __typename field won't
@@ -690,14 +713,77 @@ mod field_selection {
             parent_type: &CompositeTypeDefinitionPosition,
             alias: Option<Name>,
         ) -> Self {
-            Self::new(FieldData {
+            Self {
                 schema: schema.clone(),
                 field_position: parent_type.introspection_typename_field(),
                 alias,
                 arguments: Default::default(),
                 directives: Default::default(),
                 sibling_typename: None,
-            })
+            }
+        }
+
+        pub(crate) fn schema(&self) -> &ValidFederationSchema {
+            &self.schema
+        }
+
+        pub(crate) fn name(&self) -> &Name {
+            self.field_position.field_name()
+        }
+
+        pub(crate) fn response_name(&self) -> &Name {
+            self.alias.as_ref().unwrap_or_else(|| self.name())
+        }
+
+        // Is this a plain simple __typename without any directive or alias?
+        pub(crate) fn is_plain_typename_field(&self) -> bool {
+            *self.field_position.field_name() == TYPENAME_FIELD
+                && self.directives.is_empty()
+                && self.alias.is_none()
+        }
+
+        pub(super) fn directives_mut(&mut self) -> &mut DirectiveList {
+            &mut self.directives
+        }
+
+        pub(crate) fn sibling_typename(&self) -> Option<&SiblingTypename> {
+            self.sibling_typename.as_ref()
+        }
+
+        pub(crate) fn sibling_typename_mut(&mut self) -> &mut Option<SiblingTypename> {
+            &mut self.sibling_typename
+        }
+
+        pub(crate) fn as_path_element(&self) -> FetchDataPathElement {
+            FetchDataPathElement::Key(self.response_name().clone(), Default::default())
+        }
+
+        pub(crate) fn output_base_type(&self) -> Result<TypeDefinitionPosition, FederationError> {
+            let definition = self.field_position.get(self.schema.schema())?;
+            self.schema
+                .get_type(definition.ty.inner_named_type().clone())
+        }
+
+        pub(crate) fn is_leaf(&self) -> Result<bool, FederationError> {
+            let base_type_position = self.output_base_type()?;
+            Ok(matches!(
+                base_type_position,
+                TypeDefinitionPosition::Scalar(_) | TypeDefinitionPosition::Enum(_)
+            ))
+        }
+
+        pub(crate) fn with_updated_directives(&self, directives: impl Into<DirectiveList>) -> Self {
+            Self {
+                directives: directives.into(),
+                ..self.clone()
+            }
+        }
+
+        pub(crate) fn with_updated_alias(&self, alias: Name) -> Self {
+            Self {
+                alias: Some(alias),
+                ..self.clone()
+            }
         }
 
         /// Turn this `Field` into a `FieldSelection` with the given sub-selection. If this is
@@ -708,7 +794,7 @@ mod field_selection {
         ) -> FieldSelection {
             if cfg!(debug_assertions) {
                 if let Some(ref selection_set) = selection_set {
-                    if let Ok(field_type) = self.data.output_base_type() {
+                    if let Ok(field_type) = self.output_base_type() {
                         if let Ok(field_type_position) =
                             CompositeTypeDefinitionPosition::try_from(field_type)
                         {
@@ -741,122 +827,9 @@ mod field_selection {
                 selection_set,
             }
         }
-
-        pub(crate) fn schema(&self) -> &ValidFederationSchema {
-            &self.data.schema
-        }
-
-        pub(crate) fn data(&self) -> &FieldData {
-            &self.data
-        }
-
-        // Is this a plain simple __typename without any directive or alias?
-        pub(crate) fn is_plain_typename_field(&self) -> bool {
-            *self.data.field_position.field_name() == TYPENAME_FIELD
-                && self.data.directives.is_empty()
-                && self.data.alias.is_none()
-        }
-
-        pub(crate) fn sibling_typename(&self) -> Option<&SiblingTypename> {
-            self.data.sibling_typename.as_ref()
-        }
-
-        pub(crate) fn sibling_typename_mut(&mut self) -> &mut Option<SiblingTypename> {
-            &mut self.data.sibling_typename
-        }
-
-        pub(crate) fn with_updated_directives(
-            &self,
-            directives: impl Into<DirectiveList>,
-        ) -> Field {
-            let mut data = self.data.clone();
-            data.directives = directives.into();
-            Self::new(data)
-        }
-
-        pub(crate) fn as_path_element(&self) -> FetchDataPathElement {
-            FetchDataPathElement::Key(self.response_name().clone(), Default::default())
-        }
     }
 
     impl HasSelectionKey for Field {
-        fn key(&self) -> SelectionKey<'_> {
-            self.data.key()
-        }
-    }
-
-    // SiblingTypename indicates how the sibling __typename field should be restored.
-    // PORT_NOTE: The JS version used the empty string to indicate unaliased sibling typenames.
-    // Here we use an enum to make the distinction explicit.
-    #[derive(Debug, Clone, Serialize)]
-    pub(crate) enum SiblingTypename {
-        Unaliased,
-        Aliased(Name), // the sibling __typename has been aliased
-    }
-
-    impl SiblingTypename {
-        pub(crate) fn alias(&self) -> Option<&Name> {
-            match self {
-                SiblingTypename::Unaliased => None,
-                SiblingTypename::Aliased(alias) => Some(alias),
-            }
-        }
-    }
-
-    #[derive(Debug, Clone, Serialize)]
-    pub(crate) struct FieldData {
-        #[serde(skip)]
-        pub(crate) schema: ValidFederationSchema,
-        pub(crate) field_position: FieldDefinitionPosition,
-        pub(crate) alias: Option<Name>,
-        #[serde(serialize_with = "crate::display_helpers::serialize_as_debug_string")]
-        pub(crate) arguments: ArgumentList,
-        #[serde(serialize_with = "crate::display_helpers::serialize_as_string")]
-        pub(crate) directives: DirectiveList,
-        pub(crate) sibling_typename: Option<SiblingTypename>,
-    }
-
-    impl FieldData {
-        #[cfg(test)]
-        /// Create a trivial field selection without any arguments or directives.
-        pub(crate) fn from_position(
-            schema: &ValidFederationSchema,
-            field_position: FieldDefinitionPosition,
-        ) -> Self {
-            Self {
-                schema: schema.clone(),
-                field_position,
-                alias: None,
-                arguments: Default::default(),
-                directives: Default::default(),
-                sibling_typename: None,
-            }
-        }
-
-        pub(crate) fn name(&self) -> &Name {
-            self.field_position.field_name()
-        }
-
-        pub(crate) fn response_name(&self) -> &Name {
-            self.alias.as_ref().unwrap_or_else(|| self.name())
-        }
-
-        pub(crate) fn output_base_type(&self) -> Result<TypeDefinitionPosition, FederationError> {
-            let definition = self.field_position.get(self.schema.schema())?;
-            self.schema
-                .get_type(definition.ty.inner_named_type().clone())
-        }
-
-        pub(crate) fn is_leaf(&self) -> Result<bool, FederationError> {
-            let base_type_position = self.output_base_type()?;
-            Ok(matches!(
-                base_type_position,
-                TypeDefinitionPosition::Scalar(_) | TypeDefinitionPosition::Enum(_)
-            ))
-        }
-    }
-
-    impl HasSelectionKey for FieldData {
         fn key(&self) -> SelectionKey<'_> {
             SelectionKey::Field {
                 response_name: self.response_name(),
@@ -867,7 +840,6 @@ mod field_selection {
 }
 
 pub(crate) use field_selection::Field;
-pub(crate) use field_selection::FieldData;
 pub(crate) use field_selection::FieldSelection;
 pub(crate) use field_selection::SiblingTypename;
 
@@ -2253,7 +2225,7 @@ impl SelectionSet {
                         selection_map.insert(selection.clone());
                     } else {
                         let updated_field = match alias {
-                            Some(alias) => field.with_updated_alias(alias.alias.clone()),
+                            Some(alias) => field.field.with_updated_alias(alias.alias.clone()),
                             None => field.field.clone(),
                         };
                         selection_map
@@ -2643,7 +2615,7 @@ fn gen_alias_name(base_name: &Name, unavailable_names: &IndexMap<Name, SeenRespo
     }
 }
 
-impl FieldData {
+impl Field {
     fn with_updated_position(
         &self,
         schema: ValidFederationSchema,
@@ -2688,14 +2660,14 @@ impl FieldSelection {
         .is_ok();
 
         Ok(Some(FieldSelection {
-            field: Field::new(FieldData {
+            field: Field {
                 schema: schema.clone(),
                 field_position,
                 alias: field.alias.clone(),
                 arguments: field.arguments.clone().into(),
                 directives: field.directives.clone().into(),
                 sibling_typename: None,
-            }),
+            },
             selection_set: if is_composite {
                 Some(SelectionSet::from_selection_set(
                     &field.selection_set,
@@ -2708,10 +2680,10 @@ impl FieldSelection {
         }))
     }
 
-    fn with_updated_element(&self, element: FieldData) -> Self {
+    fn with_updated_element(&self, field: Field) -> Self {
         Self {
-            field: Field::new(element),
-            ..self.clone()
+            field,
+            selection_set: self.selection_set.clone(),
         }
     }
 

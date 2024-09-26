@@ -191,10 +191,10 @@ impl Field {
                 }
                 .into())
             } else {
-                let mut updated_field_data = self.data().clone();
-                updated_field_data.schema = schema.clone();
-                updated_field_data.field_position = parent_type.introspection_typename_field();
-                Ok(Field::new(updated_field_data))
+                let mut updated_field = self.clone();
+                updated_field.schema = schema.clone();
+                updated_field.field_position = parent_type.introspection_typename_field();
+                Ok(updated_field)
             };
         }
 
@@ -202,10 +202,10 @@ impl Field {
         return if field_from_parent.try_get(schema.schema()).is_some()
             && self.can_rebase_on(parent_type)?
         {
-            let mut updated_field_data = self.data().clone();
-            updated_field_data.schema = schema.clone();
-            updated_field_data.field_position = field_from_parent;
-            Ok(Field::new(updated_field_data))
+            let mut updated_field = self.clone();
+            updated_field.schema = schema.clone();
+            updated_field.field_position = field_from_parent;
+            Ok(updated_field)
         } else {
             Err(RebaseError::CannotRebase {
                 field_position: self.field_position.clone(),
