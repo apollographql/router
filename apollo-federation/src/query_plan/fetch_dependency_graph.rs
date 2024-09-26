@@ -2094,29 +2094,34 @@ impl FetchDependencyGraph {
     fn can_merge_grand_child_in(
         &self,
         node_id: NodeIndex,
-        grand_child_id: NodeIndex,
+        child_id: NodeIndex,
+        maybe_grand_child_id: NodeIndex,
     ) -> Result<bool, FederationError> {
-        let grand_child_parent_relations: Vec<ParentRelation> =
-            self.parents_relations_of(grand_child_id).collect();
-        if grand_child_parent_relations.len() != 1 {
+        let Some(grand_child_parent_relation) =
+            iter_into_single_item(self.parents_relations_of(maybe_grand_child_id))
+        else {
             return Ok(false);
-        }
+        };
+        let Some(grand_child_parent_parent_relation) =
+            self.parent_relation(grand_child_parent_relation.parent_node_id, node_id)
+        else {
+            return Ok(false);
+        };
 
         let node = self.node_weight(node_id)?;
-        let grand_child = self.node_weight(grand_child_id)?;
-        let grand_child_parent_parent_relation =
-            self.parent_relation(grand_child_parent_relations[0].parent_node_id, node_id);
+        let child = self.node_weight(child_id)?;
+        let grand_child = self.node_weight(maybe_grand_child_id)?;
 
-        let (Some(node_inputs), Some(grand_child_inputs)) = (&node.inputs, &grand_child.inputs)
+        let (Some(child_inputs), Some(grand_child_inputs)) = (&child.inputs, &grand_child.inputs)
         else {
             return Ok(false);
         };
 
         // we compare the subgraph names last because on average it improves performance
-        Ok(grand_child_parent_relations[0].path_in_parent.is_some()
-            && grand_child_parent_parent_relation.is_some_and(|r| r.path_in_parent.is_some())
-            && node.merge_at == grand_child.merge_at
-            && node_inputs.contains(grand_child_inputs)
+        Ok(grand_child_parent_relation.path_in_parent.is_some()
+            && grand_child_parent_parent_relation.path_in_parent.is_some()
+            && child.merge_at == grand_child.merge_at
+            && child_inputs.contains(grand_child_inputs)
             && node.defer_ref == grand_child.defer_ref
             && node.subgraph_name == grand_child.subgraph_name)
     }
@@ -4278,9 +4283,11 @@ fn handle_requires(
             // can merge the node).
             if parent.path_in_parent.is_some() {
                 for created_node_id in newly_created_node_ids {
-                    if dependency_graph
-                        .can_merge_grand_child_in(parent.parent_node_id, created_node_id)?
-                    {
+                    if dependency_graph.can_merge_grand_child_in(
+                        parent.parent_node_id,
+                        fetch_node_id,
+                        created_node_id,
+                    )? {
                         dependency_graph
                             .merge_grand_child_in(parent.parent_node_id, created_node_id)?;
                     } else {
