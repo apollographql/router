@@ -24,11 +24,13 @@ use apollo_compiler::Schema;
 fn is_semantic_directive_application(directive: &Directive) -> bool {
     match directive.name.as_str() {
         "specifiedBy" => true,
-        // For @deprecated, explicitly writing `reason: null` disables the directive,
-        // as `null` overrides the default string value.
+        // graphql-js’ intropection returns `isDeprecated: false` for `@deprecated(reason: null)`,
+        // which is arguably a bug. Do the same here for now.
+        // TODO: remove this and allow `isDeprecated: true`, `deprecatedReason: null`
+        // after we fully move to Rust introspection?
         "deprecated"
             if directive
-                .argument_by_name("reason")
+                .specified_argument_by_name("reason")
                 .is_some_and(|value| value.is_null()) =>
         {
             false
@@ -42,7 +44,7 @@ fn is_semantic_directive_application(directive: &Directive) -> bool {
 fn standardize_deprecated(directive: &mut Directive) {
     if directive.name == "deprecated"
         && directive
-            .argument_by_name("reason")
+            .specified_argument_by_name("reason")
             .and_then(|value| value.as_str())
             .is_some_and(|reason| reason == "No longer supported")
     {
