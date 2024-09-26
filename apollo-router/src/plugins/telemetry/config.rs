@@ -349,9 +349,8 @@ pub(crate) struct TracingCommon {
     /// The sampler, always_on, always_off or a decimal between 0.0 and 1.0
     pub(crate) sampler: SamplerOption,
     /// Use datadog agent sampling. This means that all spans will be sent to the Datadog agent
-    /// and the `sampling.priority` attribute will be used to control if the span will then be sent to Datadog.
-    /// This option is enabled by default if you are using the Datadog native exporter but can be explicitly disabled.
-    pub(crate) datadog_agent_sampling: Option<bool>,
+    /// and the `sampling.priority` attribute will be used to control if the span will then be sent to Datadog
+    pub(crate) preview_datadog_agent_sampling: Option<bool>,
     /// Whether to use parent based sampling
     pub(crate) parent_based_sampler: bool,
     /// The maximum events per span before discarding
@@ -406,7 +405,7 @@ impl Default for TracingCommon {
             service_name: Default::default(),
             service_namespace: Default::default(),
             sampler: default_sampler(),
-            datadog_agent_sampling: None,
+            preview_datadog_agent_sampling: None,
             parent_based_sampler: default_parent_based_sampler(),
             max_events_per_span: default_max_events_per_span(),
             max_attributes_per_span: default_max_attributes_per_span(),
@@ -674,7 +673,7 @@ impl From<&TracingCommon> for opentelemetry::sdk::trace::Config {
         if config.parent_based_sampler {
             sampler = parent_based(sampler);
         }
-        if config.datadog_agent_sampling.unwrap_or_default() {
+        if config.preview_datadog_agent_sampling.unwrap_or_default() {
             common = common.with_sampler(DatadogAgentSampling::new(
                 sampler,
                 config.parent_based_sampler,
@@ -706,7 +705,7 @@ impl Conf {
             .exporters
             .tracing
             .common
-            .datadog_agent_sampling
+            .preview_datadog_agent_sampling
             .unwrap_or_default()
         {
             let field_ratio = match &self.apollo.field_level_instrumentation_sampler {

@@ -134,8 +134,13 @@ fn get_sampling_priority(span: &SpanData) -> f64 {
         .span_context
         .trace_state()
         .sampling_priority()
-        .unwrap_or_default()
-    {
+        .unwrap_or_else(|| {
+            if span.span_context.trace_flags().is_sampled() {
+                SamplingPriority::AutoKeep
+            } else {
+                SamplingPriority::AutoReject
+            }
+        }) {
         SamplingPriority::UserReject => -1.0,
         SamplingPriority::AutoReject => 0.0,
         SamplingPriority::AutoKeep => 1.0,

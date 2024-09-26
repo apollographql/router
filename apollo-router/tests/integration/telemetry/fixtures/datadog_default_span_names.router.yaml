@@ -7,6 +7,7 @@ telemetry:
         format: datadog
       common:
         service_name: router
+        preview_datadog_agent_sampling: true
       datadog:
         enabled: true
         batch_processor:
