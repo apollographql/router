@@ -12,6 +12,7 @@ use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_federation::error::FederationError;
 use apollo_federation::error::SingleFederationError;
+use apollo_federation::query_plan::query_planner::QueryPlanOptions;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use futures::future::BoxFuture;
 use opentelemetry_api::metrics::MeterProvider as _;
@@ -68,7 +69,6 @@ use crate::Configuration;
 pub(crate) const RUST_QP_MODE: &str = "rust";
 pub(crate) const JS_QP_MODE: &str = "js";
 const UNSUPPORTED_CONTEXT: &str = "context";
-const UNSUPPORTED_OVERRIDES: &str = "overrides";
 const UNSUPPORTED_FED1: &str = "fed1";
 const INTERNAL_INIT_ERROR: &str = "internal";
 
@@ -203,9 +203,6 @@ impl PlannerMode {
                     metric_rust_qp_init(Some(UNSUPPORTED_FED1));
                 }
                 SingleFederationError::UnsupportedFeature { message: _, kind } => match kind {
-                    apollo_federation::error::UnsupportedFeatureKind::ProgressiveOverrides => {
-                        metric_rust_qp_init(Some(UNSUPPORTED_OVERRIDES))
-                    }
                     apollo_federation::error::UnsupportedFeatureKind::Context => {
                         metric_rust_qp_init(Some(UNSUPPORTED_CONTEXT))
                     }
@@ -298,12 +295,20 @@ impl PlannerMode {
                 let (plan, mut root_node) = tokio::task::spawn_blocking(move || {
                     let start = Instant::now();
 
+                    let query_plan_options = QueryPlanOptions {
+                        override_conditions: plan_options.override_conditions,
+                    };
+
                     let result = operation
                         .as_deref()
                         .map(|n| Name::new(n).map_err(FederationError::from))
                         .transpose()
                         .and_then(|operation| {
-                            rust_planner.build_query_plan(&doc.executable, operation)
+                            rust_planner.build_query_plan(
+                                &doc.executable,
+                                operation,
+                                query_plan_options,
+                            )
                         })
                         .map_err(|e| QueryPlannerError::FederationError(e.to_string()));
 
@@ -346,7 +351,7 @@ impl PlannerMode {
                 let start = Instant::now();
 
                 let result = js
-                    .plan(filtered_query, operation.clone(), plan_options)
+                    .plan(filtered_query, operation.clone(), plan_options.clone())
                     .await;
 
                 let elapsed = start.elapsed().as_secs_f64();
@@ -365,6 +370,9 @@ impl PlannerMode {
                     }
                 }
 
+                let query_plan_options = QueryPlanOptions {
+                    override_conditions: plan_options.override_conditions,
+                };
                 BothModeComparisonJob {
                     rust_planner: rust.clone(),
                     js_duration: elapsed,
@@ -375,6 +383,7 @@ impl PlannerMode {
                         .as_ref()
                         .map(|success| success.data.clone())
                         .map_err(|e| e.errors.clone()),
+                    plan_options: query_plan_options,
                 }
                 .schedule();
 
@@ -941,9 +950,9 @@ impl BridgeQueryPlanner {
             if has_schema_introspection {
                 if has_other_root_fields {
                     let error = graphql::Error::builder()
-                    .message("Mixed queries with both schema introspection and concrete fields are not supported")
-                    .extension_code("MIXED_INTROSPECTION")
-                    .build();
+                        .message("Mixed queries with both schema introspection and concrete fields are not supported")
+                        .extension_code("MIXED_INTROSPECTION")
+                        .build();
                     return Ok(QueryPlannerContent::Response {
                         response: Box::new(graphql::Response::builder().error(error).build()),
                     });
@@ -1242,8 +1251,8 @@ mod tests {
                 &doc,
                 query_metrics
             )
-            .await
-            .unwrap_err();
+                .await
+                .unwrap_err();
 
         match err {
             QueryPlannerError::EmptyPlan(usage_reporting) => {
@@ -1347,7 +1356,7 @@ mod tests {
             }
         }}"#);
         // Aliases
-        // FIXME: uncomment myName alias when this is fixed:
+        // FIXME: uncomment myName alias when this is fixed:
         // https://github.com/apollographql/router/issues/3263
         s!(r#"query Q { me {
             username
@@ -1795,13 +1804,6 @@ mod tests {
             "apollo.router.lifecycle.query_planner.init",
             1,
             "init.error_kind" = "context",
-            "init.is_success" = false
-        );
-        metric_rust_qp_init(Some(UNSUPPORTED_OVERRIDES));
-        assert_counter!(
-            "apollo.router.lifecycle.query_planner.init",
-            1,
-            "init.error_kind" = "overrides",
             "init.is_success" = false
         );
         metric_rust_qp_init(Some(UNSUPPORTED_FED1));

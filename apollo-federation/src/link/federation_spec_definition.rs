@@ -12,6 +12,7 @@ use lazy_static::lazy_static;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::argument::directive_optional_boolean_argument;
+use crate::link::argument::directive_optional_string_argument;
 use crate::link::argument::directive_required_string_argument;
 use crate::link::cost_spec_definition::CostSpecDefinition;
 use crate::link::cost_spec_definition::COST_VERSIONS;
@@ -49,6 +50,11 @@ pub(crate) struct RequiresDirectiveArguments<'doc> {
 
 pub(crate) struct ProvidesDirectiveArguments<'doc> {
     pub(crate) fields: &'doc str,
+}
+
+pub(crate) struct OverrideDirectiveArguments<'doc> {
+    pub(crate) from: &'doc str,
+    pub(crate) label: Option<&'doc str>,
 }
 
 #[derive(Debug)]
@@ -361,6 +367,19 @@ impl FederationSpecDefinition {
         })
     }
 
+    pub(crate) fn override_directive_definition<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema Node<DirectiveDefinition>, FederationError> {
+        self.directive_definition(schema, &FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC)?
+            .ok_or_else(|| {
+                FederationError::internal(format!(
+                    "Unexpectedly could not find federation spec's \"@{}\" directive definition",
+                    FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC
+                ))
+            })
+    }
+
     pub(crate) fn override_directive(
         &self,
         schema: &FederationSchema,
@@ -387,6 +406,19 @@ impl FederationSpecDefinition {
         Ok(Directive {
             name: name_in_schema,
             arguments,
+        })
+    }
+
+    pub(crate) fn override_directive_arguments<'doc>(
+        &self,
+        application: &'doc Node<Directive>,
+    ) -> Result<OverrideDirectiveArguments<'doc>, FederationError> {
+        Ok(OverrideDirectiveArguments {
+            from: directive_required_string_argument(application, &FEDERATION_FROM_ARGUMENT_NAME)?,
+            label: directive_optional_string_argument(
+                application,
+                &FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME,
+            )?,
         })
     }
 
