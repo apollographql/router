@@ -103,7 +103,7 @@ use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::TracingCommon;
 use crate::plugins::telemetry::config_new::cost::add_cost_attributes;
 use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
-use crate::plugins::telemetry::config_new::instruments::ConnectorInstruments;
+use crate::plugins::telemetry::config_new::instruments::ConnectorHttpInstruments;
 use crate::plugins::telemetry::config_new::instruments::SupergraphInstruments;
 use crate::plugins::telemetry::config_new::trace_id;
 use crate::plugins::telemetry::config_new::DatadogId;
@@ -882,7 +882,10 @@ impl PluginPrivate for Telemetry {
                         (http_request.context.clone(), None)
                     }
                 },
-                move |(context, custom_instruments): (Context, Option<ConnectorInstruments>),
+                move |(context, custom_instruments): (
+                    Context,
+                    Option<ConnectorHttpInstruments>,
+                ),
                       f: BoxFuture<
                     'static,
                     Result<crate::services::http::HttpResponse, BoxError>,

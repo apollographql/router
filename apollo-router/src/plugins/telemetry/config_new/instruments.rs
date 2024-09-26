@@ -20,7 +20,7 @@ use serde_json_bytes::Value;
 use tokio::time::Instant;
 use tower::BoxError;
 
-use super::attributes::ConnectorAttributes;
+use super::attributes::ConnectorHttpAttributes;
 use super::attributes::HttpServerAttributes;
 use super::cache::attributes::CacheAttributes;
 use super::cache::CacheInstruments;
@@ -31,8 +31,8 @@ use super::graphql::GraphQLInstruments;
 use super::graphql::FIELD_EXECUTION;
 use super::graphql::FIELD_LENGTH;
 use super::selectors::CacheKind;
-use super::selectors::ConnectorSelector;
-use super::selectors::ConnectorValue;
+use super::selectors::ConnectorHttpSelector;
+use super::selectors::ConnectorHttpValue;
 use super::DefaultForLevel;
 use super::Selector;
 use crate::metrics;
@@ -89,7 +89,7 @@ pub(crate) struct InstrumentsConfig {
     /// Connector service instruments. For more information see documentation on Router lifecycle.
     pub(crate) connector: Extendable<
         ConnectorInstrumentsConfig,
-        Instrument<ConnectorAttributes, ConnectorSelector, ConnectorValue>,
+        Instrument<ConnectorHttpAttributes, ConnectorHttpSelector, ConnectorHttpValue>,
     >,
     /// GraphQL response field instruments.
     pub(crate) graphql: Extendable<
@@ -698,7 +698,7 @@ impl InstrumentsConfig {
     pub(crate) fn new_connector_instruments(
         &self,
         static_instruments: Arc<HashMap<String, StaticInstrument>>,
-    ) -> ConnectorInstruments {
+    ) -> ConnectorHttpInstruments {
         let http_client_request_duration =
             self.connector
                 .attributes
@@ -767,8 +767,8 @@ impl InstrumentsConfig {
                                 )
                             ),
                             attributes: Vec::with_capacity(nb_attributes),
-                            selector: Some(Arc::new(ConnectorSelector::ConnectorRequestHeader {
-                                connector_request_header: "content-length".to_string(),
+                            selector: Some(Arc::new(ConnectorHttpSelector::ConnectorRequestHeader {
+                                connector_http_request_header: "content-length".to_string(),
                                 redact: None,
                                 default: None,
                             })),
@@ -808,8 +808,8 @@ impl InstrumentsConfig {
                                 )
                             ),
                             attributes: Vec::with_capacity(nb_attributes),
-                            selector: Some(Arc::new(ConnectorSelector::ConnectorResponseHeader {
-                                connector_response_header: "content-length".to_string(),
+                            selector: Some(Arc::new(ConnectorHttpSelector::ConnectorResponseHeader {
+                                connector_http_response_header: "content-length".to_string(),
                                 redact: None,
                                 default: None,
                             })),
@@ -818,7 +818,7 @@ impl InstrumentsConfig {
                         }),
                     }
                 });
-        ConnectorInstruments {
+        ConnectorHttpInstruments {
             http_client_request_duration,
             http_client_request_body_size,
             http_client_response_body_size,
@@ -1381,17 +1381,17 @@ pub(crate) struct ConnectorInstrumentsConfig {
     /// Histogram of client request duration
     #[serde(rename = "http.client.request.duration")]
     http_client_request_duration:
-        DefaultedStandardInstrument<Extendable<ConnectorAttributes, ConnectorSelector>>,
+        DefaultedStandardInstrument<Extendable<ConnectorHttpAttributes, ConnectorHttpSelector>>,
 
     /// Histogram of client request body size
     #[serde(rename = "http.client.request.body.size")]
     http_client_request_body_size:
-        DefaultedStandardInstrument<Extendable<ConnectorAttributes, ConnectorSelector>>,
+        DefaultedStandardInstrument<Extendable<ConnectorHttpAttributes, ConnectorHttpSelector>>,
 
     /// Histogram of client response body size
     #[serde(rename = "http.client.response.body.size")]
     http_client_response_body_size:
-        DefaultedStandardInstrument<Extendable<ConnectorAttributes, ConnectorSelector>>,
+        DefaultedStandardInstrument<Extendable<ConnectorHttpAttributes, ConnectorHttpSelector>>,
 }
 
 impl DefaultForLevel for ConnectorInstrumentsConfig {
@@ -2016,17 +2016,20 @@ impl Instrumented for SubgraphInstruments {
     }
 }
 
-pub(crate) struct ConnectorInstruments {
-    http_client_request_duration:
-        Option<CustomHistogram<HttpRequest, HttpResponse, ConnectorAttributes, ConnectorSelector>>,
-    http_client_request_body_size:
-        Option<CustomHistogram<HttpRequest, HttpResponse, ConnectorAttributes, ConnectorSelector>>,
-    http_client_response_body_size:
-        Option<CustomHistogram<HttpRequest, HttpResponse, ConnectorAttributes, ConnectorSelector>>,
-    custom: ConnectorCustomInstruments,
+pub(crate) struct ConnectorHttpInstruments {
+    http_client_request_duration: Option<
+        CustomHistogram<HttpRequest, HttpResponse, ConnectorHttpAttributes, ConnectorHttpSelector>,
+    >,
+    http_client_request_body_size: Option<
+        CustomHistogram<HttpRequest, HttpResponse, ConnectorHttpAttributes, ConnectorHttpSelector>,
+    >,
+    http_client_response_body_size: Option<
+        CustomHistogram<HttpRequest, HttpResponse, ConnectorHttpAttributes, ConnectorHttpSelector>,
+    >,
+    custom: ConnectorHttpCustomInstruments,
 }
 
-impl Instrumented for ConnectorInstruments {
+impl Instrumented for ConnectorHttpInstruments {
     type Request = HttpRequest;
     type Response = HttpResponse;
     type EventResponse = ();
@@ -2095,12 +2098,12 @@ pub(crate) type SubgraphCustomInstruments = CustomInstruments<
     SubgraphValue,
 >;
 
-pub(crate) type ConnectorCustomInstruments = CustomInstruments<
+pub(crate) type ConnectorHttpCustomInstruments = CustomInstruments<
     HttpRequest,
     HttpResponse,
-    ConnectorAttributes,
-    ConnectorSelector,
-    ConnectorValue,
+    ConnectorHttpAttributes,
+    ConnectorHttpSelector,
+    ConnectorHttpValue,
 >;
 
 // ---------------- Counter -----------------------

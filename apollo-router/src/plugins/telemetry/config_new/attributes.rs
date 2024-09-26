@@ -274,7 +274,7 @@ impl DefaultForLevel for SubgraphAttributes {
 
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
-pub(crate) struct ConnectorAttributes {
+pub(crate) struct ConnectorHttpAttributes {
     /// The name of the subgraph containing the connector
     /// Examples:
     ///
@@ -313,7 +313,7 @@ pub(crate) struct ConnectorAttributes {
     connector_url_template: Option<StandardAttribute>,
 }
 
-impl DefaultForLevel for ConnectorAttributes {
+impl DefaultForLevel for ConnectorHttpAttributes {
     fn defaults_for_level(
         &mut self,
         requirement_level: DefaultAttributeRequirementLevel,
@@ -1211,7 +1211,7 @@ impl Selectors for SubgraphAttributes {
     }
 }
 
-impl Selectors for ConnectorAttributes {
+impl Selectors for ConnectorHttpAttributes {
     type Request = HttpRequest;
     type Response = HttpResponse;
     type EventResponse = ();
