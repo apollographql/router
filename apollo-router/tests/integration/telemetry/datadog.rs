@@ -102,18 +102,24 @@ async fn test_sampling_datadog_agent_disabled() -> Result<(), BoxError> {
 
     router.start().await;
     router.assert_started().await;
-    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    let (id, result) = router.execute_query(&query).await;
-    assert!(result.status().is_success());
 
+    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
+    let (id, result) = router.execute_untraced_query(&query).await;
+    router.graceful_shutdown().await;
+    assert!(result.status().is_success());
+    let context = context
+        .lock()
+        .expect("poisoned")
+        .as_ref()
+        .expect("state")
+        .clone();
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
     TraceSpec::builder()
-        .services(["client", "router", "subgraph"].into())
-        .no_priority_sampled_attribute(true)
+        .services([].into())
         .build()
         .validate_trace(id)
         .await?;
-
-    router.graceful_shutdown().await;
 
     Ok(())
 }
@@ -810,6 +816,7 @@ impl TraceSpec {
     async fn validate_trace(&self, id: TraceId) -> Result<(), BoxError> {
         let datadog_id = id.to_datadog();
         let url = format!("http://localhost:8126/test/traces?trace_ids={datadog_id}");
+        println!("validating trace {} {} {}", id, datadog_id, url);
         for _ in 0..20 {
             if self.find_valid_trace(&url).await.is_ok() {
                 return Ok(());
@@ -898,9 +905,11 @@ impl TraceSpec {
 
     fn verify_span_kinds(&self, trace: &Value) -> Result<(), BoxError> {
         // Validate that the span.kind has been propagated. We can just do this for a selection of spans.
-        self.validate_span_kind(trace, "router", "server")?;
-        self.validate_span_kind(trace, "supergraph", "internal")?;
-        self.validate_span_kind(trace, "http_request", "client")?;
+        if self.services.contains("router") {
+            self.validate_span_kind(trace, "router", "server")?;
+            self.validate_span_kind(trace, "supergraph", "internal")?;
+            self.validate_span_kind(trace, "http_request", "client")?;
+        }
         Ok(())
     }
 
