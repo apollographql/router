@@ -1064,6 +1064,7 @@ async fn test_redis_query_plan_config_update(updated_config: &str, new_cache_key
 
     // If the tests above are failing, this is the key that needs to be changed first.
     let starting_key = "plan:0:v2.9.1:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:a52c81e3e2e47c8363fbcd2653e196431c15716acc51fce4f58d9368ac4c2d8d";
+    assert_ne!(starting_key, new_cache_key, "starting_key (cache key for the initial config) and new_cache_key (cache key with the updated config) should not be equal. This either means that the cache key is not being generated correctly, or that the test is not actually checking the updated key.");
 
     router.execute_default_query().await;
     router.assert_redis_cache_contains(starting_key, None).await;
