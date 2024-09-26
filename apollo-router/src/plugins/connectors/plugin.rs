@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 use apollo_federation::sources::connect::ApplyToError;
 use bytes::Bytes;
@@ -28,6 +29,8 @@ const CONNECTORS_DEBUG_HEADER_NAME: &str = "Apollo-Connectors-Debugging";
 const CONNECTORS_DEBUG_ENV: &str = "APOLLO_CONNECTORS_DEBUGGING";
 const CONNECTORS_MAX_REQUESTS_ENV: &str = "APOLLO_CONNECTORS_MAX_REQUESTS_PER_OPERATION";
 
+static LOG_ONE_TIME: OnceLock<()> = OnceLock::new();
+
 #[derive(Debug, Clone)]
 struct Connectors {
     debug_extensions: bool,
@@ -42,10 +45,11 @@ impl Plugin for Connectors {
         let debug_extensions = init.config.debug_extensions
             || std::env::var(CONNECTORS_DEBUG_ENV).as_deref() == Ok("true");
 
-        if debug_extensions {
+        if debug_extensions && LOG_ONE_TIME.get().is_none() {
             tracing::warn!(
                 "Connector debugging is enabled, this may expose sensitive information."
             );
+            LOG_ONE_TIME.get_or_init(|| ());
         }
 
         let max_requests = init
