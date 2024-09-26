@@ -560,7 +560,7 @@ mod tests {
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
@@ -891,7 +891,7 @@ mod tests {
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
@@ -978,7 +978,7 @@ mod tests {
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
@@ -1073,7 +1073,7 @@ mod tests {
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
@@ -1137,7 +1137,7 @@ mod tests {
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
@@ -1225,7 +1225,7 @@ mod tests {
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
@@ -1310,7 +1310,7 @@ mod tests {
       `SECURITY` features provide metadata necessary to securely resolve fields.
       """
       SECURITY
-    
+
       """
       `EXECUTION` features provide metadata necessary for operation execution.
       """
@@ -1319,18 +1319,18 @@ mod tests {
         type Query {
             post(id: ID!): Post
           }
-          
+
           interface Post {
             id: ID!
             author: String!
             title: String!
             content: String!
           }
-          
+
           type Stats {
             views: Int
           }
-          
+
           type PublicBlog implements Post {
             id: ID!
             author: String!
@@ -1338,7 +1338,7 @@ mod tests {
             content: String!
             stats: Stats @authenticated
           }
-          
+
           type PrivateBlog implements Post @authenticated {
             id: ID!
             author: String!
@@ -1410,14 +1410,14 @@ mod tests {
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
     EXECUTION
   }
 
-  
+
    scalar join__FieldSet
    enum join__Graph {
        USER @join__graph(name: "user", url: "http://localhost:4001/graphql")
@@ -1725,6 +1725,12 @@ mod tests {
         resolvable: Boolean! = true
         isInterfaceObject: Boolean! = false
         ) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+    directive @join__unionMember(
+        graph: join__Graph!
+        member: String!
+    ) repeatable on UNION
+
+    directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
     scalar join__FieldSet
     scalar link__Import
@@ -1808,6 +1814,13 @@ mod tests {
         resolvable: Boolean! = true
         isInterfaceObject: Boolean! = false
         ) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+    directive @join__unionMember(
+        graph: join__Graph!
+        member: String!
+    ) repeatable on UNION
+
+    directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
     scalar join__FieldSet
     scalar link__Import

@@ -22,6 +22,7 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
+use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Node;
 use multimap::MultiMap;
 
@@ -40,21 +41,29 @@ use crate::sources::connect::SubSelection;
 
 impl JSONSelection {
     /// Apply a selection set to create a new [`JSONSelection`]
-    pub fn apply_selection_set(&self, selection_set: &SelectionSet) -> Self {
+    pub fn apply_selection_set(
+        &self,
+        document: &ExecutableDocument,
+        selection_set: &SelectionSet,
+    ) -> Self {
         match self {
-            Self::Named(sub) => Self::Named(sub.apply_selection_set(selection_set)),
-            Self::Path(path) => Self::Path(path.apply_selection_set(selection_set)),
+            Self::Named(sub) => Self::Named(sub.apply_selection_set(document, selection_set)),
+            Self::Path(path) => Self::Path(path.apply_selection_set(document, selection_set)),
         }
     }
 }
 
 impl SubSelection {
     /// Apply a selection set to create a new [`SubSelection`]
-    pub fn apply_selection_set(&self, selection_set: &SelectionSet) -> Self {
+    pub fn apply_selection_set(
+        &self,
+        document: &ExecutableDocument,
+        selection_set: &SelectionSet,
+    ) -> Self {
         let mut new_selections = Vec::new();
         let mut dropped_fields = IndexMap::default();
         let mut referenced_fields = HashSet::new();
-        let field_map = map_fields_by_name(selection_set);
+        let field_map = map_fields_by_name(document, selection_set);
 
         // When the operation contains __typename, it might be used to complete
         // an entity reference (e.g. `__typename id`) for a subsequent fetch.
@@ -112,8 +121,9 @@ impl SubSelection {
                                     Some(Alias::new(field_response_key))
                                 },
                                 name.clone(),
-                                sub.as_ref()
-                                    .map(|sub| sub.apply_selection_set(&field.selection_set)),
+                                sub.as_ref().map(|sub| {
+                                    sub.apply_selection_set(document, &field.selection_set)
+                                }),
                             ));
                         }
                     } else if self.star.is_some() {
@@ -131,7 +141,7 @@ impl SubSelection {
                         for field in fields {
                             new_selections.push(NamedSelection::Path(
                                 Alias::new(field.response_key().as_str()),
-                                path_selection.apply_selection_set(&field.selection_set),
+                                path_selection.apply_selection_set(document, &field.selection_set),
                             ));
                         }
                     } else if self.star.is_some() {
@@ -146,7 +156,7 @@ impl SubSelection {
                         for field in fields {
                             new_selections.push(NamedSelection::Group(
                                 Alias::new(field.response_key().as_str()),
-                                sub.apply_selection_set(&field.selection_set),
+                                sub.apply_selection_set(document, &field.selection_set),
                             ));
                         }
                     }
@@ -181,10 +191,14 @@ impl SubSelection {
 
 impl PathSelection {
     /// Apply a selection set to create a new [`PathSelection`]
-    pub fn apply_selection_set(&self, selection_set: &SelectionSet) -> Self {
+    pub fn apply_selection_set(
+        &self,
+        document: &ExecutableDocument,
+        selection_set: &SelectionSet,
+    ) -> Self {
         Self {
             path: WithRange::new(
-                self.path.apply_selection_set(selection_set),
+                self.path.apply_selection_set(document, selection_set),
                 self.path.range(),
             ),
         }
@@ -192,26 +206,44 @@ impl PathSelection {
 }
 
 impl PathList {
-    pub fn apply_selection_set(&self, selection_set: &SelectionSet) -> Self {
+    pub fn apply_selection_set(
+        &self,
+        document: &ExecutableDocument,
+        selection_set: &SelectionSet,
+    ) -> Self {
         match self {
             Self::Var(name, path) => Self::Var(
                 name.clone(),
-                WithRange::new(path.apply_selection_set(selection_set), path.range()),
+                WithRange::new(
+                    path.apply_selection_set(document, selection_set),
+                    path.range(),
+                ),
             ),
             Self::Key(key, path) => Self::Key(
                 key.clone(),
-                WithRange::new(path.apply_selection_set(selection_set), path.range()),
+                WithRange::new(
+                    path.apply_selection_set(document, selection_set),
+                    path.range(),
+                ),
             ),
             Self::Expr(expr, path) => Self::Expr(
                 expr.clone(),
-                WithRange::new(path.apply_selection_set(selection_set), path.range()),
+                WithRange::new(
+                    path.apply_selection_set(document, selection_set),
+                    path.range(),
+                ),
             ),
             Self::Method(method_name, args, path) => Self::Method(
                 method_name.clone(),
                 args.clone(),
-                WithRange::new(path.apply_selection_set(selection_set), path.range()),
+                WithRange::new(
+                    path.apply_selection_set(document, selection_set),
+                    path.range(),
+                ),
             ),
-            Self::Selection(sub) => Self::Selection(sub.apply_selection_set(selection_set)),
+            Self::Selection(sub) => {
+                Self::Selection(sub.apply_selection_set(document, selection_set))
+            }
             Self::Empty => Self::Empty,
         }
     }
@@ -225,23 +257,37 @@ fn key_name(path_selection: &PathSelection) -> Option<&str> {
     }
 }
 
-fn map_fields_by_name(set: &SelectionSet) -> MultiMap<String, &Node<Field>> {
+fn map_fields_by_name<'a>(
+    document: &'a ExecutableDocument,
+    set: &'a SelectionSet,
+) -> MultiMap<String, &'a Node<Field>> {
     let mut map = MultiMap::new();
-    map_fields_by_name_impl(set, &mut map);
+    map_fields_by_name_impl(document, set, &mut map);
     map
 }
 
-fn map_fields_by_name_impl<'a>(set: &'a SelectionSet, map: &mut MultiMap<String, &'a Node<Field>>) {
+fn map_fields_by_name_impl<'a>(
+    document: &'a ExecutableDocument,
+    set: &'a SelectionSet,
+    map: &mut MultiMap<String, &'a Node<Field>>,
+) {
     for selection in &set.selections {
         match selection {
             Selection::Field(field) => {
                 map.insert(field.name.to_string(), field);
             }
-            Selection::FragmentSpread(_) => {
+            Selection::FragmentSpread(f) => {
+                map_fields_by_name_impl(
+                    &document,
+                    &f.fragment_def(document)
+                        .expect("fragment exists")
+                        .selection_set,
+                    map,
+                );
                 // Ignore - these are always expanded into inline fragments
             }
             Selection::InlineFragment(fragment) => {
-                map_fields_by_name_impl(&fragment.selection_set, map);
+                map_fields_by_name_impl(&document, &fragment.selection_set, map);
             }
         }
     }
@@ -251,12 +297,14 @@ fn map_fields_by_name_impl<'a>(set: &'a SelectionSet, map: &mut MultiMap<String,
 mod tests {
     use apollo_compiler::executable::SelectionSet;
     use apollo_compiler::validation::Valid;
+    use apollo_compiler::ExecutableDocument;
     use apollo_compiler::Schema;
     use pretty_assertions::assert_eq;
 
-    fn selection_set(schema: &Valid<Schema>, s: &str) -> SelectionSet {
-        apollo_compiler::ExecutableDocument::parse_and_validate(schema, s, "./")
-            .unwrap()
+    fn selection_set(schema: &Valid<Schema>, s: &str) -> (ExecutableDocument, SelectionSet) {
+        let document =
+            apollo_compiler::ExecutableDocument::parse_and_validate(schema, s, "./").unwrap();
+        let selection_set = document
             .operations
             .anonymous
             .as_ref()
@@ -266,7 +314,8 @@ mod tests {
             .next()
             .unwrap()
             .selection_set
-            .clone()
+            .clone();
+        (document.into_inner(), selection_set)
     }
 
     #[test]
@@ -310,12 +359,12 @@ mod tests {
         )
         .unwrap();
 
-        let selection_set = selection_set(
+        let (document, selection_set) = selection_set(
             &schema,
             "{ t { z: a, y: b, x: d, w: h v: k { u: l t: m } } }",
         );
 
-        let transformed = json.apply_selection_set(&selection_set);
+        let transformed = json.apply_selection_set(&document, &selection_set);
         assert_eq!(
             transformed.to_string(),
             r###".result {
@@ -387,12 +436,12 @@ mod tests {
         )
         .unwrap();
 
-        let selection_set = selection_set(
+        let (document, selection_set) = selection_set(
             &schema,
             "{ t { a b_alias c { e: e_alias h group { j } } path_to_f } }",
         );
 
-        let transformed = json_selection.apply_selection_set(&selection_set);
+        let transformed = json_selection.apply_selection_set(&document, &selection_set);
         assert_eq!(
             transformed.to_string(),
             r###".result {
@@ -498,9 +547,9 @@ mod tests {
         )
         .unwrap();
 
-        let selection_set = selection_set(&schema, "{ t { a { b { renamed } } } }");
+        let (document, selection_set) = selection_set(&schema, "{ t { a { b { renamed } } } }");
 
-        let transformed = json.apply_selection_set(&selection_set);
+        let transformed = json.apply_selection_set(&document, &selection_set);
         assert_eq!(
             transformed.to_string(),
             r###".result {
@@ -566,10 +615,10 @@ mod tests {
         )
         .unwrap();
 
-        let selection_set =
+        let (document, selection_set) =
             selection_set(&schema, "{ t { id __typename author { __typename id } } }");
 
-        let transformed = json.apply_selection_set(&selection_set);
+        let transformed = json.apply_selection_set(&document, &selection_set);
         assert_eq!(
             transformed.to_string(),
             r###".result {

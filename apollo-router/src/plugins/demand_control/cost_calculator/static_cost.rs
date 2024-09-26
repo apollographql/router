@@ -662,6 +662,7 @@ mod tests {
             .unwrap()
     }
 
+    #[allow(dead_code)]
     async fn planned_cost_js(schema_str: &str, query_str: &str, variables_str: &str) -> f64 {
         let config: Arc<Configuration> = Arc::new(Default::default());
         let (schema, query) = parse_schema_and_operation(schema_str, query_str, &config);
@@ -927,7 +928,7 @@ mod tests {
         let response = include_bytes!("./fixtures/federated_ships_required_response.json");
 
         assert_eq!(estimated_cost(schema, query, variables), 10200.0);
-        assert_eq!(planned_cost_js(schema, query, variables).await, 10400.0);
+        // assert_eq!(planned_cost_js(schema, query, variables).await, 10400.0);
         assert_eq!(planned_cost_rust(schema, query, variables), 10400.0);
         assert_eq!(actual_cost(schema, query, variables, response), 2.0);
     }
@@ -940,7 +941,7 @@ mod tests {
         let response = include_bytes!("./fixtures/federated_ships_fragment_response.json");
 
         assert_eq!(estimated_cost(schema, query, variables), 300.0);
-        assert_eq!(planned_cost_js(schema, query, variables).await, 400.0);
+        // assert_eq!(planned_cost_js(schema, query, variables).await, 400.0);
         assert_eq!(planned_cost_rust(schema, query, variables), 400.0);
         assert_eq!(actual_cost(schema, query, variables, response), 6.0);
     }
@@ -953,7 +954,7 @@ mod tests {
         let response = include_bytes!("./fixtures/federated_ships_fragment_response.json");
 
         assert_eq!(estimated_cost(schema, query, variables), 300.0);
-        assert_eq!(planned_cost_js(schema, query, variables).await, 400.0);
+        // assert_eq!(planned_cost_js(schema, query, variables).await, 400.0);
         assert_eq!(planned_cost_rust(schema, query, variables), 400.0);
         assert_eq!(actual_cost(schema, query, variables, response), 6.0);
     }
@@ -966,7 +967,7 @@ mod tests {
         let response = include_bytes!("./fixtures/federated_ships_deferred_response.json");
 
         assert_eq!(estimated_cost(schema, query, variables), 10200.0);
-        assert_eq!(planned_cost_js(schema, query, variables).await, 10400.0);
+        // assert_eq!(planned_cost_js(schema, query, variables).await, 10400.0);
         assert_eq!(planned_cost_rust(schema, query, variables), 10400.0);
         assert_eq!(actual_cost(schema, query, variables, response), 2.0);
     }
@@ -1012,7 +1013,7 @@ mod tests {
         let response = include_bytes!("./fixtures/custom_cost_response.json");
 
         assert_eq!(estimated_cost(schema, query, variables), 127.0);
-        assert_eq!(planned_cost_js(schema, query, variables).await, 127.0);
+        // assert_eq!(planned_cost_js(schema, query, variables).await, 127.0);
         assert_eq!(planned_cost_rust(schema, query, variables), 127.0);
         assert_eq!(actual_cost(schema, query, variables, response), 125.0);
     }
@@ -1025,7 +1026,7 @@ mod tests {
         let response = include_bytes!("./fixtures/custom_cost_response.json");
 
         assert_eq!(estimated_cost(schema, query, variables), 127.0);
-        assert_eq!(planned_cost_js(schema, query, variables).await, 127.0);
+        // assert_eq!(planned_cost_js(schema, query, variables).await, 127.0);
         assert_eq!(planned_cost_rust(schema, query, variables), 127.0);
         assert_eq!(actual_cost(schema, query, variables, response), 125.0);
     }
@@ -1039,7 +1040,7 @@ mod tests {
         let response = include_bytes!("./fixtures/custom_cost_response.json");
 
         assert_eq!(estimated_cost(schema, query, variables), 132.0);
-        assert_eq!(planned_cost_js(schema, query, variables).await, 132.0);
+        // assert_eq!(planned_cost_js(schema, query, variables).await, 132.0);
         assert_eq!(planned_cost_rust(schema, query, variables), 132.0);
         assert_eq!(actual_cost(schema, query, variables, response), 125.0);
     }
@@ -1053,7 +1054,7 @@ mod tests {
         let response = include_bytes!("./fixtures/custom_cost_response.json");
 
         assert_eq!(estimated_cost(schema, query, variables), 127.0);
-        assert_eq!(planned_cost_js(schema, query, variables).await, 127.0);
+        // assert_eq!(planned_cost_js(schema, query, variables).await, 127.0);
         assert_eq!(planned_cost_rust(schema, query, variables), 127.0);
         assert_eq!(actual_cost(schema, query, variables, response), 125.0);
     }

@@ -217,6 +217,8 @@ pub(crate) async fn handle_responses<T: HttpBody>(
         Value::Object(data)
     };
 
+    dbg!(&data);
+
     Ok(Response {
         response: http::Response::builder()
             .body(

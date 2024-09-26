@@ -22,7 +22,7 @@ async fn authenticated_request() {
     let subgraphs = MockedSubgraphs([
     ("user", MockSubgraph::builder().with_json(
             serde_json::json!{{
-                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{name phone}}}",
+                "query": "query($representations: [_Any!]!) {_entities(representations:$representations){..._generated_onUser2_0}}fragment _generated_onUser2_0 on User{name phone}",
                 "variables": {
                     "representations": [
                         { "__typename": "User", "id":0 }
@@ -95,7 +95,7 @@ async fn unauthenticated_request() {
     let subgraphs = MockedSubgraphs([
     ("user", MockSubgraph::builder().with_json(
             serde_json::json!{{
-                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}",
+                "query": "query($representations: [_Any!]!) {_entities(representations:$representations){..._generated_onUser2_0}}fragment _generated_onUser2_0 on User{name phone}",
                 "variables": {
                     "representations": [
                         { "__typename": "User", "id":0 }
@@ -178,7 +178,7 @@ enum link__Purpose {
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
@@ -222,14 +222,14 @@ async fn authenticated_directive() {
     let subgraphs = MockedSubgraphs([
     ("user", MockSubgraph::builder().with_json(
             serde_json::json!{{
-                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}",
+                "query": "query($representations: [_Any!]!) {_entities(representations:$representations){..._generated_onUser2_0}}fragment _generated_onUser2_0 on User{name}",
                 "variables": {"representations": [{ "__typename": "User", "id":0 }],}
             }},
             serde_json::json! {{ "data": {"_entities":[{ "name":"Ada" }] }}},
         )
         .with_json(
             serde_json::json!{{
-                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{name phone}}}",
+                "query": "query($representations: [_Any!]!) {_entities(representations:$representations){..._generated_onUser2_0}}fragment _generated_onUser2_0 on User{name phone}",
                 "variables": {"representations": [{ "__typename": "User", "id":0 }],}
             }},
             serde_json::json! {{ "data": {"_entities":[{"name":"Ada", "phone": "1234"}] }}},
@@ -339,14 +339,14 @@ async fn authenticated_directive_reject_unauthorized() {
     let subgraphs = MockedSubgraphs([
     ("user", MockSubgraph::builder().with_json(
             serde_json::json!{{
-                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}",
+                "query": "query($representations: [_Any!]!) {_entities(representations:$representations){..._generated_onUser2_0}}fragment _generated_onUser2_0 on User{name}",
                 "variables": {"representations": [{ "__typename": "User", "id":0 }],}
             }},
             serde_json::json! {{ "data": {"_entities":[{ "name":"Ada" }] }}},
         )
         .with_json(
             serde_json::json!{{
-                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{name phone}}}",
+                "query": "query($representations: [_Any!]!) {_entities(representations:$representations){..._generated_onUser2_0}}fragment _generated_onUser2_0 on User{name phone}",
                 "variables": {"representations": [{ "__typename": "User", "id":0 }],}
             }},
             serde_json::json! {{ "data": {"_entities":[{"name":"Ada", "phone": "1234"}] }}},
@@ -424,14 +424,14 @@ async fn authenticated_directive_dry_run() {
     let subgraphs = MockedSubgraphs([
     ("user", MockSubgraph::builder().with_json(
             serde_json::json!{{
-                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}",
+                "query": "query($representations: [_Any!]!) {_entities(representations:$representations){..._generated_onUser2_0}}fragment _generated_onUser2_0 on User{name}",
                 "variables": {"representations": [{ "__typename": "User", "id":0 }],}
             }},
             serde_json::json! {{ "data": {"_entities":[{ "name":"Ada" }] }}},
         )
         .with_json(
             serde_json::json!{{
-                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{name phone}}}",
+                "query": "query($representations: [_Any!]!) {_entities(representations:$representations){..._generated_onUser2_0}}fragment _generated_onUser2_0 on User{name phone}",
                 "variables": {"representations": [{ "__typename": "User", "id":0 }],}
             }},
             serde_json::json! {{ "data": {"_entities":[{"name":"Ada", "phone": "1234"}] }}},
@@ -525,7 +525,7 @@ enum link__Purpose {
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
@@ -571,13 +571,13 @@ async fn scopes_directive() {
     let subgraphs = MockedSubgraphs([
     ("user", MockSubgraph::builder().with_json(
             serde_json::json!{{
-                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}",
+                "query": "query($representations: [_Any!]!) {_entities(representations:$representations){..._generated_onUser2_0}}fragment _generated_onUser2_0 on User{name}",
                 "variables": {"representations": [{ "__typename": "User", "id":0 }],}
             }},
             serde_json::json! {{ "data": { "_entities":[{"name":"Ada"}] } }},
         ).with_json(
             serde_json::json!{{
-                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{name phone}}}",
+                "query": "query($representations: [_Any!]!) {_entities(representations:$representations){..._generated_onUser2_0}}fragment _generated_onUser2_0 on User{name phone}",
                 "variables": {"representations": [{ "__typename": "User", "id":0 }],}
             }},
             serde_json::json! {{ "data": { "_entities":[{"name":"Ada", "phone": "1234"}] } }},
@@ -742,13 +742,13 @@ async fn scopes_directive_reject_unauthorized() {
     let subgraphs = MockedSubgraphs([
     ("user", MockSubgraph::builder().with_json(
             serde_json::json!{{
-                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}",
+                "query": "query($representations: [_Any!]!) {_entities(representations:$representations){..._generated_onUser2_0}}fragment _generated_onUser2_0 on User{name}",
                 "variables": {"representations": [{ "__typename": "User", "id":0 }],}
             }},
             serde_json::json! {{ "data": { "_entities":[{"name":"Ada"}] } }},
         ).with_json(
             serde_json::json!{{
-                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{name phone}}}",
+                "query": "query($representations: [_Any!]!) {_entities(representations:$representations){..._generated_onUser2_0}}fragment _generated_onUser2_0 on User{name phone}",
                 "variables": {"representations": [{ "__typename": "User", "id":0 }],}
             }},
             serde_json::json! {{ "data": { "_entities":[{"name":"Ada", "phone": "1234"}] } }},
@@ -822,13 +822,13 @@ async fn scopes_directive_dry_run() {
     let subgraphs = MockedSubgraphs([
     ("user", MockSubgraph::builder().with_json(
             serde_json::json!{{
-                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}",
+                "query": "query($representations: [_Any!]!) {_entities(representations:$representations){..._generated_onUser2_0}}fragment _generated_onUser2_0 on User{name}",
                 "variables": {"representations": [{ "__typename": "User", "id":0 }],}
             }},
             serde_json::json! {{ "data": { "_entities":[{"name":"Ada"}] } }},
         ).with_json(
             serde_json::json!{{
-                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{name phone}}}",
+                "query": "query($representations: [_Any!]!) {_entities(representations:$representations){..._generated_onUser2_0}}fragment _generated_onUser2_0 on User{name phone}",
                 "variables": {"representations": [{ "__typename": "User", "id":0 }],}
             }},
             serde_json::json! {{ "data": { "_entities":[{"name":"Ada", "phone": "1234"}] } }},
@@ -902,13 +902,13 @@ async fn errors_in_extensions() {
     let subgraphs = MockedSubgraphs([
     ("user", MockSubgraph::builder().with_json(
             serde_json::json!{{
-                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}",
+                "query": "query($representations: [_Any!]!) {_entities(representations:$representations){..._generated_onUser2_0}}fragment _generated_onUser2_0 on User{name}",
                 "variables": {"representations": [{ "__typename": "User", "id":0 }],}
             }},
             serde_json::json! {{ "data": { "_entities":[{"name":"Ada"}] } }},
         ).with_json(
             serde_json::json!{{
-                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{name phone}}}",
+                "query": "query($representations: [_Any!]!) {_entities(representations:$representations){..._generated_onUser2_0}}fragment _generated_onUser2_0 on User{name phone}",
                 "variables": {"representations": [{ "__typename": "User", "id":0 }],}
             }},
             serde_json::json! {{ "data": { "_entities":[{"name":"Ada", "phone": "1234"}] } }},

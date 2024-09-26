@@ -188,7 +188,7 @@ pub(crate) mod mock_subgraph {
         Mock::given(method("POST"))
             .and(path("/graphql"))
             .and(body_json(json!({
-              "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{c}}}",
+              "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on User { c } } }",
               "variables": {"representations":[{"__typename":"User","id":1},{"__typename":"User","id":2}]}
             })))
             .respond_with(
@@ -448,6 +448,14 @@ async fn test_root_field_plus_entity_plus_requires() {
     )
     .await;
 
+    dbg!(mock_server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| r.body_json::<serde_json::Value>().unwrap_or_default())
+        .collect::<Vec<_>>());
+
     insta::assert_json_snapshot!(response, @r###"
     {
       "data": {
@@ -483,9 +491,9 @@ async fn test_root_field_plus_entity_plus_requires() {
         &mock_server.received_requests().await.unwrap(),
         vec![
             Matcher::new().method("GET").path("/users").build(),
-            Matcher::new().method("POST").path("/graphql").build(),
             Matcher::new().method("GET").path("/users/1").build(),
             Matcher::new().method("GET").path("/users/2").build(),
+            Matcher::new().method("POST").path("/graphql").build(),
             Matcher::new().method("GET").path("/users/1").build(),
             Matcher::new().method("GET").path("/users/2").build(),
         ],

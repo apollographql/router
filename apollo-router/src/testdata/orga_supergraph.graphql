@@ -35,6 +35,13 @@ directive @link(
   import: [link__Import]
 ) repeatable on SCHEMA
 
+directive @join__unionMember(
+  graph: join__Graph!
+  member: String!
+) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
 scalar join__FieldSet
 scalar link__Import
 

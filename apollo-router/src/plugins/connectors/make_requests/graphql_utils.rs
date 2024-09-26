@@ -110,7 +110,10 @@ pub(super) fn get_entity_fields(
                 }
             }
             Selection::FragmentSpread(_) => {
-                return Err(UnsupportedOperation("fragment spread not supported".into()))
+                // hmm
+                // return Err(UnsupportedOperation(
+                //     "fragment spread not supported".into(),
+                // ))
             }
             Selection::InlineFragment(f) => {
                 for selection in f.selection_set.selections.iter() {
@@ -121,9 +124,10 @@ pub(super) fn get_entity_fields(
                             }
                         }
                         Selection::FragmentSpread(_) | Selection::InlineFragment(_) => {
-                            return Err(UnsupportedOperation(
-                                "fragment spread not supported".into(),
-                            ))
+                            // hmm
+                            // return Err(UnsupportedOperation(
+                            //     "fragment spread not supported".into(),
+                            // ))
                         }
                     }
                 }

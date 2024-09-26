@@ -224,7 +224,7 @@ fn root_fields(
                     selection: Arc::new(
                         connector
                             .selection
-                            .apply_selection_set(&field.selection_set),
+                            .apply_selection_set(&request.operation, &field.selection_set),
                     ),
                     inputs: request_inputs,
                 };
@@ -272,6 +272,8 @@ fn entities_from_request(
         return root_fields(connector, request);
     };
 
+    dbg!(&request.operation.serialize().to_string());
+
     let op = request
         .operation
         .operations
@@ -283,7 +285,7 @@ fn entities_from_request(
     let selection = Arc::new(
         connector
             .selection
-            .apply_selection_set(&entities_field.selection_set),
+            .apply_selection_set(&request.operation, &entities_field.selection_set),
     );
 
     representations
@@ -359,6 +361,8 @@ fn entities_with_fields_from_request(
 ) -> Result<Vec<ResponseKey>, MakeRequestError> {
     use MakeRequestError::*;
 
+    dbg!(&request.operation.serialize().to_string());
+
     let op = request
         .operation
         .operations
@@ -372,11 +376,29 @@ fn entities_with_fields_from_request(
         .selections
         .iter()
         .map(|selection| match selection {
-            Selection::Field(_) => Ok(vec![]),
+            Selection::Field(_) => Ok::<_, MakeRequestError>(vec![]),
 
-            Selection::FragmentSpread(_) => Err(InvalidOperation(
-                "_entities selection can't be a named fragment".into(),
-            )),
+            Selection::FragmentSpread(f) => {
+                let frag = f.fragment_def(&request.operation).expect("fragment exists");
+                let typename = frag.type_condition();
+                Ok(frag
+                    .selection_set
+                    .selections
+                    .iter()
+                    .map(|sel| {
+                        let field = match sel {
+                            Selection::Field(f) => f,
+                            Selection::FragmentSpread(_) | Selection::InlineFragment(_) => {
+                                return Err(InvalidOperation(
+                                    "handling fragments inside entity selections not implemented"
+                                        .into(),
+                                ))
+                            }
+                        };
+                        Ok((typename.to_string(), field))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?)
+            }
 
             Selection::InlineFragment(frag) => {
                 let typename = frag
@@ -424,7 +446,7 @@ fn entities_with_fields_from_request(
             let selection = Arc::new(
                 connector
                     .selection
-                    .apply_selection_set(&field.selection_set),
+                    .apply_selection_set(&request.operation, &field.selection_set),
             );
 
             representations.iter().map(move |(i, representation)| {

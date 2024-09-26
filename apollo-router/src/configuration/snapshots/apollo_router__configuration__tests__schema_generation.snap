@@ -6623,14 +6623,14 @@ expression: "&schema"
           "type": "boolean"
         },
         "experimental_reuse_query_fragments": {
-          "default": null,
+          "default": false,
           "description": "Enable reuse of query fragments Default: depends on the federation version",
           "nullable": true,
           "type": "boolean"
         },
         "generate_query_fragments": {
-          "default": false,
-          "description": "Enable QP generation of fragments for subgraph requests Default: false",
+          "default": true,
+          "description": "Enable QP generation of fragments for subgraph requests Default: true",
           "type": "boolean"
         },
         "introspection": {
