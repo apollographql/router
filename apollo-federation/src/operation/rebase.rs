@@ -710,8 +710,8 @@ impl SelectionSet {
     ) -> Result<SelectionSet, FederationError> {
         let rebased_results = self
             .selections
-            .iter()
-            .map(|(_, selection)| {
+            .values()
+            .map(|selection| {
                 selection.rebase_inner(
                     parent_type,
                     named_fragments,

@@ -260,7 +260,7 @@ impl InlineFragmentSelection {
             && this_condition.is_some_and(|c| c.is_abstract_type())
         {
             let mut liftable_selections = SelectionMap::new();
-            for (_, selection) in selection_set.selections.iter() {
+            for selection in selection_set.selections.values() {
                 match selection {
                     Selection::FragmentSpread(spread_selection) => {
                         let type_condition = &spread_selection.spread.type_condition_position;
@@ -323,8 +323,8 @@ impl InlineFragmentSelection {
 
                 // Since liftable_selections are changing their parent, we need to rebase them.
                 liftable_selections = liftable_selections
-                    .into_iter()
-                    .map(|(_key, sel)| sel.rebase_on(parent_type, named_fragments, schema))
+                    .into_values()
+                    .map(|sel| sel.rebase_on(parent_type, named_fragments, schema))
                     .collect::<Result<_, _>>()?;
 
                 let mut final_selection_map = SelectionMap::new();

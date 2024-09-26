@@ -237,7 +237,8 @@ impl SelectionSet {
             }
         }
 
-        for (key, self_selection) in target.iter_mut() {
+        for self_selection in target.values_mut() {
+            let key = self_selection.key();
             match self_selection {
                 SelectionValue::Field(mut self_field_selection) => {
                     if let Some(other_field_selections) = fields.shift_remove(&key) {

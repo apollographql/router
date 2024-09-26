@@ -163,7 +163,8 @@ impl SelectionSet {
         let mut is_equal = true;
         let mut did_ignore_typename = false;
 
-        for (key, other_selection) in other.selections.iter() {
+        for other_selection in other.selections.values() {
+            let key = other_selection.key();
             if key.is_typename_field() && options.ignore_missing_typename {
                 if !self.has_top_level_typename_field() {
                     did_ignore_typename = true;
