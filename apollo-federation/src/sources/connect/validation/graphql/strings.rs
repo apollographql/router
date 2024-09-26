@@ -109,7 +109,7 @@ mod tests {
         };
         let field = query.fields.get("field").unwrap();
         let directive = field.directives.get("connect").unwrap();
-        directive.argument_by_name(name, schema).unwrap()
+        directive.specified_argument_by_name(name).unwrap()
     }
 
     #[test]
