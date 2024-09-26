@@ -8,7 +8,6 @@ use futures::stream::once;
 use futures::StreamExt;
 use http::HeaderValue;
 use itertools::Itertools;
-use lazy_static::lazy_static;
 use parking_lot::Mutex;
 use serde::Deserialize;
 use serde::Serialize;
@@ -29,9 +28,7 @@ const CONNECTORS_DEBUG_HEADER_NAME: &str = "Apollo-Connectors-Debugging";
 const CONNECTORS_DEBUG_ENV: &str = "APOLLO_CONNECTORS_DEBUGGING";
 const CONNECTORS_MAX_REQUESTS_ENV: &str = "APOLLO_CONNECTORS_MAX_REQUESTS_PER_OPERATION";
 
-lazy_static! {
-    static ref LAST_DEBUG_ENABLED_VALUE: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
-}
+static LAST_DEBUG_ENABLED_VALUE: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone)]
 struct Connectors {
@@ -47,14 +44,20 @@ impl Plugin for Connectors {
         let debug_extensions = init.config.debug_extensions
             || std::env::var(CONNECTORS_DEBUG_ENV).as_deref() == Ok("true");
 
+        let last_value = LAST_DEBUG_ENABLED_VALUE.load(Ordering::Relaxed);
+        if LAST_DEBUG_ENABLED_VALUE
+            .compare_exchange(
+                last_value,
+                debug_extensions,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            )
+            .is_ok()
+            && debug_extensions
         {
-            if debug_extensions && *LAST_DEBUG_ENABLED_VALUE.lock() != debug_extensions {
-                tracing::warn!(
-                    "Connector debugging is enabled, this may expose sensitive information."
-                );
-            }
-
-            *LAST_DEBUG_ENABLED_VALUE.lock() = debug_extensions;
+            tracing::warn!(
+                "Connector debugging is enabled, this may expose sensitive information."
+            );
         }
 
         let max_requests = init
