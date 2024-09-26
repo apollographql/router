@@ -51,6 +51,7 @@ use super::Field;
 use super::FieldSelection;
 use super::Fragment;
 use super::FragmentSpreadSelection;
+use super::HasSelectionKey;
 use super::InlineFragmentSelection;
 use super::NamedFragments;
 use super::Operation;
@@ -270,7 +271,7 @@ impl SelectionSet {
             .selections
             .iter()
             .map(|(k, v)| {
-                if let Some(other_v) = other.selections.get(k) {
+                if let Some(other_v) = other.selections.get(&k) {
                     v.minus(other_v)
                 } else {
                     Ok(Some(v.clone()))
@@ -299,7 +300,7 @@ impl SelectionSet {
             .selections
             .iter()
             .map(|(k, v)| {
-                if let Some(other_v) = other.selections.get(k) {
+                if let Some(other_v) = other.selections.get(&k) {
                     v.intersection(other_v)
                 } else {
                     Ok(None)
@@ -684,7 +685,7 @@ impl FragmentRestrictionAtType {
     fn is_useless(&self) -> bool {
         match self.selections.selections.as_slice().split_first() {
             None => true,
-            Some((first, rest)) => rest.is_empty() && first.0.is_typename_field(),
+            Some((first, rest)) => rest.is_empty() && first.key().is_typename_field(),
         }
     }
 }

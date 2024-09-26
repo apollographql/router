@@ -866,8 +866,6 @@ pub(crate) use field_selection::FieldSelection;
 pub(crate) use field_selection::SiblingTypename;
 
 mod fragment_spread_selection {
-    use std::ops::Deref;
-
     use apollo_compiler::Name;
     use serde::Serialize;
 
@@ -966,7 +964,7 @@ mod fragment_spread_selection {
         fn key(&self) -> SelectionKey {
             if is_deferred_selection(&self.directives) {
                 SelectionKey::Defer {
-                    deferred_id: self.selection_id.clone(),
+                    deferred_id: self.selection_id,
                 }
             } else {
                 SelectionKey::FragmentSpread {
@@ -2413,8 +2411,8 @@ impl SelectionSet {
 }
 
 impl IntoIterator for SelectionSet {
-    type Item = <IndexMap<SelectionKey, Selection> as IntoIterator>::Item;
-    type IntoIter = <IndexMap<SelectionKey, Selection> as IntoIterator>::IntoIter;
+    type Item = <SelectionMap as IntoIterator>::Item;
+    type IntoIter = <SelectionMap as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
         Arc::unwrap_or_clone(self.selections).into_iter()
@@ -2422,8 +2420,8 @@ impl IntoIterator for SelectionSet {
 }
 
 impl<'a> IntoIterator for &'a SelectionSet {
-    type Item = <&'a IndexMap<SelectionKey, Selection> as IntoIterator>::Item;
-    type IntoIter = <&'a IndexMap<SelectionKey, Selection> as IntoIterator>::IntoIter;
+    type Item = <&'a SelectionMap as IntoIterator>::Item;
+    type IntoIter = <&'a SelectionMap as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
         self.selections.as_ref().iter()
@@ -2431,11 +2429,11 @@ impl<'a> IntoIterator for &'a SelectionSet {
 }
 
 pub(crate) struct FieldSelectionsIter<'sel> {
-    stack: Vec<indexmap::map::Values<'sel, SelectionKey, Selection>>,
+    stack: Vec<selection_map::Values<'sel>>,
 }
 
 impl<'sel> FieldSelectionsIter<'sel> {
-    fn new(iter: indexmap::map::Values<'sel, SelectionKey, Selection>) -> Self {
+    fn new(iter: selection_map::Values<'sel>) -> Self {
         Self { stack: vec![iter] }
     }
 }

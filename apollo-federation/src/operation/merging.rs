@@ -240,7 +240,7 @@ impl SelectionSet {
         for (key, self_selection) in target.iter_mut() {
             match self_selection {
                 SelectionValue::Field(mut self_field_selection) => {
-                    if let Some(other_field_selections) = fields.shift_remove(key) {
+                    if let Some(other_field_selections) = fields.shift_remove(&key) {
                         self_field_selection.merge_into(
                             other_field_selections.iter().map(|selection| &***selection),
                         )?;
@@ -248,7 +248,7 @@ impl SelectionSet {
                 }
                 SelectionValue::FragmentSpread(mut self_fragment_spread_selection) => {
                     if let Some(other_fragment_spread_selections) =
-                        fragment_spreads.shift_remove(key)
+                        fragment_spreads.shift_remove(&key)
                     {
                         self_fragment_spread_selection.merge_into(
                             other_fragment_spread_selections
@@ -259,7 +259,7 @@ impl SelectionSet {
                 }
                 SelectionValue::InlineFragment(mut self_inline_fragment_selection) => {
                     if let Some(other_inline_fragment_selections) =
-                        inline_fragments.shift_remove(key)
+                        inline_fragments.shift_remove(&key)
                     {
                         self_inline_fragment_selection.merge_into(
                             other_inline_fragment_selections
