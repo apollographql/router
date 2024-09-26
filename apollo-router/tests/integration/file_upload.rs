@@ -648,7 +648,6 @@ async fn it_fails_with_file_size_limit() -> Result<(), BoxError> {
               "errors": [
                 {
                   "message": "HTTP fetch failed from 'uploads': HTTP fetch failed from 'uploads': error from user's HttpBody stream: error reading a body from connection: Exceeded the limit of 512.0 KB on 'fat.payload.bin' file.",
-                  "path": [],
                   "extensions": {
                     "code": "SUBREQUEST_HTTP_ERROR",
                     "service": "uploads",
