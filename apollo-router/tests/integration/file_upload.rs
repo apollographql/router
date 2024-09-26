@@ -570,7 +570,6 @@ async fn it_fails_upload_without_file() -> Result<(), BoxError> {
               "errors": [
                 {
                   "message": "HTTP fetch failed from 'uploads': HTTP fetch failed from 'uploads': error from user's HttpBody stream: error reading a body from connection: Missing files in the request: '0'.",
-                  "path": [],
                   "extensions": {
                     "code": "SUBREQUEST_HTTP_ERROR",
                     "service": "uploads",
@@ -648,7 +647,6 @@ async fn it_fails_with_file_size_limit() -> Result<(), BoxError> {
               "errors": [
                 {
                   "message": "HTTP fetch failed from 'uploads': HTTP fetch failed from 'uploads': error from user's HttpBody stream: error reading a body from connection: Exceeded the limit of 512.0 KB on 'fat.payload.bin' file.",
-                  "path": [],
                   "extensions": {
                     "code": "SUBREQUEST_HTTP_ERROR",
                     "service": "uploads",
@@ -769,7 +767,6 @@ async fn it_fails_invalid_file_order() -> Result<(), BoxError> {
               "errors": [
                 {
                   "message": "HTTP fetch failed from 'uploads_clone': HTTP fetch failed from 'uploads_clone': error from user's HttpBody stream: error reading a body from connection: Missing files in the request: '1'.",
-                  "path": [],
                   "extensions": {
                     "code": "SUBREQUEST_HTTP_ERROR",
                     "service": "uploads_clone",

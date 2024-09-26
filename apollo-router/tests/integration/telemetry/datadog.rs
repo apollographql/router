@@ -359,6 +359,7 @@ async fn test_span_metrics() -> Result<(), BoxError> {
         .get("apollo-custom-trace-id")
         .unwrap()
         .is_empty());
+    router.graceful_shutdown().await;
     TraceSpec::builder()
         .operation_name("ExampleQuery")
         .services(["client", "router", "subgraph"].into())
@@ -381,7 +382,6 @@ async fn test_span_metrics() -> Result<(), BoxError> {
         .build()
         .validate_trace(id)
         .await?;
-    router.graceful_shutdown().await;
     Ok(())
 }
 
