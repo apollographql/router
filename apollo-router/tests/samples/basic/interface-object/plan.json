@@ -36,6 +36,12 @@
                                                 "id": "1",
                                                 "x": 1,
                                                 "a": "a"
+                                            },
+                                            {
+                                                "__typename": "B",
+                                                "id": "3",
+                                                "x": 3,
+                                                "b": "c"
                                             }
                                         ]
                                     }
@@ -60,6 +66,10 @@
                                             {
                                                 "__typename": "I",
                                                 "id": "2"
+                                            },
+                                            {
+                                                "__typename": "I",
+                                                "id": "3"
                                             }
                                         ]
                                     }
@@ -74,7 +84,8 @@
                                             },
                                             {
                                                 "y": 2
-                                            }
+                                            },
+                                            null
                                         ]
                                     }
                                 }
@@ -110,8 +121,94 @@
                             "x": 1,
                             "y": 1,
                             "a": "a"
+                        },
+                        {
+                            "__typename": "B",
+                            "x": 3,
+                            "y": null,
+                            "b": "c"
                         }
                     ]
+                }
+            }
+        },
+        {
+            "type": "ReloadSubgraphs",
+            "subgraphs": {
+                "accounts": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query TestItf2__accounts__0{req{__typename id i{__typename id x}}}",
+                                    "operationName": "TestItf2__accounts__0"
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "req": {
+                                            "__typename": "C",
+                                            "id": "1",
+                                            "i": {
+                                                "__typename": "A",
+                                                "id": "1",
+                                                "x": 1
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    ],
+                    "products": {
+                        "requests": [
+                            {
+                                "request": {
+                                    "body": {
+                                        "query": "query TestItf2__products__1($representations:[_Any!]!){_entities(representations:$representations){...on I{y}}}",
+                                        "operationName": "TestItf2__products__1",
+                                        "variables": {
+                                            "representations": [
+                                                {
+                                                    "__typename": "I",
+                                                    "id": "1"
+                                                }
+                                            ]
+                                        }
+                                    }
+                                },
+                                "response": {
+                                    "body": {
+                                        "data": {
+                                            "_entities": [
+                                                {
+                                                    "y": 1
+                                                }
+                                            ]
+                                        }
+                                    }
+                                }
+                            }
+                        ]
+                    },
+                    "reviews": {
+                        "requests": []
+                    }
+                }
+            }
+        },
+        {
+            "type": "Request",
+            "request": {
+                "query": "query TestItf2 { req { id c } }"
+            },
+            "expected_response": {
+                "data": {
+                    "req": {
+                        "id": "1",
+                        "c": "a"
+                    }
                 }
             }
         },

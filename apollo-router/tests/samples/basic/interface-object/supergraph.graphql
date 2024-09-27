@@ -73,16 +73,19 @@ enum link__Purpose {
 }
 
 type Query
-  @join__type(graph: ACCOUNTS) {
+  @join__type(graph: ACCOUNTS)
+  @join__type(graph: REVIEWS) {
   i: [I] @join__field(graph: ACCOUNTS)
+  req: C @join__field(graph: ACCOUNTS)
 }
 
 interface I
   @join__type(graph: ACCOUNTS, key: "id")
-  @join__type(graph: PRODUCTS, key: "id", isInterfaceObject: true) {
+  @join__type(graph: PRODUCTS, key: "id", isInterfaceObject: true)
+  @join__type(graph: REVIEWS) {
   id: ID!
-  x: Int @join__field(graph: ACCOUNTS)
-  y: Int @join__field(graph: PRODUCTS)
+  x: Int @join__field(graph: ACCOUNTS) @join__field(graph: REVIEWS)
+  y: Int @join__field(graph: PRODUCTS) @join__field(graph: REVIEWS)
 }
 
 type A implements I
@@ -101,4 +104,12 @@ type B implements I
   x: Int
   y: Int @join__field
   b: String
+}
+
+type C
+  @join__type(graph: ACCOUNTS, key: "id")
+  @join__type(graph: REVIEWS, key: "id") {
+  id: ID!
+  i: I @join__field(graph: ACCOUNTS) @join__field(graph: REVIEWS, external: true)
+  c: String @join__field(graph: REVIEWS, requires: "i { x y }")
 }
