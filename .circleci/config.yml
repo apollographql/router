@@ -1,5 +1,7 @@
 version: 2.1
 
+# TODO Remove this line.
+
 # These "CircleCI Orbs" are reusable bits of configuration that can be shared
 # across projects.  See https://circleci.com/orbs/ for more information.
 orbs:
@@ -47,7 +49,7 @@ executors:
       # at https://circleci.com/docs/using-macos#supported-xcode-versions.
       # We use the major.minor notation to bring in compatible patches.
       xcode: "14.2.0"
-    resource_class: macos.m1.medium.gen1
+    resource_class: macos.m1.large.gen1
   macos_test: &macos_test_executor
     macos:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
@@ -58,7 +60,7 @@ executors:
       # once we update to Xcode >= 15.1.0 
       # See: https://github.com/apollographql/router/pull/5462
       xcode: "14.2.0"
-    resource_class: macos.m1.medium.gen1
+    resource_class: macos.m1.large.gen1
   windows_build: &windows_build_executor
     machine:
       image: "windows-server-2019-vs2019:2024.02.21"
@@ -574,6 +576,9 @@ jobs:
     parameters:
       platform:
         type: executor
+      fuzz:
+        type: boolean
+        default: false
     executor: << parameters.platform >>
     steps:
       - checkout
@@ -582,7 +587,9 @@ jobs:
       - xtask_test
       - when:
           condition:
-            equal: [ *arm_linux_test_executor, << parameters.platform >> ]
+            and:
+              - equal: [ true, << parameters.fuzz >> ]
+              - equal: [ *arm_linux_test_executor, << parameters.platform >> ]
           steps:
             - fuzz_build
 
@@ -736,7 +743,7 @@ jobs:
             - setup_remote_docker:
                 # CircleCI Image Policy
                 #   https://circleci.com/docs/remote-docker-images-support-policy/
-                version: 24.0.9
+                version: docker23
                 docker_layer_caching: true
             - run:
                 name: Docker build
@@ -971,6 +978,8 @@ workflows:
               platform:
                 [ amd_linux_test ]
       - test:
+          # this should be changed back to true on dev after release
+          fuzz: false
           requires:
             - lint
             - check_helm
@@ -1102,10 +1111,6 @@ workflows:
             tags:
               only: /v.*/
       - test_updated:
-          requires:
-            - lint
-            - check_helm
-            - check_compliance
           matrix:
             parameters:
               platform:
@@ -1116,10 +1121,6 @@ workflows:
             tags:
               only: /v.*/
       - test:
-          requires:
-            - lint
-            - check_helm
-            - check_compliance
           matrix:
             parameters:
               platform:
@@ -1130,10 +1131,6 @@ workflows:
             tags:
               only: /v.*/
       - build_release:
-          requires:
-            - pre_verify_release
-            - test
-            - test_updated
           matrix:
             parameters:
               platform:
@@ -1144,7 +1141,14 @@ workflows:
             tags:
               only: /v.*/
       - publish_github_release:
-          requires: [ build_release ]
+          requires:
+            - build_release
+            - lint
+            - check_helm
+            - check_compliance
+            - pre_verify_release
+            - test
+            - test_updated
           filters:
             branches:
               ignore: /.*/

@@ -20,6 +20,7 @@ use std::ops::Deref;
 use std::sync::atomic;
 use std::sync::Arc;
 
+use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
@@ -27,6 +28,7 @@ use apollo_compiler::name;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use itertools::Itertools;
 use serde::Serialize;
 
 use crate::compat::coerce_executable_values;
@@ -45,6 +47,7 @@ use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::ValidFederationSchema;
+use crate::utils::FallibleIterator;
 
 mod contains;
 mod directive_list;
@@ -670,8 +673,8 @@ mod selection_map {
             if *self.key() != value.key() {
                 return Err(Internal {
                     message: format!(
-                        "Key mismatch when inserting selection {} into vacant entry ",
-                        value
+                        "Key mismatch when inserting selection `{value}` into vacant entry. Expected {:?}, found {:?}",
+                        self.key(), value.key()
                     ),
                 }
                 .into());
@@ -786,6 +789,7 @@ impl Selection {
     pub(crate) fn from_element(
         element: OpPathElement,
         sub_selections: Option<SelectionSet>,
+        unnecessary_directives: Option<&HashSet<Node<apollo_compiler::ast::Directive>>>,
     ) -> Result<Selection, FederationError> {
         // PORT_NOTE: This is TODO item is copied from the JS `selectionOfElement` function.
         // TODO: validate that the subSelection is ok for the element
@@ -797,7 +801,21 @@ impl Selection {
                         "unexpected inline fragment without sub-selections",
                     ));
                 };
-                Ok(InlineFragmentSelection::new(inline_fragment, sub_selections).into())
+                if let Some(unnecessary_directives) = unnecessary_directives {
+                    let directives = inline_fragment
+                        .directives
+                        .iter()
+                        .filter(|dir| !unnecessary_directives.contains(dir.as_ref()))
+                        .cloned()
+                        .collect::<DirectiveList>();
+                    Ok(InlineFragmentSelection::new(
+                        inline_fragment.with_updated_directives(directives),
+                        sub_selections,
+                    )
+                    .into())
+                } else {
+                    Ok(InlineFragmentSelection::new(inline_fragment, sub_selections).into())
+                }
             }
         }
     }
@@ -892,10 +910,6 @@ impl Selection {
                 Some(&inline_fragment_selection.selection_set)
             }
         }
-    }
-
-    fn sub_selection_type_position(&self) -> Option<CompositeTypeDefinitionPosition> {
-        Some(self.selection_set()?.type_position.clone())
     }
 
     pub(crate) fn conditions(&self) -> Result<Conditions, FederationError> {
@@ -1310,7 +1324,7 @@ mod field_selection {
         }
 
         pub(crate) fn as_path_element(&self) -> FetchDataPathElement {
-            FetchDataPathElement::Key(self.response_name())
+            FetchDataPathElement::Key(self.response_name(), Default::default())
         }
     }
 
@@ -1672,6 +1686,16 @@ mod inline_fragment_selection {
                 selection_set: self.selection_set.clone(),
             }
         }
+        pub(crate) fn with_updated_directives_and_selection_set(
+            &self,
+            directives: impl Into<DirectiveList>,
+            selection_set: SelectionSet,
+        ) -> Self {
+            Self {
+                inline_fragment: self.inline_fragment.with_updated_directives(directives),
+                selection_set,
+            }
+        }
     }
 
     impl HasSelectionKey for InlineFragmentSelection {
@@ -1907,7 +1931,7 @@ impl SelectionSet {
                         .flat_map(SelectionSet::split_top_level_fields)
                         .filter_map(move |set| {
                             let parent_type = ele.parent_type_position();
-                            Selection::from_element(ele.clone(), Some(set))
+                            Selection::from_element(ele.clone(), Some(set), None)
                                 .ok()
                                 .map(|sel| SelectionSet::from_selection(parent_type, sel))
                         }),
@@ -2027,7 +2051,7 @@ impl SelectionSet {
             type_position,
             selections: Arc::new(SelectionMap::new()),
         };
-        merged.merge_selections_into(normalized_selections.iter())?;
+        merged.merge_selections_into(normalized_selections.iter(), false)?;
         Ok(merged)
     }
 
@@ -2124,7 +2148,7 @@ impl SelectionSet {
             type_position: self.type_position.clone(),
             selections: Arc::new(SelectionMap::new()),
         };
-        expanded.merge_selections_into(expanded_selections.iter())?;
+        expanded.merge_selections_into(expanded_selections.iter(), false)?;
         Ok(expanded)
     }
 
@@ -2405,16 +2429,14 @@ impl SelectionSet {
         selection_key_groups: impl Iterator<Item = impl Iterator<Item = &'a Selection>>,
         named_fragments: &NamedFragments,
     ) -> Result<SelectionSet, FederationError> {
-        let mut result = SelectionMap::new();
-        for group in selection_key_groups {
-            let selection = Self::make_selection(schema, parent_type, group, named_fragments)?;
-            result.insert(selection);
-        }
-        Ok(SelectionSet {
-            schema: schema.clone(),
-            type_position: parent_type.clone(),
-            selections: Arc::new(result),
-        })
+        selection_key_groups
+            .map(|group| Self::make_selection(schema, parent_type, group, named_fragments))
+            .try_collect()
+            .map(|result| SelectionSet {
+                schema: schema.clone(),
+                type_position: parent_type.clone(),
+                selections: Arc::new(result),
+            })
     }
 
     // PORT_NOTE: Some features of the TypeScript `lazyMap` were not ported:
@@ -2471,6 +2493,7 @@ impl SelectionSet {
 
         // Now update the rest of the selections using the `mapper` function.
         update_new_selection(first_changed);
+
         for selection in iter {
             update_new_selection(mapper(selection)?)
         }
@@ -2499,19 +2522,27 @@ impl SelectionSet {
                 sibling_typename.alias().cloned(),
             );
             let typename_selection =
-                Selection::from_element(field_element.into(), /*subselection*/ None)?;
+                Selection::from_element(field_element.into(), /*subselection*/ None, None)?;
             Ok([typename_selection, updated].into_iter().collect())
         })
     }
 
+    /// Adds __typename field for selection sets on abstract types.
+    ///
+    /// __typename is added to the sub selection set of a given selection in following conditions
+    /// * if a given selection is a field, we add a __typename sub selection if its selection set type
+    /// position is an abstract type
+    /// * if a given selection is a fragment, we only add __typename sub selection if fragment specifies
+    /// type condition and that type condition is an abstract type.
     pub(crate) fn add_typename_field_for_abstract_types(
         &self,
         parent_type_if_abstract: Option<AbstractTypeDefinitionPosition>,
     ) -> Result<SelectionSet, FederationError> {
         let mut selection_map = SelectionMap::new();
         if let Some(parent) = parent_type_if_abstract {
-            // XXX(@goto-bus-stop): if the selection set has an *alias* named __typename for some
-            // other field, this doesn't work right. is that allowed?
+            // We don't handle aliased __typename fields. This means we may end up with additional
+            // __typename sub selection. This should be fine though as aliased __typenames should
+            // be rare occurrence.
             if !self.has_top_level_typename_field() {
                 let typename_selection = Selection::from_field(
                     Field::new_introspection_typename(&self.schema, &parent.into(), None),
@@ -2522,11 +2553,24 @@ impl SelectionSet {
         }
         for selection in self.selections.values() {
             selection_map.insert(if let Some(selection_set) = selection.selection_set() {
-                let type_if_abstract = selection
-                    .sub_selection_type_position()
-                    .and_then(|ty| ty.try_into().ok());
+                let abstract_type = match selection {
+                    Selection::Field(field_selection) => field_selection
+                        .selection_set
+                        .as_ref()
+                        .map(|s| s.type_position.clone()),
+                    Selection::FragmentSpread(fragment_selection) => {
+                        Some(fragment_selection.spread.type_condition_position.clone())
+                    }
+                    Selection::InlineFragment(inline_fragment_selection) => {
+                        inline_fragment_selection
+                            .inline_fragment
+                            .type_condition_position
+                            .clone()
+                    }
+                }
+                .and_then(|ty| ty.try_into().ok());
                 let updated_selection_set =
-                    selection_set.add_typename_field_for_abstract_types(type_if_abstract)?;
+                    selection_set.add_typename_field_for_abstract_types(abstract_type)?;
 
                 if updated_selection_set == *selection_set {
                     selection.clone()
@@ -2583,6 +2627,16 @@ impl SelectionSet {
         path: &[Arc<OpPathElement>],
         selection_set: Option<&Arc<SelectionSet>>,
     ) -> Result<(), FederationError> {
+        let mut unnecessary_directives = HashSet::default();
+        self.add_at_path_inner(path, selection_set, &mut unnecessary_directives)
+    }
+
+    fn add_at_path_inner(
+        &mut self,
+        path: &[Arc<OpPathElement>],
+        selection_set: Option<&Arc<SelectionSet>>,
+        unnecessary_directives: &mut HashSet<Node<apollo_compiler::ast::Directive>>,
+    ) -> Result<(), FederationError> {
         // PORT_NOTE: This method was ported from the JS class `SelectionSetUpdates`. Unlike the
         // JS code, this mutates the selection set map in-place.
         match path.split_first() {
@@ -2592,28 +2646,39 @@ impl SelectionSet {
                 let Some(sub_selection_type) = element.sub_selection_type_position()? else {
                     return Err(FederationError::internal("unexpected error: add_at_path encountered a field that is not of a composite type".to_string()));
                 };
-                let mut selection = Arc::make_mut(&mut self.selections)
-                    .entry(ele.key())
-                    .or_insert(|| {
-                        Selection::from_element(
+                let target = Arc::make_mut(&mut self.selections);
+                let mut selection = match target.get_mut(&ele.key()) {
+                    Some(selection) => selection,
+                    None => {
+                        let selection = Selection::from_element(
                             element,
                             // We immediately add a selection afterward to make this selection set
                             // valid.
                             Some(SelectionSet::empty(self.schema.clone(), sub_selection_type)),
-                        )
-                    })?;
+                            Some(&*unnecessary_directives),
+                        )?;
+                        target.entry(selection.key()).or_insert(|| Ok(selection))?
+                    }
+                };
+                unnecessary_directives.extend(
+                    selection
+                        .get_directives_mut()
+                        .iter()
+                        .filter(|d| d.name == "include" || d.name == "skip")
+                        .cloned(),
+                );
                 match &mut selection {
                     SelectionValue::Field(field) => match field.get_selection_set_mut() {
-                        Some(sub_selection) => sub_selection.add_at_path(path, selection_set)?,
+                        Some(sub_selection) => sub_selection.add_at_path_inner(path, selection_set, unnecessary_directives),
                         None => return Err(FederationError::internal("add_at_path encountered a field without a subselection which should never happen".to_string())),
                     },
                     SelectionValue::InlineFragment(fragment) => fragment
                         .get_selection_set_mut()
-                        .add_at_path(path, selection_set)?,
+                        .add_at_path_inner(path, selection_set, unnecessary_directives),
                     SelectionValue::FragmentSpread(_fragment) => {
-                        return Err(FederationError::internal("add_at_path encountered a named fragment spread which should never happen".to_string()));
+                        return Err(FederationError::internal("add_at_path encountered a named fragment spread which should never happen".to_string()))
                     }
-                };
+                }?;
             }
             // If we have no sub-path, we can add the selection.
             Some((ele, &[])) => {
@@ -2632,8 +2697,9 @@ impl SelectionSet {
                         return Ok(());
                     } else {
                         // add leaf
-                        let selection = Selection::from_element(element, None)?;
-                        self.add_local_selection(&selection)?
+                        let selection =
+                            Selection::from_element(element, None, Some(&*unnecessary_directives))?;
+                        self.add_local_selection(&selection, true)?
                     }
                 } else {
                     let selection_set = selection_set
@@ -2648,8 +2714,12 @@ impl SelectionSet {
                         })
                         .transpose()?
                         .map(|selection_set| selection_set.without_unnecessary_fragments());
-                    let selection = Selection::from_element(element, selection_set)?;
-                    self.add_local_selection(&selection)?
+                    let selection = Selection::from_element(
+                        element,
+                        selection_set,
+                        Some(&*unnecessary_directives),
+                    )?;
+                    self.add_local_selection(&selection, true)?;
                 }
             }
             // If we don't have any path, we rebase and merge in the given sub selections at the root.
@@ -2702,7 +2772,7 @@ impl SelectionSet {
                      response_name,
                      alias,
                  }| {
-                    path.push(FetchDataPathElement::Key(alias));
+                    path.push(FetchDataPathElement::Key(alias, Default::default()));
                     Arc::new(FetchDataRewrite::KeyRenamer(FetchDataKeyRenamer {
                         path,
                         rename_key_to: response_name,
@@ -2731,7 +2801,7 @@ impl SelectionSet {
                 remaining.push(alias);
             } else {
                 at_current_level.insert(
-                    FetchDataPathElement::Key(alias.response_name.clone()),
+                    FetchDataPathElement::Key(alias.response_name.clone(), Default::default()),
                     alias,
                 );
             }
@@ -2854,13 +2924,10 @@ impl SelectionSet {
         if self.selections.is_empty() {
             Err(FederationError::internal("Invalid empty selection set"))
         } else {
-            for selection in self.selections.values() {
-                if let Some(s) = selection.selection_set() {
-                    s.validate(_variable_definitions)?;
-                }
-            }
-
-            Ok(())
+            self.selections
+                .values()
+                .filter_map(|selection| selection.selection_set())
+                .try_for_each(|s| s.validate(_variable_definitions))
         }
     }
 
@@ -2912,12 +2979,9 @@ impl SelectionSet {
         &self,
         predicate: &mut impl FnMut(OpPathElement) -> Result<bool, FederationError>,
     ) -> Result<bool, FederationError> {
-        for selection in self.selections.values() {
-            if selection.any_element(self.type_position.clone(), predicate)? {
-                return Ok(true);
-            }
-        }
-        Ok(false)
+        self.selections
+            .values()
+            .fallible_any(|selection| selection.any_element(self.type_position.clone(), predicate))
     }
 }
 
@@ -3046,7 +3110,10 @@ fn compute_aliases_for_non_merging_fields(
                             Some(s) => {
                                 let mut selections = s.clone();
                                 let mut p = path.clone();
-                                p.push(FetchDataPathElement::Key(response_name.clone()));
+                                p.push(FetchDataPathElement::Key(
+                                    response_name.clone(),
+                                    Default::default(),
+                                ));
                                 selections.push(SelectionSetAtPath {
                                     path: p,
                                     selections: field.selection_set.clone(),
@@ -3072,7 +3139,7 @@ fn compute_aliases_for_non_merging_fields(
                     let selections = match field.selection_set.as_ref() {
                         Some(s) => {
                             let mut p = path.clone();
-                            p.push(FetchDataPathElement::Key(alias.clone()));
+                            p.push(FetchDataPathElement::Key(alias.clone(), Default::default()));
                             Some(vec![SelectionSetAtPath {
                                 path: p,
                                 selections: Some(s.clone()),
@@ -3103,7 +3170,10 @@ fn compute_aliases_for_non_merging_fields(
                 let selections: Option<Vec<SelectionSetAtPath>> = match field.selection_set.as_ref()
                 {
                     Some(s) => {
-                        path.push(FetchDataPathElement::Key(response_name.clone()));
+                        path.push(FetchDataPathElement::Key(
+                            response_name.clone(),
+                            Default::default(),
+                        ));
                         Some(vec![SelectionSetAtPath {
                             path,
                             selections: Some(s.clone()),
@@ -3123,13 +3193,12 @@ fn compute_aliases_for_non_merging_fields(
         }
     }
 
-    for selections in seen_response_names.into_values() {
-        if let Some(selections) = selections.selections {
-            compute_aliases_for_non_merging_fields(selections, alias_collector, schema)?;
-        }
-    }
-
-    Ok(())
+    seen_response_names
+        .into_values()
+        .filter_map(|selections| selections.selections)
+        .try_for_each(|selections| {
+            compute_aliases_for_non_merging_fields(selections, alias_collector, schema)
+        })
 }
 
 fn gen_alias_name(base_name: &Name, unavailable_names: &IndexMap<Name, SeenResponseName>) -> Name {
@@ -3322,6 +3391,25 @@ impl InlineFragmentSelection {
         parent_type_position: CompositeTypeDefinitionPosition,
         fragment_spread_selection: &Arc<FragmentSpreadSelection>,
     ) -> Result<InlineFragmentSelection, FederationError> {
+        let schema = fragment_spread_selection.spread.schema.schema();
+        for directive in fragment_spread_selection.spread.directives.iter() {
+            let Some(definition) = schema.directive_definitions.get(&directive.name) else {
+                return Err(FederationError::internal(format!(
+                    "Undefined directive {}",
+                    directive.name
+                )));
+            };
+            if !definition
+                .locations
+                .contains(&apollo_compiler::schema::DirectiveLocation::InlineFragment)
+            {
+                return Err(SingleFederationError::UnsupportedSpreadDirective {
+                    name: directive.name.clone(),
+                }
+                .into());
+            }
+        }
+
         // Note: We assume that fragment_spread_selection.spread.type_condition_position is the same as
         //       fragment_spread_selection.selection_set.type_position.
         Ok(InlineFragmentSelection::new(

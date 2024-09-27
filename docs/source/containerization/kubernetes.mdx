@@ -80,17 +80,8 @@ helm show values oci://ghcr.io/apollographql/helm-charts/router
 
     </Note>
 
-1. Log in with Helm to the Apollo container registry in GitHub.
-  
-    * Get a GitHub OCI token and save it in an environment variable, `GITHUB_OCI_TOKEN`. For reference, follow the guide for [authenticating to the GitHub container registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry#authenticating-to-the-container-registry).
 
-    * Log in with the `helm registry login` command, using your saved `GITHUB_OCI_TOKEN` and GitHub username:
-
-      ```bash
-      echo ${GITHUB_OCI_TOKEN} | helm registry login -u <username> --password-stdin ghcr.io
-      ```
-
-1. After logging in, verify your access to the registry by showing the latest router chart values with the `helm show values` command:
+1. Verify you can pull from the registry by showing the latest router chart values with the `helm show values` command:
 
     ```bash
     helm show values oci://ghcr.io/apollographql/helm-charts/router
