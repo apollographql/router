@@ -788,9 +788,6 @@ mod tests {
     use crate::schema::FederationSchema;
 
     #[test]
-    fn dead_code_filter() {}
-
-    #[test]
     #[should_panic(
         expected = "Should provide a @link specification to use in supergraph for directive @foo if it composes"
     )]
