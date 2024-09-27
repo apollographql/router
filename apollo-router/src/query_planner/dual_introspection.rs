@@ -109,9 +109,19 @@ fn normalize_default_value(key: &str, value: &Value) -> Option<Value> {
         .arguments
         .first()?
         .value;
-    parsed_default_value.as_object()?;
-    let normalized = normalize_parsed_default_value(parsed_default_value);
-    Some(normalized.serialize().no_indent().to_string().into())
+    match parsed_default_value.as_ref() {
+        ast::Value::List(_) | ast::Value::Object(_) => {
+            let normalized = normalize_parsed_default_value(parsed_default_value);
+            Some(normalized.serialize().no_indent().to_string().into())
+        }
+        ast::Value::Null
+        | ast::Value::Enum(_)
+        | ast::Value::Variable(_)
+        | ast::Value::String(_)
+        | ast::Value::Float(_)
+        | ast::Value::Int(_)
+        | ast::Value::Boolean(_) => None,
+    }
 }
 
 fn normalize_parsed_default_value(value: &ast::Value) -> ast::Value {
