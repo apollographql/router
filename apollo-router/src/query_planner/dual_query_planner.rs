@@ -413,19 +413,20 @@ fn vec_matches_sorted_by<T: Clone>(
     Ok(())
 }
 
+// `this` vector includes `other` vector as a set
+fn vec_includes_as_set<T>(this: &[T], other: &[T], item_matches: impl Fn(&T, &T) -> bool) -> bool {
+    other.iter().all(|other_node| {
+        this.iter()
+            .any(|this_node| item_matches(this_node, other_node))
+    })
+}
+
 // performs a set comparison, ignoring order
 fn vec_matches_as_set<T>(this: &[T], other: &[T], item_matches: impl Fn(&T, &T) -> bool) -> bool {
     // Set-inclusion test in both directions
     this.len() == other.len()
-        && this.iter().all(|this_node| {
-            other
-                .iter()
-                .any(|other_node| item_matches(this_node, other_node))
-        })
-        && other.iter().all(|other_node| {
-            this.iter()
-                .any(|this_node| item_matches(this_node, other_node))
-        })
+        && vec_includes_as_set(this, other, &item_matches)
+        && vec_includes_as_set(other, this, &item_matches)
 }
 
 fn vec_matches_result_as_set<T>(
