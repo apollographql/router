@@ -266,7 +266,7 @@ impl ApplyToInternal for NamedSelection {
                     if let Some(value) = value_opt {
                         output.insert(alias.name(), value);
                     }
-                } else {
+                } else if let Some(sub) = path_selection.next_subselection() {
                     match value_opt {
                         Some(JSON::Object(value)) => {
                             // Handle the PathWithSubSelection case.
@@ -280,18 +280,32 @@ impl ApplyToInternal for NamedSelection {
                         Some(value) => {
                             errors.push(ApplyToError::new(
                                 format!("Expected an object, not a {}", json_type_name(&value)),
+                                // Since the path_selection.apply_to_path
+                                // execution stack has been unwound by this
+                                // point, input_path does not include the path
+                                // itself, but may include ancestor path items.
                                 input_path.to_vec(),
-                                path_selection.range(),
+                                sub.range(),
                             ));
                         }
                         None => {
                             errors.push(ApplyToError::new(
-                                format!("Expected an object, not nothing (see other errors)"),
+                                "Expected an object, not nothing (see other errors)".to_string(),
                                 input_path.to_vec(),
-                                path_selection.range(),
+                                sub.range(),
                             ));
                         }
-                    }
+                    };
+                } else {
+                    // This error case should never happen if the selection was
+                    // constructed by parsing, because the presence of the
+                    // SubSelection (in the absence of an Alias) is enforced by
+                    // NamedSelection::parse_path.
+                    errors.push(ApplyToError::new(
+                        "Path without alias must have subselection".to_string(),
+                        input_path.to_vec(),
+                        path_selection.range(),
+                    ));
                 }
             }
             Self::Group(alias, sub_selection) => {
@@ -2073,7 +2087,10 @@ mod tests {
                 ),
             );
         }
+    }
 
+    #[test]
+    fn test_inline_path_errors() {
         {
             let data = json!({
                 "id": 123,
@@ -2106,7 +2123,8 @@ mod tests {
                     ApplyToError::new(
                         "Expected an object, not a string".to_string(),
                         vec![],
-                        Some(98..137),
+                        // This is the range of the { role content } subselection.
+                        Some(121..137),
                     ),
                 ],
             );
@@ -2126,13 +2144,7 @@ mod tests {
         }
 
         assert_eq!(
-            selection!(
-                r#"
-                id
-                nested.path.nonexistent { name }
-            "#
-            )
-            .apply_to(&json!({
+            selection!("id nested.path.nonexistent { name }").apply_to(&json!({
                 "id": 2345,
                 "nested": {
                     "path": "nested path value",
@@ -2146,14 +2158,54 @@ mod tests {
                     ApplyToError::new(
                         "Property .nonexistent not found in string".to_string(),
                         vec![json!("nested"), json!("path"), json!("nonexistent")],
-                        Some(48..59),
+                        Some(15..26),
                     ),
                     ApplyToError::new(
                         "Expected an object, not nothing (see other errors)".to_string(),
                         vec![],
-                        Some(36..68),
+                        // This is the range of the { name } subselection.
+                        Some(27..35),
                     ),
                 ],
+            ),
+        );
+
+        // We have to construct this invalid selection manually because we want
+        // to test an error case requiring a PathWithSubSelection that does not
+        // actually have a SubSelection, which should not be possible to
+        // construct through normal parsing.
+        let invalid_inline_path_selection = JSONSelection::Named(SubSelection {
+            selections: vec![NamedSelection::Path(
+                None,
+                PathSelection {
+                    path: PathList::Key(
+                        Key::field("some").into_with_range(),
+                        PathList::Key(
+                            Key::field("number").into_with_range(),
+                            PathList::Empty.into_with_range(),
+                        )
+                        .into_with_range(),
+                    )
+                    .into_with_range(),
+                },
+            )],
+            ..Default::default()
+        });
+
+        assert_eq!(
+            invalid_inline_path_selection.apply_to(&json!({
+                "some": {
+                    "number": 579,
+                },
+            })),
+            (
+                Some(json!({})),
+                vec![ApplyToError::new(
+                    "Path without alias must have subselection".to_string(),
+                    vec![],
+                    // No range because this is a manually constructed selection.
+                    None,
+                ),],
             ),
         );
     }
