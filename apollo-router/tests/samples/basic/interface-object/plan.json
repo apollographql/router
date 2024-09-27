@@ -196,7 +196,39 @@
                         ]
                     },
                     "reviews": {
-                        "requests": []
+                        "requests": [
+                            {
+                                "request": {
+                                    "body": {
+                                        "query": "query TestItf2__reviews__2($representations:[_Any!]!){_entities(representations:$representations){...on C{c}}}",
+                                        "operationName": "TestItf2__reviews__2",
+                                        "variables": {
+                                            "representations": [
+                                                {
+                                                    "__typename": "C",
+                                                    "i": {
+                                                        "x": 1,
+                                                        "y": 1
+                                                    },
+                                                    "id": "1"
+                                                }
+                                            ]
+                                        }
+                                    }
+                                },
+                                "response": {
+                                    "body": {
+                                        "data": {
+                                            "_entities": [
+                                                {
+                                                    "c": "c"
+                                                }
+                                            ]
+                                        }
+                                    }
+                                }
+                            }
+                        ]
                     }
                 }
             }
@@ -210,7 +242,7 @@
                 "data": {
                     "req": {
                         "id": "1",
-                        "c": "a"
+                        "c": "c"
                     }
                 }
             }
