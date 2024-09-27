@@ -266,15 +266,32 @@ impl ApplyToInternal for NamedSelection {
                     if let Some(value) = value_opt {
                         output.insert(alias.name(), value);
                     }
-                } else if let Some(JSON::Object(value)) = value_opt {
-                    // Handle the PathWithSubSelection case.
-                    output.extend(value);
                 } else {
-                    errors.push(ApplyToError::new(
-                        "Unnamed path selection did not return an object".to_string(),
-                        input_path.to_vec(),
-                        path_selection.range(),
-                    ));
+                    match value_opt {
+                        Some(JSON::Object(value)) => {
+                            // Handle the PathWithSubSelection case.
+                            // TODO Define merge semantics in case of key collisions?
+                            output.extend(value);
+                        }
+                        // To be consistent with NamedSelection::apply_to_path, we
+                        // also report errors accessing properties of the
+                        // non-object value, which are reported by
+                        // path_selection.apply_to_path above.
+                        Some(value) => {
+                            errors.push(ApplyToError::new(
+                                format!("Expected an object, not a {}", json_type_name(&value)),
+                                input_path.to_vec(),
+                                path_selection.range(),
+                            ));
+                        }
+                        None => {
+                            errors.push(ApplyToError::new(
+                                format!("Expected an object, not nothing (see other errors)"),
+                                input_path.to_vec(),
+                                path_selection.range(),
+                            ));
+                        }
+                    }
                 }
             }
             Self::Group(alias, sub_selection) => {
@@ -2056,6 +2073,89 @@ mod tests {
                 ),
             );
         }
+
+        {
+            let data = json!({
+                "id": 123,
+                "created": "2021-01-01T00:00:00Z",
+                "model": "gpt-4o",
+                "choices": [{
+                    "message": "The capital of Australia is Canberra.",
+                }, {
+                    "message": "The capital of Australia is Sydney.",
+                }],
+            });
+
+            let expected = (
+                Some(json!({
+                    "id": 123,
+                    "created": "2021-01-01T00:00:00Z",
+                    "model": "gpt-4o",
+                })),
+                vec![
+                    ApplyToError::new(
+                        "Property .role not found in string".to_string(),
+                        vec![json!("choices"), json!("message"), json!("role")],
+                        Some(123..127),
+                    ),
+                    ApplyToError::new(
+                        "Property .content not found in string".to_string(),
+                        vec![json!("choices"), json!("message"), json!("content")],
+                        Some(128..135),
+                    ),
+                    ApplyToError::new(
+                        "Expected an object, not a string".to_string(),
+                        vec![],
+                        Some(98..137),
+                    ),
+                ],
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    id
+                    created
+                    model
+                    choices->first.message { role content }
+                "#
+                )
+                .apply_to(&data),
+                expected.clone(),
+            );
+        }
+
+        assert_eq!(
+            selection!(
+                r#"
+                id
+                nested.path.nonexistent { name }
+            "#
+            )
+            .apply_to(&json!({
+                "id": 2345,
+                "nested": {
+                    "path": "nested path value",
+                },
+            })),
+            (
+                Some(json!({
+                    "id": 2345,
+                })),
+                vec![
+                    ApplyToError::new(
+                        "Property .nonexistent not found in string".to_string(),
+                        vec![json!("nested"), json!("path"), json!("nonexistent")],
+                        Some(48..59),
+                    ),
+                    ApplyToError::new(
+                        "Expected an object, not nothing (see other errors)".to_string(),
+                        vec![],
+                        Some(36..68),
+                    ),
+                ],
+            ),
+        );
     }
 
     #[test]
