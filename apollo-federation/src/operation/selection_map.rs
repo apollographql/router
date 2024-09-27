@@ -233,6 +233,7 @@ fn key_eq<'a>(selections: &'a [Selection], key: SelectionKey<'a>) -> impl Fn(&Bu
 }
 
 impl SelectionMap {
+    /// Create an empty selection map.
     pub(crate) fn new() -> Self {
         SelectionMap {
             hash_builder: Default::default(),
@@ -361,7 +362,9 @@ impl SelectionMap {
         self.selections.into_iter()
     }
 
-    pub(super) fn entry<'a>(&'a mut self, key: SelectionKey<'_>) -> Entry<'a> {
+    /// Provides mutable access to a selection key. A new selection can be inserted or an existing
+    /// selection modified.
+    pub(super) fn entry<'a>(&'a mut self, key: SelectionKey<'a>) -> Entry<'a> {
         let hash = self.hash(key);
         let slot = self.table.find_entry(hash, key_eq(&self.selections, key));
         match slot {
@@ -378,20 +381,20 @@ impl SelectionMap {
         }
     }
 
+    /// Add selections from another selection map to this one. If there are key collisions, the
+    /// selections are *overwritten*.
     pub(crate) fn extend(&mut self, other: SelectionMap) {
         for selection in other.into_values() {
             self.insert(selection);
         }
     }
 
+    /// Add selections from another selection map to this one. If there are key collisions, the
+    /// selections are *overwritten*.
     pub(crate) fn extend_ref(&mut self, other: &SelectionMap) {
         for selection in other.values() {
             self.insert(selection.clone());
         }
-    }
-
-    pub(crate) fn as_slice(&self) -> &[Selection] {
-        &self.selections
     }
 
     /// Returns the selection set resulting from "recursively" filtering any selection
@@ -453,7 +456,7 @@ impl SelectionMap {
             }
 
             // Clone the map so far
-            new_map = self.as_slice()[..index].iter().cloned().collect();
+            new_map = self.selections[..index].iter().cloned().collect();
 
             if keep {
                 new_map.insert(filtered.into_owned());
@@ -474,6 +477,8 @@ impl<A> FromIterator<A> for SelectionMap
 where
     A: Into<Selection>,
 {
+    /// Create a selection map from an iterator of selections. On key collisions, *only the later
+    /// selection is used*.
     fn from_iter<T: IntoIterator<Item = A>>(iter: T) -> Self {
         let mut map = Self::new();
         for selection in iter {
@@ -516,7 +521,7 @@ impl<'a> SelectionValue<'a> {
         }
     }
 
-    pub(super) fn get_selection_set_mut(&mut self) -> Option<&'_ mut SelectionSet> {
+    pub(super) fn get_selection_set_mut(&mut self) -> Option<&mut SelectionSet> {
         match self {
             SelectionValue::Field(field) => field.get_selection_set_mut(),
             SelectionValue::FragmentSpread(frag) => Some(frag.get_selection_set_mut()),
