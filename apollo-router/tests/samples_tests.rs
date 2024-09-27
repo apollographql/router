@@ -163,9 +163,9 @@ impl TestExecution {
             }
             Action::ReloadSubgraphs {
                 subgraphs,
-                update_overrides,
+                update_url_overrides,
             } => {
-                self.reload_subgraphs(subgraphs, *update_overrides, out)
+                self.reload_subgraphs(subgraphs, *update_url_overrides, out)
                     .await
             }
             Action::Request {
@@ -329,7 +329,7 @@ impl TestExecution {
     async fn reload_subgraphs(
         &mut self,
         subgraphs: &HashMap<String, Subgraph>,
-        update_overrides: bool,
+        update_url_overrides: bool,
         out: &mut String,
     ) -> Result<(), Failed> {
         writeln!(out, "reloading subgraphs with: {subgraphs:?}").unwrap();
@@ -360,7 +360,7 @@ impl TestExecution {
             Some(router) => router,
         };
 
-        if update_overrides {
+        if update_url_overrides {
             router.update_subgraph_overrides(subgraph_overrides);
             router.touch_config().await;
             router.assert_reloaded().await;
@@ -575,7 +575,7 @@ enum Action {
         subgraphs: HashMap<String, Subgraph>,
         // set to true if subgraph URL overrides should be updated (ex: a new subgraph is added)
         #[serde(default)]
-        update_overrides: bool,
+        update_url_overrides: bool,
     },
     Request {
         request: Value,
