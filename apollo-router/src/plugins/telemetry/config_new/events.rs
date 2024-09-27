@@ -739,7 +739,7 @@ where
             let mut new_attributes = selectors.on_response_event(response, ctx);
             attributes.append(&mut new_attributes);
         }
-        // Dumb span to make sure the custom attributes are saved in current span extensions
+        // Stub span to make sure the custom attributes are saved in current span extensions
         // It won't be extracted or sampled at all
         let span = info_span!("supergraph_event_send_event");
         let _entered = span.enter();
