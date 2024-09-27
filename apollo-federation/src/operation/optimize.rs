@@ -61,7 +61,6 @@ use super::SelectionOrSet;
 use super::SelectionSet;
 use crate::error::FederationError;
 use crate::operation::FragmentSpread;
-use crate::operation::FragmentSpreadData;
 use crate::operation::SelectionValue;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 
@@ -1385,7 +1384,7 @@ impl InlineFragmentSelection {
                         // case they should be kept on the spread.
                         // PORT_NOTE: We are assuming directives on fragment definitions are
                         //            carried over to their spread sites as JS version does, which
-                        //            is handled differently in Rust version (see `FragmentSpreadData`).
+                        //            is handled differently in Rust version (see `FragmentSpread`).
                         let directives: executable::DirectiveList = self
                             .inline_fragment
                             .directives
@@ -1752,14 +1751,14 @@ impl FragmentGenerator {
                     };
                     new_selection_set.add_local_selection(&Selection::from(
                         FragmentSpreadSelection {
-                            spread: FragmentSpread::new(FragmentSpreadData {
+                            spread: FragmentSpread {
                                 schema: selection_set.schema.clone(),
                                 fragment_name: existing.name.clone(),
                                 type_condition_position: existing.type_condition_position.clone(),
                                 directives: skip_include.into(),
                                 fragment_directives: existing.directives.clone(),
                                 selection_id: crate::operation::SelectionId::new(),
-                            }),
+                            },
                             selection_set: existing.selection_set.clone(),
                         },
                     ))?;

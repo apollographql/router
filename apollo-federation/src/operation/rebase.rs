@@ -11,7 +11,6 @@ use super::Field;
 use super::FieldSelection;
 use super::Fragment;
 use super::FragmentSpread;
-use super::FragmentSpreadData;
 use super::FragmentSpreadSelection;
 use super::InlineFragment;
 use super::InlineFragmentSelection;
@@ -389,10 +388,10 @@ impl FragmentSpread {
             &named_fragment.type_condition_position,
             &self.schema,
         ) {
-            Ok(FragmentSpread::new(FragmentSpreadData::from_fragment(
+            Ok(FragmentSpread::from_fragment(
                 named_fragment,
                 &self.directives,
-            )))
+            ))
         } else {
             Err(RebaseError::NonIntersectingCondition {
                 type_condition: named_fragment.type_condition_position.clone().into(),
@@ -486,10 +485,7 @@ impl FragmentSpreadSelection {
             };
         }
 
-        let spread = FragmentSpread::new(FragmentSpreadData::from_fragment(
-            named_fragment,
-            &self.spread.directives,
-        ));
+        let spread = FragmentSpread::from_fragment(named_fragment, &self.spread.directives);
         Ok(FragmentSpreadSelection {
             spread,
             selection_set: named_fragment.selection_set.clone(),
