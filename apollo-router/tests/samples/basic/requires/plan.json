@@ -25,24 +25,6 @@
                                     }
                                 }
                             }
-                        },
-                        {
-                            "request": {
-                                "body": {
-                                    "query": "query TestD__accounts__0{d{__typename id}}",
-                                    "operationName": "TestD__accounts__0"
-                                }
-                            },
-                            "response": {
-                                "body": {
-                                    "data": {
-                                        "d": {
-                                            "__typename": "D",
-                                            "id": "1"
-                                        }
-                                    }
-                                }
-                            }
                         }
                     ]
                 },
@@ -72,40 +54,6 @@
                                                 "b": {
                                                     "b": "b"
                                                 }
-                                            }
-                                        ]
-                                    }
-                                }
-                            }
-                        },
-                        {
-                            "request": {
-                                "body": {
-                                    "query": "query TestD__reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on D{i{__typename x}}}}",
-                                    "operationName": "TestD__reviews__1",
-                                    "variables": {
-                                        "representations": [
-                                            {
-                                                "__typename": "D",
-                                                "id": "1"
-                                            }
-                                        ]
-                                    }
-                                }
-                            },
-                            "response": {
-                                "body": {
-                                    "data": {
-                                        "_entities": [
-                                            {
-                                                "i": [
-                                                    {
-                                                        "x": "xy"
-                                                    },
-                                                    {
-                                                        "x": "xz"
-                                                    }
-                                                ]
                                             }
                                         ]
                                     }
@@ -147,7 +95,91 @@
                                     }
                                 }
                             }
-                        },
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "Request",
+            "request": {
+                "query": "query TestA { a { c { c } } }"
+            },
+            "expected_response": {
+                "data": {
+                    "a": {
+                        "c": {
+                            "c": "c"
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "type": "ReloadSubgraphs",
+            "subgraphs": {
+                "accounts": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query TestD__accounts__0{d{__typename id}}",
+                                    "operationName": "TestD__accounts__0"
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "d": {
+                                            "__typename": "D",
+                                            "id": "1"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                },
+                "reviews": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query TestD__reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on D{i{__typename x}}}}",
+                                    "operationName": "TestD__reviews__1",
+                                    "variables": {
+                                        "representations": [
+                                            {
+                                                "__typename": "D",
+                                                "id": "1"
+                                            }
+                                        ]
+                                    }
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "_entities": [
+                                            {
+                                                "i": [
+                                                    {
+                                                        "x": "xy"
+                                                    },
+                                                    {
+                                                        "x": "xz"
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                },
+                "products": {
+                    "requests": [
                         {
                             "request": {
                                 "body": {
@@ -192,22 +224,10 @@
         {
             "type": "Request",
             "request": {
-                "query": "query TestA { a { c { c } } }"
-            },
-            "expected_response": {
-                "data": {
-                    "a": {
-                        "c": {
-                            "c": "c"
-                        }
-                    }
-                }
-            }
-        },
-        {
-            "type": "Request",
-            "request": {
                 "query": "query TestD { d { j } }"
+            },
+            "headers": {
+                "Apollo-Expose-Query-Plan": "true"
             },
             "expected_response": {
                 "data": {
