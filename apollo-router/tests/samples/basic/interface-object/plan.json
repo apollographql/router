@@ -1,0 +1,122 @@
+{
+    "actions": [
+        {
+            "type": "Start",
+            "schema_path": "./supergraph.graphql",
+            "configuration_path": "./configuration.yaml",
+            "subgraphs": {
+                "accounts": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query TestItf__accounts__0{i{__typename id x ...on A{a}...on B{b}}}",
+                                    "operationName": "TestItf__accounts__0"
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "i": [
+                                            {
+                                                "__typename": "A",
+                                                "id": "1",
+                                                "x": 1,
+                                                "a": "a"
+                                            },
+                                            null,
+                                            {
+                                                "__typename": "B",
+                                                "id": "2",
+                                                "x": 2,
+                                                "b": "b"
+                                            },
+                                            {
+                                                "__typename": "A",
+                                                "id": "1",
+                                                "x": 1,
+                                                "a": "a"
+                                            }
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                },
+                "products": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query TestItf__products__1($representations:[_Any!]!){_entities(representations:$representations){...on I{y}}}",
+                                    "operationName": "TestItf__products__1",
+                                    "variables": {
+                                        "representations": [
+                                            {
+                                                "__typename": "I",
+                                                "id": "1"
+                                            },
+                                            {
+                                                "__typename": "I",
+                                                "id": "2"
+                                            }
+                                        ]
+                                    }
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "_entities": [
+                                            {
+                                                "y": 1
+                                            },
+                                            {
+                                                "y": 2
+                                            }
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "Request",
+            "request": {
+                "query": "query TestItf { i { __typename x y ... on A { a } ... on B { b } } }"
+            },
+            "expected_response": {
+                "data": {
+                    "i": [
+                        {
+                            "__typename": "A",
+                            "x": 1,
+                            "y": 1,
+                            "a": "a"
+                        },
+                        null,
+                        {
+                            "__typename": "B",
+                            "x": 2,
+                            "y": 2,
+                            "b": "b"
+                        },
+                        {
+                            "__typename": "A",
+                            "x": 1,
+                            "y": 1,
+                            "a": "a"
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "Stop"
+        }
+    ]
+}
