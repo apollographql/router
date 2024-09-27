@@ -1914,6 +1914,148 @@ mod tests {
                 expected.clone(),
             );
         }
+
+        {
+            let data = json!({
+                "from": "data",
+            });
+
+            let vars = {
+                let mut vars = IndexMap::default();
+                vars.insert(
+                    "$this".to_string(),
+                    json!({
+                        "id": 1234,
+                    }),
+                );
+                vars.insert(
+                    "$args".to_string(),
+                    json!({
+                        "input": {
+                            "title": "The capital of Australia",
+                            "body": "Canberra",
+                        },
+                        "extra": "extra",
+                    }),
+                );
+                vars
+            };
+
+            let expected = (
+                Some(json!({
+                    "id": 1234,
+                    "title": "The capital of Australia",
+                    "body": "Canberra",
+                    "from": "data",
+                })),
+                vec![],
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    id: $this.id
+                    $args.input {
+                        title
+                        body
+                    }
+                    from
+                "#
+                )
+                .apply_with_vars(&data, &vars),
+                expected.clone(),
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    from
+                    $args.input { title body }
+                    id: $this.id
+                "#
+                )
+                .apply_with_vars(&data, &vars),
+                expected.clone(),
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    $args.input { body title }
+                    from
+                    id: $this.id
+                "#
+                )
+                .apply_with_vars(&data, &vars),
+                expected.clone(),
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    id: $this.id
+                    $args { .input { title body } }
+                    from
+                "#
+                )
+                .apply_with_vars(&data, &vars),
+                expected.clone(),
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    id: $this.id
+                    $args { .input { title body } extra }
+                    from: .from
+                "#
+                )
+                .apply_with_vars(&data, &vars),
+                (
+                    Some(json!({
+                        "id": 1234,
+                        "title": "The capital of Australia",
+                        "body": "Canberra",
+                        "extra": "extra",
+                        "from": "data",
+                    })),
+                    vec![],
+                ),
+            );
+
+            assert_eq!(
+                selection!(
+                    r#"
+                    # Equivalent to id: $this.id
+                    $this { id }
+
+                    $args {
+                        __typename: $("Args")
+
+                        # Using $. instead of just . prevents .input from
+                        # parsing as a key applied to the $("Args") string.
+                        $.input { title body }
+
+                        extra
+                    }
+
+                    from: $.from
+                "#
+                )
+                .apply_with_vars(&data, &vars),
+                (
+                    Some(json!({
+                        "id": 1234,
+                        "title": "The capital of Australia",
+                        "body": "Canberra",
+                        "__typename": "Args",
+                        "extra": "extra",
+                        "from": "data",
+                    })),
+                    vec![],
+                ),
+            );
+        }
     }
 
     #[test]

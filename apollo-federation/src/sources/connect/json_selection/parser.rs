@@ -2428,6 +2428,44 @@ mod tests {
             model
         "#
         ));
+
+        assert_debug_snapshot!(JSONSelection::parse(
+            r#"
+            id: $this.id
+            $args.input {
+                title
+                body
+            }
+        "#
+        ));
+
+        // Like the selection above, this selection produces an output shape
+        // with id, title, and body all flattened in a top-level object.
+        assert_debug_snapshot!(JSONSelection::parse(
+            r#"
+            $this { id }
+            $args { .input { title body } }
+        "#
+        ));
+
+        assert_debug_snapshot!(JSONSelection::parse(
+            r#"
+            # Equivalent to id: $this.id
+            $this { id }
+
+            $args {
+                __typename: $("Args")
+
+                # Using $. instead of just . prevents .input from
+                # parsing as a key applied to the $("Args") string.
+                $.input { title body }
+
+                extra
+            }
+
+            from: $.from
+        "#
+        ));
     }
 
     #[test]
