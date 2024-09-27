@@ -9,7 +9,6 @@ use serde::ser::SerializeSeq;
 use serde::Serialize;
 
 use crate::error::FederationError;
-use crate::error::SingleFederationError::Internal;
 use crate::operation::field_selection::FieldSelection;
 use crate::operation::fragment_spread_selection::FragmentSpreadSelection;
 use crate::operation::inline_fragment_selection::InlineFragmentSelection;
@@ -152,7 +151,7 @@ impl<'a> SelectionKey<'a> {
     pub(crate) fn field_name(name: &'a Name) -> Self {
         static EMPTY_LIST: DirectiveList = DirectiveList::new();
         SelectionKey::Field {
-            response_name: &name,
+            response_name: name,
             directives: &EMPTY_LIST,
         }
     }
@@ -173,11 +172,9 @@ struct Bucket {
 /// together by the user of this structure: the selection map API itself will overwrite selections
 /// with the same key.
 ///
-/// Because the key depends strictly on the value, we expose the underlying map's API in a
-/// read-only capacity, while mutations use an API closer to `IndexSet`. We don't just use an
-/// `IndexSet` since key computation is expensive (it involves sorting). This type is in its own
-/// module to prevent code from accidentally mutating the underlying map outside the mutation
-/// API.
+/// Once a selection is in the selection map, it must not be modified in a way that changes the
+/// selection key. Therefore, the selection map only hands out mutable access through the
+/// SelectionValue types, which expose the parts of selections that are safe to modify.
 #[derive(Clone)]
 pub(crate) struct SelectionMap {
     hash_builder: DefaultHashBuilder,
@@ -223,7 +220,10 @@ impl Default for SelectionMap {
 }
 
 pub(crate) type Values<'a> = std::slice::Iter<'a, Selection>;
-pub(crate) type ValuesMut<'a> = std::slice::IterMut<'a, Selection>;
+pub(crate) type ValuesMut<'a> = std::iter::Map<
+    std::slice::IterMut<'a, Selection>,
+    fn(&'a mut Selection) -> SelectionValue<'a>,
+>;
 pub(crate) type IntoValues = std::vec::IntoIter<Selection>;
 
 /// Return an equality function taking an index into `selections` and returning if the index
@@ -288,8 +288,6 @@ impl SelectionMap {
     fn raw_insert(&mut self, hash: u64, value: Selection) -> &mut Selection {
         let index = self.selections.len();
 
-        // `insert` overwrites a selection without running `Drop`: because
-        // we only store an integer which is `Copy`, this works out fine
         self.table.insert_unique(hash, Bucket { index, hash }, |existing| existing.hash);
 
         self.selections.push(value);
@@ -351,17 +349,17 @@ impl SelectionMap {
     }
 
     /// Iterate over all selections.
-    pub(crate) fn values(&self) -> std::slice::Iter<'_, Selection> {
+    pub(crate) fn values(&self) -> Values<'_> {
         self.selections.iter()
     }
 
     /// Iterate over all selections.
-    pub(crate) fn values_mut(&mut self) -> impl Iterator<Item = SelectionValue<'_>> {
+    pub(crate) fn values_mut(&mut self) -> ValuesMut<'_> {
         self.selections.iter_mut().map(SelectionValue::new)
     }
 
     /// Iterate over all selections.
-    pub(crate) fn into_values(self) -> std::vec::IntoIter<Selection> {
+    pub(crate) fn into_values(self) -> IntoValues {
         self.selections.into_iter()
     }
 
@@ -626,13 +624,9 @@ impl<'a> VacantEntry<'a> {
 
     pub(crate) fn insert(self, value: Selection) -> Result<SelectionValue<'a>, FederationError> {
         if self.key() != value.key() {
-            return Err(Internal {
-                message: format!(
-                    "Key mismatch when inserting selection {} into vacant entry ",
-                    value
-                ),
-            }
-            .into());
+            return Err(FederationError::internal(format!(
+                "Key mismatch when inserting selection {value} into vacant entry "
+            )));
         };
         Ok(SelectionValue::new(self.map.raw_insert(self.hash, value)))
     }
