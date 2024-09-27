@@ -1,5 +1,6 @@
 extern crate core;
 
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::time::Duration;
 
@@ -24,6 +25,9 @@ use crate::integration::ValueExt;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_basic() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        panic!("Error: test skipped because GraphOS is not enabled");
+    }
     let mock_server = mock_otlp_server().await;
     let config = include_str!("fixtures/otlp.router.yaml")
         .replace("<otel-collector-endpoint>", &mock_server.uri());
@@ -80,6 +84,9 @@ async fn test_basic() -> Result<(), BoxError> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_otlp_request_with_datadog_propagator() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        panic!("Error: test skipped because GraphOS is not enabled");
+    }
     let mock_server = mock_otlp_server().await;
     let config = include_str!("fixtures/otlp_datadog_propagation.router.yaml")
         .replace("<otel-collector-endpoint>", &mock_server.uri());
@@ -108,6 +115,9 @@ async fn test_otlp_request_with_datadog_propagator() -> Result<(), BoxError> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_otlp_request_with_datadog_propagator_no_agent() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        panic!("Error: test skipped because GraphOS is not enabled");
+    }
     let mock_server = mock_otlp_server().await;
     let config = include_str!("fixtures/otlp_datadog_propagation_no_agent.router.yaml")
         .replace("<otel-collector-endpoint>", &mock_server.uri());
@@ -134,7 +144,130 @@ async fn test_otlp_request_with_datadog_propagator_no_agent() -> Result<(), BoxE
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_otlp_request_with_zipkin_trace_context_propagator_with_datadog(
+) -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        panic!("Error: test skipped because GraphOS is not enabled");
+    }
+    let mock_server = mock_otlp_server().await;
+    let config = include_str!("fixtures/otlp_datadog_request_with_zipkin_propagator.router.yaml")
+        .replace("<otel-collector-endpoint>", &mock_server.uri());
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Otlp {
+            endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
+        })
+        .config(&config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
+    let (id, _) = router.execute_query(&query).await;
+
+    Spec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .priority_sampled("1")
+        .build()
+        .validate_trace(id, &mock_server)
+        .await?;
+    // ---------------------- zipkin propagator with unsampled trace
+    // Testing for an unsampled trace, so it should be sent to the otlp exporter with sampling priority set 0
+    // But it shouldn't send the trace to subgraph as the trace is originally not sampled, the main goal is to measure it at the DD agent level
+    let id = TraceId::from_hex("80f198ee56343ba864fe8b2a57d3eff7").unwrap();
+    let headers: HashMap<String, String> = [
+        (
+            "X-B3-TraceId".to_string(),
+            "80f198ee56343ba864fe8b2a57d3eff7".to_string(),
+        ),
+        (
+            "X-B3-ParentSpanId".to_string(),
+            "05e3ac9a4f6e3b90".to_string(),
+        ),
+        ("X-B3-SpanId".to_string(), "e457b5a2e4d86bd1".to_string()),
+        ("X-B3-Sampled".to_string(), "0".to_string()),
+    ]
+    .into();
+
+    let (_id, _) = router.execute_untraced_query(&query, Some(headers)).await;
+    Spec::builder()
+        .services(["router"].into())
+        .priority_sampled("0")
+        .build()
+        .validate_trace(id, &mock_server)
+        .await?;
+    // ---------------------- trace context propagation
+    // Testing for a trace containing the right tracestate with m and psr for DD and a sampled trace, so it should be sent to the otlp exporter with sampling priority set to 1
+    // And it should also send the trace to subgraph as the trace is sampled
+    let id = TraceId::from_hex("0af7651916cd43dd8448eb211c80319c").unwrap();
+    let headers: HashMap<String, String> = [
+        (
+            "traceparent".to_string(),
+            "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01".to_string(),
+        ),
+        ("tracestate".to_string(), "m=1,psr=1".to_string()),
+    ]
+    .into();
+
+    let (_id, _) = router.execute_untraced_query(&query, Some(headers)).await;
+    Spec::builder()
+        .services(["router", "subgraph"].into())
+        .priority_sampled("1")
+        .build()
+        .validate_trace(id, &mock_server)
+        .await?;
+    // ----------------------
+    // Testing for a trace containing the right tracestate with m and psr for DD and an unsampled trace, so it should be sent to the otlp exporter with sampling priority set to 0
+    // But it shouldn't send the trace to subgraph as the trace is originally not sampled, the main goal is to measure it at the DD agent level
+    let id = TraceId::from_hex("0af7651916cd43dd8448eb211c80319d").unwrap();
+    let headers: HashMap<String, String> = [
+        (
+            "traceparent".to_string(),
+            "00-0af7651916cd43dd8448eb211c80319d-b7ad6b7169203331-00".to_string(),
+        ),
+        ("tracestate".to_string(), "m=1,psr=0".to_string()),
+    ]
+    .into();
+
+    let (_id, _) = router.execute_untraced_query(&query, Some(headers)).await;
+    Spec::builder()
+        .services(["router"].into())
+        .priority_sampled("0")
+        .build()
+        .validate_trace(id, &mock_server)
+        .await?;
+    // ----------------------
+    // Testing for a trace containing a tracestate m and psr with psr set to 1 for DD and an unsampled trace, so it should be sent to the otlp exporter with sampling priority set to 1
+    // But it should send the trace to subgraph as the tracestate contains a psr set to 1
+    let id = TraceId::from_hex("0af7651916cd43dd8448eb211c80319e").unwrap();
+    let headers: HashMap<String, String> = [
+        (
+            "traceparent".to_string(),
+            "00-0af7651916cd43dd8448eb211c80319e-b7ad6b7169203331-00".to_string(),
+        ),
+        ("tracestate".to_string(), "m=1,psr=1".to_string()),
+    ]
+    .into();
+
+    let (_id, _) = router.execute_untraced_query(&query, Some(headers)).await;
+    Spec::builder()
+        .services(["router", "subgraph"].into())
+        .priority_sampled("1")
+        .build()
+        .validate_trace(id, &mock_server)
+        .await?;
+
+    // Be careful if you add the same kind of test crafting your own trace id, make sure to increment the previous trace id by 1 if not you'll receive all the previous spans tested with the same trace id before
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_untraced_request_no_sample_datadog_agent() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        panic!("Error: test skipped because GraphOS is not enabled");
+    }
     let mock_server = mock_otlp_server().await;
     let config = include_str!("fixtures/otlp_datadog_agent_no_sample.router.yaml")
         .replace("<otel-collector-endpoint>", &mock_server.uri());
@@ -144,7 +277,7 @@ async fn test_untraced_request_no_sample_datadog_agent() -> Result<(), BoxError>
     router.assert_started().await;
 
     let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    let (id, _) = router.execute_untraced_query(&query).await;
+    let (id, _) = router.execute_untraced_query(&query, None).await;
     Spec::builder()
         .services(["router"].into())
         .priority_sampled("0")
@@ -157,6 +290,9 @@ async fn test_untraced_request_no_sample_datadog_agent() -> Result<(), BoxError>
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_untraced_request_sample_datadog_agent() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        panic!("Error: test skipped because GraphOS is not enabled");
+    }
     let mock_server = mock_otlp_server().await;
     let config = include_str!("fixtures/otlp_datadog_agent_sample.router.yaml")
         .replace("<otel-collector-endpoint>", &mock_server.uri());
@@ -166,7 +302,7 @@ async fn test_untraced_request_sample_datadog_agent() -> Result<(), BoxError> {
     router.assert_started().await;
 
     let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    let (id, _) = router.execute_untraced_query(&query).await;
+    let (id, _) = router.execute_untraced_query(&query, None).await;
     Spec::builder()
         .services(["router"].into())
         .priority_sampled("1")
@@ -179,6 +315,9 @@ async fn test_untraced_request_sample_datadog_agent() -> Result<(), BoxError> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_untraced_request_sample_datadog_agent_unsampled() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        panic!("Error: test skipped because GraphOS is not enabled");
+    }
     let mock_server = mock_otlp_server().await;
     let config = include_str!("fixtures/otlp_datadog_agent_sample_no_sample.router.yaml")
         .replace("<otel-collector-endpoint>", &mock_server.uri());
@@ -194,7 +333,7 @@ async fn test_untraced_request_sample_datadog_agent_unsampled() -> Result<(), Bo
     router.assert_started().await;
 
     let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    let (id, _) = router.execute_untraced_query(&query).await;
+    let (id, _) = router.execute_untraced_query(&query, None).await;
     Spec::builder()
         .services(["router"].into())
         .priority_sampled("0")
@@ -208,7 +347,7 @@ async fn test_untraced_request_sample_datadog_agent_unsampled() -> Result<(), Bo
 #[tokio::test(flavor = "multi_thread")]
 async fn test_priority_sampling_propagated() -> Result<(), BoxError> {
     if !graph_os_enabled() {
-        return Ok(());
+        panic!("Error: test skipped because GraphOS is not enabled");
     }
     let mock_server = mock_otlp_server().await;
     let config = include_str!("fixtures/otlp_datadog_propagation.router.yaml")
@@ -534,7 +673,6 @@ impl Spec {
             .filter_map(|service| service.as_string())
             .collect();
         tracing::debug!("found services {:?}", actual_services);
-
         let expected_services = self
             .services
             .iter()

@@ -632,6 +632,7 @@ impl IntegrationTest {
     pub fn execute_untraced_query(
         &self,
         query: &Value,
+        headers: Option<HashMap<String, String>>,
     ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
         assert!(
             self.router.is_some(),
@@ -653,6 +654,16 @@ impl IntegrationTest {
                 .unwrap();
 
             request.headers_mut().remove(ACCEPT);
+            if let Some(headers) = headers {
+                for (name, value) in headers {
+                    request.headers_mut().remove(&name);
+                    request.headers_mut().append(
+                        HeaderName::from_str(&name).expect("header was invalid"),
+                        value.try_into().expect("header was invalid"),
+                    );
+                }
+            }
+
             match client.execute(request).await {
                 Ok(response) => (
                     TraceId::from_hex(

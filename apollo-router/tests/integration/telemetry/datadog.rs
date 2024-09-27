@@ -60,7 +60,7 @@ async fn test_no_sample() -> Result<(), BoxError> {
     router.assert_started().await;
 
     let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    let (_id, result) = router.execute_untraced_query(&query).await;
+    let (_id, result) = router.execute_untraced_query(&query, None).await;
     router.graceful_shutdown().await;
     assert!(result.status().is_success());
     let context = context
@@ -104,7 +104,7 @@ async fn test_sampling_datadog_agent_disabled() -> Result<(), BoxError> {
     router.assert_started().await;
 
     let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    let (id, result) = router.execute_untraced_query(&query).await;
+    let (id, result) = router.execute_untraced_query(&query, None).await;
     router.graceful_shutdown().await;
     assert!(result.status().is_success());
     let _context = context
