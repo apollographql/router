@@ -769,6 +769,7 @@ impl Display for Unadvanceable {
 }
 
 #[derive(Debug, Clone, strum_macros::Display, serde::Serialize)]
+// PORT_NOTE: This is only used by composition, which is not ported to Rust yet.
 enum UnadvanceableReason {}
 
 /// One of the options for a `ClosedBranch` (see the documentation of that struct for details). Note
