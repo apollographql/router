@@ -26,9 +26,13 @@ The `experimental_query_planner_mode` option has the following supported modes:
 - `legacy` - enables only the legacy JavaScript query planner 
 - `both_best_effort` - enables both new and legacy query planners for comparison. The legacy query planner is used for execution. 
 
+<MinVersion version="2.0.0">
+
 ## Configure native query planning
 
-To maximize performance and minimize resource utilization of query planning, you should run your router with the following options to enable completely native query planning:
+</MinVersion>
+
+To run the native query planner with the best performance and resource utilization, configure your router with the following options:
 
 ```yaml title="router.yaml" showLineNumbers=false
 supergraph:
@@ -38,6 +42,7 @@ experimental_query_planner_mode: new
 experimental_introspection_mode: new
 ```
 
+- `experimental_query_planner_mode: new` enables only the Rust-native query planner.
 - `generate_query_fragments: true` enables faster throughput by reducing the size of queries sent to subgraphs.
 - `experimental_introspection_mode: new` enables Rust-native schema introspection.
 
