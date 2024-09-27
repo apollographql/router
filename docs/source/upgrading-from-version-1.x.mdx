@@ -1,16 +1,77 @@
 ---
 title: Upgrading from Versions 1.x
 subtitle: Upgrade from version 1.x to 2.x of GraphOS Router
-description: Learn how to upgrade from version 1.x to 2.x of the Apollo GraphOS Router.
+description: Learn how to upgrade from version 1.x to 2.x of the GraphOS Router.
 ---
 
-Learn how to upgrade from your Apollo Router 1.x deployment to Apollo Router 2.x.
+TBD: RELEASE_NUMBER
+
+Learn how to upgrade from your GraphOS Router 1.x deployment to GraphOS Router RELEASE_NUMBER.
 
 ## What's different?
 
-TBD: Write some text here about what is different and why.
+There are new features in GraphOS Router v2.0 (Alpha). Think about how you can take advantage of these as you plan your upgrade to your existing 1.x deployment.
+
+### Rust Query Planner
+
+TBD: Should we even mention this. After all it's 1.x feature already.
+
+### Apollo Reporting
+
+TBD: I can't find any references to where this is documented apart from the CHANGELOG Entry for 1.49.0. I've reproduced that text here for now.
+
+Initially, in 1.x, the router reported metrics to Apollo Studio in a propietary tracing format.
+
+As the ecosystem around OpenTelemetry (OTel) has been expanding rapidly, we are evaluating a migration of Apollo's internal tracing system to use an OTel-based protocol.
+
+In the short-term, benefits include:
+
+- A comprehensive way to visualize the router execution path in GraphOS Studio.
+- Additional spans that were previously not included in Studio traces, such as query parsing, planning, execution, and more.
+- Additional metadata such as subgraph fetch details, router idle / busy timing, and more.
+
+Long-term, we see this as a strategic enhancement to consolidate these two disparate tracing systems.
+
+This will pave the way for future enhancements to more easily plug into the Studio trace visualizer.
+
+#### Configuration
+
+This change adds a new configuration option `experimental_otlp_tracing_sampler`. This can be used to send a percentage of traces via OTLP instead of the native Apollo Usage Reporting protocol. Supported values:
+
+- `always_off`: send all traces via Apollo Usage Reporting protocol.
+- `always_on` (default): send all traces via OTLP.
+- `0.0 - 1.0`: the ratio of traces to send via OTLP (0.5 = 50 / 50).
+
+Note that this sampler is only applied _after_ the common tracing sampler, for example:
+
+##### Sample 1% of traces, send all traces via OTLP:
+
+```yaml
+telemetry:
+  apollo:
+    # Send all traces via OTLP
+    experimental_otlp_tracing_sampler: always_on
+
+  exporters:
+    tracing:
+      common:
+        # Sample traces at 1% of all traffic
+        sampler: 0.01
+```
 
 ## How do I upgrade?
+
+Upgrading will generally be quick and painless, but some planning will help.
+
+### Configuration
+
+If you are happy to submit traces via OTEL, then no changes are required. Otherwise, use the `experimental_otlp_tracing_sampler` to turn this off.
+
+### Deployment
+
+Make sure that you are referencing the correct router release: RELEASE_NUMBER
+
+During upgrade, carefully monitor resource consumption.
 
 TBD: Write a list of all considerations and possible changes a user must make (configuration, deployment, etc.) to upgrade to 2.x. Add some text here about various changes and how they impact 1.x deployments. Perhaps talk about tooling that automates upgrade (config in particular).
 
