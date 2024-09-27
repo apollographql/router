@@ -143,8 +143,8 @@ impl GroupVisitor<JSONSelectionGroup, NamedSelection>
             "tried to get fields on a group not yet visited",
         ))?;
 
-        match field.names().as_slice() {
-            &[field_name] => {
+        match field.names().first() {
+            Some(field_name) => {
                 let field_name = Name::new(field_name)?;
                 let field_type_name = definition
                     .field(field_name)
@@ -160,7 +160,7 @@ impl GroupVisitor<JSONSelectionGroup, NamedSelection>
 
                 Ok(field.next_subselection().cloned().map(|s| (field_type, s)))
             }
-            _ => Ok(None),
+            None => Ok(None),
         }
     }
 
