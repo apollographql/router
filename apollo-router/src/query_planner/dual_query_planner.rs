@@ -386,7 +386,6 @@ fn vec_matches_result<T>(
             item_matches(this, other)
                 .map_err(|err| err.add_description(&format!("under item[{}]", index)))
         })?;
-    assert!(vec_matches(this, other, |a, b| item_matches(a, b).is_ok())); // Note: looks redundant
     Ok(())
 }
 
@@ -398,7 +397,7 @@ fn vec_matches_sorted<T: Ord + Clone>(this: &[T], other: &[T]) -> bool {
     vec_matches(&this_sorted, &other_sorted, T::eq)
 }
 
-fn vec_matches_sorted_by<T: Eq + Clone>(
+fn vec_matches_sorted_by<T: Clone>(
     this: &[T],
     other: &[T],
     compare: impl Fn(&T, &T) -> std::cmp::Ordering,
@@ -457,7 +456,6 @@ fn vec_matches_result_as_set<T>(
             ));
         }
     }
-    assert!(vec_matches_as_set(this, other, item_matches));
     Ok(())
 }
 
