@@ -517,29 +517,16 @@ impl InlineFragmentData {
         if self.schema == *schema && self.parent_type_position == *parent_type {
             return Some(self.casted_type());
         }
-        match self.can_rebase_on(parent_type, schema) {
-            (false, _) => None,
-            (true, None) => Some(parent_type.clone()),
-            (true, Some(ty)) => Some(ty),
-        }
-    }
-
-    fn can_rebase_on(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        schema: &ValidFederationSchema,
-    ) -> (bool, Option<CompositeTypeDefinitionPosition>) {
         let Some(ty) = self.type_condition_position.as_ref() else {
-            return (true, None);
+            return Some(parent_type.clone());
         };
-        match schema
+
+        let rebased_type = schema
             .get_type(ty.type_name().clone())
             .ok()
-            .and_then(|ty| CompositeTypeDefinitionPosition::try_from(ty).ok())
-        {
-            Some(ty) if runtime_types_intersect(parent_type, &ty, schema) => (true, Some(ty)),
-            _ => (false, None),
-        }
+            .and_then(|ty| CompositeTypeDefinitionPosition::try_from(ty).ok())?;
+
+        runtime_types_intersect(parent_type, &rebased_type, schema).then_some(rebased_type)
     }
 }
 
