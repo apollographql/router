@@ -34,7 +34,6 @@ use crate::operation::DirectiveList;
 use crate::operation::Field;
 use crate::operation::HasSelectionKey;
 use crate::operation::InlineFragment;
-use crate::operation::InlineFragmentData;
 use crate::operation::SelectionId;
 use crate::operation::SelectionKey;
 use crate::operation::SelectionSet;
@@ -2695,19 +2694,15 @@ impl OpGraphPath {
                             debug!("Handling implementation {implementation_type_pos}");
                             let span = debug_span!(" |");
                             let guard = span.enter();
-                            let implementation_inline_fragment =
-                                InlineFragment::new(InlineFragmentData {
-                                    schema: self
-                                        .graph
-                                        .schema_by_source(&tail_weight.source)?
-                                        .clone(),
-                                    parent_type_position: tail_type_pos.clone().into(),
-                                    type_condition_position: Some(
-                                        implementation_type_pos.clone().into(),
-                                    ),
-                                    directives: Default::default(),
-                                    selection_id: SelectionId::new(),
-                                });
+                            let implementation_inline_fragment = InlineFragment {
+                                schema: self.graph.schema_by_source(&tail_weight.source)?.clone(),
+                                parent_type_position: tail_type_pos.clone().into(),
+                                type_condition_position: Some(
+                                    implementation_type_pos.clone().into(),
+                                ),
+                                directives: Default::default(),
+                                selection_id: SelectionId::new(),
+                            };
                             let implementation_options =
                                 SimultaneousPathsWithLazyIndirectPaths::new(
                                     self.clone().into(),
@@ -2902,19 +2897,15 @@ impl OpGraphPath {
                         for implementation_type_pos in intersection {
                             let span = debug_span!("Trying {implementation_type_pos}");
                             let guard = span.enter();
-                            let implementation_inline_fragment =
-                                InlineFragment::new(InlineFragmentData {
-                                    schema: self
-                                        .graph
-                                        .schema_by_source(&tail_weight.source)?
-                                        .clone(),
-                                    parent_type_position: tail_type_pos.clone().into(),
-                                    type_condition_position: Some(
-                                        implementation_type_pos.clone().into(),
-                                    ),
-                                    directives: operation_inline_fragment.directives.clone(),
-                                    selection_id: SelectionId::new(),
-                                });
+                            let implementation_inline_fragment = InlineFragment {
+                                schema: self.graph.schema_by_source(&tail_weight.source)?.clone(),
+                                parent_type_position: tail_type_pos.clone().into(),
+                                type_condition_position: Some(
+                                    implementation_type_pos.clone().into(),
+                                ),
+                                directives: operation_inline_fragment.directives.clone(),
+                                selection_id: SelectionId::new(),
+                            };
                             let implementation_options =
                                 SimultaneousPathsWithLazyIndirectPaths::new(
                                     self.clone().into(),
@@ -2988,17 +2979,16 @@ impl OpGraphPath {
                                 if operation_inline_fragment.directives.is_empty() {
                                     return Ok((Some(vec![self.clone().into()]), None));
                                 }
-                                let operation_inline_fragment =
-                                    InlineFragment::new(InlineFragmentData {
-                                        schema: self
-                                            .graph
-                                            .schema_by_source(&tail_weight.source)?
-                                            .clone(),
-                                        parent_type_position: tail_type_pos.clone().into(),
-                                        type_condition_position: None,
-                                        directives: operation_inline_fragment.directives.clone(),
-                                        selection_id: SelectionId::new(),
-                                    });
+                                let operation_inline_fragment = InlineFragment {
+                                    schema: self
+                                        .graph
+                                        .schema_by_source(&tail_weight.source)?
+                                        .clone(),
+                                    parent_type_position: tail_type_pos.clone().into(),
+                                    type_condition_position: None,
+                                    directives: operation_inline_fragment.directives.clone(),
+                                    selection_id: SelectionId::new(),
+                                };
                                 let defer_directive_arguments =
                                     operation_inline_fragment.defer_directive_arguments()?;
                                 let fragment_path = self.add(

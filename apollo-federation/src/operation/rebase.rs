@@ -14,7 +14,6 @@ use super::FragmentSpread;
 use super::FragmentSpreadData;
 use super::FragmentSpreadSelection;
 use super::InlineFragment;
-use super::InlineFragmentData;
 use super::InlineFragmentSelection;
 use super::NamedFragments;
 use super::OperationElement;
@@ -474,13 +473,13 @@ impl FragmentSpreadSelection {
                 Err(RebaseError::EmptySelectionSet.into())
             } else {
                 Ok(InlineFragmentSelection::new(
-                    InlineFragment::new(InlineFragmentData {
+                    InlineFragment {
                         schema: schema.clone(),
                         parent_type_position: parent_type.clone(),
                         type_condition_position: None,
                         directives: Default::default(),
                         selection_id: SelectionId::new(),
-                    }),
+                    },
                     expanded_selection_set,
                 )
                 .into())
@@ -508,7 +507,7 @@ impl FragmentSpreadSelection {
     }
 }
 
-impl InlineFragmentData {
+impl InlineFragment {
     fn casted_type_if_add_to(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
@@ -528,9 +527,7 @@ impl InlineFragmentData {
 
         runtime_types_intersect(parent_type, &rebased_type, schema).then_some(rebased_type)
     }
-}
 
-impl InlineFragment {
     pub(crate) fn rebase_on(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
@@ -553,11 +550,11 @@ impl InlineFragment {
             }
             .into())
         } else {
-            let mut rebased_fragment_data = self.data().clone();
-            rebased_fragment_data.parent_type_position = parent_type.clone();
-            rebased_fragment_data.type_condition_position = rebased_condition;
-            rebased_fragment_data.schema = schema.clone();
-            Ok(InlineFragment::new(rebased_fragment_data))
+            let mut rebased_fragment = self.clone();
+            rebased_fragment.parent_type_position = parent_type.clone();
+            rebased_fragment.type_condition_position = rebased_condition;
+            rebased_fragment.schema = schema.clone();
+            Ok(rebased_fragment)
         }
     }
 

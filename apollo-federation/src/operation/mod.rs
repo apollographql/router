@@ -1004,13 +1004,13 @@ impl FragmentSpreadSelection {
         parent_type_position: CompositeTypeDefinitionPosition,
         predicate: &mut impl FnMut(OpPathElement) -> Result<bool, FederationError>,
     ) -> Result<bool, FederationError> {
-        let inline_fragment = InlineFragment::new(InlineFragmentData {
+        let inline_fragment = InlineFragment {
             schema: self.spread.schema.clone(),
             parent_type_position,
             type_condition_position: Some(self.spread.type_condition_position.clone()),
             directives: self.spread.directives.clone(),
             selection_id: self.spread.selection_id.clone(),
-        });
+        };
         if predicate(inline_fragment.into())? {
             return Ok(true);
         }
@@ -1037,7 +1037,6 @@ impl FragmentSpreadData {
 mod inline_fragment_selection {
     use std::hash::Hash;
     use std::hash::Hasher;
-    use std::ops::Deref;
 
     use serde::Serialize;
 
@@ -1103,15 +1102,16 @@ mod inline_fragment_selection {
 
     /// The non-selection-set data of `InlineFragmentSelection`, used with operation paths and
     /// graph paths.
-    #[derive(Clone, Serialize)]
+    #[derive(Debug, Clone, Serialize)]
     pub(crate) struct InlineFragment {
-        data: InlineFragmentData,
-    }
-
-    impl std::fmt::Debug for InlineFragment {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            self.data.fmt(f)
-        }
+        #[serde(skip)]
+        pub(crate) schema: ValidFederationSchema,
+        pub(crate) parent_type_position: CompositeTypeDefinitionPosition,
+        pub(crate) type_condition_position: Option<CompositeTypeDefinitionPosition>,
+        #[serde(serialize_with = "crate::display_helpers::serialize_as_string")]
+        pub(crate) directives: DirectiveList,
+        #[cfg_attr(not(feature = "snapshot_tracing"), serde(skip))]
+        pub(crate) selection_id: SelectionId,
     }
 
     impl PartialEq for InlineFragment {
@@ -1128,42 +1128,26 @@ mod inline_fragment_selection {
         }
     }
 
-    impl Deref for InlineFragment {
-        type Target = InlineFragmentData;
-
-        fn deref(&self) -> &Self::Target {
-            &self.data
-        }
-    }
-
     impl InlineFragment {
-        pub(crate) fn new(data: InlineFragmentData) -> Self {
-            Self { data }
-        }
-
         pub(crate) fn schema(&self) -> &ValidFederationSchema {
-            &self.data.schema
-        }
-
-        pub(crate) fn data(&self) -> &InlineFragmentData {
-            &self.data
+            &self.schema
         }
 
         pub(crate) fn with_updated_type_condition(
             &self,
-            new: Option<CompositeTypeDefinitionPosition>,
+            type_condition_position: Option<CompositeTypeDefinitionPosition>,
         ) -> Self {
-            let mut data = self.data().clone();
-            data.type_condition_position = new;
-            Self::new(data)
+            Self {
+                type_condition_position,
+                ..self.clone()
+            }
         }
-        pub(crate) fn with_updated_directives(
-            &self,
-            directives: impl Into<DirectiveList>,
-        ) -> InlineFragment {
-            let mut data = self.data().clone();
-            data.directives = directives.into();
-            Self::new(data)
+
+        pub(crate) fn with_updated_directives(&self, directives: impl Into<DirectiveList>) -> Self {
+            Self {
+                directives: directives.into(),
+                ..self.clone()
+            }
         }
 
         pub(crate) fn as_path_element(&self) -> Option<FetchDataPathElement> {
@@ -1173,27 +1157,7 @@ mod inline_fragment_selection {
                 condition.type_name().clone(),
             ))
         }
-    }
 
-    impl HasSelectionKey for InlineFragment {
-        fn key(&self) -> SelectionKey<'_> {
-            self.data.key()
-        }
-    }
-
-    #[derive(Debug, Clone, Serialize)]
-    pub(crate) struct InlineFragmentData {
-        #[serde(skip)]
-        pub(crate) schema: ValidFederationSchema,
-        pub(crate) parent_type_position: CompositeTypeDefinitionPosition,
-        pub(crate) type_condition_position: Option<CompositeTypeDefinitionPosition>,
-        #[serde(serialize_with = "crate::display_helpers::serialize_as_string")]
-        pub(crate) directives: DirectiveList,
-        #[cfg_attr(not(feature = "snapshot_tracing"), serde(skip))]
-        pub(crate) selection_id: SelectionId,
-    }
-
-    impl InlineFragmentData {
         pub(crate) fn defer_directive_arguments(
             &self,
         ) -> Result<Option<DeferDirectiveArguments>, FederationError> {
@@ -1211,7 +1175,7 @@ mod inline_fragment_selection {
         }
     }
 
-    impl HasSelectionKey for InlineFragmentData {
+    impl HasSelectionKey for InlineFragment {
         fn key(&self) -> SelectionKey<'_> {
             if is_deferred_selection(&self.directives) {
                 SelectionKey::Defer {
@@ -1231,7 +1195,6 @@ mod inline_fragment_selection {
 }
 
 pub(crate) use inline_fragment_selection::InlineFragment;
-pub(crate) use inline_fragment_selection::InlineFragmentData;
 pub(crate) use inline_fragment_selection::InlineFragmentSelection;
 
 use self::selection_map::OwnedSelectionKey;
@@ -2757,13 +2720,13 @@ impl InlineFragmentSelection {
             };
         let new_selection_set =
             SelectionSet::from_selection_set(&inline_fragment.selection_set, fragments, schema)?;
-        let new_inline_fragment = InlineFragment::new(InlineFragmentData {
+        let new_inline_fragment = InlineFragment {
             schema: schema.clone(),
             parent_type_position: parent_type_position.clone(),
             type_condition_position,
             directives: inline_fragment.directives.clone().into(),
             selection_id: SelectionId::new(),
-        });
+        };
         Ok(InlineFragmentSelection::new(
             new_inline_fragment,
             new_selection_set,
@@ -2796,7 +2759,7 @@ impl InlineFragmentSelection {
         // Note: We assume that fragment_spread_selection.spread.type_condition_position is the same as
         //       fragment_spread_selection.selection_set.type_position.
         Ok(InlineFragmentSelection::new(
-            InlineFragment::new(InlineFragmentData {
+            InlineFragment {
                 schema: fragment_spread_selection.spread.schema.clone(),
                 parent_type_position,
                 type_condition_position: Some(
@@ -2807,7 +2770,7 @@ impl InlineFragmentSelection {
                 ),
                 directives: fragment_spread_selection.spread.directives.clone(),
                 selection_id: SelectionId::new(),
-            }),
+            },
             fragment_spread_selection
                 .selection_set
                 .expand_all_fragments()?,
@@ -2821,14 +2784,14 @@ impl InlineFragmentSelection {
         selection_set: SelectionSet,
         directives: DirectiveList,
     ) -> Self {
-        let inline_fragment_data = InlineFragmentData {
+        let inline_fragment_data = InlineFragment {
             schema: selection_set.schema.clone(),
             parent_type_position,
             type_condition_position: selection_set.type_position.clone().into(),
             directives,
             selection_id: SelectionId::new(),
         };
-        InlineFragmentSelection::new(InlineFragment::new(inline_fragment_data), selection_set)
+        InlineFragmentSelection::new(inline_fragment_data, selection_set)
     }
 
     pub(crate) fn casted_type(&self) -> &CompositeTypeDefinitionPosition {
@@ -3074,7 +3037,7 @@ impl DeferNormalizer {
         let mut stack = selection_set.into_iter().collect::<Vec<_>>();
         while let Some(selection) = stack.pop() {
             if let Selection::InlineFragment(inline) = selection {
-                if let Some(args) = inline.inline_fragment.data().defer_directive_arguments()? {
+                if let Some(args) = inline.inline_fragment.defer_directive_arguments()? {
                     let DeferDirectiveArguments { label, if_: _ } = args;
                     if let Some(label) = label {
                         digest.used_labels.insert(label);
@@ -3207,9 +3170,9 @@ impl InlineFragment {
     }
 
     fn without_defer(&self, filter: DeferFilter<'_>) -> Result<Self, FederationError> {
-        let mut data = self.data().clone();
-        filter.remove_defer(&mut data.directives, data.schema.schema());
-        Ok(Self::new(data))
+        let mut without_defer = self.clone();
+        filter.remove_defer(&mut without_defer.directives, without_defer.schema.schema());
+        Ok(without_defer)
     }
 }
 
