@@ -422,13 +422,16 @@ impl ApplyToInternal for WithRange<PathList> {
                 .apply_to_path(data, vars, input_path)
                 .and_then_collecting_errors(|value| tail.apply_to_path(value, vars, input_path)),
             PathList::Method(method_name, method_args, tail) => {
+                let method_path =
+                    input_path.append(JSON::String(format!("->{}", method_name.as_ref()).into()));
+
                 if let Some(method) = lookup_arrow_method(method_name) {
                     method(
                         method_name,
                         method_args.as_ref(),
                         data,
                         vars,
-                        input_path,
+                        &method_path,
                         tail,
                     )
                 } else {
@@ -436,7 +439,7 @@ impl ApplyToInternal for WithRange<PathList> {
                         None,
                         vec![ApplyToError::new(
                             format!("Method ->{} not found", method_name.as_ref()),
-                            input_path.to_vec(),
+                            method_path.to_vec(),
                             method_name.range(),
                         )],
                     )
@@ -2112,12 +2115,22 @@ mod tests {
                 vec![
                     ApplyToError::new(
                         "Property .role not found in string".to_string(),
-                        vec![json!("choices"), json!("message"), json!("role")],
+                        vec![
+                            json!("choices"),
+                            json!("->first"),
+                            json!("message"),
+                            json!("role"),
+                        ],
                         Some(123..127),
                     ),
                     ApplyToError::new(
                         "Property .content not found in string".to_string(),
-                        vec![json!("choices"), json!("message"), json!("content")],
+                        vec![
+                            json!("choices"),
+                            json!("->first"),
+                            json!("message"),
+                            json!("content"),
+                        ],
                         Some(128..135),
                     ),
                     ApplyToError::new(
