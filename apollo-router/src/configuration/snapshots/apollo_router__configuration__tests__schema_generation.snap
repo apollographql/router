@@ -1753,10 +1753,6 @@ expression: "&schema"
           "$ref": "#/definitions/Protocol",
           "description": "#/definitions/Protocol"
         },
-        "experimental_otlp_tracing_sampler": {
-          "$ref": "#/definitions/SamplerOption",
-          "description": "#/definitions/SamplerOption"
-        },
         "field_level_instrumentation_sampler": {
           "$ref": "#/definitions/SamplerOption",
           "description": "#/definitions/SamplerOption"
@@ -1764,6 +1760,10 @@ expression: "&schema"
         "metrics_reference_mode": {
           "$ref": "#/definitions/ApolloMetricsReferenceMode",
           "description": "#/definitions/ApolloMetricsReferenceMode"
+        },
+        "otlp_tracing_sampler": {
+          "$ref": "#/definitions/SamplerOption",
+          "description": "#/definitions/SamplerOption"
         },
         "send_headers": {
           "$ref": "#/definitions/ForwardHeaders",

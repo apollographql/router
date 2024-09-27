@@ -84,7 +84,7 @@ pub(crate) struct Config {
     pub(crate) field_level_instrumentation_sampler: SamplerOption,
 
     /// Percentage of traces to send via the OTel protocol when sending to Apollo Studio.
-    pub(crate) experimental_otlp_tracing_sampler: SamplerOption,
+    pub(crate) otlp_tracing_sampler: SamplerOption,
 
     /// OTLP protocol used for OTel traces.
     /// Note this only applies if OTel traces are enabled and is only intended for use in tests.
@@ -164,7 +164,7 @@ const fn default_field_level_instrumentation_sampler() -> SamplerOption {
     SamplerOption::TraceIdRatioBased(0.01)
 }
 
-const fn default_experimental_otlp_tracing_sampler() -> SamplerOption {
+const fn default_otlp_tracing_sampler() -> SamplerOption {
     SamplerOption::Always(Sampler::AlwaysOn)
 }
 
@@ -209,7 +209,7 @@ impl Default for Config {
             schema_id: "<no_schema_id>".to_string(),
             buffer_size: default_buffer_size(),
             field_level_instrumentation_sampler: default_field_level_instrumentation_sampler(),
-            experimental_otlp_tracing_sampler: default_experimental_otlp_tracing_sampler(),
+            otlp_tracing_sampler: default_otlp_tracing_sampler(),
             send_headers: ForwardHeaders::None,
             send_variable_values: ForwardValues::None,
             batch_processor: BatchProcessorConfig::default(),
