@@ -4,7 +4,13 @@ subtitle: Upgrade from version 1.x to 2.x of GraphOS Router
 description: Learn how to upgrade from version 1.x to 2.x of the GraphOS Router.
 ---
 
-Learn how to upgrade from your GraphOS Router 1.x deployment to GraphOS Router 2.x.
+Learn how to upgrade from your GraphOS Router deployment from version 1.x to 2.x.
+
+<Note>
+
+The latest version of GraphOS Router v2.x is **TBD**.
+
+</Note>
 
 ## What's different?
 
@@ -16,30 +22,13 @@ There are new features in GraphOS Router v2.0 (Alpha). Think about how you can t
 
 Prior to version 1.49.0 of the router, all GraphOS reporting was performed using a [private tracing format](graphos/metrics/sending-operation-metrics#reporting-format).
 
-In 1.49.0, we introduced support for using OTEL to perform this reporting.
+In v1.49.0, we introduced support for using OTEL to perform this reporting.
 
-In 1.x, this is controlled using the `experimental_otlp_tracing_sampler` flag, and is disabled by default.
+In v1.x, this is controlled using the `experimental_otlp_tracing_sampler` flag, and is disabled by default.
 
-In 2.x, this flag is now renamed to `otlp_tracing_sampler`, and is enabled by default.
+Now in v2.x, this flag is renamed to `otlp_tracing_sampler` and is enabled by default.
 
-TBD: I can't find any references to where this is documented apart from the CHANGELOG Entry for 1.49.0. I've reproduced that text here for now.
-TBD: Ideally this would be a separate page that we reference...
-
-This flag can be used to send a percentage of traces via OTLP instead of the native Apollo Usage Reporting protocol. Supported values:
-
-Prior to version 1.49.0 of the router, all GraphOS reporting was performed using a [private tracing format](graphos/metrics/sending-operation-metrics#reporting-format).
-
-As the ecosystem around OpenTelemetry (OTel) has been expanding rapidly, we are evaluating a migration of Apollo's internal tracing system to use an OTel-based protocol.
-
-In the short-term, benefits include:
-
-- A comprehensive way to visualize the router execution path in GraphOS Studio.
-- Additional spans that were previously not included in Studio traces, such as query parsing, planning, execution, and more.
-- Additional metadata such as subgraph fetch details, router idle / busy timing, and more.
-
-Long-term, we see this as a strategic enhancement to consolidate these two disparate tracing systems.
-
-This will pave the way for future enhancements to more easily plug into the Studio trace visualizer.
+Learn more in [Usage reporting via OpenTelemetry Protocol (OTLP)](/router/configuration/telemetry/apollo-telemetry#usage-reporting-via-opentelemetry-protocol-otlp).
 
 #### Configuration
 
