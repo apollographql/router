@@ -4,23 +4,30 @@ subtitle: Upgrade from version 1.x to 2.x of GraphOS Router
 description: Learn how to upgrade from version 1.x to 2.x of the GraphOS Router.
 ---
 
-TBD: RELEASE_NUMBER
-
-Learn how to upgrade from your GraphOS Router 1.x deployment to GraphOS Router RELEASE_NUMBER.
+Learn how to upgrade from your GraphOS Router 1.x deployment to GraphOS Router 2.x.
 
 ## What's different?
 
+### New Features
+
 There are new features in GraphOS Router v2.0 (Alpha). Think about how you can take advantage of these as you plan your upgrade to your existing 1.x deployment.
-
-### Rust Query Planner
-
-TBD: Should we even mention this. After all it's 1.x feature already.
 
 ### Apollo Reporting
 
-TBD: I can't find any references to where this is documented apart from the CHANGELOG Entry for 1.49.0. I've reproduced that text here for now.
+Prior to version 1.49.0 of the router, all GraphOS reporting was performed using a [private tracing format](graphos/metrics/sending-operation-metrics#reporting-format).
 
-Initially, in 1.x, the router reported metrics to Apollo Studio in a propietary tracing format.
+In 1.49.0, we introduced support for using OTEL to perform this reporting.
+
+In 1.x, this is controlled using the `experimental_otlp_tracing_sampler` flag, and is disabled by default.
+
+In 2.x, this flag is now renamed to `otlp_tracing_sampler`, and is enabled by default.
+
+TBD: I can't find any references to where this is documented apart from the CHANGELOG Entry for 1.49.0. I've reproduced that text here for now.
+TBD: Ideally this would be a separate page that we reference...
+
+This flag can be used to send a percentage of traces via OTLP instead of the native Apollo Usage Reporting protocol. Supported values:
+
+Prior to version 1.49.0 of the router, all GraphOS reporting was performed using a [private tracing format](graphos/metrics/sending-operation-metrics#reporting-format).
 
 As the ecosystem around OpenTelemetry (OTel) has been expanding rapidly, we are evaluating a migration of Apollo's internal tracing system to use an OTel-based protocol.
 
@@ -36,7 +43,7 @@ This will pave the way for future enhancements to more easily plug into the Stud
 
 #### Configuration
 
-This change adds a new configuration option `experimental_otlp_tracing_sampler`. This can be used to send a percentage of traces via OTLP instead of the native Apollo Usage Reporting protocol. Supported values:
+This change adds a new configuration option `otlp_tracing_sampler`. This can be used to send a percentage of traces via OTLP instead of the native Apollo Usage Reporting protocol. Supported values:
 
 - `always_off`: send all traces via Apollo Usage Reporting protocol.
 - `always_on` (default): send all traces via OTLP.
@@ -50,7 +57,7 @@ Note that this sampler is only applied _after_ the common tracing sampler, for e
 telemetry:
   apollo:
     # Send all traces via OTLP
-    experimental_otlp_tracing_sampler: always_on
+    otlp_tracing_sampler: always_on
 
   exporters:
     tracing:
@@ -65,11 +72,11 @@ Upgrading will generally be quick and painless, but some planning will help.
 
 ### Configuration
 
-If you are happy to submit traces via OTEL, then no changes are required. Otherwise, use the `experimental_otlp_tracing_sampler` to turn this off.
+If you are happy to submit traces via OTEL, then no changes are required. Otherwise, use the `otlp_tracing_sampler` to turn this off.
 
 ### Deployment
 
-Make sure that you are referencing the correct router release: RELEASE_NUMBER
+Make sure that you are referencing the correct router release: v2.0.0-preview.0
 
 During upgrade, carefully monitor resource consumption.
 
