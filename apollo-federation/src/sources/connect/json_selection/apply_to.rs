@@ -279,7 +279,7 @@ impl ApplyToInternal for NamedSelection {
                         // path_selection.apply_to_path above.
                         Some(value) => {
                             errors.push(ApplyToError::new(
-                                format!("Expected an object, not a {}", json_type_name(&value)),
+                                format!("Expected object, not {}", json_type_name(&value)),
                                 // Since the path_selection.apply_to_path
                                 // execution stack has been unwound by this
                                 // point, input_path does not include the path
@@ -290,7 +290,7 @@ impl ApplyToInternal for NamedSelection {
                         }
                         None => {
                             errors.push(ApplyToError::new(
-                                "Expected an object, not nothing (see other errors)".to_string(),
+                                "Expected object, not nothing (see other errors)".to_string(),
                                 input_path.to_vec(),
                                 sub.range(),
                             ));
@@ -2134,7 +2134,7 @@ mod tests {
                         Some(128..135),
                     ),
                     ApplyToError::new(
-                        "Expected an object, not a string".to_string(),
+                        "Expected object, not string".to_string(),
                         vec![],
                         // This is the range of the { role content } subselection.
                         Some(121..137),
@@ -2174,7 +2174,7 @@ mod tests {
                         Some(15..26),
                     ),
                     ApplyToError::new(
-                        "Expected an object, not nothing (see other errors)".to_string(),
+                        "Expected object, not nothing (see other errors)".to_string(),
                         vec![],
                         // This is the range of the { name } subselection.
                         Some(27..35),
