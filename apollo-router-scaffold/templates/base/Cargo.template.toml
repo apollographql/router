@@ -5,26 +5,26 @@ version = "0.1.0"
 edition = "2021"
 
 [workspace]
-members = [
-    "xtask",
-]
+members = ["xtask"]
 
 [[bin]]
 name = "router"
 path = "src/main.rs"
 
 [dependencies]
-anyhow = "1.0.58"
+
 {{#if integration_test}}
-apollo-router = { path ="{{integration_test}}apollo-router" }
 {{else}}
 {{#if branch}}
-apollo-router = { git="https://github.com/apollographql/router.git", branch="{{branch}}" }
 {{else}}
+anyhow = "1.0.58"
+apollo-router = { path = "{{integration_test}}apollo-router" }
+apollo-router = { git = "https://github.com/apollographql/router.git", branch = "{{branch}}" }
 # Note if you update these dependencies then also update xtask/Cargo.toml
-apollo-router = "2.0.0-alpha.5"
+
 {{/if}}
 {{/if}}
+apollo-router = "2.0.0-alpha.7"
 async-trait = "0.1.52"
 futures = "0.3.21"
 schemars = "0.8.10"

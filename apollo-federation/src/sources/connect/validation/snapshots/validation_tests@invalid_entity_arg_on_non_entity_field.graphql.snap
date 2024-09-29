@@ -6,15 +6,9 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_e
 [
     Message {
         code: EntityTypeInvalid,
-        message: "`@connect(entity: true)` on `Query.name` is invalid. Entities can only be non-list, object types.",
+        message: "`@connect(entity: true)` on `Query.name` is invalid. Entity connectors must return non-list, nullable, object types.",
         locations: [
-            LineColumn {
-                line: 8,
-                column: 7,
-            }..LineColumn {
-                line: 8,
-                column: 19,
-            },
+            8:7..8:19,
         ],
     },
 ]

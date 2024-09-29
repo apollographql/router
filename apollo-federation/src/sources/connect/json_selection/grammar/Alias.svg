@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="181" height="37">
+<svg xmlns="http://www.w3.org/2000/svg" width="145" height="37">
    <defs>
       <style type="text/css">
     @namespace "http://www.w3.org/2000/svg";
@@ -32,22 +32,22 @@
    <polygon points="9 17 1 13 1 21"/>
    <polygon points="17 17 9 13 9 21"/>
    <a xmlns:xlink="http://www.w3.org/1999/xlink"
-      xlink:href="#Identifier"
-      xlink:title="Identifier">
-      <rect x="31" y="3" width="78" height="32"/>
-      <rect x="29" y="1" width="78" height="32" class="nonterminal"/>
-      <text class="nonterminal" x="39" y="21">Identifier</text>
+      xlink:href="#Key"
+      xlink:title="Key">
+      <rect x="31" y="3" width="42" height="32"/>
+      <rect x="29" y="1" width="42" height="32" class="nonterminal"/>
+      <text class="nonterminal" x="39" y="21">Key</text>
    </a>
-   <rect x="129" y="3" width="24" height="32" rx="10"/>
-   <rect x="127"
+   <rect x="93" y="3" width="24" height="32" rx="10"/>
+   <rect x="91"
          y="1"
          width="24"
          height="32"
          class="terminal"
          rx="10"/>
-   <text class="terminal" x="137" y="21">:</text>
+   <text class="terminal" x="101" y="21">:</text>
    <path class="line"
-         d="m17 17 h2 m0 0 h10 m78 0 h10 m0 0 h10 m24 0 h10 m3 0 h-3"/>
-   <polygon points="171 17 179 13 179 21"/>
-   <polygon points="171 17 163 13 163 21"/>
+         d="m17 17 h2 m0 0 h10 m42 0 h10 m0 0 h10 m24 0 h10 m3 0 h-3"/>
+   <polygon points="135 17 143 13 143 21"/>
+   <polygon points="135 17 127 13 127 21"/>
 </svg>

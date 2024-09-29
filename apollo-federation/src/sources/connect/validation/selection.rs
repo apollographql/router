@@ -24,6 +24,7 @@ use crate::sources::connect::expand::visitors::GroupVisitor;
 use crate::sources::connect::json_selection::NamedSelection;
 use crate::sources::connect::spec::schema::CONNECT_SELECTION_ARGUMENT_NAME;
 use crate::sources::connect::validation::coordinates::connect_directive_http_body_coordinate;
+use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::JSONSelection;
 use crate::sources::connect::SubSelection;
 
@@ -31,7 +32,7 @@ pub(super) fn validate_selection(
     field: &Component<FieldDefinition>,
     connect_directive: &Node<Directive>,
     parent_type: &Node<ObjectType>,
-    schema: &Schema,
+    schema: &SchemaInfo,
     seen_fields: &mut IndexSet<(Name, Name)>,
 ) -> Option<Message> {
     let (selection_value, json_selection) =
@@ -85,7 +86,7 @@ pub(super) fn validate_body_selection(
 
     let (_rest, selection) = JSONSelection::parse(selection_str).map_err(|err| Message {
         code: Code::InvalidJsonSelection,
-        message: format!("{coordinate} is not a valid JSONSelection: {err}",),
+        message: format!("{coordinate} is not a valid JSONSelection: {err}"),
         locations: selection_node
             .line_column_range(&schema.sources)
             .into_iter()
@@ -300,7 +301,9 @@ impl<'schema> GroupVisitor<Group<'schema>, Field<'schema>> for SelectionValidato
                 selection,
                 definition,
             })
-        }).collect()
+        }).chain(
+            validate_star_selection(group, self.schema, &self.selection_coordinate, &self.selection_location).into_iter().map(Err)
+        ).collect()
     }
 
     fn exit_group(&mut self) -> Result<(), Self::Error> {
@@ -391,4 +394,113 @@ impl SelectionValidator<'_, '_> {
     fn last_field(&self) -> &PathPart {
         self.path.last().unwrap_or(&self.root)
     }
+}
+
+/// When using `*`, it must be mapped to a field via an alias, and the field
+/// must be a non-list custom scalar.
+fn validate_star_selection<'schema>(
+    group: &Group<'schema>,
+    schema: &'schema Schema,
+    selection_coordinate: &str,
+    selection_location: &Option<Range<LineColumn>>,
+) -> Vec<Message> {
+    group
+        .selection
+        .star_iter()
+        .filter_map(|star| {
+            let Some(field_name) = star.alias().map(|a| a.name()) else {
+                return Some(Message {
+                    code: Code::InvalidStarSelection,
+                    message: format!(
+                        "{coordinate} contains `*` without an alias. Use `fieldName: *` to map properties to a field.",
+                        coordinate = selection_coordinate,
+                    ),
+                    locations: selection_location.iter().cloned().collect(),
+                });
+            };
+
+            let Some(definition) = group.ty.fields.get(field_name) else {
+                return Some(Message {
+                    code: Code::SelectedFieldNotFound,
+                    message: format!(
+                        "{coordinate} contains field `{field_name}`, which does not exist on `{parent_type}`.",
+                        coordinate = selection_coordinate,
+                        parent_type = group.ty.name,
+                    ),
+                    locations: selection_location.iter().cloned().collect(),
+                });
+            };
+
+            let locations = selection_location.iter().cloned().chain(definition.line_column_range(&schema.sources)).collect();
+
+            if definition.ty.is_list() {
+                return Some(Message {
+                    code: Code::InvalidStarSelection,
+                    message: format!(
+                        "{coordinate} contains `{field_name}: *` but the field `{parent_type}.{field_name}: {ty}` returns a list. It must be a non-list custom scalar.",
+                        coordinate = selection_coordinate,
+                        field_name = field_name,
+                        parent_type = group.ty.name,
+                        ty = definition.ty
+                    ),
+                    locations,
+                });
+            }
+
+            let Some(ty) = schema.types.get(definition.ty.inner_named_type()) else {
+                return Some(Message {
+                    code: Code::GraphQLError,
+                    message: format!(
+                        "{coordinate} contains field `{field_name}`, which has undefined type `{type_name}.",
+                        coordinate = selection_coordinate,
+                        type_name = definition.ty.inner_named_type()
+                    ),
+                    locations,
+                });
+            };
+
+            if !ty.is_scalar() {
+                return Some(Message {
+                    code: Code::InvalidStarSelection,
+                    message: format!(
+                        "{coordinate} contains `{field_name}: *` but the field `{parent_type}.{field_name}: {ty}` returns {ty_kind} type. It must be a non-list custom scalar.",
+                        coordinate = selection_coordinate,
+                        field_name = field_name,
+                        parent_type = group.ty.name,
+                        ty = definition.ty,
+                        ty_kind = type_sentence_part(ty)
+                    ),
+                    locations,
+                });
+            }
+
+            if ty.is_built_in() {
+                return Some(Message {
+                    code: Code::InvalidStarSelection,
+                    message: format!(
+                        "{coordinate} contains `{field_name}: *` but the field `{parent_type}.{field_name}: {ty}` returns a built-in scalar type. It must be a non-list custom scalar.",
+                        coordinate = selection_coordinate,
+                        field_name = field_name,
+                        parent_type = group.ty.name,
+                        ty = definition.ty
+                    ),
+                    locations,
+                });
+            }
+
+            None
+        })
+        .collect()
+}
+
+fn type_sentence_part(ty: &ExtendedType) -> String {
+    match ty {
+        ExtendedType::Object(_) => "an object",
+        ExtendedType::Interface(_) => "an interface",
+        ExtendedType::Union(_) => "a union",
+        ExtendedType::Enum(_) => "an enum",
+        ExtendedType::InputObject(_) => "an input object",
+        ExtendedType::Scalar(_) => "a scalar",
+    }
+    .to_string()
 }

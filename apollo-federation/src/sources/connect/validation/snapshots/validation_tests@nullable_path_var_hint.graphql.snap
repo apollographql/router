@@ -1,0 +1,21 @@
+---
+source: apollo-federation/src/sources/connect/validation/mod.rs
+expression: "format!(\"{:#?}\", errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/nullable_path_var_hint.graphql
+---
+[
+    Message {
+        code: NullablePathVariable,
+        message: "Variables in path parameters should be non-null, but `GET` in `@connect(http:)` on `Query.something` contains `{$args.isNull}` which is nullable. If a null value is provided at runtime, the request will fail.",
+        locations: [
+            5:82..5:94,
+        ],
+    },
+    Message {
+        code: NullablePathVariable,
+        message: "Variables in path parameters should be non-null, but `GET` in `@connect(http:)` on `Query.nestedNull` contains `{$args.nullabled.notNull}` which is nullable. If a null value is provided at runtime, the request will fail.",
+        locations: [
+            6:88..6:111,
+        ],
+    },
+]

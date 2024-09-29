@@ -103,6 +103,8 @@ pub(crate) mod mock_api {
               "name": "Leanne Graham",
               "username": "Bret",
               "phone": "1-770-736-8031 x56442",
+              "email": "Sincere@april.biz",
+              "website": "hildegard.org"
             })))
     }
 
@@ -113,7 +115,9 @@ pub(crate) mod mock_api {
               "id": 2,
               "name": "Ervin Howell",
               "username": "Antonette",
-              "phone": "1-770-736-8031 x56442"
+              "phone": "1-770-736-8031 x56442",
+              "email": "Shanna@melissa.tv",
+              "website": "anastasia.net"
             })))
     }
 
@@ -293,7 +297,7 @@ async fn max_requests() {
             "@"
           ],
           "extensions": {
-            "service": "connectors.json http: GET /users/{$args.id!}",
+            "service": "connectors.json http: GET /users/{$args.id}",
             "code": "REQUEST_LIMIT_EXCEEDED"
           }
         }
@@ -363,7 +367,7 @@ async fn source_max_requests() {
             "@"
           ],
           "extensions": {
-            "service": "connectors.json http: GET /users/{$args.id!}",
+            "service": "connectors.json http: GET /users/{$args.id}",
             "code": "REQUEST_LIMIT_EXCEEDED"
           }
         }
@@ -437,7 +441,7 @@ async fn test_root_field_plus_entity_plus_requires() {
     let response = execute(
         STEEL_THREAD_SCHEMA,
         &mock_server.uri(),
-        "query { users { id name username d } }",
+        "query { users { id name username d rest } }",
         Default::default(),
         None,
         |_| {},
@@ -452,13 +456,23 @@ async fn test_root_field_plus_entity_plus_requires() {
             "id": 1,
             "name": "Leanne Graham",
             "username": "Bret",
-            "d": "1-770-736-8031 x56442"
+            "d": "1-770-736-8031 x56442",
+            "rest": {
+              "phone": "1-770-736-8031 x56442",
+              "email": "Sincere@april.biz",
+              "website": "hildegard.org"
+            }
           },
           {
             "id": 2,
             "name": "Ervin Howell",
             "username": "Antonette",
-            "d": "1-770-736-8031 x56442"
+            "d": "1-770-736-8031 x56442",
+            "rest": {
+              "phone": "1-770-736-8031 x56442",
+              "email": "Shanna@melissa.tv",
+              "website": "anastasia.net"
+            }
           }
         ]
       }
@@ -1195,6 +1209,120 @@ async fn error_redacted() {
     );
 }
 
+#[tokio::test]
+#[ignore] // we currently disallow interfaceObject, will revisit later
+async fn test_interface_object() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/itfs"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!([{ "id": 1, "c": 10 }, { "id": 2, "c": 11 }])),
+        )
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/itfs/1"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({ "id": 1, "c": 10, "d": 20 })),
+        )
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/itfs/2"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({ "id": 1, "c": 11, "d": 21 })),
+        )
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/itfs/1/e"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!("e1")))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/itfs/2/e"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!("e2")))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/graphql"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+          "data": {
+            "_entities": [{
+              "__typename": "T1",
+              "a": "a"
+            }, {
+              "__typename": "T2",
+              "b": "b"
+            }]
+          }
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let response = execute(
+        INTERFACE_OBJECT_SCHEMA,
+        &mock_server.uri(),
+        "query { itfs { __typename id c d e ... on T1 { a } ... on T2 { b } } }",
+        Default::default(),
+        None,
+        |_| {},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "itfs": [
+          {
+            "__typename": "T1",
+            "id": 1,
+            "c": 10,
+            "d": 20,
+            "e": "e1",
+            "a": "a"
+          },
+          {
+            "__typename": "T2",
+            "id": 2,
+            "c": 11,
+            "d": 21,
+            "e": "e2",
+            "b": "b"
+          }
+        ]
+      }
+    }
+    "###);
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+          Matcher::new().method("GET").path("/itfs").build(),
+          Matcher::new()
+            .method("POST")
+            .path("/graphql")
+            .body(serde_json::json!({
+              "query": r#"query($representations:[_Any!]!){_entities(representations:$representations){...on Itf{__typename ...on T1{a}...on T2{b}}}}"#,
+              "variables": {
+                "representations": [
+                  { "__typename": "Itf", "id": 1 },
+                  { "__typename": "Itf", "id": 2 }
+                ]
+              }
+            }))
+            .build(),
+          Matcher::new().method("GET").path("/itfs/1").build(),
+          Matcher::new().method("GET").path("/itfs/2").build(),
+          Matcher::new().method("GET").path("/itfs/1/e").build(),
+          Matcher::new().method("GET").path("/itfs/2/e").build(),
+        ],
+    );
+}
+
 mod quickstart_tests {
     use super::*;
 
@@ -1481,6 +1609,7 @@ const NULLABILITY_SCHEMA: &str = include_str!("./testdata/nullability.graphql");
 const SELECTION_SCHEMA: &str = include_str!("./testdata/selection.graphql");
 const NO_SOURCES_SCHEMA: &str = include_str!("./testdata/connector-without-source.graphql");
 const QUICKSTART_SCHEMA: &str = include_str!("./testdata/quickstart.graphql");
+const INTERFACE_OBJECT_SCHEMA: &str = include_str!("./testdata/interface-object.graphql");
 
 async fn execute(
     schema: &str,

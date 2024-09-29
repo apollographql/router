@@ -15,22 +15,21 @@ use super::Code;
 use super::DirectiveName;
 use super::Message;
 use crate::sources::connect::spec::schema::SOURCE_NAME_ARGUMENT_NAME;
+use crate::sources::connect::validation::graphql::SchemaInfo;
 
 pub(super) fn validate_source_name_arg(
     field_name: &Name,
     object_name: &Name,
     source_name: &Node<Argument>,
-    source_map: &SourceMap,
     source_names: &[SourceName],
-    source_directive_name: &Name,
-    connect_directive_name: &Name,
+    schema: &SchemaInfo,
 ) -> Vec<Message> {
     let mut messages = vec![];
 
     if source_names.iter().all(|name| name != &source_name.value) {
         // TODO: Pick a suggestion that's not just the first defined source
         let qualified_directive = connect_directive_name_coordinate(
-            connect_directive_name,
+            schema.connect_directive_name,
             &source_name.value,
             object_name,
             field_name,
@@ -41,7 +40,7 @@ pub(super) fn validate_source_name_arg(
                     message: format!(
                         "{qualified_directive} does not match any defined sources. Did you mean {first_source_name}?",
                     ),
-                    locations: source_name.line_column_range(source_map)
+                    locations: source_name.line_column_range(&schema.sources)
                         .into_iter()
                         .collect(),
                 });
@@ -50,9 +49,9 @@ pub(super) fn validate_source_name_arg(
                     code: Code::NoSourcesDefined,
                     message: format!(
                         "{qualified_directive} specifies a source, but none are defined. Try adding {coordinate} to the schema.",
-                        coordinate = source_name_value_coordinate(source_directive_name, &source_name.value),
+                        coordinate = source_name_value_coordinate(schema.source_directive_name, &source_name.value),
                     ),
-                    locations: source_name.line_column_range(source_map)
+                    locations: source_name.line_column_range(&schema.sources)
                         .into_iter()
                         .collect(),
                 });

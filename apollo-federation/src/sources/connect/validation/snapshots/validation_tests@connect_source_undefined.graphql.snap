@@ -8,13 +8,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/connect_s
         code: NoSourcesDefined,
         message: "`@connect(source: \"v1\")` on `Query.resources` specifies a source, but none are defined. Try adding `@source(name: \"v1\")` to the schema.",
         locations: [
-            LineColumn {
-                line: 9,
-                column: 14,
-            }..LineColumn {
-                line: 9,
-                column: 26,
-            },
+            9:14..9:26,
         ],
     },
 ]

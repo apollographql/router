@@ -1,0 +1,82 @@
+---
+source: apollo-federation/src/sources/connect/url_template.rs
+expression: "URLTemplate::from_str(\"/users/{$this.user_id}?a={$args.b}&c={$args.d}&e={$args.f.g}\")"
+---
+Ok(
+    URLTemplate {
+        base: None,
+        path: [
+            Component {
+                parts: [
+                    Text(
+                        "users",
+                    ),
+                ],
+            },
+            Component {
+                parts: [
+                    Var(
+                        Variable {
+                            var_type: This,
+                            path: "user_id",
+                            location: 8..21,
+                        },
+                    ),
+                ],
+            },
+        ],
+        query: {
+            Component {
+                parts: [
+                    Text(
+                        "a",
+                    ),
+                ],
+            }: Component {
+                parts: [
+                    Var(
+                        Variable {
+                            var_type: Args,
+                            path: "b",
+                            location: 26..33,
+                        },
+                    ),
+                ],
+            },
+            Component {
+                parts: [
+                    Text(
+                        "c",
+                    ),
+                ],
+            }: Component {
+                parts: [
+                    Var(
+                        Variable {
+                            var_type: Args,
+                            path: "d",
+                            location: 38..45,
+                        },
+                    ),
+                ],
+            },
+            Component {
+                parts: [
+                    Text(
+                        "e",
+                    ),
+                ],
+            }: Component {
+                parts: [
+                    Var(
+                        Variable {
+                            var_type: Args,
+                            path: "f.g",
+                            location: 50..59,
+                        },
+                    ),
+                ],
+            },
+        },
+    },
+)

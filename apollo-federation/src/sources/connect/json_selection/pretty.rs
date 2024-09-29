@@ -47,7 +47,6 @@ fn indent_chars(indent: usize) -> String {
 impl PrettyPrintable for JSONSelection {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
         match self {
-            // Top-level fields should not be wrapped in {}, so we manually unroll here
             JSONSelection::Named(named) => named.print_subselections(indentation),
             JSONSelection::Path(path) => path.pretty_print_with_indentation(inline, indentation),
         }
@@ -132,6 +131,16 @@ impl PrettyPrintable for PathList {
                 result.push_str(key.dotted().as_str());
                 result.push_str(rest.as_str());
             }
+            Self::Expr(expr, tail) => {
+                let rest = tail.pretty_print_with_indentation(true, indentation);
+                result.push_str("$(");
+                result.push_str(
+                    expr.pretty_print_with_indentation(true, indentation)
+                        .as_str(),
+                );
+                result.push(')');
+                result.push_str(rest.as_str());
+            }
             Self::Method(method, args, tail) => {
                 result.push_str("->");
                 result.push_str(method.as_str());
@@ -169,7 +178,7 @@ impl PrettyPrintable for MethodArgs {
         result.push('(');
 
         // TODO Break long argument lists across multiple lines, with indentation?
-        for (i, arg) in self.0.iter().enumerate() {
+        for (i, arg) in self.args.iter().enumerate() {
             if i > 0 {
                 result.push_str(", ");
             }
@@ -193,14 +202,14 @@ impl PrettyPrintable for LitExpr {
         }
 
         match self {
-            LitExpr::String(s) => {
+            Self::String(s) => {
                 let safely_quoted = serde_json_bytes::Value::String(s.clone().into()).to_string();
                 result.push_str(safely_quoted.as_str());
             }
-            LitExpr::Number(n) => result.push_str(n.to_string().as_str()),
-            LitExpr::Bool(b) => result.push_str(b.to_string().as_str()),
-            LitExpr::Null => result.push_str("null"),
-            LitExpr::Object(map) => {
+            Self::Number(n) => result.push_str(n.to_string().as_str()),
+            Self::Bool(b) => result.push_str(b.to_string().as_str()),
+            Self::Null => result.push_str("null"),
+            Self::Object(map) => {
                 result.push('{');
                 let mut is_first = true;
                 for (key, value) in map {
@@ -209,7 +218,7 @@ impl PrettyPrintable for LitExpr {
                     } else {
                         result.push_str(", ");
                     }
-                    let key = serde_json_bytes::Value::String(key.clone().into()).to_string();
+                    let key = serde_json_bytes::Value::String(key.as_str().into()).to_string();
                     result.push_str(key.as_str());
                     result.push_str(": ");
                     result.push_str(
@@ -220,7 +229,7 @@ impl PrettyPrintable for LitExpr {
                 }
                 result.push('}');
             }
-            LitExpr::Array(vec) => {
+            Self::Array(vec) => {
                 result.push('[');
                 let mut is_first = true;
                 for value in vec {
@@ -237,7 +246,7 @@ impl PrettyPrintable for LitExpr {
                 }
                 result.push(']');
             }
-            LitExpr::Path(path) => {
+            Self::Path(path) => {
                 let path = path.pretty_print_with_indentation(inline, indentation);
                 result.push_str(path.as_str());
             }
@@ -256,13 +265,19 @@ impl PrettyPrintable for NamedSelection {
         }
 
         match self {
-            NamedSelection::Field(alias, field_name, sub) => {
+            Self::Field(alias, field_key, sub) => {
                 if let Some(alias) = alias {
                     result.push_str(alias.name.as_str());
                     result.push_str(": ");
                 }
 
-                result.push_str(field_name.as_str());
+                if field_key.is_quoted() {
+                    let safely_quoted =
+                        serde_json_bytes::Value::String(field_key.as_str().into()).to_string();
+                    result.push_str(safely_quoted.as_str());
+                } else {
+                    result.push_str(field_key.as_str());
+                }
 
                 if let Some(sub) = sub {
                     let sub = sub.pretty_print_with_indentation(true, indentation);
@@ -270,28 +285,14 @@ impl PrettyPrintable for NamedSelection {
                     result.push_str(sub.as_str());
                 }
             }
-            NamedSelection::Quoted(alias, literal, sub) => {
-                result.push_str(alias.name.as_str());
-                result.push_str(": ");
-
-                let safely_quoted =
-                    serde_json_bytes::Value::String(literal.clone().into()).to_string();
-                result.push_str(safely_quoted.as_str());
-
-                if let Some(sub) = sub {
-                    let sub = sub.pretty_print_with_indentation(true, indentation);
-                    result.push(' ');
-                    result.push_str(sub.as_str());
-                }
-            }
-            NamedSelection::Path(alias, path) => {
+            Self::Path(alias, path) => {
                 result.push_str(alias.name.as_str());
                 result.push_str(": ");
 
                 let path = path.pretty_print_with_indentation(true, indentation);
                 result.push_str(path.trim_start());
             }
-            NamedSelection::Group(alias, sub) => {
+            Self::Group(alias, sub) => {
                 result.push_str(alias.name.as_str());
                 result.push_str(": ");
 
@@ -312,14 +313,14 @@ impl PrettyPrintable for StarSelection {
             result.push_str(indent_chars(indentation).as_str());
         }
 
-        if let Some(alias) = self.0.as_ref() {
+        if let Some(alias) = &self.alias {
             result.push_str(alias.name.as_str());
             result.push_str(": ");
         }
 
         result.push('*');
 
-        if let Some(sub) = self.1.as_ref() {
+        if let Some(sub) = &self.selection {
             let sub = sub.pretty_print_with_indentation(true, indentation);
             result.push(' ');
             result.push_str(sub.as_str());
@@ -331,6 +332,7 @@ impl PrettyPrintable for StarSelection {
 
 #[cfg(test)]
 mod tests {
+    use super::super::location::Span;
     use crate::sources::connect::json_selection::pretty::indent_chars;
     use crate::sources::connect::json_selection::NamedSelection;
     use crate::sources::connect::json_selection::PrettyPrintable;
@@ -371,7 +373,7 @@ mod tests {
 
     #[test]
     fn it_prints_a_star_selection() {
-        let (unmatched, star_selection) = StarSelection::parse("rest: *").unwrap();
+        let (unmatched, star_selection) = StarSelection::parse(Span::new("rest: *")).unwrap();
         assert!(unmatched.is_empty());
 
         test_permutations(star_selection, "rest: *");
@@ -379,7 +381,8 @@ mod tests {
 
     #[test]
     fn it_prints_a_star_selection_with_subselection() {
-        let (unmatched, star_selection) = StarSelection::parse("rest: * { a b }").unwrap();
+        let (unmatched, star_selection) =
+            StarSelection::parse(Span::new("rest: * { a b }")).unwrap();
         assert!(unmatched.is_empty());
 
         test_permutations(star_selection, "rest: * {\n  a\n  b\n}");
@@ -401,7 +404,7 @@ mod tests {
             "cool: {\n  a\n  b\n}",
         ];
         for selection in selections {
-            let (unmatched, named_selection) = NamedSelection::parse(selection).unwrap();
+            let (unmatched, named_selection) = NamedSelection::parse(Span::new(selection)).unwrap();
             assert!(
                 unmatched.is_empty(),
                 "static named selection was not fully parsed: '{selection}' ({named_selection:?}) had unmatched '{unmatched}'"
@@ -423,9 +426,15 @@ mod tests {
             "a.b.c.d.e",
             "one.two.three {\n  a\n  b\n}",
             ".single {\n  x\n}",
+            "results->slice($(-1)->mul($args.suffixLength))",
+            "$(1234)->add($(5678)->mul(2))",
+            "$(true)->and($(false)->not)",
+            "$(12345678987654321)->div(111111111)->eq(111111111)",
+            "$(\"Product\")->slice(0, $(4)->mul(-1))->eq(\"Pro\")",
+            "$($args.unnecessary.parens)->eq(42)",
         ];
         for path in paths {
-            let (unmatched, path_selection) = PathSelection::parse(path).unwrap();
+            let (unmatched, path_selection) = PathSelection::parse(Span::new(path)).unwrap();
             assert!(
                 unmatched.is_empty(),
                 "static path was not fully parsed: '{path}' ({path_selection:?}) had unmatched '{unmatched}'"
@@ -438,7 +447,7 @@ mod tests {
     #[test]
     fn it_prints_a_sub_selection() {
         let sub = "{\n  a\n  b\n}";
-        let (unmatched, sub_selection) = SubSelection::parse(sub).unwrap();
+        let (unmatched, sub_selection) = SubSelection::parse(Span::new(sub)).unwrap();
         assert!(
             unmatched.is_empty(),
             "static path was not fully parsed: '{sub}' ({sub_selection:?}) had unmatched '{unmatched}'"
@@ -459,7 +468,8 @@ mod tests {
         let sub_indented = "{\n  a {\n    b {\n      c\n    }\n  }\n}";
         let sub_super_indented = "        {\n          a {\n            b {\n              c\n            }\n          }\n        }";
 
-        let (unmatched, sub_selection) = SubSelection::parse(sub).unwrap();
+        let (unmatched, sub_selection) = SubSelection::parse(Span::new(sub)).unwrap();
+
         assert!(
             unmatched.is_empty(),
             "static nested sub was not fully parsed: '{sub}' ({sub_selection:?}) had unmatched '{unmatched}'"

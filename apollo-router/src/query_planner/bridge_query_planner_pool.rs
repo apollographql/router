@@ -3,6 +3,7 @@ use std::num::NonZeroUsize;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Instant;
 
 use apollo_compiler::validation::Valid;
@@ -12,7 +13,6 @@ use futures::future::BoxFuture;
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::Unit;
-use opentelemetry_api::metrics::Meter;
 use router_bridge::planner::Planner;
 use tokio::sync::oneshot;
 use tokio::task::JoinSet;
@@ -21,8 +21,11 @@ use tower::ServiceExt;
 
 use super::bridge_query_planner::BridgeQueryPlanner;
 use super::QueryPlanResult;
+use crate::cache::storage::CacheStorage;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
+use crate::graphql::Response;
+use crate::introspection::default_cache_storage;
 use crate::metrics::meter_provider;
 use crate::query_planner::PlannerMode;
 use crate::services::QueryPlannerRequest;
@@ -41,23 +44,16 @@ pub(crate) struct BridgeQueryPlannerPool {
     )>,
     schema: Arc<Schema>,
     subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
-    _pool_size_gauge: opentelemetry::metrics::ObservableGauge<u64>,
+    pool_size_gauge: Arc<Mutex<Option<ObservableGauge<u64>>>>,
     v8_heap_used: Arc<AtomicU64>,
-    _v8_heap_used_gauge: ObservableGauge<u64>,
+    v8_heap_used_gauge: Arc<Mutex<Option<ObservableGauge<u64>>>>,
     v8_heap_total: Arc<AtomicU64>,
-    _v8_heap_total_gauge: ObservableGauge<u64>,
+    v8_heap_total_gauge: Arc<Mutex<Option<ObservableGauge<u64>>>>,
+    introspection_cache: CacheStorage<String, Response>,
 }
 
 impl BridgeQueryPlannerPool {
     pub(crate) async fn new(
-        schema: Arc<Schema>,
-        configuration: Arc<Configuration>,
-        size: NonZeroUsize,
-    ) -> Result<Self, ServiceBuildError> {
-        Self::new_from_planners(Default::default(), schema, configuration, size).await
-    }
-
-    pub(crate) async fn new_from_planners(
         old_js_planners: Vec<Arc<Planner<QueryPlanResult>>>,
         schema: Arc<Schema>,
         configuration: Arc<Configuration>,
@@ -74,16 +70,28 @@ impl BridgeQueryPlannerPool {
 
         let mut old_js_planners_iterator = old_js_planners.into_iter();
 
-        (0..size.into()).for_each(|_| {
+        // All query planners in the pool now share the same introspection cache.
+        // This allows meaningful gauges, and it makes sense that queries should be cached across all planners.
+        let introspection_cache = default_cache_storage().await;
+
+        for _ in 0..size.into() {
             let schema = schema.clone();
             let configuration = configuration.clone();
             let rust_planner = rust_planner.clone();
+            let introspection_cache = introspection_cache.clone();
 
             let old_planner = old_js_planners_iterator.next();
             join_set.spawn(async move {
-                BridgeQueryPlanner::new(schema, configuration, old_planner, rust_planner).await
+                BridgeQueryPlanner::new(
+                    schema,
+                    configuration,
+                    old_planner,
+                    rust_planner,
+                    introspection_cache,
+                )
+                .await
             });
-        });
+        }
 
         let mut bridge_query_planners = Vec::new();
 
@@ -102,9 +110,9 @@ impl BridgeQueryPlannerPool {
             })?
             .subgraph_schemas();
 
-        let planners: Vec<_> = bridge_query_planners
+        let js_planners: Vec<_> = bridge_query_planners
             .iter()
-            .map(|p| p.planner().clone())
+            .filter_map(|p| p.js_planner())
             .collect();
 
         for mut planner in bridge_query_planners.into_iter() {
@@ -127,20 +135,11 @@ impl BridgeQueryPlannerPool {
                 }
             });
         }
-        let sender_for_gauge = sender.clone();
-        let meter = meter_provider().meter("apollo/router");
-        let pool_size_gauge = meter
-            .u64_observable_gauge("apollo.router.query_planning.queued")
-            .with_description("Number of queries waiting to be planned")
-            .with_unit(Unit::new("query"))
-            .with_callback(move |m| m.observe(sender_for_gauge.len() as u64, &[]))
-            .init();
-
-        let (v8_heap_used, _v8_heap_used_gauge) = Self::create_heap_used_gauge(&meter);
-        let (v8_heap_total, _v8_heap_total_gauge) = Self::create_heap_total_gauge(&meter);
+        let v8_heap_used: Arc<AtomicU64> = Default::default();
+        let v8_heap_total: Arc<AtomicU64> = Default::default();
 
         // initialize v8 metrics
-        if let Some(bridge_query_planner) = planners.first().cloned() {
+        if let Some(bridge_query_planner) = js_planners.first().cloned() {
             Self::get_v8_metrics(
                 bridge_query_planner,
                 v8_heap_used.clone(),
@@ -150,21 +149,33 @@ impl BridgeQueryPlannerPool {
         }
 
         Ok(Self {
-            js_planners: planners,
+            js_planners,
             sender,
             schema,
             subgraph_schemas,
-            _pool_size_gauge: pool_size_gauge,
+            pool_size_gauge: Default::default(),
             v8_heap_used,
-            _v8_heap_used_gauge,
+            v8_heap_used_gauge: Default::default(),
             v8_heap_total,
-            _v8_heap_total_gauge,
+            v8_heap_total_gauge: Default::default(),
+            introspection_cache,
         })
     }
 
-    fn create_heap_used_gauge(meter: &Meter) -> (Arc<AtomicU64>, ObservableGauge<u64>) {
-        let current_heap_used = Arc::new(AtomicU64::new(0));
-        let current_heap_used_for_gauge = current_heap_used.clone();
+    fn create_pool_size_gauge(&self) -> ObservableGauge<u64> {
+        let sender = self.sender.clone();
+        let meter = meter_provider().meter("apollo/router");
+        meter
+            .u64_observable_gauge("apollo.router.query_planning.queued")
+            .with_description("Number of queries waiting to be planned")
+            .with_unit(Unit::new("query"))
+            .with_callback(move |m| m.observe(sender.len() as u64, &[]))
+            .init()
+    }
+
+    fn create_heap_used_gauge(&self) -> ObservableGauge<u64> {
+        let meter = meter_provider().meter("apollo/router");
+        let current_heap_used_for_gauge = self.v8_heap_used.clone();
         let heap_used_gauge = meter
             .u64_observable_gauge("apollo.router.v8.heap.used")
             .with_description("V8 heap used, in bytes")
@@ -173,12 +184,12 @@ impl BridgeQueryPlannerPool {
                 i.observe(current_heap_used_for_gauge.load(Ordering::SeqCst), &[])
             })
             .init();
-        (current_heap_used, heap_used_gauge)
+        heap_used_gauge
     }
 
-    fn create_heap_total_gauge(meter: &Meter) -> (Arc<AtomicU64>, ObservableGauge<u64>) {
-        let current_heap_total = Arc::new(AtomicU64::new(0));
-        let current_heap_total_for_gauge = current_heap_total.clone();
+    fn create_heap_total_gauge(&self) -> ObservableGauge<u64> {
+        let meter = meter_provider().meter("apollo/router");
+        let current_heap_total_for_gauge = self.v8_heap_total.clone();
         let heap_total_gauge = meter
             .u64_observable_gauge("apollo.router.v8.heap.total")
             .with_description("V8 heap total, in bytes")
@@ -187,10 +198,10 @@ impl BridgeQueryPlannerPool {
                 i.observe(current_heap_total_for_gauge.load(Ordering::SeqCst), &[])
             })
             .init();
-        (current_heap_total, heap_total_gauge)
+        heap_total_gauge
     }
 
-    pub(crate) fn planners(&self) -> Vec<Arc<Planner<QueryPlanResult>>> {
+    pub(crate) fn js_planners(&self) -> Vec<Arc<Planner<QueryPlanResult>>> {
         self.js_planners.clone()
     }
 
@@ -214,6 +225,17 @@ impl BridgeQueryPlannerPool {
             v8_heap_used.store(metrics.heap_used, Ordering::SeqCst);
             v8_heap_total.store(metrics.heap_total, Ordering::SeqCst);
         }
+    }
+
+    pub(super) fn activate(&self) {
+        // Gauges MUST be initialized after a meter provider is created.
+        // When a hot reload happens this means that the gauges must be re-initialized.
+        *self.pool_size_gauge.lock().expect("lock poisoned") = Some(self.create_pool_size_gauge());
+        *self.v8_heap_used_gauge.lock().expect("lock poisoned") =
+            Some(self.create_heap_used_gauge());
+        *self.v8_heap_total_gauge.lock().expect("lock poisoned") =
+            Some(self.create_heap_total_gauge());
+        self.introspection_cache.activate();
     }
 }
 
@@ -243,13 +265,10 @@ impl tower::Service<QueryPlannerRequest> for BridgeQueryPlannerPool {
 
         let get_metrics_future =
             if let Some(bridge_query_planner) = self.js_planners.first().cloned() {
-                let v8_heap_used = self.v8_heap_used.clone();
-                let v8_heap_total = self.v8_heap_total.clone();
-
                 Some(Self::get_v8_metrics(
                     bridge_query_planner,
-                    v8_heap_used,
-                    v8_heap_total,
+                    self.v8_heap_used.clone(),
+                    self.v8_heap_total.clone(),
                 ))
             } else {
                 None
@@ -297,12 +316,14 @@ mod tests {
 
         async move {
             let mut pool = BridgeQueryPlannerPool::new(
+                Vec::new(),
                 schema.clone(),
                 config.clone(),
                 NonZeroUsize::new(2).unwrap(),
             )
             .await
             .unwrap();
+            pool.activate();
             let query = "query { me { name } }".to_string();
 
             let doc = Query::parse_document(&query, None, &schema, &config).unwrap();

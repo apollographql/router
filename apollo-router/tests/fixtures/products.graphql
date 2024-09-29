@@ -1,4 +1,11 @@
-extend type Mutation {
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key"])
+
+type Query {
+  topProducts(first: Int = 5): [Product]
+}
+
+type Mutation {
   createProduct(upc: ID!, name: String): Product
 }
 
@@ -7,8 +14,4 @@ type Product @key(fields: "upc") {
   name: String
   price: Int
   weight: Int
-}
-
-extend type Query {
-  topProducts(first: Int = 5): [Product]
 }

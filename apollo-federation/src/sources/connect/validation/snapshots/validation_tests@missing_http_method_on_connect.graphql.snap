@@ -8,13 +8,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/missing_h
         code: MissingHttpMethod,
         message: "`@connect(http:)` on `Query.resources` must specify an HTTP method.",
         locations: [
-            LineColumn {
-                line: 9,
-                column: 54,
-            }..LineColumn {
-                line: 9,
-                column: 56,
-            },
+            9:54..9:56,
         ],
     },
 ]

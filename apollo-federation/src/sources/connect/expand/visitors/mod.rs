@@ -198,6 +198,7 @@ mod tests {
     use crate::sources::connect::expand::visitors::GroupVisitor;
     use crate::sources::connect::json_selection::NamedSelection;
     use crate::sources::connect::JSONSelection;
+    use crate::sources::connect::Key;
     use crate::sources::connect::SubSelection;
 
     /// Visitor for tests.
@@ -262,6 +263,19 @@ mod tests {
                 .selections_iter()
                 .sorted_by_key(|s| s.name())
                 .cloned()
+                .chain(
+                    group
+                        .star_iter()
+                        // We just need a field name here
+                        // This relies on validation to enforce the presence of an alias
+                        .map(|s| {
+                            NamedSelection::Field(
+                                s.alias().cloned(),
+                                Key::field("").into_with_range(),
+                                None,
+                            )
+                        }),
+                )
                 .collect())
         }
 
@@ -318,6 +332,23 @@ mod tests {
         b
         c
         d
+        "###);
+    }
+
+    #[test]
+    fn it_iterates_rest() {
+        let mut visited = Vec::new();
+        let visitor = TestVisitor::new(&mut visited);
+        let (unmatched, selection) = JSONSelection::parse("a b rest: *").unwrap();
+        assert!(unmatched.is_empty());
+
+        visitor
+            .walk(selection.next_subselection().cloned().unwrap())
+            .unwrap();
+        assert_snapshot!(print_visited(visited), @r###"
+        a
+        b
+        rest
         "###);
     }
 
