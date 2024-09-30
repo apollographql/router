@@ -474,3 +474,93 @@ impl SelectionSet {
         Ok(normalized_selections)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use apollo_compiler::Schema;
+
+    use super::*;
+    use crate::operation::Operation;
+
+    #[test]
+    fn does_not_duplicate_fragments_regression_router782() {
+        let schema = Schema::parse_and_validate(
+            r#"
+interface Node {
+  id: ID!
+}
+interface HasNodes {
+  nodes: [Node!]!
+}
+type MySpecialNode implements Node & HasNodes {
+  id: ID!
+  value: String
+  nodes: [Node]
+}
+type Query {
+  nodes: [Node]
+}
+        "#,
+            "apischema.graphql",
+        )
+        .unwrap();
+        let schema = ValidFederationSchema::new(schema).unwrap();
+
+        // Below, the second `... on MySpecialNode` is redundant,
+        // the same selection is already guaranteed by the first.
+        let operation = Operation::parse(
+            schema.clone(),
+            r#"
+{
+  nodes {
+    __typename
+    ... on MySpecialNode {
+      value
+    }
+    ... on HasNodes {
+      ... on Node {
+        __typename
+        ... on MySpecialNode {
+          value
+        }
+      }
+    }
+  }
+}
+        "#,
+            "query.graphql",
+            None,
+        )
+        .unwrap();
+
+        let expanded_and_flattened = operation
+            .selection_set
+            .flatten_unnecessary_fragments(
+                &operation.selection_set.type_position,
+                &NamedFragments::default(),
+                &schema,
+            )
+            .unwrap();
+
+        // Use apollo-compiler's selection set printer directly instead of the minimized
+        // apollo-federation printer
+        let compiler_set =
+            apollo_compiler::executable::SelectionSet::try_from(&expanded_and_flattened).unwrap();
+
+        insta::assert_snapshot!(compiler_set, @r#"
+            {
+              nodes {
+                __typename
+                ... on MySpecialNode {
+                  value
+                }
+                ... on HasNodes {
+                  ... on Node {
+                    __typename
+                  }
+                }
+              }
+            }
+        "#);
+    }
+}
