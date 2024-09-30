@@ -4,6 +4,8 @@ schema
   query: Query
 }
 
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
 directive @join__field(
   graph: join__Graph
   requires: join__FieldSet
@@ -24,6 +26,11 @@ directive @join__type(
   isInterfaceObject: Boolean! = false
 ) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
 
+directive @join__unionMember(
+  graph: join__Graph!
+  member: String!
+) repeatable on UNION
+
 directive @link(
   url: String
   as: String
@@ -35,13 +42,6 @@ directive @join__implements(
   graph: join__Graph!
   interface: String!
 ) repeatable on OBJECT | INTERFACE
-
-directive @join__unionMember(
-  graph: join__Graph!
-  member: String!
-) repeatable on UNION
-
-directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
 scalar join__FieldSet
 scalar link__Import

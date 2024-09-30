@@ -48,7 +48,7 @@ use crate::integration::IntegrationTest;
 async fn query_planner_cache() -> Result<(), BoxError> {
     // If this test fails and the cache key format changed you'll need to update the key here.
     // Look at the top of the file for instructions on getting the new cache key.
-    let known_cache_key = "plan:0:v2.9.1:70f115ebba5991355c17f4f56ba25bb093c519c4db49a30f3b10de279a4e3fa4:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:4f9f0183101b2f249a364b98adadfda6e5e2001d1f2465c988428cf1ac0b545f";
+    let known_cache_key = "plan:0:v2.9.1:70f115ebba5991355c17f4f56ba25bb093c519c4db49a30f3b10de279a4e3fa4:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:6228627a898d25321e17dac655b1d3fa3841c55adcb2748c16e1db658463aa49";
 
     let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
     let client = RedisClient::new(config, None, None, None);
@@ -329,7 +329,7 @@ async fn entity_cache() -> Result<(), BoxError> {
         "products",
         MockSubgraph::builder()
             .with_json(
-                serde_json::json! {{"query":"{topProducts{__typename upc name}}"}},
+                serde_json::json! {{"query":"{ topProducts{ __typename upc name } }"}},
                 serde_json::json! {{"data": {
                         "topProducts": [{
                             "__typename": "Product",
@@ -348,7 +348,7 @@ async fn entity_cache() -> Result<(), BoxError> {
     );
     subgraphs.insert("reviews", MockSubgraph::builder().with_json(
             serde_json::json!{{
-                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{body}}}}",
+                "query": "query ($representations: [_Any!]!) { _entities(representations: $representations) { ...on Product { reviews { body } } } }",
                 "variables": {
                     "representations": [
                         { "upc": "1", "__typename": "Product" },
@@ -434,13 +434,13 @@ async fn entity_cache() -> Result<(), BoxError> {
     insta::assert_json_snapshot!(response);
 
     let s:String = client
-          .get("version:1.0:subgraph:products:type:Query:hash:0b4d791a3403d76643db0a9e4a8d304b1cd1f8c4ab68cb58ab7ccdc116a1da1c:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .get("version:1.0:subgraph:products:type:Query:hash:238a7aea1ff14ec36fb59429c13e8b497377ad1d869e846f586a10770ca5a983:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
     insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
-    let s: String = client.get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:04c47a3b857394fb0feef5b999adc073b8ab7416e3bc871f54c0b885daae8359:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c").await.unwrap();
+    let s: String = client.get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:14b8df93cfec3abe70b6d5cad56d49308f9d569fe5dba6ab2aaf21c6302928bb:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c").await.unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
     insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
@@ -450,7 +450,7 @@ async fn entity_cache() -> Result<(), BoxError> {
         "products",
         MockSubgraph::builder()
             .with_json(
-                serde_json::json! {{"query":"{topProducts(first:2){__typename upc name}}"}},
+                serde_json::json! {{"query":"{ topProducts(first: 2) { __typename upc name } }"}},
                 serde_json::json! {{"data": {
                         "topProducts": [{
                             "__typename": "Product",
@@ -472,7 +472,7 @@ async fn entity_cache() -> Result<(), BoxError> {
     // we already have it in cache
     subgraphs.insert("reviews", MockSubgraph::builder().with_json(
             serde_json::json!{{
-                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{body}}}}",
+                "query": "query ($representations:[_Any!]!) { _entities(representations: $representations) { ...on Product { reviews { body } } } }",
                 "variables": {
                     "representations": [
                         { "upc": "3", "__typename": "Product" }
@@ -548,7 +548,7 @@ async fn entity_cache() -> Result<(), BoxError> {
     insta::assert_json_snapshot!(response);
 
     let s:String = client
-        .get("version:1.0:subgraph:reviews:type:Product:entity:d9a4cd73308dd13ca136390c10340823f94c335b9da198d2339c886c738abf0d:hash:04c47a3b857394fb0feef5b999adc073b8ab7416e3bc871f54c0b885daae8359:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+        .get("version:1.0:subgraph:reviews:type:Product:entity:d9a4cd73308dd13ca136390c10340823f94c335b9da198d2339c886c738abf0d:hash:14b8df93cfec3abe70b6d5cad56d49308f9d569fe5dba6ab2aaf21c6302928bb:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
         .await
         .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
@@ -572,7 +572,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
             "accounts",
             MockSubgraph::builder().with_json(
                 serde_json::json!{{
-                    "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{username}}}",
+                    "query": "query ($representations: [_Any!]!) { _entities(representations: $representations) { ...on User { username } } }",
                     "variables": {
                         "representations": [
                             { "__typename": "User", "id": "1" },
@@ -593,7 +593,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
                     }
                 }},
             ).with_json(
-                serde_json::json! {{"query":"{me{id}}"}},
+                serde_json::json! {{"query":"{ me { id } }"}},
                 serde_json::json! {{"data": {
                     "me": {
                         "id": "1"
@@ -606,7 +606,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
         "products",
         MockSubgraph::builder()
             .with_json(
-                serde_json::json! {{"query":"{topProducts{__typename upc name}}"}},
+                serde_json::json! {{"query":"{ topProducts { __typename upc name } }"}},
                 serde_json::json! {{"data": {
                         "topProducts": [{
                             "__typename": "Product",
@@ -627,7 +627,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
             "reviews",
             MockSubgraph::builder().with_json(
                     serde_json::json!{{
-                        "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{body}}}}",
+                        "query": "query ($representations: [_Any!]!) { _entities(representations: $representations) { ...on Product { reviews { body } } } }",
                         "variables": {
                             "representations": [
                                 { "upc": "1", "__typename": "Product" },
@@ -656,7 +656,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
                     }},
                 ).with_json(
                     serde_json::json!{{
-                        "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{body author{__typename id}}}}}",
+                        "query": "query ($representations: [_Any!]!) { _entities(representations: $representations) { ...on Product { reviews { body author { __typename id } } } } }",
                         "variables": {
                             "representations": [
                                 { "upc": "1", "__typename": "Product" },
@@ -769,7 +769,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
     insta::assert_json_snapshot!(response);
 
     let s:String = client
-          .get("version:1.0:subgraph:products:type:Query:hash:0b4d791a3403d76643db0a9e4a8d304b1cd1f8c4ab68cb58ab7ccdc116a1da1c:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .get("version:1.0:subgraph:products:type:Query:hash:238a7aea1ff14ec36fb59429c13e8b497377ad1d869e846f586a10770ca5a983:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
@@ -790,7 +790,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
     );
 
     let s: String = client
-        .get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:04c47a3b857394fb0feef5b999adc073b8ab7416e3bc871f54c0b885daae8359:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+        .get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:14b8df93cfec3abe70b6d5cad56d49308f9d569fe5dba6ab2aaf21c6302928bb:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
         .await
         .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
@@ -834,7 +834,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
     insta::assert_json_snapshot!(response);
 
     let s:String = client
-          .get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:f7d6d3af2706afe346e3d5fd353e61bd186d2fc64cb7b3c13a62162189519b5f:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:b5cebfb48a2a7ed932f097ce6a11488f4ab6b0d9d1c47dae48572941101de3a8:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
@@ -944,7 +944,7 @@ async fn connection_failure_blocks_startup() {
 async fn query_planner_redis_update_query_fragments() {
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_query_fragments.router.yaml"),
-        "plan:0:v2.9.1:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:78f3ccab3def369f4b809a0f8c8f6e90545eb08cd1efeb188ffc663b902c1f2d",
+        "plan:0:v2.9.1:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:d7889d0d2386a9f5124a840ac0cb08c47fee602a4f840fbd5172196a9cb63e2f",
     )
     .await;
 }
@@ -974,7 +974,7 @@ async fn query_planner_redis_update_introspection() {
     // test just passes locally.
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_introspection.router.yaml"),
-        "plan:0:v2.9.1:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:99a70d6c967eea3bc68721e1094f586f5ae53c7e12f83a650abd5758c372d048",
+        "plan:0:v2.9.1:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:75e80a0420ee53c5370e6b5375e2a4ba7595a401a099fea5c5f9eda24fa14922",
     )
     .await;
 }
@@ -994,7 +994,7 @@ async fn query_planner_redis_update_defer() {
     // test just passes locally.
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_defer.router.yaml"),
-        "plan:0:v2.9.1:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:d6a3d7807bb94cfb26be4daeb35e974680b53755658fafd4c921c70cec1b7c39",
+        "plan:0:v2.9.1:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:96bd33db66f683dd1499d0c2cc0b78ff5eb38adfd7eaacc447a21bbb714ccaad",
     )
     .await;
 }
@@ -1016,7 +1016,7 @@ async fn query_planner_redis_update_type_conditional_fetching() {
         include_str!(
             "fixtures/query_planner_redis_config_update_type_conditional_fetching.router.yaml"
         ),
-        "plan:0:v2.9.1:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:8991411cc7b66d9f62ab1e661f2ce9ccaf53b0d203a275e43ced9a8b6bba02dd",
+        "plan:0:v2.9.1:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:eb311fd9191acfe7c191b8cda7a4c42df40993d194695163e1ed65c52cd88d22",
     )
     .await;
 }
@@ -1038,7 +1038,7 @@ async fn query_planner_redis_update_reuse_query_fragments() {
         include_str!(
             "fixtures/query_planner_redis_config_update_reuse_query_fragments.router.yaml"
         ),
-        "plan:0:v2.9.1:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:c05e89caeb8efc4e8233e8648099b33414716fe901e714416fd0f65a67867f07",
+        "plan:0:v2.9.1:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:03351bc357fccd101b7e5637dad1353000295caae1fe266c4f3395906ed2b0e5",
     )
     .await;
 }
@@ -1063,7 +1063,7 @@ async fn test_redis_query_plan_config_update(updated_config: &str, new_cache_key
     router.clear_redis_cache().await;
 
     // If the tests above are failing, this is the key that needs to be changed first.
-    let starting_key = "plan:0:v2.9.1:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:a52c81e3e2e47c8363fbcd2653e196431c15716acc51fce4f58d9368ac4c2d8d";
+    let starting_key = "plan:0:v2.9.1:e15b4f5cd51b8cc728e3f5171611073455601e81196cd3cbafc5610d9769a370:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:ce7e014f825b8aa9671a5fe6182f5edc92e8f605240a65d469bd4fb4f6b9bcdc";
 
     router.execute_default_query().await;
     router.assert_redis_cache_contains(starting_key, None).await;

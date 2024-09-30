@@ -1704,6 +1704,7 @@ mod tests {
     }
     directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
     directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+    directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
     directive @join__field(
         graph: join__Graph
         requires: join__FieldSet
@@ -1725,13 +1726,10 @@ mod tests {
         resolvable: Boolean! = true
         isInterfaceObject: Boolean! = false
         ) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-
     directive @join__unionMember(
         graph: join__Graph!
         member: String!
     ) repeatable on UNION
-
-    directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
     scalar join__FieldSet
     scalar link__Import
@@ -1794,6 +1792,7 @@ mod tests {
     }
     directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
     directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+    directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
     directive @join__field(
         graph: join__Graph
         requires: join__FieldSet
@@ -1815,14 +1814,10 @@ mod tests {
         resolvable: Boolean! = true
         isInterfaceObject: Boolean! = false
         ) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-
-
     directive @join__unionMember(
         graph: join__Graph!
         member: String!
     ) repeatable on UNION
-
-    directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
     scalar join__FieldSet
     scalar link__Import

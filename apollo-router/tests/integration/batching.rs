@@ -21,7 +21,7 @@ async fn it_supports_single_subgraph_batching() -> Result<(), BoxError> {
         .map(|index| {
             Request::fake_builder()
                 .query(format!(
-                    "query op{index}{{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
+                    "query op{index} {{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
                 ))
                 .build()
         })
@@ -66,14 +66,14 @@ async fn it_supports_multi_subgraph_batching() -> Result<(), BoxError> {
     let requests_a = (0..REQUEST_COUNT).map(|index| {
         Request::fake_builder()
             .query(format!(
-                "query op{index}{{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
+                "query op{index} {{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
             ))
             .build()
     });
     let requests_b = (0..REQUEST_COUNT).map(|index| {
         Request::fake_builder()
             .query(format!(
-                "query op{index}{{ entryB(count: {REQUEST_COUNT}) {{ index }} }}"
+                "query op{index} {{ entryB(count: {REQUEST_COUNT}) {{ index }} }}"
             ))
             .build()
     });
@@ -124,7 +124,7 @@ async fn it_batches_with_errors_in_single_graph() -> Result<(), BoxError> {
         .map(|index| {
             Request::fake_builder()
                 .query(format!(
-                    "query op{index}{{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
+                    "query op{index} {{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
                 ))
                 .build()
         })
@@ -166,14 +166,14 @@ async fn it_batches_with_errors_in_multi_graph() -> Result<(), BoxError> {
     let requests_a = (0..REQUEST_COUNT).map(|index| {
         Request::fake_builder()
             .query(format!(
-                "query op{index}{{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
+                "query op{index} {{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
             ))
             .build()
     });
     let requests_b = (0..REQUEST_COUNT).map(|index| {
         Request::fake_builder()
             .query(format!(
-                "query op{index}{{ entryB(count: {REQUEST_COUNT}) {{ index }} }}"
+                "query op{index} {{ entryB(count: {REQUEST_COUNT}) {{ index }} }}"
             ))
             .build()
     });
@@ -222,14 +222,14 @@ async fn it_handles_short_timeouts() -> Result<(), BoxError> {
     let requests_a = (0..REQUEST_COUNT).map(|index| {
         Request::fake_builder()
             .query(format!(
-                "query op{index}{{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
+                "query op{index} {{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
             ))
             .build()
     });
     let requests_b = (0..REQUEST_COUNT).map(|index| {
         Request::fake_builder()
             .query(format!(
-                "query op{index}{{ entryB(count: {REQUEST_COUNT}) {{ index }} }}"
+                "query op{index} {{ entryB(count: {REQUEST_COUNT}) {{ index }} }}"
             ))
             .build()
     });
@@ -281,7 +281,7 @@ async fn it_handles_indefinite_timeouts() -> Result<(), BoxError> {
         .map(|index| {
             Request::fake_builder()
                 .query(format!(
-                    "query op{index}{{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
+                    "query op{index} {{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
                 ))
                 .build()
         })
@@ -290,7 +290,7 @@ async fn it_handles_indefinite_timeouts() -> Result<(), BoxError> {
         .map(|index| {
             Request::fake_builder()
                 .query(format!(
-                    "query op{index}{{ entryB(count: {REQUEST_COUNT}) {{ index }} }}"
+                    "query op{index} {{ entryB(count: {REQUEST_COUNT}) {{ index }} }}"
                 ))
                 .build()
         })
@@ -355,14 +355,14 @@ async fn it_handles_cancelled_by_rhai() -> Result<(), BoxError> {
     let requests_a = (0..REQUEST_COUNT).map(|index| {
         Request::fake_builder()
             .query(format!(
-                "query op{index}{{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
+                "query op{index} {{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
             ))
             .build()
     });
     let requests_b = (0..REQUEST_COUNT).map(|index| {
         Request::fake_builder()
             .query(format!(
-                "query op{index}_failMe{{ entryB(count: {REQUEST_COUNT}) {{ index }} }}"
+                "query op{index}_failMe {{ entryB(count: {REQUEST_COUNT}) {{ index }} }}"
             ))
             .build()
     });
@@ -405,14 +405,14 @@ async fn it_handles_single_request_cancelled_by_rhai() -> Result<(), BoxError> {
     let requests_a = (0..REQUEST_COUNT).map(|index| {
         Request::fake_builder()
             .query(format!(
-                "query op{index}{{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
+                "query op{index} {{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
             ))
             .build()
     });
     let requests_b = (0..REQUEST_COUNT).map(|index| {
         Request::fake_builder()
             .query(format!(
-                "query {}{{ entryB(count: {REQUEST_COUNT}) {{ index }} }}",
+                "query {} {{ entryB(count: {REQUEST_COUNT}) {{ index }} }}",
                 (index == 1)
                     .then_some("failMe".to_string())
                     .unwrap_or(format!("op{index}"))
@@ -434,7 +434,7 @@ async fn it_handles_single_request_cancelled_by_rhai() -> Result<(), BoxError> {
             assert_eq!(
                 request.query,
                 Some(format!(
-                    "query op{index}__b__0{{entryB(count:{REQUEST_COUNT}){{index}}}}",
+                    "query op{index}__b__0 {{ entryB(count: {REQUEST_COUNT}) {{ index }} }}",
                 ))
             );
         }
@@ -494,14 +494,14 @@ async fn it_handles_cancelled_by_coprocessor() -> Result<(), BoxError> {
     let requests_a = (0..REQUEST_COUNT).map(|index| {
         Request::fake_builder()
             .query(format!(
-                "query op{index}{{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
+                "query op{index} {{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
             ))
             .build()
     });
     let requests_b = (0..REQUEST_COUNT).map(|index| {
         Request::fake_builder()
             .query(format!(
-                "query op{index}{{ entryB(count: {REQUEST_COUNT}) {{ index }} }}"
+                "query op{index} {{ entryB(count: {REQUEST_COUNT}) {{ index }} }}"
             ))
             .build()
     });
@@ -593,14 +593,14 @@ async fn it_handles_single_request_cancelled_by_coprocessor() -> Result<(), BoxE
     let requests_a = (0..REQUEST_COUNT).map(|index| {
         Request::fake_builder()
             .query(format!(
-                "query op{index}{{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
+                "query op{index} {{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
             ))
             .build()
     });
     let requests_b = (0..REQUEST_COUNT).map(|index| {
         Request::fake_builder()
             .query(format!(
-                "query op{index}{{ entryB(count: {REQUEST_COUNT}) {{ index }} }}"
+                "query op{index} {{ entryB(count: {REQUEST_COUNT}) {{ index }} }}"
             ))
             .build()
     });
@@ -670,7 +670,7 @@ async fn it_handles_single_request_cancelled_by_coprocessor() -> Result<(), BoxE
             assert_eq!(
                 request.query,
                 Some(format!(
-                    "query op{index}__a__0{{entryA(count:{REQUEST_COUNT}){{index}}}}",
+                    "query op{index}__a__0 {{ entryA(count: {REQUEST_COUNT}) {{ index }} }}",
                 ))
             );
         }
@@ -748,7 +748,7 @@ async fn it_handles_single_invalid_graphql() -> Result<(), BoxError> {
         .map(|index| {
             Request::fake_builder()
                 .query(format!(
-                    "query op{index}{{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
+                    "query op{index} {{ entryA(count: {REQUEST_COUNT}) {{ index }} }}"
                 ))
                 .build()
         })
@@ -771,7 +771,7 @@ async fn it_handles_single_invalid_graphql() -> Result<(), BoxError> {
             assert_eq!(
                 request.query,
                 Some(format!(
-                    "query op{index}__a__0{{entryA(count:{REQUEST_COUNT}){{index}}}}",
+                    "query op{index}__a__0 {{ entryA(count: {REQUEST_COUNT}) {{ index }} }}",
                 ))
             );
         }
@@ -913,7 +913,7 @@ mod helper {
 
         // Extract info about this operation
         let (subgraph, count): (String, usize) = {
-            let re = regex::Regex::new(r"entry([AB])\(count:([0-9]+)\)").unwrap();
+            let re = regex::Regex::new(r"entry([AB])\(count: ([0-9]+)\)").unwrap();
             let captures = re.captures(requests[0].query.as_ref().unwrap()).unwrap();
 
             (captures[1].to_string(), captures[2].parse().unwrap())
@@ -929,7 +929,7 @@ mod helper {
             assert_eq!(
                 request.query,
                 Some(format!(
-                    "query op{index}__{}__0{{entry{}(count:{count}){{index}}}}",
+                    "query op{index}__{}__0 {{ entry{}(count: {count}) {{ index }} }}",
                     subgraph.to_lowercase(),
                     subgraph
                 ))
@@ -957,7 +957,7 @@ mod helper {
 
         // Extract info about this operation
         let (subgraph, count): (String, usize) = {
-            let re = regex::Regex::new(r"entry([AB])\(count:([0-9]+)\)").unwrap();
+            let re = regex::Regex::new(r"entry([AB])\(count: ([0-9]+)\)").unwrap();
             let captures = re.captures(requests[0].query.as_ref().unwrap()).unwrap();
 
             (captures[1].to_string(), captures[2].parse().unwrap())
@@ -996,7 +996,7 @@ mod helper {
 
         // Extract info about this operation
         let (_, count): (String, usize) = {
-            let re = regex::Regex::new(r"entry([AB])\(count:([0-9]+)\)").unwrap();
+            let re = regex::Regex::new(r"entry([AB])\(count: ([0-9]+)\)").unwrap();
             let captures = re.captures(requests[0].query.as_ref().unwrap()).unwrap();
 
             (captures[1].to_string(), captures[2].parse().unwrap())

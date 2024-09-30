@@ -7,6 +7,7 @@ schema
 }
 
 directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 directive @join__field(
   graph: join__Graph
   requires: join__FieldSet
@@ -28,19 +29,16 @@ directive @join__type(
   resolvable: Boolean! = true
   isInterfaceObject: Boolean! = false
 ) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @join__unionMember(
+  graph: join__Graph!
+  member: String!
+) repeatable on UNION
 directive @link(
   url: String
   as: String
   for: link__Purpose
   import: [link__Import]
 ) repeatable on SCHEMA
-
-directive @join__unionMember(
-  graph: join__Graph!
-  member: String!
-) repeatable on UNION
-
-directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
 scalar join__FieldSet
 scalar link__Import
