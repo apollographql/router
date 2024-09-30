@@ -4,8 +4,6 @@ subtitle: Configure Redis-backed caching for query plans and APQ
 description: Distributed caching for GraphOS Router with GraphOS Enterprise. Configure a Redis-backed cache for query plans and automatic persisted queries (APQ).
 ---
 
-import RedisTLS from '../../shared/redis-tls.mdx'
-
 <SummitCallout
   topic="graph performance"
   workshopName="Better, faster, stronger: Advanced configurations to boost your router performance"
@@ -161,7 +159,23 @@ When using the same Redis instance for multiple purposes, the `namespace` option
 
 ### TLS
 
-<RedisTLS />
+For Redis TLS connections, you can set up a client certificate or override the root certificate authority by configuring `tls` in your router's [YAML config file](https://www.apollographql.com/docs/router/overview/#yaml-config-file). For example:
+
+```yaml
+apq:
+  router:
+    cache:
+      redis:
+        urls: [ "rediss://redis.example.com:6379" ]
+        #highlight-start
+        tls:
+          certificate_authorities: ${file./path/to/ca.crt}
+          client_authentication:
+            certificate_chain: ${file./path/to/certificate_chain.pem}
+            key: ${file./path/to/key.pem}
+        #highlight-end
+```
+
 
 ### Required to start
 
