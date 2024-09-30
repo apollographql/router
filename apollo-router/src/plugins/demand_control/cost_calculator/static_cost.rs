@@ -582,18 +582,12 @@ mod tests {
     use apollo_federation::query_plan::query_planner::QueryPlanner;
     use bytes::Bytes;
     use test_log::test;
-    use tower::Service;
 
     use super::*;
-    use crate::introspection::default_cache_storage;
-    use crate::query_planner::BridgeQueryPlanner;
     use crate::services::layers::query_analysis::ParsedDocument;
-    use crate::services::QueryPlannerContent;
-    use crate::services::QueryPlannerRequest;
     use crate::spec;
     use crate::spec::Query;
     use crate::Configuration;
-    use crate::Context;
 
     impl StaticCostCalculator {
         fn rust_planned(
@@ -660,57 +654,6 @@ mod tests {
         calculator
             .estimated(&query, &calculator.supergraph_schema, &variables, true)
             .unwrap()
-    }
-
-    async fn planned_cost_js(schema_str: &str, query_str: &str, variables_str: &str) -> f64 {
-        let config: Arc<Configuration> = Arc::new(Default::default());
-        let (schema, query) = parse_schema_and_operation(schema_str, query_str, &config);
-        let variables = serde_json::from_str::<Value>(variables_str)
-            .unwrap()
-            .as_object()
-            .cloned()
-            .unwrap_or_default();
-        let supergraph_schema = schema.supergraph_schema().clone();
-
-        let mut planner = BridgeQueryPlanner::new(
-            schema.into(),
-            config.clone(),
-            None,
-            None,
-            default_cache_storage().await,
-        )
-        .await
-        .unwrap();
-
-        let ctx = Context::new();
-        ctx.extensions()
-            .with_lock(|mut lock| lock.insert::<ParsedDocument>(query));
-
-        let planner_res = planner
-            .call(QueryPlannerRequest::new(query_str.to_string(), None, ctx))
-            .await
-            .unwrap();
-        let query_plan = match planner_res.content.unwrap() {
-            QueryPlannerContent::Plan { plan } => plan,
-            _ => panic!("Query planner returned unexpected non-plan content"),
-        };
-
-        let schema = DemandControlledSchema::new(Arc::new(supergraph_schema)).unwrap();
-        let mut demand_controlled_subgraph_schemas = HashMap::new();
-        for (subgraph_name, subgraph_schema) in planner.subgraph_schemas().iter() {
-            let demand_controlled_subgraph_schema =
-                DemandControlledSchema::new(subgraph_schema.clone()).unwrap();
-            demand_controlled_subgraph_schemas
-                .insert(subgraph_name.to_string(), demand_controlled_subgraph_schema);
-        }
-
-        let calculator = StaticCostCalculator::new(
-            Arc::new(schema),
-            Arc::new(demand_controlled_subgraph_schemas),
-            100,
-        );
-
-        calculator.planned(&query_plan, &variables).unwrap()
     }
 
     fn planned_cost_rust(schema_str: &str, query_str: &str, variables_str: &str) -> f64 {
@@ -927,7 +870,6 @@ mod tests {
         let response = include_bytes!("./fixtures/federated_ships_required_response.json");
 
         assert_eq!(estimated_cost(schema, query, variables), 10200.0);
-        assert_eq!(planned_cost_js(schema, query, variables).await, 10400.0);
         assert_eq!(planned_cost_rust(schema, query, variables), 10400.0);
         assert_eq!(actual_cost(schema, query, variables, response), 2.0);
     }
@@ -940,7 +882,6 @@ mod tests {
         let response = include_bytes!("./fixtures/federated_ships_fragment_response.json");
 
         assert_eq!(estimated_cost(schema, query, variables), 300.0);
-        assert_eq!(planned_cost_js(schema, query, variables).await, 400.0);
         assert_eq!(planned_cost_rust(schema, query, variables), 400.0);
         assert_eq!(actual_cost(schema, query, variables, response), 6.0);
     }
@@ -953,7 +894,6 @@ mod tests {
         let response = include_bytes!("./fixtures/federated_ships_fragment_response.json");
 
         assert_eq!(estimated_cost(schema, query, variables), 300.0);
-        assert_eq!(planned_cost_js(schema, query, variables).await, 400.0);
         assert_eq!(planned_cost_rust(schema, query, variables), 400.0);
         assert_eq!(actual_cost(schema, query, variables, response), 6.0);
     }
@@ -966,7 +906,6 @@ mod tests {
         let response = include_bytes!("./fixtures/federated_ships_deferred_response.json");
 
         assert_eq!(estimated_cost(schema, query, variables), 10200.0);
-        assert_eq!(planned_cost_js(schema, query, variables).await, 10400.0);
         assert_eq!(planned_cost_rust(schema, query, variables), 10400.0);
         assert_eq!(actual_cost(schema, query, variables, response), 2.0);
     }
@@ -1012,7 +951,6 @@ mod tests {
         let response = include_bytes!("./fixtures/custom_cost_response.json");
 
         assert_eq!(estimated_cost(schema, query, variables), 127.0);
-        assert_eq!(planned_cost_js(schema, query, variables).await, 127.0);
         assert_eq!(planned_cost_rust(schema, query, variables), 127.0);
         assert_eq!(actual_cost(schema, query, variables, response), 125.0);
     }
@@ -1025,7 +963,6 @@ mod tests {
         let response = include_bytes!("./fixtures/custom_cost_response.json");
 
         assert_eq!(estimated_cost(schema, query, variables), 127.0);
-        assert_eq!(planned_cost_js(schema, query, variables).await, 127.0);
         assert_eq!(planned_cost_rust(schema, query, variables), 127.0);
         assert_eq!(actual_cost(schema, query, variables, response), 125.0);
     }
@@ -1039,7 +976,6 @@ mod tests {
         let response = include_bytes!("./fixtures/custom_cost_response.json");
 
         assert_eq!(estimated_cost(schema, query, variables), 132.0);
-        assert_eq!(planned_cost_js(schema, query, variables).await, 132.0);
         assert_eq!(planned_cost_rust(schema, query, variables), 132.0);
         assert_eq!(actual_cost(schema, query, variables, response), 125.0);
     }
@@ -1053,7 +989,6 @@ mod tests {
         let response = include_bytes!("./fixtures/custom_cost_response.json");
 
         assert_eq!(estimated_cost(schema, query, variables), 127.0);
-        assert_eq!(planned_cost_js(schema, query, variables).await, 127.0);
         assert_eq!(planned_cost_rust(schema, query, variables), 127.0);
         assert_eq!(actual_cost(schema, query, variables, response), 125.0);
     }

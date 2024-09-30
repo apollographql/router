@@ -209,6 +209,7 @@ pub(crate) enum QueryPlannerMode {
     ///
     /// Raises an error at Router startup if the the new planner does not support the schema
     /// (such as using legacy Apollo Federation 1)
+    #[default]
     New,
     /// Use the old JavaScript-based implementation.
     Legacy,
@@ -227,7 +228,6 @@ pub(crate) enum QueryPlannerMode {
     /// Falls back to `legacy` with a warning
     /// if the the new planner does not support the schema
     /// (such as using legacy Apollo Federation 1)
-    #[default]
     BothBestEffort,
 }
 
@@ -237,12 +237,12 @@ pub(crate) enum QueryPlannerMode {
 #[serde(rename_all = "lowercase")]
 pub(crate) enum IntrospectionMode {
     /// Use the new Rust-based implementation.
+    #[default]
     New,
     /// Use the old JavaScript-based implementation.
     Legacy,
     /// Use Rust-based and Javascript-based implementations side by side,
     /// logging warnings if the implementations disagree.
-    #[default]
     Both,
 }
 

@@ -569,5 +569,5 @@ async fn escaped_quotes_in_string_literal() {
     let subgraph_query = subgraph_query_log[1].1.as_ref().unwrap();
 
     // The string literal made it through unchanged:
-    assert!(subgraph_query.contains(r#"reviewsForAuthor(authorID:"\"1\"")"#));
+    assert!(subgraph_query.contains(r#"reviewsForAuthor(authorID: "\"1\"")"#));
 }
