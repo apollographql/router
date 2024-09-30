@@ -149,7 +149,7 @@ impl FragmentSpreadSelection {
 
 impl InlineFragmentSelection {
     fn flatten_unnecessary_fragments(
-        &self,
+        self: &Arc<Self>,
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
         schema: &ValidFederationSchema,
@@ -176,10 +176,9 @@ impl InlineFragmentSelection {
             // 2. if it's the same type as the current type: it's not restricting types further.
             // 3. if the current type is an object more generally: because in that case the condition
             //   cannot be restricting things further (it's typically a less precise interface/union).
-            let useless_fragment = match this_condition {
-                None => true,
-                Some(c) => self.inline_fragment.schema == *schema && c == parent_type,
-            };
+            let useless_fragment = this_condition.map_or(true, |type_condition| {
+                self.inline_fragment.schema == *schema && type_condition == parent_type
+            });
             if useless_fragment || parent_type.is_object_type() {
                 // Try to skip this fragment and flatten_unnecessary_fragments self.selection_set with `parent_type`,
                 // instead of its original type.
@@ -264,27 +263,22 @@ impl InlineFragmentSelection {
             for (_, selection) in selection_set.selections.iter() {
                 match selection {
                     Selection::FragmentSpread(spread_selection) => {
-                        let type_condition =
-                            spread_selection.spread.type_condition_position.clone();
+                        let type_condition = &spread_selection.spread.type_condition_position;
                         if type_condition.is_object_type()
-                            && runtime_types_intersect(parent_type, &type_condition, schema)
+                            && runtime_types_intersect(parent_type, type_condition, schema)
                         {
-                            liftable_selections
-                                .insert(Selection::FragmentSpread(spread_selection.clone()));
+                            liftable_selections.insert(selection.clone());
                         }
                     }
                     Selection::InlineFragment(inline_fragment_selection) => {
-                        if let Some(type_condition) = inline_fragment_selection
+                        if let Some(type_condition) = &inline_fragment_selection
                             .inline_fragment
                             .type_condition_position
-                            .clone()
                         {
                             if type_condition.is_object_type()
-                                && runtime_types_intersect(parent_type, &type_condition, schema)
+                                && runtime_types_intersect(parent_type, type_condition, schema)
                             {
-                                liftable_selections.insert(Selection::InlineFragment(
-                                    inline_fragment_selection.clone(),
-                                ));
+                                liftable_selections.insert(selection.clone());
                             }
                         };
                     }
@@ -311,16 +305,18 @@ impl InlineFragmentSelection {
                 // applied recursively. This could be worth investigating.
                 let rebased_inline_fragment =
                     self.inline_fragment.rebase_on(parent_type, schema)?;
-                let mut mutable_selections = self.selection_set.selections.clone();
-                let final_fragment_selections = Arc::make_mut(&mut mutable_selections);
-                final_fragment_selections.retain(|k, _| !liftable_selections.contains_key(k));
+
+                let mut nonliftable_selections = self.selection_set.selections.clone();
+                Arc::make_mut(&mut nonliftable_selections)
+                    .retain(|k, _| !liftable_selections.contains_key(k));
+
                 let rebased_casted_type = rebased_inline_fragment.casted_type();
                 let final_inline_fragment: Selection = InlineFragmentSelection::new(
                     rebased_inline_fragment,
                     SelectionSet {
                         schema: schema.clone(),
                         type_position: rebased_casted_type,
-                        selections: Arc::new(final_fragment_selections.clone()),
+                        selections: nonliftable_selections,
                     },
                 )
                 .into();
@@ -332,8 +328,8 @@ impl InlineFragmentSelection {
                     .collect::<Result<_, _>>()?;
 
                 let mut final_selection_map = SelectionMap::new();
-                final_selection_map.insert(final_inline_fragment);
                 final_selection_map.extend(liftable_selections);
+                final_selection_map.insert(final_inline_fragment);
                 let final_selections = SelectionSet {
                     schema: schema.clone(),
                     type_position: parent_type.clone(),
@@ -348,21 +344,19 @@ impl InlineFragmentSelection {
             && self.selection_set == selection_set
         {
             // flattening did not change the fragment
-            // TODO(@goto-bus-stop): no change, but we still create a non-trivial clone here
-            Ok(Some(SelectionOrSet::Selection(Selection::InlineFragment(
-                Arc::new(self.clone()),
-            ))))
+            Ok(Some(Selection::InlineFragment(Arc::clone(self)).into()))
         } else {
             let rebased_inline_fragment = self.inline_fragment.rebase_on(parent_type, schema)?;
             let rebased_casted_type = rebased_inline_fragment.casted_type();
             let rebased_selection_set =
                 selection_set.rebase_on(&rebased_casted_type, named_fragments, schema)?;
-            Ok(Some(SelectionOrSet::Selection(Selection::InlineFragment(
-                Arc::new(InlineFragmentSelection::new(
+            Ok(Some(
+                Selection::InlineFragment(Arc::new(InlineFragmentSelection::new(
                     rebased_inline_fragment,
                     rebased_selection_set,
-                )),
-            ))))
+                )))
+                .into(),
+            ))
         }
     }
 }
