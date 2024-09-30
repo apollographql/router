@@ -101,13 +101,13 @@ fn prefers_html(headers: &HeaderMap) -> bool {
 
 pub(crate) fn sandbox_page_content() -> Vec<u8> {
     const TEMPLATE: &str = include_str!("../../../templates/sandbox_index.html");
-    TEMPLATE.replace("{{APOLLO_ROUTER_VERSION}}", std::env!("CARGO_PKG_VERSION")).into_bytes()
+    TEMPLATE
+        .replace("{{APOLLO_ROUTER_VERSION}}", std::env!("CARGO_PKG_VERSION"))
+        .into_bytes()
 }
 
 pub(crate) fn home_page_content(homepage_config: &Homepage) -> Vec<u8> {
     const TEMPLATE: &str = include_str!("../../../templates/homepage_index.html");
     let graph_ref = serde_json::to_string(&homepage_config.graph_ref).expect("cannot fail");
-    TEMPLATE
-        .replace("{{GRAPH_REF}}", &graph_ref)
-        .into_bytes()
+    TEMPLATE.replace("{{GRAPH_REF}}", &graph_ref).into_bytes()
 }
