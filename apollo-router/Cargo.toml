@@ -64,7 +64,6 @@ ci = []
 features = ["docs_rs"]
 
 [dependencies]
-askama = "0.12.1"
 access-json = "0.1.0"
 anyhow = "1.0.86"
 apollo-compiler.workspace = true

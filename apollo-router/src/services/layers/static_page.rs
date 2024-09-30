@@ -5,7 +5,6 @@
 
 use std::ops::ControlFlow;
 
-use askama::Template;
 use bytes::Bytes;
 use http::header::CONTENT_TYPE;
 use http::HeaderMap;
@@ -100,36 +99,15 @@ fn prefers_html(headers: &HeaderMap) -> bool {
     })
 }
 
-#[derive(Template)]
-#[template(path = "sandbox_index.html")]
-struct SandboxTemplate {
-    apollo_router_version: &'static str,
-}
-
 pub(crate) fn sandbox_page_content() -> Vec<u8> {
-    let template = SandboxTemplate {
-        apollo_router_version: std::env!("CARGO_PKG_VERSION"),
-    };
-    let mut buffer = Vec::new();
-    template.write_into(&mut buffer).expect("cannot fail");
-    buffer
-}
-
-#[derive(Template)]
-#[template(path = "homepage_index.html")]
-struct HomepageTemplate {
-    graph_ref: String,
+    const TEMPLATE: &str = include_str!("../../../templates/sandbox_index.html");
+    TEMPLATE.replace("{{APOLLO_ROUTER_VERSION}}", std::env!("CARGO_PKG_VERSION")).into_bytes()
 }
 
 pub(crate) fn home_page_content(homepage_config: &Homepage) -> Vec<u8> {
-    let template = HomepageTemplate {
-        graph_ref: homepage_config
-            .graph_ref
-            .as_ref()
-            .cloned()
-            .unwrap_or_default(),
-    };
-    let mut buffer = Vec::new();
-    template.write_into(&mut buffer).expect("cannot fail");
-    buffer
+    const TEMPLATE: &str = include_str!("../../../templates/homepage_index.html");
+    let graph_ref = serde_json::to_string(&homepage_config.graph_ref).expect("cannot fail");
+    TEMPLATE
+        .replace("{{GRAPH_REF}}", &graph_ref)
+        .into_bytes()
 }
