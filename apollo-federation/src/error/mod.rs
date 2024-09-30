@@ -13,6 +13,7 @@ use lazy_static::lazy_static;
 
 use crate::subgraph::spec::FederationSpecError;
 
+/// Break out of the current function, returning an internal error.
 #[macro_export]
 macro_rules! internal_error {
     ( $( $arg:tt )+ ) => {
@@ -22,11 +23,19 @@ macro_rules! internal_error {
 
 /// A safe assertion: in debug mode, it panicks on failure, and in production, it returns an
 /// internal error.
+///
+/// Treat this as an assertion. It must only be used for conditions that *should never happen*
+/// in normal operation.
 #[macro_export]
 macro_rules! ensure {
     ( $expr:expr, $( $arg:tt )+ ) => {
         #[cfg(debug_assertions)]
-        assert!($expr, $( $arg )+);
+        {
+            if false {
+                return Err($crate::error::FederationError::internal("ensure!() must be used in a function that returns a Result").into());
+            }
+            assert!($expr, $( $arg )+);
+        }
 
         #[cfg(not(debug_assertions))]
         if !$expr {
