@@ -10,6 +10,7 @@ use ::tracing::info_span;
 use ::tracing::Span;
 use axum::headers::HeaderName;
 use config_new::cache::CacheInstruments;
+use config_new::connectors::http::instruments::ConnectorHttpInstruments;
 use config_new::instruments::InstrumentsConfig;
 use config_new::instruments::StaticInstrument;
 use config_new::Selectors;
@@ -103,7 +104,6 @@ use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::TracingCommon;
 use crate::plugins::telemetry::config_new::cost::add_cost_attributes;
 use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
-use crate::plugins::telemetry::config_new::instruments::ConnectorHttpInstruments;
 use crate::plugins::telemetry::config_new::instruments::SupergraphInstruments;
 use crate::plugins::telemetry::config_new::trace_id;
 use crate::plugins::telemetry::config_new::DatadogId;
@@ -314,7 +314,6 @@ impl PluginPrivate for Telemetry {
             subgraph_custom_instruments,
             connector_custom_instruments,
             cache_custom_instruments,
-            ..
         } = create_builtin_instruments(&config.instrumentation.instruments);
 
         Ok(Telemetry {
