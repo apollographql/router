@@ -20,6 +20,8 @@ There are new features in GraphOS Router v2.0 (Alpha). Think about how you can t
 
 ### Apollo Reporting
 
+#### Sampling
+
 Prior to version 1.49.0 of the router, all GraphOS reporting was performed using a [private tracing format](graphos/metrics/sending-operation-metrics#reporting-format).
 
 In v1.49.0, we introduced support for using OTEL to perform this reporting.
@@ -30,7 +32,7 @@ Now in v2.x, this flag is renamed to `otlp_tracing_sampler` and is enabled by de
 
 Learn more in [Usage reporting via OpenTelemetry Protocol (OTLP)](/router/configuration/telemetry/apollo-telemetry#usage-reporting-via-opentelemetry-protocol-otlp).
 
-#### Configuration
+##### Configuration
 
 This change adds a new configuration option `otlp_tracing_sampler`. This can be used to send a percentage of traces via OTLP instead of the native Apollo Usage Reporting protocol. Supported values:
 
@@ -55,13 +57,30 @@ telemetry:
         sampler: 0.01
 ```
 
+#### Metrics reporting defaults
+
+GraphOS metrics reporting defaults are updated from 1.x as follows:
+
+`telemetry.apollo.signature_normalization_algorithm` now defaults to `enhanced` (in 1.x this is `legacy`)
+`telemetry.apollo.metrics_reference_mode` now defaults to `extended` (in 1.x this is `standard`)
+
 ## How do I upgrade?
 
 Upgrading will generally be quick and painless, but some planning will help.
 
 ### Configuration
 
-If you are happy to submit traces via OTEL, then no changes are required. Otherwise, use the `otlp_tracing_sampler` to turn this off.
+If you are happy to submit traces via OTEL, then no changes are required. Otherwise, use the `otlp_tracing_sampler` to turn this off and restore the default 1.x behavior.
+
+If you are happy to use the new metrics reporting default, then no changes are required. Otherwise:
+
+```yaml
+`telemetry:
+  apollo:
+    signature_normalization_algorithm: legacy
+    metrics_reference_mode: standard
+```
+will restore the default 1.x behavior.
 
 ### Deployment
 
