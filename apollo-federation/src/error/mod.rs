@@ -13,6 +13,28 @@ use lazy_static::lazy_static;
 
 use crate::subgraph::spec::FederationSpecError;
 
+#[macro_export]
+macro_rules! internal_error {
+    ( $( $arg:tt )+ ) => {
+        return Err($crate::error::FederationError::internal(format!( $( $arg )+ )).into());
+    }
+}
+
+/// A safe assertion: in debug mode, it panicks on failure, and in production, it returns an
+/// internal error.
+#[macro_export]
+macro_rules! ensure {
+    ( $expr:expr, $( $arg:tt )+ ) => {
+        #[cfg(debug_assertions)]
+        assert!($expr, $( $arg )+);
+
+        #[cfg(not(debug_assertions))]
+        if !$expr {
+            $crate::internal_error!( $( $arg )+ );
+        }
+    }
+}
+
 // What we really needed here was the string representations in enum form, this isn't meant to
 // replace AST components.
 #[derive(Clone, Debug, strum_macros::Display)]
