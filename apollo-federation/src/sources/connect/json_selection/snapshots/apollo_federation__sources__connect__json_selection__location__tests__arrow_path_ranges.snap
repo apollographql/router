@@ -6,19 +6,21 @@ Named(
     SubSelection {
         selections: [
             Path(
-                Alias {
-                    name: WithRange {
-                        node: Field(
-                            "__typename",
-                        ),
+                Some(
+                    Alias {
+                        name: WithRange {
+                            node: Field(
+                                "__typename",
+                            ),
+                            range: Some(
+                                2..12,
+                            ),
+                        },
                         range: Some(
-                            2..12,
+                            2..13,
                         ),
                     },
-                    range: Some(
-                        2..13,
-                    ),
-                },
+                ),
                 PathSelection {
                     path: WithRange {
                         node: Var(
