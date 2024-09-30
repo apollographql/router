@@ -8,85 +8,61 @@ Learn how to upgrade from your GraphOS Router deployment from version 1.x to 2.x
 
 <Note>
 
-The latest version of GraphOS Router v2.x is `v2.0.0-preview.0`.
+The latest version of GraphOS Router v2.x is **v2.0.0-preview.0**.
 
 </Note>
 
-## What's different?
+## New features in GraphOS Router v2.x
 
-### New Features
+### Apollo operation usage reporting via OTLP
 
-There are new features in GraphOS Router v2.0 (Alpha). Think about how you can take advantage of these as you plan your upgrade to your existing 1.x deployment.
+The router supports reporting operation usage metrics to GraphOS via OpenTelemetry Protocol (OTLP).
 
-### Apollo Reporting
+Prior to version 1.49.0 of the router, all GraphOS reporting was performed using a [private tracing format](graphos/metrics/sending-operation-metrics#reporting-format). In v1.49.0, we introduced support for using OTEL to perform this reporting. In v1.x, this is controlled using the `experimental_otlp_tracing_sampler` flag, and it's disabled by default. 
 
-#### Sampling
+Now in v2.x, this flag is renamed to `otlp_tracing_sampler`, and it's enabled by default.
 
-Prior to version 1.49.0 of the router, all GraphOS reporting was performed using a [private tracing format](graphos/metrics/sending-operation-metrics#reporting-format).
+Learn more about configuring [usage reporting via OTLP](/router/configuration/telemetry/apollo-telemetry#usage-reporting-via-opentelemetry-protocol-otlp).
 
-In v1.49.0, we introduced support for using OTEL to perform this reporting.
+#### Metrics reporting defaults
 
-In v1.x, this is controlled using the `experimental_otlp_tracing_sampler` flag, and is disabled by default.
+Default values of some GraphOS reporting metrics have been changed from v1.x to the following in v2.x:
 
-Now in v2.x, this flag is renamed to `otlp_tracing_sampler` and is enabled by default.
+- `telemetry.apollo.signature_normalization_algorithm` now defaults to `enhanced`. (In v1.x the default is `legacy`.)
+- `telemetry.apollo.metrics_reference_mode` now defaults to `extended`. (In v1.x the default is `standard`.)
 
-Learn more in [Usage reporting via OpenTelemetry Protocol (OTLP)](/router/configuration/telemetry/apollo-telemetry#usage-reporting-via-opentelemetry-protocol-otlp).
+## Upgrading to GraphOS Router v2.x
 
-##### Configuration
+Upgrading from GraphOS Router v1.x to v2.x requires the following steps.
 
-This change adds a new configuration option `otlp_tracing_sampler`. This can be used to send a percentage of traces via OTLP instead of the native Apollo Usage Reporting protocol. Supported values:
+### Configure your Apollo usage reporting protocol
 
-- `always_off`: send all traces via Apollo Usage Reporting protocol.
-- `always_on` (default): send all traces via OTLP.
-- `0.0 - 1.0`: the ratio of traces to send via OTLP (0.5 = 50 / 50).
+If your router v1.x is configured with `experimental_otlp_tracing_sampler`, rename it to `otlp_tracing_sampler`.
 
-Note that this sampler is only applied _after_ the common tracing sampler, for example:
+To [report operation usage metrics to GraphOS via OTLP](#apollo-operation-usage-reporting-via-otlp), you can either remove your configuration of `otlp_tracing_sampler` and use its default value, or you can explicitly enable it by setting it to [`always_on` or a sampling ratio](/router/configuration/telemetry/apollo-telemetry#configuring-usage-reporting-via-otlp).
 
-##### Sample 1% of traces, send all traces via OTLP:
+Otherwise, to use the behavior of v1.x, disable usage reporting via OTLP by setting `otlp_tracing_sampler` to `always_off`. 
+
+### Configure metrics reporting defaults
+
+If you plan to use the [new metrics reporting defaults](#metrics-reporting-defaults), then no changes are required. 
+
+Otherwise, to use the defaults from v1.x, set the following:
 
 ```yaml
 telemetry:
   apollo:
-    # Send all traces via OTLP
-    otlp_tracing_sampler: always_on
-
-  exporters:
-    tracing:
-      common:
-        # Sample traces at 1% of all traffic
-        sampler: 0.01
-```
-
-#### Metrics reporting defaults
-
-GraphOS metrics reporting defaults are updated from 1.x as follows:
-
-`telemetry.apollo.signature_normalization_algorithm` now defaults to `enhanced` (in 1.x this is `legacy`)
-`telemetry.apollo.metrics_reference_mode` now defaults to `extended` (in 1.x this is `standard`)
-
-## How do I upgrade?
-
-Upgrading will generally be quick and painless, but some planning will help.
-
-### Configuration
-
-If you are happy to submit traces via OTEL, then no changes are required. Otherwise, use the `otlp_tracing_sampler` to turn this off and restore the default 1.x behavior.
-
-If you are happy to use the new metrics reporting default, then no changes are required. Otherwise:
-
-```yaml
-`telemetry:
-  apollo:
     signature_normalization_algorithm: legacy
     metrics_reference_mode: standard
 ```
-will restore the default 1.x behavior.
 
-### Deployment
+### Deploy your router
 
-Make sure that you are referencing the correct router release: v2.0.0-preview.0
+Make sure that you are referencing the correct router release: **v2.0.0-preview.0**
 
-During upgrade, carefully monitor logs and resource consumption to ensure that your router has successully upgraded and that your router has enough resources to perform as expected. The router will automatically migrate required configuration changes, but it is good practice to review the Configuration notes above and decide if you want to change your configuration. For example: you may decide that you wish to change the way in which you sample OTLP traces in this new release and not simply preserve your existing configuration.
+During upgrade, carefully monitor logs and resource consumption to ensure that your router has successfully upgraded and that your router has enough resources to perform as expected. The router will automatically migrate required configuration changes, but it is good practice to review the steps above and decide if you want to change your configuration. 
+
+For example, you may decide that you wish to change the way in which you sample OTLP traces in this new release and not simply preserve your existing configuration.
 
 ## Reporting upgrade issues
 
