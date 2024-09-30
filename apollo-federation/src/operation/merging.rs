@@ -183,7 +183,7 @@ impl SelectionSet {
         let target = Arc::make_mut(&mut self.selections);
         for other_selection in others {
             let other_key = other_selection.key();
-            match target.entry(other_key.clone()) {
+            match target.entry(other_key) {
                 selection_map::Entry::Occupied(existing) => match existing.get() {
                     Selection::Field(self_field_selection) => {
                         let Selection::Field(other_field_selection) = other_selection else {

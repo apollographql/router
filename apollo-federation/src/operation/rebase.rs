@@ -197,7 +197,7 @@ impl Field {
         }
 
         let field_from_parent = parent_type.field(self.name().clone())?;
-        return if field_from_parent.try_get(schema.schema()).is_some()
+        if field_from_parent.try_get(schema.schema()).is_some()
             && self.can_rebase_on(parent_type)?
         {
             let mut updated_field = self.clone();
@@ -210,7 +210,7 @@ impl Field {
                 parent_type: parent_type.clone(),
             }
             .into())
-        };
+        }
     }
 
     /// Verifies whether given field can be rebase on following parent type.

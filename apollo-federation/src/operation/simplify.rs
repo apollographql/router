@@ -295,7 +295,7 @@ impl InlineFragmentSelection {
 
             // Otherwise, if there are "liftable" selections, we must return a set comprised of those lifted selection,
             // and the current fragment _without_ those lifted selections.
-            if liftable_selections.len() > 0 {
+            if !liftable_selections.is_empty() {
                 // Converting `... [on T] { <liftable_selections> <non-liftable_selections> }` into
                 // `{ ... [on T] { <non-liftable_selections> } <liftable_selections> }`.
                 // PORT_NOTE: It appears that this lifting could be repeatable (meaning lifted

@@ -228,10 +228,7 @@ impl Selection {
             let diff = self_sub_selection.minus(other_sub_selection)?;
             if !diff.is_empty() {
                 return self
-                    .with_updated_selections(
-                        self_sub_selection.type_position.clone(),
-                        diff.into_iter(),
-                    )
+                    .with_updated_selections(self_sub_selection.type_position.clone(), diff)
                     .map(Some);
             }
         }
@@ -251,10 +248,7 @@ impl Selection {
                 return Ok(None);
             } else {
                 return self
-                    .with_updated_selections(
-                        self_sub_selection.type_position.clone(),
-                        common.into_iter(),
-                    )
+                    .with_updated_selections(self_sub_selection.type_position.clone(), common)
                     .map(Some);
             }
         }

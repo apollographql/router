@@ -979,7 +979,7 @@ impl FragmentSpreadSelection {
             parent_type_position,
             type_condition_position: Some(self.spread.type_condition_position.clone()),
             directives: self.spread.directives.clone(),
-            selection_id: self.spread.selection_id.clone(),
+            selection_id: self.spread.selection_id,
         };
         if predicate(inline_fragment.into())? {
             return Ok(true);
