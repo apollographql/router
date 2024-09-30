@@ -35,11 +35,122 @@ To respond incrementally, the router uses a multipart-encoded HTTP response. To 
 
 The router's `@defer` support is compatible with all [federation-compatible subgraph libraries](/federation/building-supergraphs/supported-subgraphs/), because the deferring logic exists entirely within the router itself.
 
-### Basics of `@defer`
+## Which fields can my router defer?
 
-To learn the basics of the `@defer` directive and how you can use it with your supergraph, first read [Deferring query response data with GraphOS](/graphos/operations/defer).
+Your router can defer the following fields in your schema:
 
-The remainder of this article covers the router's defer implementation in greater depth.
+- Root fields of the `Query` type (along with their subfields)
+- Fields of any entity type (along with their subfields)
+  - Deferring entity fields is extremely powerful but requires some setup if you aren't using entities already. This is covered in more detail [below](#entity-fields).
+
+See below for more information on each of these.
+
+### `Query` fields
+
+Your router can defer any field of your schema's `Query` type, along with any subfields of those fields:
+
+```graphql
+query GetUsersAndDeferProducts {
+  users {
+    id
+  }
+  # highlight-start
+  ... @defer {
+    products {
+      id
+    }
+  }
+  # highlight-end
+}
+```
+
+With the query above, the router first returns a list of `User` IDs, then later completes the response with a list of `Product` IDs.
+
+### Entity fields
+
+Your router supports deferring fields of the special object types in your supergraph called entities.
+
+Entities are object types that often define their fields across multiple subgraphs (but they don't have to). You can identify an entity by its use of the `@key` directive. In the example subgraph schemas below, the `Product` type is an entity:
+
+<CodeColumns>
+
+```graphql title="Products subgraph"
+type Product @key(fields: "id") {
+  id: ID!
+  name: String!
+  price: Int!
+}
+
+type Query {
+  topProducts: [Product!]!
+}
+```
+
+```graphql title="Reviews subgraph"
+type Product @key(fields: "id") {
+  id: ID!
+  reviews: [Review!]!
+}
+
+type Review {
+  score: Int!
+}
+```
+
+</CodeColumns>
+
+Entities are query entry points into your subgraphs, and this is what enables your router to defer their fields: the router can send a followup query to a subgraph to fetch any entity fields that it doesn't fetch initially.
+
+Here's an example query that defers entity fields using the subgraphs above:
+
+```graphql
+query GetProductsAndDeferReviews {
+  topProducts {
+    id
+    name
+    # highlight-start
+    ... @defer {
+      reviews {
+        score
+      }
+    }
+    # highlight-end
+  }
+}
+```
+
+To handle this query, the router first resolves and returns a list of `Product` objects with their IDs and names. Later, the router completes the response by returning review scores for each of those products.
+
+<Note>
+
+It doesn't matter which subgraph defines a particular entity field! Queries can defer entity fields that are defined across any number of different subgraphs.
+
+</Note>
+
+### Defining entities in your subgraphs
+
+If your subgraphs don't yet include any entities, you need to define some before clients can start deferring their fields in queries.
+
+To learn about creating entities, see [this guide](/graphos/schema-design/federated-schemas/entities).
+
+## Requirements for `@defer`
+
+To use `@defer` successfully, your supergraph and its clients must meet the requirements listed below. These requirements are divided between [general requirements](#general-requirements) (requirements for using `@defer` at all) and [entity-specific requirements](#entity-specific-requirements) (additional requirements for using `@defer` with entity fields).
+
+### General requirements
+
+- Clients must support receiving deferred query responses as multipart HTTP responses.
+  - This functionality is currently supported in Apollo Client for [Web](/react/data/defer) and [Kotlin (experimental)](/kotlin/fetching/defer).
+- Your supergraph must be one of:
+  - A [cloud supergraph](/graphos/routing/cloud#cloud-supergraphs)
+  - A [self-hosted supergraph](/graphos/routing/self-hosted#self-hosted-supergraphs) running the [GraphOS Router](/graphos/routing/about-router)
+
+### Entity-specific requirements
+
+- Your subgraphs must each use a [subgraph-compatible GraphQL server library](/graphos/reference/federation/compatible-subgraphs).
+- You must [define one or more entities](/graphos/schema-design/federated-schemas/entities/intro#defining-an-entity) in your subgraph schemas.
+- Each subgraph must define a [reference resolver](/graphos/schema-design/federated-schemas/entities/intro#2-define-a-reference-resolver) for each of its entities (or implement the corresponding functionality in your chosen subgraph library).
+  - This is what enables the router to directly access entity fields with followup sub-queries.
 
 ## Executing a `@defer` query
 
@@ -56,7 +167,7 @@ Accept: multipart/mixed;deferSpec=20220824, application/json
 
 ## How does the router defer fields?
 
-As discussed in [this article](/graphos/operations/defer/#which-fields-can-my-router-defer), the router can defer the following fields in your schema:
+As discussed in [this section](#which-fields-can-my-router-defer), the router can defer the following fields in your schema:
 
 - Root fields of the `Query` type (along with their subfields)
 - Fields of any entity type (along with their subfields)
