@@ -109,6 +109,14 @@ preview_entity_cache:
         private_id: "user_id"
 ```
 
+
+<Note>
+
+In router versions 1.51 and earlier, Redis and per-subgraph caching configurations were set directly on `preview_entity_cache`, for example `preview_entity_cache.redis`.
+While in [preview](/resources/product-launch-stages/#product-launch-stages), configuration may change.
+
+</Note>
+
 ### Configure time to live (TTL)
 
 Besides configuring a global TTL for all the entries in Redis, the GraphOS Router also honors the [`Cache-Control` header](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control) returned with the subgraph response. It generates a `Cache-Control` header for the client response by aggregating the TTL information from all response parts.
