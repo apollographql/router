@@ -192,7 +192,6 @@ dependencies = [
  "petgraph",
  "ron",
  "serde",
- "serde_json",
  "serde_json_bytes",
  "sha1",
  "strum 0.26.3",
@@ -260,7 +259,6 @@ dependencies = [
  "ci_info",
  "clap",
  "console",
- "console-subscriber",
  "cookie",
  "crossbeam-channel",
  "dashmap",
@@ -436,7 +434,6 @@ dependencies = [
  "anyhow",
  "apollo-router",
  "async-trait",
- "futures",
  "schemars",
  "serde",
  "serde_json",
@@ -1711,43 +1708,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "console-api"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd326812b3fd01da5bb1af7d340d0d555fd3d4b641e7f1dfcf5962a902952787"
-dependencies = [
- "futures-core",
- "prost 0.12.6",
- "prost-types 0.12.6",
- "tonic 0.10.2",
- "tracing-core",
-]
-
-[[package]]
-name = "console-subscriber"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7481d4c57092cd1c19dd541b92bdce883de840df30aa5d03fd48a3935c01842e"
-dependencies = [
- "console-api",
- "crossbeam-channel",
- "crossbeam-utils",
- "futures-task",
- "hdrhistogram",
- "humantime",
- "prost-types 0.12.6",
- "serde",
- "serde_json",
- "thread_local",
- "tokio",
- "tokio-stream",
- "tonic 0.10.2",
- "tracing",
- "tracing-core",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "const-oid"
 version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2550,11 +2510,6 @@ dependencies = [
  "async-graphql-axum",
  "axum",
  "env_logger",
- "futures",
- "lazy_static",
- "log",
- "rand 0.8.5",
- "serde_json",
  "tokio",
  "tower",
 ]
@@ -3180,10 +3135,7 @@ version = "7.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "765c9198f173dd59ce26ff9f95ef0aafd0a0fe01fb9d72841bc5066a4c06511d"
 dependencies = [
- "base64 0.21.7",
  "byteorder",
- "flate2",
- "nom",
  "num-traits",
 ]
 
@@ -5626,7 +5578,6 @@ name = "router-fuzz"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "apollo-compiler",
  "apollo-parser",
  "apollo-router",
  "apollo-smith",
@@ -5636,12 +5587,10 @@ dependencies = [
  "libfuzzer-sys",
  "log",
  "reqwest",
- "router-bridge",
  "schemars",
  "serde",
  "serde_json",
  "serde_json_bytes",
- "tokio",
  "tower",
 ]
 
@@ -6688,7 +6637,6 @@ dependencies = [
  "signal-hook-registry",
  "socket2 0.5.7",
  "tokio-macros",
- "tracing",
  "windows-sys 0.48.0",
 ]
 
@@ -6849,33 +6797,6 @@ dependencies = [
  "rustls-pemfile",
  "tokio",
  "tokio-rustls",
- "tokio-stream",
- "tower",
- "tower-layer",
- "tower-service",
- "tracing",
-]
-
-[[package]]
-name = "tonic"
-version = "0.10.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d560933a0de61cf715926b9cac824d4c883c2c43142f787595e48280c40a1d0e"
-dependencies = [
- "async-stream",
- "async-trait",
- "axum",
- "base64 0.21.7",
- "bytes",
- "h2",
- "http 0.2.12",
- "http-body 0.4.6",
- "hyper",
- "hyper-timeout",
- "percent-encoding",
- "pin-project",
- "prost 0.12.6",
- "tokio",
  "tokio-stream",
  "tower",
  "tower-layer",
