@@ -8,7 +8,7 @@ Learn how to upgrade from your GraphOS Router deployment from version 1.x to 2.x
 
 <Note>
 
-The latest version of GraphOS Router v2.x is **TBD**.
+The latest version of GraphOS Router v2.x is `v2.0.0-preview.0`.
 
 </Note>
 
@@ -86,9 +86,7 @@ will restore the default 1.x behavior.
 
 Make sure that you are referencing the correct router release: v2.0.0-preview.0
 
-During upgrade, carefully monitor resource consumption.
-
-TBD: Write a list of all considerations and possible changes a user must make (configuration, deployment, etc.) to upgrade to 2.x. Add some text here about various changes and how they impact 1.x deployments. Perhaps talk about tooling that automates upgrade (config in particular).
+During upgrade, carefully monitor logs and resource consumption to ensure that your router has successully upgraded and that your router has enough resources to perform as expected. The router will automatically migrate required configuration changes, but it is good practice to review the Configuration notes above and decide if you want to change your configuration. For example: you may decide that you wish to change the way in which you sample OTLP traces in this new release and not simply preserve your existing configuration.
 
 ## Reporting upgrade issues
 
