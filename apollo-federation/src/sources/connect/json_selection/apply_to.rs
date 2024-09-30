@@ -662,10 +662,10 @@ mod tests {
             }),
         );
 
-        check_ok(selection!(".nested.hello"), json!("world"));
+        check_ok(selection!("nested.hello"), json!("world"));
         check_ok(selection!("$.nested.hello"), json!("world"));
 
-        check_ok(selection!(".nested.world"), json!("hello"));
+        check_ok(selection!("nested.world"), json!("hello"));
         check_ok(selection!("$.nested.world"), json!("hello"));
 
         check_ok(
@@ -702,7 +702,7 @@ mod tests {
         );
 
         check_ok(
-            selection!(".array { hello }"),
+            selection!("$.array { hello }"),
             json!([
                 { "hello": "world 0" },
                 { "hello": "world 1" },
@@ -711,7 +711,7 @@ mod tests {
         );
 
         check_ok(
-            selection!("worlds: .array.hello"),
+            selection!("worlds: array.hello"),
             json!({
                 "worlds": [
                     "world 0",
@@ -733,7 +733,7 @@ mod tests {
         );
 
         check_ok(
-            selection!(".array.hello"),
+            selection!("array.hello"),
             json!(["world 0", "world 1", "world 2",]),
         );
 
@@ -743,7 +743,7 @@ mod tests {
         );
 
         check_ok(
-            selection!("nested grouped: { hello worlds: .array.hello }"),
+            selection!("nested grouped: { hello worlds: array.hello }"),
             json!({
                 "nested": {
                     "hello": "world",
@@ -844,7 +844,7 @@ mod tests {
         );
 
         check_ok(
-            selection!("englishAndGreekLetters { C: .c.en * { gr }}"),
+            selection!("englishAndGreekLetters { C: c.en * { gr }}"),
             json!({
                 "englishAndGreekLetters": {
                     "a": { "gr": "alpha" },
@@ -874,7 +874,7 @@ mod tests {
         );
 
         check_ok(
-            selection!(".'englishAndSpanishNumbers' { en rest: * }"),
+            selection!("$.'englishAndSpanishNumbers' { en rest: * }"),
             json!([
                 { "en": "one", "rest": { "es": "uno" } },
                 { "en": "two", "rest": { "es": "dos" } },
@@ -908,7 +908,7 @@ mod tests {
         );
 
         check_ok(
-            selection!("asciiCharCodes { * } gee: .asciiCharCodes.G"),
+            selection!("asciiCharCodes { * } gee: asciiCharCodes.G"),
             json!({
                 "asciiCharCodes": data.get("asciiCharCodes").unwrap(),
                 "gee": 71,
@@ -984,16 +984,12 @@ mod tests {
             (Some(json!({})), make_yellow_errors_expected(0..6)),
         );
         assert_eq!(
-            selection!(".yellow").apply_to(&data),
-            (None, make_yellow_errors_expected(1..7)),
-        );
-        assert_eq!(
             selection!("$.yellow").apply_to(&data),
             (None, make_yellow_errors_expected(2..8)),
         );
 
         assert_eq!(
-            selection!(".nested.hello").apply_to(&data),
+            selection!("nested.hello").apply_to(&data),
             (Some(json!(123)), vec![],)
         );
 
@@ -1010,8 +1006,12 @@ mod tests {
             )
         }
         assert_eq!(
-            selection!(".nested.'yellow'").apply_to(&data),
-            make_quoted_yellow_expected(8..16),
+            selection!("nested.'yellow'").apply_to(&data),
+            make_quoted_yellow_expected(7..15),
+        );
+        assert_eq!(
+            selection!("nested.\"yellow\"").apply_to(&data),
+            make_quoted_yellow_expected(7..15),
         );
         assert_eq!(
             selection!("$.nested.'yellow'").apply_to(&data),
@@ -1041,12 +1041,12 @@ mod tests {
             )
         }
         assert_eq!(
-            selection!(".nested { hola yellow world }").apply_to(&data),
-            make_nested_path_expected((10, 14), (15, 21)),
-        );
-        assert_eq!(
             selection!("$.nested { hola yellow world }").apply_to(&data),
             make_nested_path_expected((11, 15), (16, 22)),
+        );
+        assert_eq!(
+            selection!(" $ . nested { hola yellow world } ").apply_to(&data),
+            make_nested_path_expected((14, 18), (19, 25)),
         );
 
         fn make_partial_array_expected(
@@ -1075,16 +1075,16 @@ mod tests {
             )
         }
         assert_eq!(
-            selection!("partial: .array { hello goodbye }").apply_to(&data),
-            make_partial_array_expected((24, 31)),
-        );
-        assert_eq!(
             selection!("partial: $.array { hello goodbye }").apply_to(&data),
             make_partial_array_expected((25, 32)),
         );
+        assert_eq!(
+            selection!(" partial : $ . array { hello goodbye } ").apply_to(&data),
+            make_partial_array_expected((29, 36)),
+        );
 
         assert_eq!(
-            selection!("good: .array.hello bad: .array.smello").apply_to(&data),
+            selection!("good: array.hello bad: array.smello").apply_to(&data),
             (
                 Some(json!({
                     "good": [
@@ -1102,12 +1102,12 @@ mod tests {
                     ApplyToError::from_json(&json!({
                         "message": "Property .smello not found in object",
                         "path": ["array", 0, "smello"],
-                        "range": [31, 37],
+                        "range": [29, 35],
                     })),
                     ApplyToError::from_json(&json!({
                         "message": "Property .smello not found in object",
                         "path": ["array", 1, "smello"],
-                        "range": [31, 37],
+                        "range": [29, 35],
                     })),
                 ],
             )
@@ -1139,7 +1139,7 @@ mod tests {
         );
 
         assert_eq!(
-            selection!(".nested { grouped: { hello smelly world } }").apply_to(&data),
+            selection!("$.nested { grouped: { hello smelly world } }").apply_to(&data),
             (
                 Some(json!({
                     "grouped": {
@@ -1150,13 +1150,13 @@ mod tests {
                 vec![ApplyToError::from_json(&json!({
                     "message": "Property .smelly not found in object",
                     "path": ["nested", "smelly"],
-                    "range": [27, 33],
+                    "range": [28, 34],
                 })),],
             )
         );
 
         assert_eq!(
-            selection!("alias: .nested { grouped: { hello smelly world } }").apply_to(&data),
+            selection!("alias: $.nested { grouped: { hello smelly world } }").apply_to(&data),
             (
                 Some(json!({
                     "alias": {
@@ -1169,7 +1169,7 @@ mod tests {
                 vec![ApplyToError::from_json(&json!({
                     "message": "Property .smelly not found in object",
                     "path": ["nested", "smelly"],
-                    "range": [34, 40],
+                    "range": [35, 41],
                 }))],
             )
         );
@@ -1222,8 +1222,8 @@ mod tests {
             )
         }
         assert_eq!(
-            selection!(".arrayOfArrays.x").apply_to(&data),
-            make_array_of_arrays_x_expected((15, 16)),
+            selection!("arrayOfArrays.x").apply_to(&data),
+            make_array_of_arrays_x_expected((14, 15)),
         );
         assert_eq!(
             selection!("$.arrayOfArrays.x").apply_to(&data),
@@ -1261,8 +1261,8 @@ mod tests {
             )
         }
         assert_eq!(
-            selection!(".arrayOfArrays.y").apply_to(&data),
-            make_array_of_arrays_y_expected((15, 16)),
+            selection!("arrayOfArrays.y").apply_to(&data),
+            make_array_of_arrays_y_expected((14, 15)),
         );
         assert_eq!(
             selection!("$.arrayOfArrays.y").apply_to(&data),
@@ -1379,8 +1379,8 @@ mod tests {
             )
         }
         assert_eq!(
-            selection!("ys: .arrayOfArrays.y xs: .arrayOfArrays.x").apply_to(&data),
-            make_array_of_arrays_x_y_expected((40, 41), (19, 20)),
+            selection!("ys: arrayOfArrays.y xs: arrayOfArrays.x").apply_to(&data),
+            make_array_of_arrays_x_y_expected((38, 39), (18, 19)),
         );
         assert_eq!(
             selection!("ys: $.arrayOfArrays.y xs: $.arrayOfArrays.x").apply_to(&data),
@@ -2028,7 +2028,7 @@ mod tests {
                 selection!(
                     r#"
                     id: $this.id
-                    $args { .input { title body } }
+                    $args { $.input { title body } }
                     from
                 "#
                 )
@@ -2040,8 +2040,8 @@ mod tests {
                 selection!(
                     r#"
                     id: $this.id
-                    $args { .input { title body } extra }
-                    from: .from
+                    $args { $.input { title body } extra }
+                    from: $.from
                 "#
                 )
                 .apply_with_vars(&data, &vars),
@@ -2066,7 +2066,7 @@ mod tests {
                     $args {
                         __typename: $("Args")
 
-                        # Using $. instead of just . prevents .input from
+                        # Requiring $. instead of just . prevents .input from
                         # parsing as a key applied to the $("Args") string.
                         $.input { title body }
 
@@ -2258,12 +2258,17 @@ mod tests {
         );
 
         assert_eq!(
-            selection!(".'not an identifier'.'also.not.an.identifier'").apply_to(&data),
+            selection!("'not an identifier'.'also.not.an.identifier'").apply_to(&data),
             (Some(json!([0, 1, 2])), vec![],),
         );
 
         assert_eq!(
-            selection!(".\"not an identifier\" { safe: \"also.not.an.identifier\" }")
+            selection!("$.'not an identifier'.'also.not.an.identifier'").apply_to(&data),
+            (Some(json!([0, 1, 2])), vec![],),
+        );
+
+        assert_eq!(
+            selection!("$.\"not an identifier\" { safe: \"also.not.an.identifier\" }")
                 .apply_to(&data),
             (
                 Some(json!([
@@ -2299,12 +2304,17 @@ mod tests {
         );
 
         assert_eq!(
-            selection!(".another.'pesky string literal!'.'{ evil braces }'").apply_to(&data),
+            selection!("another.'pesky string literal!'.'{ evil braces }'").apply_to(&data),
             (Some(json!(true)), vec![],),
         );
 
         assert_eq!(
-            selection!(".another.'pesky string literal!'.\"identifier\"").apply_to(&data),
+            selection!("another.'pesky string literal!'.\"identifier\"").apply_to(&data),
+            (Some(json!(123)), vec![],),
+        );
+
+        assert_eq!(
+            selection!("$.another.'pesky string literal!'.\"identifier\"").apply_to(&data),
             (Some(json!(123)), vec![],),
         );
     }

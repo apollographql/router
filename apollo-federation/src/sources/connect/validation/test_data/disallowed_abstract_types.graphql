@@ -6,7 +6,7 @@ type Query {
     @connect(
       http: { GET: "http://127.0.0.1:8000/products" }
       selection: """
-      .results {
+      $.results {
         id
         title
         author { name }

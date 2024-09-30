@@ -286,10 +286,10 @@ mod tests {
     fn test() {
         let json = super::JSONSelection::parse(
             r###"
-        .result {
+        $.result {
           a
           b: c
-          d: .e.f
+          d: e.f
           g
           h: 'i-j'
           k: { l m: n }
@@ -331,7 +331,7 @@ mod tests {
         let transformed = json.apply_selection_set(&selection_set);
         assert_eq!(
             transformed.to_string(),
-            r###".result {
+            r###"$.result {
   z: a
   y: c
   x: e.f
@@ -348,7 +348,7 @@ mod tests {
     fn test_star() {
         let json_selection = super::JSONSelection::parse(
             r###"
-        .result {
+        $.result {
           a
           b_alias: b
           c {
@@ -362,7 +362,7 @@ mod tests {
             }
             rest: *
           }
-          path_to_f: .c.f
+          path_to_f: c.f
           rest: *
         }
         "###,
@@ -408,7 +408,7 @@ mod tests {
         let transformed = json_selection.apply_selection_set(&selection_set);
         assert_eq!(
             transformed.to_string(),
-            r###".result {
+            r###"$.result {
   a
   b_alias: b
   c {
@@ -477,7 +477,7 @@ mod tests {
     fn test_depth() {
         let json = super::JSONSelection::parse(
             r###"
-        .result {
+        $.result {
           a {
             b {
               renamed: c
@@ -516,7 +516,7 @@ mod tests {
         let transformed = json.apply_selection_set(&selection_set);
         assert_eq!(
             transformed.to_string(),
-            r###".result {
+            r###"$.result {
   a {
     b {
       renamed: c
@@ -549,7 +549,7 @@ mod tests {
     fn test_typename() {
         let json = super::JSONSelection::parse(
             r###"
-            .result {
+            $.result {
               id
               author: {
                 id: authorId
@@ -585,7 +585,7 @@ mod tests {
         let transformed = json.apply_selection_set(&selection_set);
         assert_eq!(
             transformed.to_string(),
-            r###".result {
+            r###"$.result {
   __typename: $->echo("T")
   id
   author: {

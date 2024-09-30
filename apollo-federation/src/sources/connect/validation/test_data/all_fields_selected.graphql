@@ -17,7 +17,7 @@ type Query {
       wrapped: {
         id
       }
-      unwrapped: .foo.bar
+      unwrapped: foo.bar
       """
     )
     @connect(
