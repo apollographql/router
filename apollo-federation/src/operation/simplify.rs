@@ -306,7 +306,7 @@ impl InlineFragmentSelection {
                 let rebased_inline_fragment =
                     self.inline_fragment.rebase_on(parent_type, schema)?;
 
-                let mut nonliftable_selections = self.selection_set.selections.clone();
+                let mut nonliftable_selections = selection_set.selections.clone();
                 Arc::make_mut(&mut nonliftable_selections)
                     .retain(|k, _| !liftable_selections.contains_key(k));
 
