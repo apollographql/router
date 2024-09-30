@@ -2,6 +2,7 @@ use std::fmt;
 use std::fmt::Display;
 use std::fmt::Formatter;
 
+use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::Value;
 use apollo_compiler::schema::Component;
@@ -41,6 +42,7 @@ impl Display for FieldCoordinate<'_> {
 /// The location of a `@connect` directive.
 #[derive(Clone, Copy)]
 pub(super) struct ConnectDirectiveCoordinate<'a> {
+    pub directive: &'a Node<Directive>,
     pub connect_directive_name: &'a Name,
     pub field_coordinate: FieldCoordinate<'a>,
 }
@@ -48,10 +50,38 @@ pub(super) struct ConnectDirectiveCoordinate<'a> {
 impl Display for ConnectDirectiveCoordinate<'_> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let Self {
+            directive: _,
             connect_directive_name,
             field_coordinate,
         } = self;
         write!(f, "`@{connect_directive_name}` on {field_coordinate}",)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct SelectionCoordinate<'a> {
+    pub(crate) connect_directive_coordinate: ConnectDirectiveCoordinate<'a>,
+}
+
+impl Display for SelectionCoordinate<'_> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        let ConnectDirectiveCoordinate {
+            directive: _,
+            connect_directive_name,
+            field_coordinate,
+        } = self.connect_directive_coordinate;
+        write!(
+            f,
+            "`@{connect_directive_name}({CONNECT_SELECTION_ARGUMENT_NAME}:)` on {field_coordinate}"
+        )
+    }
+}
+
+impl<'a> From<ConnectDirectiveCoordinate<'a>> for SelectionCoordinate<'a> {
+    fn from(connect_directive_coordinate: ConnectDirectiveCoordinate<'a>) -> Self {
+        Self {
+            connect_directive_coordinate,
+        }
     }
 }
 
@@ -63,6 +93,7 @@ pub(super) struct ConnectHTTPCoordinate<'a> {
 impl Display for ConnectHTTPCoordinate<'_> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let ConnectDirectiveCoordinate {
+            directive: _,
             connect_directive_name,
             field_coordinate,
         } = self.connect_directive_coordinate;
@@ -94,6 +125,7 @@ impl Display for HttpMethodCoordinate<'_> {
         let Self {
             connect:
                 ConnectDirectiveCoordinate {
+                    directive: _,
                     connect_directive_name,
                     field_coordinate,
                 },
@@ -123,14 +155,6 @@ impl Display for BaseUrlCoordinate<'_> {
             "`@{source_directive_name}({SOURCE_BASE_URL_ARGUMENT_NAME}:)`",
         )
     }
-}
-
-pub(super) fn connect_directive_selection_coordinate(
-    connect_directive_name: &Name,
-    object: &Node<ObjectType>,
-    field: &Name,
-) -> String {
-    format!("`@{connect_directive_name}({CONNECT_SELECTION_ARGUMENT_NAME}:)` on `{object_name}.{field}`", object_name = object.name)
 }
 
 pub(super) fn connect_directive_http_body_coordinate(
