@@ -423,10 +423,10 @@ mod tests {
             "$this.a.b",
             "$this.id.first {\n  username\n}",
             // Key
-            ".first",
+            "$.first",
             "a.b.c.d.e",
             "one.two.three {\n  a\n  b\n}",
-            ".single {\n  x\n}",
+            "$.single {\n  x\n}",
             "results->slice($(-1)->mul($args.suffixLength))",
             "$(1234)->add($(5678)->mul(2))",
             "$(true)->and($(false)->not)",
