@@ -163,73 +163,73 @@
                                 }
                             }
                         }
-                    ],
-                    "products": {
-                        "requests": [
-                            {
-                                "request": {
-                                    "body": {
-                                        "query": "query TestItf2__products__1($representations:[_Any!]!){_entities(representations:$representations){...on I{y}}}",
-                                        "operationName": "TestItf2__products__1",
-                                        "variables": {
-                                            "representations": [
-                                                {
-                                                    "__typename": "I",
-                                                    "id": "1"
-                                                }
-                                            ]
-                                        }
+                    ]
+                },
+                "products": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query TestItf2__products__1($representations:[_Any!]!){_entities(representations:$representations){...on I{y}}}",
+                                    "operationName": "TestItf2__products__1",
+                                    "variables": {
+                                        "representations": [
+                                            {
+                                                "__typename": "I",
+                                                "id": "1"
+                                            }
+                                        ]
                                     }
-                                },
-                                "response": {
-                                    "body": {
-                                        "data": {
-                                            "_entities": [
-                                                {
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "_entities": [
+                                            {
+                                                "y": 1
+                                            }
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                },
+                "reviews": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {
+                                    "query": "query TestItf2__reviews__2($representations:[_Any!]!){_entities(representations:$representations){...on C{c}}}",
+                                    "operationName": "TestItf2__reviews__2",
+                                    "variables": {
+                                        "representations": [
+                                            {
+                                                "__typename": "C",
+                                                "i": {
+                                                    "x": 1,
                                                     "y": 1
-                                                }
-                                            ]
-                                        }
+                                                },
+                                                "id": "1"
+                                            }
+                                        ]
+                                    }
+                                }
+                            },
+                            "response": {
+                                "body": {
+                                    "data": {
+                                        "_entities": [
+                                            {
+                                                "c": "c"
+                                            }
+                                        ]
                                     }
                                 }
                             }
-                        ]
-                    },
-                    "reviews": {
-                        "requests": [
-                            {
-                                "request": {
-                                    "body": {
-                                        "query": "query TestItf2__reviews__2($representations:[_Any!]!){_entities(representations:$representations){...on C{c}}}",
-                                        "operationName": "TestItf2__reviews__2",
-                                        "variables": {
-                                            "representations": [
-                                                {
-                                                    "__typename": "C",
-                                                    "i": {
-                                                        "x": 1,
-                                                        "y": 1
-                                                    },
-                                                    "id": "1"
-                                                }
-                                            ]
-                                        }
-                                    }
-                                },
-                                "response": {
-                                    "body": {
-                                        "data": {
-                                            "_entities": [
-                                                {
-                                                    "c": "c"
-                                                }
-                                            ]
-                                        }
-                                    }
-                                }
-                            }
-                        ]
-                    }
+                        }
+                    ]
                 }
             }
         },
