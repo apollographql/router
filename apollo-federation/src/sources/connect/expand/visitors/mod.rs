@@ -398,7 +398,7 @@ mod tests {
         c
         e
         f
-        | i
+        |  i
         j
         "###);
     }
