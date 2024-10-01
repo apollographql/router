@@ -11,6 +11,14 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ## 🚀 Features
 
+## Native query planner is now in public preview
+
+The native query planner is now in public preview. You can configure the `experimental_query_planner_mode` option in the router configuration YAML to change the mode of the native query planner.  The following modes are available:
+
+- `new`: Enable _only_ the new Rust-native query planner in the hot-path of query execution.
+- `legacy`: Enable _only_ the legacy JavaScript query planner in the hot-path of query execution.
+- `both_best_effort`: Enables _both_ the new and legacy query planners.  They are configured in a comparison-based mode of operation with the legacy planner in the hot-path and the and the new planner in the cold-path.  Comparisions are made between the two plans on a sampled basis and metrics are available to analyze the differences in aggregate.
+
 ### Support loading Apollo key from file ([PR #5917](https://github.com/apollographql/router/pull/5917))
 
 You can now specific the location to a file containing the Apollo key that's used by Apollo Uplink and usage reporting. The router now supports both the `--apollo-key-path` CLI argument and the `APOLLO_KEY_PATH` environment variable for passing the file containing your Apollo key.
@@ -20,6 +28,7 @@ Previously, the router supported only the `APOLLO_KEY` environment variable to p
 Note: This feature is unavailable for Windows.
 
 By [@lleadbet](https://github.com/lleadbet) in https://github.com/apollographql/router/pull/5917
+
 
 ## 🐛 Fixes
 
