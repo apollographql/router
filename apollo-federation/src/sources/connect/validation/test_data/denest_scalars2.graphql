@@ -12,7 +12,7 @@ type Query {
         lastName: last
       }
       $.address {
-        street
+        street { number name }
       }
       """
     )
@@ -22,10 +22,5 @@ type User {
   id: ID!
   firstName: String
   lastName: String
-  street: Street
-}
-
-type Street {
-  number: Int
-  name: String
+  street: String
 }
