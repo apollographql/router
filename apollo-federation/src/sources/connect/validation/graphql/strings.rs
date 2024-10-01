@@ -27,7 +27,10 @@ impl<'schema> GraphQLString<'schema> {
     /// Get the raw string value of this GraphQL string literal
     ///
     /// Returns `None` if the value was not a string literal or if location data is messed up
-    pub fn new(value: &'schema Node<Value>, sources: &'schema SourceMap) -> Result<Self, ()> {
+    pub(crate) fn new(
+        value: &'schema Node<Value>,
+        sources: &'schema SourceMap,
+    ) -> Result<Self, ()> {
         let value_without_quotes = value.as_str().ok_or(())?;
         let source_span = value.location().ok_or(())?;
         let file = sources.get(&source_span.file_id()).ok_or(())?;
@@ -54,11 +57,11 @@ impl<'schema> GraphQLString<'schema> {
         })
     }
 
-    pub fn as_str(&self) -> &str {
+    pub(crate) fn as_str(&self) -> &str {
         self.raw_string
     }
 
-    pub fn line_col_for_subslice(
+    pub(crate) fn line_col_for_subslice(
         &self,
         substring_location: Range<usize>,
         schema_info: &SchemaInfo,

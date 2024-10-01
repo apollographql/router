@@ -198,6 +198,7 @@ dependencies = [
  "ron",
  "rstest",
  "serde",
+ "serde_json",
  "serde_json_bytes",
  "sha1",
  "strum 0.26.3",

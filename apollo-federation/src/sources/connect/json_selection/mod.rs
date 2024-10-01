@@ -16,4 +16,4 @@ pub use apply_to::*;
 pub(crate) use known_var::*;
 pub use parser::*;
 #[cfg(test)]
-pub use pretty::*;
+pub(crate) use pretty::*;

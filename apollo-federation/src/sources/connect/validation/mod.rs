@@ -300,6 +300,7 @@ fn check_conflicting_directives(schema: &Schema) -> Vec<Message> {
 }
 
 const DEFAULT_SOURCE_DIRECTIVE_NAME: &str = "connect__source";
+#[allow(unused)]
 const DEFAULT_CONNECT_DIRECTIVE_NAME: &str = "connect__connect";
 
 fn validate_source(directive: &Component<Directive>, schema: &SchemaInfo) -> SourceDirective {

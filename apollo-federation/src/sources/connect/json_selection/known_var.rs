@@ -31,6 +31,7 @@ impl KnownVariable {
         }
     }
 
+    #[allow(unused)]
     pub(super) fn into_with_range(self) -> WithRange<Self> {
         WithRange::new(self, None)
     }

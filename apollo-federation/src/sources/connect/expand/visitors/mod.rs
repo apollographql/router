@@ -3,7 +3,7 @@
 //! This module contains various helper visitors for traversing nested structures,
 //! adding needed types to a mutable schema.
 
-pub mod input;
+pub(crate) mod input;
 mod selection;
 
 use std::collections::VecDeque;
@@ -174,7 +174,7 @@ pub(crate) struct SchemaVisitor<'a, Group, GroupType> {
 }
 
 impl<'a, Group, GroupType> SchemaVisitor<'a, Group, GroupType> {
-    pub fn new(
+    pub(crate) fn new(
         original_schema: &'a ValidFederationSchema,
         to_schema: &'a mut FederationSchema,
         directive_deny_list: &'a IndexSet<Name>,

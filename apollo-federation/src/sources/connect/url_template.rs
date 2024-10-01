@@ -26,14 +26,14 @@ pub struct URLTemplate {
 /// A single component of a path, like `/<component>` or a single query parameter, like `?<something>`.
 /// Each component can consist of multiple parts, which are either text or variables.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct Component {
+pub(crate) struct Component {
     /// The parts, which together, make up the single path component or query parameter.
     parts: Vec<ValuePart>,
 }
 
 /// A piece of a path or query parameter, which is either static text or a variable.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub enum ValuePart {
+pub(crate) enum ValuePart {
     Text(String),
     Var(Variable),
 }
@@ -241,6 +241,7 @@ impl Component {
         Some(value)
     }
 
+    #[allow(unused)]
     fn extract_vars(&self, concrete_value: &Component) -> Result<Map<ByteString, JSON>, String> {
         let mut concrete_text = String::new();
         for part in &concrete_value.parts {
