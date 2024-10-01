@@ -229,7 +229,7 @@ impl LitExpr {
         })
     }
 
-    #[allow(unused)]
+    #[cfg(test)]
     pub(super) fn into_with_range(self) -> WithRange<Self> {
         WithRange::new(self, None)
     }
