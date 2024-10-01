@@ -59,11 +59,11 @@ ci = []
 features = ["docs_rs"]
 
 [dependencies]
+arc-swap = "1.6.0"
 access-json = "0.1.0"
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
 apollo-federation = { path = "../apollo-federation", version = "=2.0.0-alpha.7" }
-arc-swap = "1.6.0"
 async-channel = "1.9.0"
 async-compression = { version = "0.4.6", features = [
     "tokio",
