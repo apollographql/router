@@ -163,10 +163,6 @@ impl FederationSchema {
         })
     }
 
-    pub(crate) fn validate(self) -> Result<ValidFederationSchema, FederationError> {
-        self.validate_or_return_self().map_err(|e| e.1)
-    }
-
     /// Similar to `Self::validate` but returns `self` as part of the error should it be needed by
     /// the caller
     pub(crate) fn validate_or_return_self(
@@ -230,10 +226,6 @@ impl ValidFederationSchema {
         let schema = FederationSchema::new(schema.into_inner())?;
 
         Self::new_assume_valid(schema).map_err(|(_schema, error)| error)
-    }
-
-    pub(crate) fn ptr_eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.schema, &other.schema)
     }
 
     /// Construct a ValidFederationSchema by assuming the given FederationSchema is valid.
