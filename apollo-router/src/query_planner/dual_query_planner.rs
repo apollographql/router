@@ -734,22 +734,24 @@ fn ast_value_maybe_coerced_to(x: &ast::Value, y: &ast::Value) -> bool {
             }
         }
 
-        // Special case 2: Rust QP expands a list/object value by filling in its
-        // default item/field values.
-        // - If the Rust QP value subsumes the JS QP value, consider it a match.
-        // - Assuming the Rust QP object value has only default item/field values.
+        // Special case 2: Rust QP expands a object value by filling in its
+        // default field values.
+        // - If the Rust QP object value subsumes the JS QP object value, consider it a match.
+        // - Assuming the Rust QP object value has only default field values.
         // - Warning: This is an unsound heuristic.
-        (ast::Value::List(ref x), ast::Value::List(ref y)) => {
-            if vec_includes_as_set(y, x, |yy, xx| {
-                xx == yy || ast_value_maybe_coerced_to(xx, yy)
-            }) {
-                return true;
-            }
-        }
         (ast::Value::Object(ref x), ast::Value::Object(ref y)) => {
             if vec_includes_as_set(y, x, |(yy_name, yy_val), (xx_name, xx_val)| {
                 xx_name == yy_name
                     && (xx_val == yy_val || ast_value_maybe_coerced_to(xx_val, yy_val))
+            }) {
+                return true;
+            }
+        }
+
+        // Recurse into list items.
+        (ast::Value::List(ref x), ast::Value::List(ref y)) => {
+            if vec_matches(x, y, |xx, yy| {
+                xx == yy || ast_value_maybe_coerced_to(xx, yy)
             }) {
                 return true;
             }
@@ -906,26 +908,6 @@ mod ast_comparison_tests {
         let op_x = r#"query($qv1: T! = {field1: true}) { x(arg1: $qv1) }"#;
         let op_y =
             r#"query($qv1: T! = { field1: true, field2: "default_value" }) { x(arg1: $qv1) }"#;
-        let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
-        let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
-        assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
-    }
-
-    #[test]
-    fn test_query_variable_decl_list_value_coercion_empty_case() {
-        // Note: Rust QP expands empty list default values by filling in its default items.
-        let op_x = r#"query($qv1: [Int!]! = []) { x(arg1: $qv1) }"#;
-        let op_y = r#"query($qv1: [Int!]! = [1, 42]) { x(arg1: $qv1) }"#;
-        let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
-        let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
-        assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
-    }
-
-    #[test]
-    fn test_query_variable_decl_list_value_coercion_non_empty_case() {
-        // Note: Rust QP expands empty list default values by filling in its default items.
-        let op_x = r#"query($qv1: [Int!]! = [1]) { x(arg1: $qv1) }"#;
-        let op_y = r#"query($qv1: [Int!]! = [1, 42]) { x(arg1: $qv1) }"#;
         let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
         let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
         assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
