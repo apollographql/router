@@ -10,7 +10,7 @@ use ::tracing::info_span;
 use ::tracing::Span;
 use axum::headers::HeaderName;
 use config_new::cache::CacheInstruments;
-use config_new::connectors::http::instruments::ConnectorHttpInstruments;
+use config_new::connector::http::instruments::ConnectorHttpInstruments;
 use config_new::instruments::InstrumentsConfig;
 use config_new::instruments::StaticInstrument;
 use config_new::Selectors;

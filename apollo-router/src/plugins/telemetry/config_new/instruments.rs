@@ -38,11 +38,8 @@ use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
 use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
 use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
 use crate::plugins::telemetry::config_new::conditions::Condition;
-use crate::plugins::telemetry::config_new::connectors::http::attributes::ConnectorHttpAttributes;
-use crate::plugins::telemetry::config_new::connectors::http::instruments::ConnectorHttpInstruments;
-use crate::plugins::telemetry::config_new::connectors::http::instruments::ConnectorInstrumentsConfig;
-use crate::plugins::telemetry::config_new::connectors::http::selectors::ConnectorHttpSelector;
-use crate::plugins::telemetry::config_new::connectors::http::selectors::ConnectorHttpValue;
+use crate::plugins::telemetry::config_new::connector::http::instruments::ConnectorHttpInstruments;
+use crate::plugins::telemetry::config_new::connector::instruments::ConnectorInstrumentsKind;
 use crate::plugins::telemetry::config_new::cost::CostInstruments;
 use crate::plugins::telemetry::config_new::cost::CostInstrumentsConfig;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
@@ -86,11 +83,8 @@ pub(crate) struct InstrumentsConfig {
         SubgraphInstrumentsConfig,
         Instrument<SubgraphAttributes, SubgraphSelector, SubgraphValue>,
     >,
-    /// Connector service instruments. For more information see documentation on Router lifecycle.
-    pub(crate) connector: Extendable<
-        ConnectorInstrumentsConfig,
-        Instrument<ConnectorHttpAttributes, ConnectorHttpSelector, ConnectorHttpValue>,
-    >,
+    /// Connector service instruments.
+    pub(crate) connector: ConnectorInstrumentsKind,
     /// GraphQL response field instruments.
     pub(crate) graphql: Extendable<
         GraphQLInstrumentsConfig,
@@ -139,6 +133,11 @@ impl InstrumentsConfig {
                 format!("error for custom cache instrument {name:?} in condition: {err}")
             })?;
         }
+        for (name, custom) in &self.connector.http.custom {
+            custom.condition.validate(None).map_err(|err| {
+                format!("error for custom connector instrument {name:?} in condition: {err}")
+            })?;
+        }
 
         Ok(())
     }
@@ -153,6 +152,9 @@ impl InstrumentsConfig {
         self.subgraph
             .defaults_for_levels(self.default_requirement_level, TelemetryDataKind::Metrics);
         self.graphql
+            .defaults_for_levels(self.default_requirement_level, TelemetryDataKind::Metrics);
+        self.connector
+            .http
             .defaults_for_levels(self.default_requirement_level, TelemetryDataKind::Metrics);
     }
 
@@ -699,14 +701,14 @@ impl InstrumentsConfig {
         &self,
         static_instruments: Arc<HashMap<String, StaticInstrument>>,
     ) -> ConnectorHttpInstruments {
-        ConnectorHttpInstruments::new(&self.connector, static_instruments)
+        ConnectorHttpInstruments::new(&self.connector.http, static_instruments)
     }
 
     pub(crate) fn new_builtin_connector_instruments(&self) -> HashMap<String, StaticInstrument> {
         let meter = metrics::meter_provider().meter(METER_NAME);
-        let mut static_instruments = ConnectorHttpInstruments::new_builtin(&self.connector);
+        let mut static_instruments = ConnectorHttpInstruments::new_builtin(&self.connector.http);
 
-        for (instrument_name, instrument) in &self.connector.custom {
+        for (instrument_name, instrument) in &self.connector.http.custom {
             match instrument.ty {
                 InstrumentType::Counter => {
                     static_instruments.insert(
@@ -2632,6 +2634,8 @@ mod tests {
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_DEPTH;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_HEIGHT;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ROOT_FIELDS;
+    use crate::services::http::HttpRequest;
+    use crate::services::http::HttpResponse;
     use crate::services::OperationKind;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
@@ -2740,6 +2744,19 @@ mod tests {
         /// Note that this MUST not be used without first using supergraph request event
         ResponseField {
             typed_value: TypedValueMirror,
+        },
+        HttpRequest {
+            method: String,
+            uri: String,
+            #[serde(default)]
+            headers: HashMap<String, String>,
+            body: Option<String>,
+        },
+        HttpResponse {
+            status: u16,
+            #[serde(default)]
+            headers: HashMap<String, String>,
+            body: String,
         },
     }
 
@@ -2925,6 +2942,7 @@ mod tests {
                         let mut router_instruments = None;
                         let mut supergraph_instruments = None;
                         let mut subgraph_instruments = None;
+                        let mut connector_instruments = None;
                         let mut cache_instruments: Option<CacheInstruments> = None;
                         let graphql_instruments: GraphQLInstruments = config
                             .new_graphql_instruments(Arc::new(
@@ -3164,6 +3182,50 @@ mod tests {
                                             });
                                         }
                                     }
+                                }
+                                Event::HttpRequest {
+                                    method,
+                                    uri,
+                                    headers,
+                                    body,
+                                } => {
+                                    let mut http_request = http::Request::builder()
+                                        .method(Method::from_str(&method).expect("method"))
+                                        .uri(Uri::from_str(&uri).expect("uri"))
+                                        .body(body.unwrap_or(String::from("")).into())
+                                        .unwrap();
+                                    *http_request.headers_mut() = convert_http_headers(headers);
+                                    let request = HttpRequest {
+                                        http_request,
+                                        context: context.clone(),
+                                    };
+                                    connector_instruments = Some({
+                                        let connector_instruments = config
+                                            .new_connector_instruments(Arc::new(
+                                                config.new_builtin_connector_instruments(),
+                                            ));
+                                        connector_instruments.on_request(&request);
+                                        connector_instruments
+                                    });
+                                }
+                                Event::HttpResponse {
+                                    status,
+                                    headers,
+                                    body,
+                                } => {
+                                    let mut http_response = http::Response::builder()
+                                        .status(StatusCode::from_u16(status).expect("status"))
+                                        .body(body.into())
+                                        .unwrap();
+                                    *http_response.headers_mut() = convert_http_headers(headers);
+                                    let response = HttpResponse {
+                                        http_response,
+                                        context: context.clone(),
+                                    };
+                                    connector_instruments
+                                        .take()
+                                        .expect("http request must have been made first")
+                                        .on_response(&response);
                                 }
                             }
                         }

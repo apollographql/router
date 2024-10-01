@@ -1,4 +1,4 @@
-//! Selectors related to Connectors.
+//! Selectors for HTTP connectors.
 
 use derivative::Derivative;
 use opentelemetry_api::Value;
@@ -294,7 +294,7 @@ mod tests {
     use rstest::rstest;
 
     use super::ConnectorSource;
-    use crate::plugins::telemetry::config_new::connectors::http::selectors::ConnectorHttpSelector;
+    use crate::plugins::telemetry::config_new::connector::http::selectors::ConnectorHttpSelector;
     use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
     use crate::plugins::telemetry::config_new::selectors::RouterSelector;
     use crate::plugins::telemetry::config_new::Selector;

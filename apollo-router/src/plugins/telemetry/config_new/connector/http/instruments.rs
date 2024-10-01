@@ -1,4 +1,4 @@
-//! Instruments related to Connectors.
+//! Instruments for HTTP connectors.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -14,9 +14,9 @@ use tower::BoxError;
 use crate::metrics;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::conditions::Condition;
-use crate::plugins::telemetry::config_new::connectors::http::attributes::ConnectorHttpAttributes;
-use crate::plugins::telemetry::config_new::connectors::http::selectors::ConnectorHttpSelector;
-use crate::plugins::telemetry::config_new::connectors::http::selectors::ConnectorHttpValue;
+use crate::plugins::telemetry::config_new::connector::http::attributes::ConnectorHttpAttributes;
+use crate::plugins::telemetry::config_new::connector::http::selectors::ConnectorHttpSelector;
+use crate::plugins::telemetry::config_new::connector::http::selectors::ConnectorHttpValue;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogramInner;
@@ -38,7 +38,7 @@ use crate::Context;
 
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, default)]
-pub(crate) struct ConnectorInstrumentsConfig {
+pub(crate) struct ConnectorHttpInstrumentsConfig {
     /// Histogram of client request duration
     #[serde(rename = "http.client.request.duration")]
     http_client_request_duration:
@@ -55,7 +55,7 @@ pub(crate) struct ConnectorInstrumentsConfig {
         DefaultedStandardInstrument<Extendable<ConnectorHttpAttributes, ConnectorHttpSelector>>,
 }
 
-impl DefaultForLevel for ConnectorInstrumentsConfig {
+impl DefaultForLevel for ConnectorHttpInstrumentsConfig {
     fn defaults_for_level(
         &mut self,
         requirement_level: DefaultAttributeRequirementLevel,
@@ -86,7 +86,7 @@ pub(crate) struct ConnectorHttpInstruments {
 impl ConnectorHttpInstruments {
     pub(crate) fn new(
         config: &Extendable<
-            ConnectorInstrumentsConfig,
+            ConnectorHttpInstrumentsConfig,
             Instrument<ConnectorHttpAttributes, ConnectorHttpSelector, ConnectorHttpValue>,
         >,
         static_instruments: Arc<HashMap<String, StaticInstrument>>,
@@ -220,7 +220,7 @@ impl ConnectorHttpInstruments {
 
     pub(crate) fn new_builtin(
         config: &Extendable<
-            ConnectorInstrumentsConfig,
+            ConnectorHttpInstrumentsConfig,
             Instrument<ConnectorHttpAttributes, ConnectorHttpSelector, ConnectorHttpValue>,
         >,
     ) -> HashMap<String, StaticInstrument> {

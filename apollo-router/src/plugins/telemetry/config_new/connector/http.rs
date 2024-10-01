@@ -1,4 +1,4 @@
-//! Telemetry related to Connectors HTTP requests and responses.
+//! Telemetry related to HTTP requests and responses for connectors.
 
 pub(crate) mod attributes;
 pub(crate) mod instruments;

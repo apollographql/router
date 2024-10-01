@@ -1,4 +1,4 @@
-//! Attributes related to Connectors.
+//! Attributes for HTTP connectors.
 
 use opentelemetry_api::Key;
 use opentelemetry_api::KeyValue;

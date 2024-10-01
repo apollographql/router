@@ -1,0 +1,20 @@
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: none
+      connector:
+        http:
+          rate.limit:
+            value:
+              connector_http_response_header: "x-ratelimit-remaining"
+            unit: count
+            type: histogram
+            description: "Rate limit remaining"
+            condition:
+              all:
+                - eq:
+                  - 200
+                  - connector_http_response_status: code
+                - eq:
+                  - "user_api"
+                  - connector_source: name

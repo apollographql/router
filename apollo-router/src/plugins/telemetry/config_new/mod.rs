@@ -20,7 +20,7 @@ pub(crate) mod conditions;
 
 pub(crate) mod cache;
 mod conditional;
-pub(crate) mod connectors;
+pub(crate) mod connector;
 pub(crate) mod cost;
 pub(crate) mod events;
 mod experimental_when_header;
