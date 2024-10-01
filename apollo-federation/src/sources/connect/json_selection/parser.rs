@@ -746,8 +746,41 @@ impl SubSelection {
         })
     }
 
+    // Returns an Iterator over each &NamedSelection that contributes a single
+    // name to the output object. This is more complicated than returning
+    // self.selections.iter() because some NamedSelection::Path elements can
+    // contribute multiple names if they do no have an Alias.
     pub fn selections_iter(&self) -> impl Iterator<Item = &NamedSelection> {
-        self.selections.iter()
+        // TODO Implement a NamedSelectionIterator to traverse nested selections
+        // lazily, rather than using an intermediary vector.
+        let mut selections = vec![];
+        for selection in &self.selections {
+            match selection {
+                NamedSelection::Path(alias_opt, path) => {
+                    if alias_opt.is_some() {
+                        // If the PathSelection has an Alias, then it has a
+                        // singular name and should be visited directly.
+                        selections.push(selection);
+                    } else if let Some(sub) = path.next_subselection() {
+                        // If the PathSelection does not have an Alias but does
+                        // have a SubSelection, then it represents the
+                        // PathWithSubSelection non-terminal from the grammar
+                        // (see README.md + PR #6076), which produces multiple
+                        // names derived from the SubSelection, which need to be
+                        // recursively collected.
+                        selections.extend(sub.selections_iter());
+                    } else {
+                        // This no-Alias, no-SubSelection case should be
+                        // forbidden by NamedSelection::parse_path.
+                        debug_assert!(false, "PathSelection without Alias or SubSelection");
+                    }
+                }
+                _ => {
+                    selections.push(selection);
+                }
+            };
+        }
+        selections.into_iter()
     }
 
     pub fn has_star(&self) -> bool {
