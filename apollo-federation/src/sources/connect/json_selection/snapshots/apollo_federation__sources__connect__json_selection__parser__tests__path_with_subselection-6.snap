@@ -1,6 +1,6 @@
 ---
 source: apollo-federation/src/sources/connect/json_selection/parser.rs
-expression: "JSONSelection::parse(r#\"\n            $this { id }\n            $args { $.input { title body } }\n        \"#)"
+expression: "JSONSelection::parse(r#\"\n            $this { id }\n            $args { .input { title body } }\n        \"#)"
 ---
 Ok(
     (
@@ -72,70 +72,57 @@ Ok(
                                                         None,
                                                         PathSelection {
                                                             path: WithRange {
-                                                                node: Var(
+                                                                node: Key(
                                                                     WithRange {
-                                                                        node: $,
+                                                                        node: Field(
+                                                                            "input",
+                                                                        ),
                                                                         range: Some(
-                                                                            46..47,
+                                                                            47..52,
                                                                         ),
                                                                     },
                                                                     WithRange {
-                                                                        node: Key(
-                                                                            WithRange {
-                                                                                node: Field(
-                                                                                    "input",
-                                                                                ),
-                                                                                range: Some(
-                                                                                    48..53,
-                                                                                ),
-                                                                            },
-                                                                            WithRange {
-                                                                                node: Selection(
-                                                                                    SubSelection {
-                                                                                        selections: [
-                                                                                            Field(
-                                                                                                None,
-                                                                                                WithRange {
-                                                                                                    node: Field(
-                                                                                                        "title",
-                                                                                                    ),
-                                                                                                    range: Some(
-                                                                                                        56..61,
-                                                                                                    ),
-                                                                                                },
-                                                                                                None,
+                                                                        node: Selection(
+                                                                            SubSelection {
+                                                                                selections: [
+                                                                                    Field(
+                                                                                        None,
+                                                                                        WithRange {
+                                                                                            node: Field(
+                                                                                                "title",
                                                                                             ),
-                                                                                            Field(
-                                                                                                None,
-                                                                                                WithRange {
-                                                                                                    node: Field(
-                                                                                                        "body",
-                                                                                                    ),
-                                                                                                    range: Some(
-                                                                                                        62..66,
-                                                                                                    ),
-                                                                                                },
-                                                                                                None,
+                                                                                            range: Some(
+                                                                                                55..60,
                                                                                             ),
-                                                                                        ],
-                                                                                        star: None,
-                                                                                        range: Some(
-                                                                                            54..68,
-                                                                                        ),
-                                                                                    },
-                                                                                ),
+                                                                                        },
+                                                                                        None,
+                                                                                    ),
+                                                                                    Field(
+                                                                                        None,
+                                                                                        WithRange {
+                                                                                            node: Field(
+                                                                                                "body",
+                                                                                            ),
+                                                                                            range: Some(
+                                                                                                61..65,
+                                                                                            ),
+                                                                                        },
+                                                                                        None,
+                                                                                    ),
+                                                                                ],
+                                                                                star: None,
                                                                                 range: Some(
-                                                                                    54..68,
+                                                                                    53..67,
                                                                                 ),
                                                                             },
                                                                         ),
                                                                         range: Some(
-                                                                            47..68,
+                                                                            53..67,
                                                                         ),
                                                                     },
                                                                 ),
                                                                 range: Some(
-                                                                    46..68,
+                                                                    46..67,
                                                                 ),
                                                             },
                                                         },
@@ -143,17 +130,17 @@ Ok(
                                                 ],
                                                 star: None,
                                                 range: Some(
-                                                    44..70,
+                                                    44..69,
                                                 ),
                                             },
                                         ),
                                         range: Some(
-                                            44..70,
+                                            44..69,
                                         ),
                                     },
                                 ),
                                 range: Some(
-                                    38..70,
+                                    38..69,
                                 ),
                             },
                         },
@@ -161,7 +148,7 @@ Ok(
                 ],
                 star: None,
                 range: Some(
-                    13..70,
+                    13..69,
                 ),
             },
         ),

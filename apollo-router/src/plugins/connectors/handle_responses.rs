@@ -283,7 +283,7 @@ mod tests {
                 headers: Default::default(),
                 body: Default::default(),
             },
-            selection: JSONSelection::parse("$.data").unwrap().1,
+            selection: JSONSelection::parse(".data").unwrap().1,
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
@@ -296,7 +296,7 @@ mod tests {
             name: "hello".to_string(),
             inputs: Default::default(),
             typename: ResponseTypeName::Concrete("String".to_string()),
-            selection: Arc::new(JSONSelection::parse("$.data").unwrap().1),
+            selection: Arc::new(JSONSelection::parse(".data").unwrap().1),
         };
 
         let response2 = http::Response::builder()
@@ -306,7 +306,7 @@ mod tests {
             name: "hello2".to_string(),
             inputs: Default::default(),
             typename: ResponseTypeName::Concrete("String".to_string()),
-            selection: Arc::new(JSONSelection::parse("$.data").unwrap().1),
+            selection: Arc::new(JSONSelection::parse(".data").unwrap().1),
         };
 
         let res = super::handle_responses(
@@ -377,7 +377,7 @@ mod tests {
                 headers: Default::default(),
                 body: Default::default(),
             },
-            selection: JSONSelection::parse("$.data { id }").unwrap().1,
+            selection: JSONSelection::parse(".data { id }").unwrap().1,
             entity_resolver: Some(EntityResolver::Explicit),
             config: Default::default(),
             max_requests: None,
@@ -390,7 +390,7 @@ mod tests {
             index: 0,
             inputs: Default::default(),
             typename: ResponseTypeName::Concrete("User".to_string()),
-            selection: Arc::new(JSONSelection::parse("$.data").unwrap().1),
+            selection: Arc::new(JSONSelection::parse(".data").unwrap().1),
         };
 
         let response2 = http::Response::builder()
@@ -400,7 +400,7 @@ mod tests {
             index: 1,
             inputs: Default::default(),
             typename: ResponseTypeName::Concrete("User".to_string()),
-            selection: Arc::new(JSONSelection::parse("$.data").unwrap().1),
+            selection: Arc::new(JSONSelection::parse(".data").unwrap().1),
         };
 
         let res = super::handle_responses(
@@ -483,7 +483,7 @@ mod tests {
                 headers: Default::default(),
                 body: Default::default(),
             },
-            selection: JSONSelection::parse("$.data").unwrap().1,
+            selection: JSONSelection::parse(".data").unwrap().1,
             entity_resolver: Some(EntityResolver::Implicit),
             config: Default::default(),
             max_requests: None,
@@ -497,7 +497,7 @@ mod tests {
             inputs: Default::default(),
             field_name: "field".to_string(),
             typename: ResponseTypeName::Concrete("User".to_string()),
-            selection: Arc::new(JSONSelection::parse("$.data").unwrap().1),
+            selection: Arc::new(JSONSelection::parse(".data").unwrap().1),
         };
 
         let response2 = http::Response::builder()
@@ -508,7 +508,7 @@ mod tests {
             inputs: Default::default(),
             field_name: "field".to_string(),
             typename: ResponseTypeName::Concrete("User".to_string()),
-            selection: Arc::new(JSONSelection::parse("$.data").unwrap().1),
+            selection: Arc::new(JSONSelection::parse(".data").unwrap().1),
         };
 
         let res = super::handle_responses(
@@ -591,7 +591,7 @@ mod tests {
                 headers: Default::default(),
                 body: Default::default(),
             },
-            selection: JSONSelection::parse("$.data").unwrap().1,
+            selection: JSONSelection::parse(".data").unwrap().1,
             entity_resolver: Some(EntityResolver::Explicit),
             config: Default::default(),
             max_requests: None,
@@ -605,7 +605,7 @@ mod tests {
             index: 0,
             inputs: Default::default(),
             typename: ResponseTypeName::Concrete("User".to_string()),
-            selection: Arc::new(JSONSelection::parse("$.data").unwrap().1),
+            selection: Arc::new(JSONSelection::parse(".data").unwrap().1),
         };
 
         let response2 = http::Response::builder()
@@ -615,7 +615,7 @@ mod tests {
             index: 1,
             inputs: Default::default(),
             typename: ResponseTypeName::Concrete("User".to_string()),
-            selection: Arc::new(JSONSelection::parse("$.data").unwrap().1),
+            selection: Arc::new(JSONSelection::parse(".data").unwrap().1),
         };
 
         let response3 = http::Response::builder()
@@ -626,7 +626,7 @@ mod tests {
             index: 2,
             inputs: Default::default(),
             typename: ResponseTypeName::Concrete("User".to_string()),
-            selection: Arc::new(JSONSelection::parse("$.data").unwrap().1),
+            selection: Arc::new(JSONSelection::parse(".data").unwrap().1),
         };
 
         let res = super::handle_responses(

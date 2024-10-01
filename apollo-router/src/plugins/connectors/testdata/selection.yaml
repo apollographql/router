@@ -40,10 +40,10 @@ subgraphs:
                 http: { GET: "/repos/{$$args.owner}/{$$args.repo}/commits" }
                 selection: """
                 commit {
-                  name_from_path: author.name
+                  name_from_path: .author.name
                   by: {
-                    name: author.name
-                    email: author.email
+                    name: .author.name
+                    email: .author.email
                     owner: $$args.owner
                   }
                 }

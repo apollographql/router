@@ -831,7 +831,7 @@ mod tests {
                 headers: Default::default(),
                 body: Default::default(),
             },
-            selection: JSONSelection::parse("$.data").unwrap().1,
+            selection: JSONSelection::parse(".data").unwrap().1,
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
@@ -848,37 +848,24 @@ mod tests {
                     selection: Path(
                         PathSelection {
                             path: WithRange {
-                                node: Var(
+                                node: Key(
                                     WithRange {
-                                        node: $,
+                                        node: Field(
+                                            "data",
+                                        ),
                                         range: Some(
-                                            0..1,
+                                            1..5,
                                         ),
                                     },
                                     WithRange {
-                                        node: Key(
-                                            WithRange {
-                                                node: Field(
-                                                    "data",
-                                                ),
-                                                range: Some(
-                                                    2..6,
-                                                ),
-                                            },
-                                            WithRange {
-                                                node: Empty,
-                                                range: Some(
-                                                    6..6,
-                                                ),
-                                            },
-                                        ),
+                                        node: Empty,
                                         range: Some(
-                                            1..6,
+                                            5..5,
                                         ),
                                     },
                                 ),
                                 range: Some(
-                                    0..6,
+                                    0..5,
                                 ),
                             },
                         },
@@ -914,37 +901,24 @@ mod tests {
                     selection: Path(
                         PathSelection {
                             path: WithRange {
-                                node: Var(
+                                node: Key(
                                     WithRange {
-                                        node: $,
+                                        node: Field(
+                                            "data",
+                                        ),
                                         range: Some(
-                                            0..1,
+                                            1..5,
                                         ),
                                     },
                                     WithRange {
-                                        node: Key(
-                                            WithRange {
-                                                node: Field(
-                                                    "data",
-                                                ),
-                                                range: Some(
-                                                    2..6,
-                                                ),
-                                            },
-                                            WithRange {
-                                                node: Empty,
-                                                range: Some(
-                                                    6..6,
-                                                ),
-                                            },
-                                        ),
+                                        node: Empty,
                                         range: Some(
-                                            1..6,
+                                            5..5,
                                         ),
                                     },
                                 ),
                                 range: Some(
-                                    0..6,
+                                    0..5,
                                 ),
                             },
                         },
@@ -2006,7 +1980,7 @@ mod tests {
                 headers: Default::default(),
                 body: Default::default(),
             },
-            selection: JSONSelection::parse("$.data").unwrap().1,
+            selection: JSONSelection::parse(".data").unwrap().1,
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
@@ -2034,37 +2008,24 @@ mod tests {
                     selection: Path(
                         PathSelection {
                             path: WithRange {
-                                node: Var(
+                                node: Key(
                                     WithRange {
-                                        node: $,
+                                        node: Field(
+                                            "data",
+                                        ),
                                         range: Some(
-                                            0..1,
+                                            1..5,
                                         ),
                                     },
                                     WithRange {
-                                        node: Key(
-                                            WithRange {
-                                                node: Field(
-                                                    "data",
-                                                ),
-                                                range: Some(
-                                                    2..6,
-                                                ),
-                                            },
-                                            WithRange {
-                                                node: Empty,
-                                                range: Some(
-                                                    6..6,
-                                                ),
-                                            },
-                                        ),
+                                        node: Empty,
                                         range: Some(
-                                            1..6,
+                                            5..5,
                                         ),
                                     },
                                 ),
                                 range: Some(
-                                    0..6,
+                                    0..5,
                                 ),
                             },
                         },

@@ -432,30 +432,22 @@ mod tests {
 
         {
             let expected = LitExpr::Path(PathSelection {
-                path: PathList::Var(
-                    KnownVariable::Dollar.into_with_range(),
-                    PathList::Key(
-                        Key::field("data").into_with_range(),
-                        PathList::Empty.into_with_range(),
-                    )
-                    .into_with_range(),
+                path: PathList::Key(
+                    Key::field("data").into_with_range(),
+                    PathList::Empty.into_with_range(),
                 )
                 .into_with_range(),
             });
-            check_parse("$.data", expected.clone());
-            check_parse(" $ . data ", expected.clone());
+            check_parse(".data", expected.clone());
+            check_parse(" . data ", expected.clone());
         }
 
         {
             let expected = LitExpr::Array(vec![
                 LitExpr::Path(PathSelection {
-                    path: PathList::Var(
-                        KnownVariable::Dollar.into_with_range(),
-                        PathList::Key(
-                            Key::field("a").into_with_range(),
-                            PathList::Empty.into_with_range(),
-                        )
-                        .into_with_range(),
+                    path: PathList::Key(
+                        Key::field("a").into_with_range(),
+                        PathList::Empty.into_with_range(),
                     )
                     .into_with_range(),
                 })
@@ -490,22 +482,22 @@ mod tests {
                 .into_with_range(),
             ]);
 
-            check_parse("[$.a, b.c, d.e.f]", expected.clone());
-            check_parse("[$.a, b.c, d.e.f,]", expected.clone());
-            check_parse("[ $ . a , b . c , d . e . f ]", expected.clone());
-            check_parse("[ $ . a , b . c , d . e . f , ]", expected.clone());
+            check_parse("[.a, b.c, .d.e.f]", expected.clone());
+            check_parse("[.a, b.c, .d.e.f,]", expected.clone());
+            check_parse("[ . a , b . c , . d . e . f ]", expected.clone());
+            check_parse("[ . a , b . c , . d . e . f , ]", expected.clone());
             check_parse(
                 r#"[
-                $.a,
+                .a,
                 b.c,
-                d.e.f,
+                .d.e.f,
             ]"#,
                 expected.clone(),
             );
             check_parse(
                 r#"[
-                $ . a ,
-                b . c ,
+                . a ,
+                . b . c ,
                 d . e . f ,
             ]"#,
                 expected.clone(),

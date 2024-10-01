@@ -1,6 +1,6 @@
 ---
 source: apollo-federation/src/sources/connect/json_selection/parser.rs
-expression: "selection!(\"\n            # Comments are supported because we parse them as whitespace\n            topLevelAlias: topLevelField {\n                identifier: 'property name with spaces'\n                'unaliased non-identifier property'\n                'non-identifier alias': identifier\n\n                # This extracts the value located at the given path and applies a\n                # selection set to it before renaming the result to pathSelection\n                pathSelection: some.nested.path {\n                    still: yet\n                    more\n                    properties\n                }\n\n                # An aliased SubSelection of fields nests the fields together\n                # under the given alias\n                siblingGroup: { brother sister }\n            }\")"
+expression: "selection!(\"\n            # Comments are supported because we parse them as whitespace\n            topLevelAlias: topLevelField {\n                identifier: 'property name with spaces'\n                'unaliased non-identifier property'\n                'non-identifier alias': identifier\n\n                # This extracts the value located at the given path and applies a\n                # selection set to it before renaming the result to pathSelection\n                pathSelection: .some.nested.path {\n                    still: yet\n                    more\n                    properties\n                }\n\n                # An aliased SubSelection of fields nests the fields together\n                # under the given alias\n                siblingGroup: { brother sister }\n            }\")"
 ---
 Named(
     SubSelection {
@@ -120,7 +120,7 @@ Named(
                                                     "some",
                                                 ),
                                                 range: Some(
-                                                    472..476,
+                                                    473..477,
                                                 ),
                                             },
                                             WithRange {
@@ -130,7 +130,7 @@ Named(
                                                             "nested",
                                                         ),
                                                         range: Some(
-                                                            477..483,
+                                                            478..484,
                                                         ),
                                                     },
                                                     WithRange {
@@ -140,7 +140,7 @@ Named(
                                                                     "path",
                                                                 ),
                                                                 range: Some(
-                                                                    484..488,
+                                                                    485..489,
                                                                 ),
                                                             },
                                                             WithRange {
@@ -155,11 +155,11 @@ Named(
                                                                                                 "still",
                                                                                             ),
                                                                                             range: Some(
-                                                                                                511..516,
+                                                                                                512..517,
                                                                                             ),
                                                                                         },
                                                                                         range: Some(
-                                                                                            511..517,
+                                                                                            512..518,
                                                                                         ),
                                                                                     },
                                                                                 ),
@@ -168,7 +168,7 @@ Named(
                                                                                         "yet",
                                                                                     ),
                                                                                     range: Some(
-                                                                                        518..521,
+                                                                                        519..522,
                                                                                     ),
                                                                                 },
                                                                                 None,
@@ -180,7 +180,7 @@ Named(
                                                                                         "more",
                                                                                     ),
                                                                                     range: Some(
-                                                                                        542..546,
+                                                                                        543..547,
                                                                                     ),
                                                                                 },
                                                                                 None,
@@ -192,7 +192,7 @@ Named(
                                                                                         "properties",
                                                                                     ),
                                                                                     range: Some(
-                                                                                        567..577,
+                                                                                        568..578,
                                                                                     ),
                                                                                 },
                                                                                 None,
@@ -200,27 +200,27 @@ Named(
                                                                         ],
                                                                         star: None,
                                                                         range: Some(
-                                                                            489..595,
+                                                                            490..596,
                                                                         ),
                                                                     },
                                                                 ),
                                                                 range: Some(
-                                                                    489..595,
+                                                                    490..596,
                                                                 ),
                                                             },
                                                         ),
                                                         range: Some(
-                                                            483..595,
+                                                            484..596,
                                                         ),
                                                     },
                                                 ),
                                                 range: Some(
-                                                    476..595,
+                                                    477..596,
                                                 ),
                                             },
                                         ),
                                         range: Some(
-                                            472..595,
+                                            472..596,
                                         ),
                                     },
                                 },
@@ -232,11 +232,11 @@ Named(
                                             "siblingGroup",
                                         ),
                                         range: Some(
-                                            731..743,
+                                            732..744,
                                         ),
                                     },
                                     range: Some(
-                                        731..744,
+                                        732..745,
                                     ),
                                 },
                                 SubSelection {
@@ -248,7 +248,7 @@ Named(
                                                     "brother",
                                                 ),
                                                 range: Some(
-                                                    747..754,
+                                                    748..755,
                                                 ),
                                             },
                                             None,
@@ -260,7 +260,7 @@ Named(
                                                     "sister",
                                                 ),
                                                 range: Some(
-                                                    755..761,
+                                                    756..762,
                                                 ),
                                             },
                                             None,
@@ -268,14 +268,14 @@ Named(
                                     ],
                                     star: None,
                                     range: Some(
-                                        745..763,
+                                        746..764,
                                     ),
                                 },
                             ),
                         ],
                         star: None,
                         range: Some(
-                            115..777,
+                            115..778,
                         ),
                     },
                 ),
@@ -283,7 +283,7 @@ Named(
         ],
         star: None,
         range: Some(
-            86..777,
+            86..778,
         ),
     },
 )
