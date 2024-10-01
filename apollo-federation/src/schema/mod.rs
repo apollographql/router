@@ -278,7 +278,9 @@ impl ValidFederationSchema {
         // TODO for composition: this otherwise needs to check for a type name in schema based
         // on the latest federation version.
         // This code path is not hit during planning.
-        Err(FederationError::internal("typename should have been looked in a federation feature"))
+        Err(FederationError::internal(
+            "typename should have been looked in a federation feature",
+        ))
     }
 
     pub(crate) fn is_interface_object_type(
