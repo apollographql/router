@@ -6,21 +6,19 @@ Named(
     SubSelection {
         selections: [
             Path(
-                Some(
-                    Alias {
-                        name: WithRange {
-                            node: Field(
-                                "suffix",
-                            ),
-                            range: Some(
-                                1..7,
-                            ),
-                        },
+                Alias {
+                    name: WithRange {
+                        node: Field(
+                            "suffix",
+                        ),
                         range: Some(
-                            1..9,
+                            1..7,
                         ),
                     },
-                ),
+                    range: Some(
+                        1..9,
+                    ),
+                },
                 PathSelection {
                     path: WithRange {
                         node: Key(

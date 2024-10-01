@@ -284,34 +284,25 @@ impl<'schema> GroupVisitor<Group<'schema>, Field<'schema>> for SelectionValidato
             definition: group.definition,
             ty: group.ty,
         });
-        group.selection.selections_iter().flat_map(|selection| {
-            let mut results = Vec::new();
-            for field_name in selection.names() {
-                if let Some(definition) = group.ty.fields.get(field_name) {
-                    results.push(Ok(Field {
-                        selection,
-                        definition,
-                    }));
-                } else {
-                    results.push(Err(Message {
-                        code: Code::SelectedFieldNotFound,
-                        message: format!(
-                            "{coordinate} contains field `{field_name}`, which does not exist on `{parent_type}`.",
-                            coordinate = &self.selection_coordinate,
-                            parent_type = group.ty.name,
-                        ),
-                        locations: self.selection_location.iter().cloned().collect(),
-                    }));
+        group.selection.selections_iter().map(|selection| {
+            let field_name = selection.name();
+            let definition = group.ty.fields.get(field_name).ok_or_else(|| {
+                Message {
+                    code: Code::SelectedFieldNotFound,
+                    message: format!(
+                        "{coordinate} contains field `{field_name}`, which does not exist on `{parent_type}`.",
+                        coordinate = &self.selection_coordinate,
+                        parent_type = group.ty.name,
+                    ),
+                    locations: self.selection_location.iter().cloned().collect(),
                 }
-            }
-            results
+            })?;
+            Ok(Field {
+                selection,
+                definition,
+            })
         }).chain(
-            validate_star_selection(
-                group,
-                self.schema,
-                &self.selection_coordinate,
-                &self.selection_location,
-            ).into_iter().map(Err)
+            validate_star_selection(group, self.schema, &self.selection_coordinate, &self.selection_location).into_iter().map(Err)
         ).collect()
     }
 

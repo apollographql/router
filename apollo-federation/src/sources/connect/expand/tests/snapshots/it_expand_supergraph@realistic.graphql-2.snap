@@ -353,21 +353,19 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                     SubSelection {
                         selections: [
                             Path(
-                                Some(
-                                    Alias {
-                                        name: WithRange {
-                                            node: Field(
-                                                "emailDomain",
-                                            ),
-                                            range: Some(
-                                                0..11,
-                                            ),
-                                        },
+                                Alias {
+                                    name: WithRange {
+                                        node: Field(
+                                            "emailDomain",
+                                        ),
                                         range: Some(
-                                            0..12,
+                                            0..11,
                                         ),
                                     },
-                                ),
+                                    range: Some(
+                                        0..12,
+                                    ),
+                                },
                                 PathSelection {
                                     path: WithRange {
                                         node: Var(

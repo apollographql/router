@@ -18,7 +18,7 @@
 
 use std::collections::HashSet;
 
-use apollo_compiler::collections::IndexSet;
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
@@ -52,7 +52,7 @@ impl SubSelection {
     /// Apply a selection set to create a new [`SubSelection`]
     pub fn apply_selection_set(&self, selection_set: &SelectionSet) -> Self {
         let mut new_selections = Vec::new();
-        let mut dropped_fields = IndexSet::default();
+        let mut dropped_fields = IndexMap::default();
         let mut referenced_fields = HashSet::new();
         let field_map = map_fields_by_name(selection_set);
 
@@ -66,7 +66,7 @@ impl SubSelection {
         // the user defined a __typename mapping.
         if field_map.contains_key("__typename") {
             new_selections.push(NamedSelection::Path(
-                Some(Alias::new("__typename")),
+                Alias::new("__typename"),
                 PathSelection {
                     path: WithRange::new(
                         PathList::Var(
@@ -117,40 +117,27 @@ impl SubSelection {
                             ));
                         }
                     } else if self.star.is_some() {
-                        dropped_fields.insert(key);
+                        dropped_fields.insert(key, ());
                     }
                 }
                 NamedSelection::Path(alias, path_selection) => {
-                    if let Some(key) = alias.as_ref().map(|a| a.name.as_str()) {
-                        // If the NamedSelection::Path has an alias (meaning
-                        // it's a NamedPathSelection according to the grammar),
-                        // use the alias name to look up the corresponding
-                        // fields in the selection set.
-                        if let Some(fields) = field_map.get_vec(key) {
-                            for field in fields {
-                                new_selections.push(NamedSelection::Path(
-                                    Some(Alias::new(field.response_key().as_str())),
-                                    path_selection.apply_selection_set(&field.selection_set),
-                                ));
+                    let key = alias.name.as_str();
+                    if let Some(fields) = field_map.get_vec(key) {
+                        if self.star.is_some() {
+                            if let Some(name) = key_name(path_selection) {
+                                referenced_fields.insert(name);
                             }
                         }
-                    } else {
-                        // If the NamedSelection::Path has no alias (meaning
-                        // it's a PathWithSubSelection according to the
-                        // grammar), apply the selection set to the path and add
-                        // the new PathWithSubSelection to the new_selections.
-                        new_selections.push(NamedSelection::Path(
-                            None,
-                            path_selection.apply_selection_set(selection_set),
-                        ));
-                    }
-
-                    if self.star.is_some() {
-                        if let Some(name) = key_name(path_selection) {
-                            referenced_fields.insert(name);
+                        for field in fields {
+                            new_selections.push(NamedSelection::Path(
+                                Alias::new(field.response_key().as_str()),
+                                path_selection.apply_selection_set(&field.selection_set),
+                            ));
                         }
-                    } else if let Some(name) = key_name(path_selection) {
-                        dropped_fields.insert(name);
+                    } else if self.star.is_some() {
+                        if let Some(name) = key_name(path_selection) {
+                            dropped_fields.insert(name, ());
+                        }
                     }
                 }
                 NamedSelection::Group(alias, sub) => {
@@ -170,8 +157,8 @@ impl SubSelection {
         if new_star.is_some() {
             // Alias fields that were dropped from the original selection to prevent them from
             // being picked up by the star.
-            dropped_fields.retain(|key| !referenced_fields.contains(key));
-            for dropped in dropped_fields {
+            dropped_fields.retain(|key, _| !referenced_fields.contains(key));
+            for (dropped, _) in dropped_fields {
                 let name = format!("__unused__{dropped}");
                 new_selections.push(NamedSelection::Field(
                     Some(Alias::new(name.as_str())),

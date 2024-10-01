@@ -236,10 +236,10 @@ mod tests {
         type Error = FederationError;
 
         fn visit<'a>(&mut self, field: NamedSelection) -> Result<(), Self::Error> {
-            for name in field.names() {
-                self.visited
-                    .push((self.last_depth().unwrap_or_default(), name.to_string()));
-            }
+            self.visited.push((
+                self.last_depth().unwrap_or_default(),
+                field.name().to_string(),
+            ));
 
             Ok(())
         }
@@ -261,7 +261,7 @@ mod tests {
             self.depth_stack.push(next_depth);
             Ok(group
                 .selections_iter()
-                .sorted_by_key(|s| s.names())
+                .sorted_by_key(|s| s.name())
                 .cloned()
                 .chain(
                     group

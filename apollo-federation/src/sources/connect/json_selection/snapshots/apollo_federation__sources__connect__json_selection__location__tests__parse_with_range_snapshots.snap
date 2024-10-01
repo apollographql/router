@@ -6,21 +6,19 @@ Named(
     SubSelection {
         selections: [
             Path(
-                Some(
-                    Alias {
-                        name: WithRange {
-                            node: Field(
-                                "path",
-                            ),
-                            range: Some(
-                                9..13,
-                            ),
-                        },
+                Alias {
+                    name: WithRange {
+                        node: Field(
+                            "path",
+                        ),
                         range: Some(
-                            9..14,
+                            9..13,
                         ),
                     },
-                ),
+                    range: Some(
+                        9..14,
+                    ),
+                },
                 PathSelection {
                     path: WithRange {
                         node: Key(
@@ -157,21 +155,19 @@ Named(
                     SubSelection {
                         selections: [
                             Path(
-                                Some(
-                                    Alias {
-                                        name: WithRange {
-                                            node: Field(
-                                                "__typename",
-                                            ),
-                                            range: Some(
-                                                151..161,
-                                            ),
-                                        },
+                                Alias {
+                                    name: WithRange {
+                                        node: Field(
+                                            "__typename",
+                                        ),
                                         range: Some(
-                                            151..162,
+                                            151..161,
                                         ),
                                     },
-                                ),
+                                    range: Some(
+                                        151..162,
+                                    ),
+                                },
                                 PathSelection {
                                     path: WithRange {
                                         node: Var(
@@ -225,21 +221,19 @@ Named(
                                 },
                             ),
                             Path(
-                                Some(
-                                    Alias {
-                                        name: WithRange {
-                                            node: Field(
-                                                "wrapped",
-                                            ),
-                                            range: Some(
-                                                195..202,
-                                            ),
-                                        },
+                                Alias {
+                                    name: WithRange {
+                                        node: Field(
+                                            "wrapped",
+                                        ),
                                         range: Some(
-                                            195..203,
+                                            195..202,
                                         ),
                                     },
-                                ),
+                                    range: Some(
+                                        195..203,
+                                    ),
+                                },
                                 PathSelection {
                                     path: WithRange {
                                         node: Var(
@@ -388,21 +382,19 @@ Named(
                                 },
                             ),
                             Path(
-                                Some(
-                                    Alias {
-                                        name: WithRange {
-                                            node: Field(
-                                                "arg",
-                                            ),
-                                            range: Some(
-                                                272..275,
-                                            ),
-                                        },
+                                Alias {
+                                    name: WithRange {
+                                        node: Field(
+                                            "arg",
+                                        ),
                                         range: Some(
-                                            272..276,
+                                            272..275,
                                         ),
                                     },
-                                ),
+                                    range: Some(
+                                        272..276,
+                                    ),
+                                },
                                 PathSelection {
                                     path: WithRange {
                                         node: Var(

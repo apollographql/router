@@ -97,21 +97,19 @@ Named(
                                 None,
                             ),
                             Path(
-                                Some(
-                                    Alias {
-                                        name: WithRange {
-                                            node: Field(
-                                                "pathSelection",
-                                            ),
-                                            range: Some(
-                                                457..470,
-                                            ),
-                                        },
+                                Alias {
+                                    name: WithRange {
+                                        node: Field(
+                                            "pathSelection",
+                                        ),
                                         range: Some(
-                                            457..471,
+                                            457..470,
                                         ),
                                     },
-                                ),
+                                    range: Some(
+                                        457..471,
+                                    ),
+                                },
                                 PathSelection {
                                     path: WithRange {
                                         node: Key(
