@@ -370,7 +370,7 @@ impl<'schema> FieldVisitor<Field<'schema>> for SelectionValidator<'schema, '_> {
                 Err(Message {
                     code: Code::GroupSelectionRequiredForObject,
                     message: format!(
-                        "`{parent_type}.{field_name}` is an object, so `{coordinate}` must select a group `{field_name}{{}}`.",
+                        "`{parent_type}.{field_name}` is an object, so {coordinate} must select a group `{field_name}{{}}`.",
                         parent_type = self.last_field().ty().name,
                     ),
                     locations: self.get_selection_location(field.selection).chain(field.definition.line_column_range(&self.schema.sources)).collect(),

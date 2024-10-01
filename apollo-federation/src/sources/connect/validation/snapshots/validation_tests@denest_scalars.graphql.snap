@@ -6,7 +6,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/denest_sc
 [
     Message {
         code: GroupSelectionRequiredForObject,
-        message: "`User.street` is an object, so ``@connect(selection:)` on `Query.me`` must select a group `street{}`.",
+        message: "`User.street` is an object, so `@connect(selection:)` on `Query.me` must select a group `street{}`.",
         locations: [
             15:9..15:15,
             25:3..25:17,
