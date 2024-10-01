@@ -8,11 +8,8 @@ use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
-use crate::schema::field_set::add_interface_field_implementations;
 use crate::schema::field_set::collect_target_fields_from_field_set;
-use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
-use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::FederationSchema;
 
@@ -26,7 +23,6 @@ fn unwrap_schema(fed_schema: &Valid<FederationSchema>) -> &Valid<Schema> {
 #[derive(Debug, Clone)]
 pub(crate) struct SubgraphMetadata {
     federation_spec_definition: &'static FederationSpecDefinition,
-    is_fed2: bool,
     external_metadata: ExternalMetadata,
 }
 
@@ -35,23 +31,15 @@ impl SubgraphMetadata {
         schema: &Valid<FederationSchema>,
         federation_spec_definition: &'static FederationSpecDefinition,
     ) -> Result<Self, FederationError> {
-        let is_fed2 = federation_spec_definition
-            .version()
-            .satisfies(&Version { major: 2, minor: 0 });
         let external_metadata = ExternalMetadata::new(schema, federation_spec_definition)?;
         Ok(Self {
             federation_spec_definition,
-            is_fed2,
             external_metadata,
         })
     }
 
     pub(crate) fn federation_spec_definition(&self) -> &'static FederationSpecDefinition {
         self.federation_spec_definition
-    }
-
-    pub(crate) fn is_fed2(&self) -> bool {
-        self.is_fed2
     }
 
     pub(crate) fn external_metadata(&self) -> &ExternalMetadata {
@@ -70,9 +58,6 @@ pub(crate) struct ExternalMetadata {
     /// Fields with an `@external` directive that can't actually be external due to also being
     /// referenced in a `@key` directive.
     fake_external_fields: IndexSet<FieldDefinitionPosition>,
-    /// Fields that are only sometimes external, and sometimes reachable due to being included
-    /// in a `@provides` directive.
-    provided_fields: IndexSet<FieldDefinitionPosition>,
     /// Fields that are external because their parent type has an `@external` directive.
     fields_on_external_types: IndexSet<FieldDefinitionPosition>,
 }
@@ -85,7 +70,6 @@ impl ExternalMetadata {
         let external_fields = Self::collect_external_fields(federation_spec_definition, schema)?;
         let fake_external_fields =
             Self::collect_fake_externals(federation_spec_definition, schema)?;
-        let provided_fields = Self::collect_provided_fields(federation_spec_definition, schema)?;
         // We do not collect @external on types for Fed 1 schemas since those will be discarded by
         // the schema upgrader. The schema upgrader, through calls to `is_external()`, relies on the
         // populated `fields_on_external_types` set to inform when @shareable should be
@@ -103,7 +87,6 @@ impl ExternalMetadata {
         Ok(Self {
             external_fields,
             fake_external_fields,
-            provided_fields,
             fields_on_external_types,
         })
     }
@@ -188,47 +171,6 @@ impl ExternalMetadata {
         Ok(fake_external_fields)
     }
 
-    fn collect_provided_fields(
-        federation_spec_definition: &'static FederationSpecDefinition,
-        schema: &Valid<FederationSchema>,
-    ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
-        let mut provided_fields = IndexSet::default();
-        let provides_directive_definition =
-            federation_spec_definition.provides_directive_definition(schema)?;
-        let provides_directive_referencers = schema
-            .referencers
-            .get_directive(&provides_directive_definition.name)?;
-        let mut provides_field_positions: Vec<ObjectOrInterfaceFieldDefinitionPosition> = vec![];
-        for object_field_position in &provides_directive_referencers.object_fields {
-            provides_field_positions.push(object_field_position.clone().into());
-        }
-        for interface_field_position in &provides_directive_referencers.interface_fields {
-            provides_field_positions.push(interface_field_position.clone().into());
-        }
-        for field_position in provides_field_positions {
-            let field = field_position.get(schema.schema())?;
-            let field_type_position: CompositeTypeDefinitionPosition = schema
-                .get_type(field.ty.inner_named_type().clone())?
-                .try_into()?;
-            for provides_directive_application in field
-                .directives
-                .get_all(&provides_directive_definition.name)
-            {
-                let provides_directive_arguments = federation_spec_definition
-                    .provides_directive_arguments(provides_directive_application)?;
-                provided_fields.extend(add_interface_field_implementations(
-                    collect_target_fields_from_field_set(
-                        unwrap_schema(schema),
-                        field_type_position.type_name().clone(),
-                        provides_directive_arguments.fields,
-                    )?,
-                    schema,
-                )?);
-            }
-        }
-        Ok(provided_fields)
-    }
-
     fn collect_fields_on_external_types(
         federation_spec_definition: &'static FederationSpecDefinition,
         schema: &Valid<FederationSchema>,
@@ -286,21 +228,5 @@ impl ExternalMetadata {
             }
         }
         false
-    }
-
-    pub(crate) fn is_partially_external(
-        &self,
-        field_definition_position: &FieldDefinitionPosition,
-    ) -> bool {
-        self.is_external(field_definition_position)
-            && self.provided_fields.contains(field_definition_position)
-    }
-
-    pub(crate) fn is_fully_external(
-        &self,
-        field_definition_position: &FieldDefinitionPosition,
-    ) -> bool {
-        self.is_external(field_definition_position)
-            && !self.provided_fields.contains(field_definition_position)
     }
 }

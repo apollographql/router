@@ -232,13 +232,6 @@ impl TypeDefinitionPosition {
             )),
         }
     }
-
-    pub(crate) fn try_get<'schema>(
-        &self,
-        schema: &'schema Schema,
-    ) -> Option<&'schema ExtendedType> {
-        self.get(schema).ok()
-    }
 }
 
 fallible_conversions!(TypeDefinitionPosition::Scalar -> ScalarTypeDefinitionPosition);
@@ -285,45 +278,6 @@ impl OutputTypeDefinitionPosition {
             OutputTypeDefinitionPosition::Union(type_) => &type_.type_name,
             OutputTypeDefinitionPosition::Enum(type_) => &type_.type_name,
         }
-    }
-
-    fn describe(&self) -> &'static str {
-        match self {
-            OutputTypeDefinitionPosition::Scalar(_) => ScalarTypeDefinitionPosition::EXPECTED,
-            OutputTypeDefinitionPosition::Object(_) => ObjectTypeDefinitionPosition::EXPECTED,
-            OutputTypeDefinitionPosition::Interface(_) => InterfaceTypeDefinitionPosition::EXPECTED,
-            OutputTypeDefinitionPosition::Union(_) => UnionTypeDefinitionPosition::EXPECTED,
-            OutputTypeDefinitionPosition::Enum(_) => EnumTypeDefinitionPosition::EXPECTED,
-        }
-    }
-
-    pub(crate) fn get<'schema>(
-        &self,
-        schema: &'schema Schema,
-    ) -> Result<&'schema ExtendedType, PositionLookupError> {
-        let name = self.type_name();
-        let ty = schema
-            .types
-            .get(name)
-            .ok_or_else(|| PositionLookupError::TypeMissing(name.clone()))?;
-        match (ty, self) {
-            (ExtendedType::Scalar(_), OutputTypeDefinitionPosition::Scalar(_))
-            | (ExtendedType::Object(_), OutputTypeDefinitionPosition::Object(_))
-            | (ExtendedType::Interface(_), OutputTypeDefinitionPosition::Interface(_))
-            | (ExtendedType::Union(_), OutputTypeDefinitionPosition::Union(_))
-            | (ExtendedType::Enum(_), OutputTypeDefinitionPosition::Enum(_)) => Ok(ty),
-            _ => Err(PositionLookupError::TypeWrongKind(
-                name.clone(),
-                self.describe(),
-            )),
-        }
-    }
-
-    pub(crate) fn try_get<'schema>(
-        &self,
-        schema: &'schema Schema,
-    ) -> Option<&'schema ExtendedType> {
-        self.get(schema).ok()
     }
 }
 
@@ -447,13 +401,6 @@ impl CompositeTypeDefinitionPosition {
             )),
         }
     }
-
-    pub(crate) fn try_get<'schema>(
-        &self,
-        schema: &'schema Schema,
-    ) -> Option<&'schema ExtendedType> {
-        self.get(schema).ok()
-    }
 }
 
 fallible_conversions!(CompositeTypeDefinitionPosition::Object -> ObjectTypeDefinitionPosition);
@@ -489,73 +436,6 @@ impl AbstractTypeDefinitionPosition {
             AbstractTypeDefinitionPosition::Union(type_) => &type_.type_name,
         }
     }
-
-    fn describe(&self) -> &'static str {
-        match self {
-            AbstractTypeDefinitionPosition::Interface(_) => {
-                InterfaceTypeDefinitionPosition::EXPECTED
-            }
-            AbstractTypeDefinitionPosition::Union(_) => UnionTypeDefinitionPosition::EXPECTED,
-        }
-    }
-
-    pub(crate) fn field(
-        &self,
-        field_name: Name,
-    ) -> Result<FieldDefinitionPosition, FederationError> {
-        match self {
-            AbstractTypeDefinitionPosition::Interface(type_) => Ok(type_.field(field_name).into()),
-            AbstractTypeDefinitionPosition::Union(type_) => {
-                let field = type_.introspection_typename_field();
-                if *field.field_name() == field_name {
-                    Ok(field.into())
-                } else {
-                    Err(FederationError::internal(format!(
-                        r#"Union types don't have field "{}", only "{}""#,
-                        field_name,
-                        field.field_name(),
-                    )))
-                }
-            }
-        }
-    }
-
-    pub(crate) fn introspection_typename_field(&self) -> FieldDefinitionPosition {
-        match self {
-            AbstractTypeDefinitionPosition::Interface(type_) => {
-                type_.introspection_typename_field().into()
-            }
-            AbstractTypeDefinitionPosition::Union(type_) => {
-                type_.introspection_typename_field().into()
-            }
-        }
-    }
-
-    pub(crate) fn get<'schema>(
-        &self,
-        schema: &'schema Schema,
-    ) -> Result<&'schema ExtendedType, PositionLookupError> {
-        let name = self.type_name();
-        let ty = schema
-            .types
-            .get(name)
-            .ok_or_else(|| PositionLookupError::TypeMissing(name.clone()))?;
-        match (ty, self) {
-            (ExtendedType::Interface(_), AbstractTypeDefinitionPosition::Interface(_))
-            | (ExtendedType::Union(_), AbstractTypeDefinitionPosition::Union(_)) => Ok(ty),
-            _ => Err(PositionLookupError::TypeWrongKind(
-                name.clone(),
-                self.describe(),
-            )),
-        }
-    }
-
-    pub(crate) fn try_get<'schema>(
-        &self,
-        schema: &'schema Schema,
-    ) -> Option<&'schema ExtendedType> {
-        self.get(schema).ok()
-    }
 }
 
 fallible_conversions!(AbstractTypeDefinitionPosition::Interface -> InterfaceTypeDefinitionPosition);
@@ -590,17 +470,6 @@ impl ObjectOrInterfaceTypeDefinitionPosition {
         }
     }
 
-    fn describe(&self) -> &'static str {
-        match self {
-            ObjectOrInterfaceTypeDefinitionPosition::Object(_) => {
-                ObjectTypeDefinitionPosition::EXPECTED
-            }
-            ObjectOrInterfaceTypeDefinitionPosition::Interface(_) => {
-                InterfaceTypeDefinitionPosition::EXPECTED
-            }
-        }
-    }
-
     pub(crate) fn field(&self, field_name: Name) -> ObjectOrInterfaceFieldDefinitionPosition {
         match self {
             ObjectOrInterfaceTypeDefinitionPosition::Object(type_) => {
@@ -608,17 +477,6 @@ impl ObjectOrInterfaceTypeDefinitionPosition {
             }
             ObjectOrInterfaceTypeDefinitionPosition::Interface(type_) => {
                 type_.field(field_name).into()
-            }
-        }
-    }
-
-    pub(crate) fn introspection_typename_field(&self) -> FieldDefinitionPosition {
-        match self {
-            ObjectOrInterfaceTypeDefinitionPosition::Object(type_) => {
-                type_.introspection_typename_field().into()
-            }
-            ObjectOrInterfaceTypeDefinitionPosition::Interface(type_) => {
-                type_.introspection_typename_field().into()
             }
         }
     }
@@ -638,34 +496,6 @@ impl ObjectOrInterfaceTypeDefinitionPosition {
                 Ok(Box::new(type_.fields(schema)?.map(|field| field.into())))
             }
         }
-    }
-
-    pub(crate) fn get<'schema>(
-        &self,
-        schema: &'schema Schema,
-    ) -> Result<&'schema ExtendedType, PositionLookupError> {
-        let name = self.type_name();
-        let ty = schema
-            .types
-            .get(name)
-            .ok_or_else(|| PositionLookupError::TypeMissing(name.clone()))?;
-        match (ty, self) {
-            (ExtendedType::Object(_), ObjectOrInterfaceTypeDefinitionPosition::Object(_))
-            | (ExtendedType::Interface(_), ObjectOrInterfaceTypeDefinitionPosition::Interface(_)) => {
-                Ok(ty)
-            }
-            _ => Err(PositionLookupError::TypeWrongKind(
-                name.clone(),
-                self.describe(),
-            )),
-        }
-    }
-
-    pub(crate) fn try_get<'schema>(
-        &self,
-        schema: &'schema Schema,
-    ) -> Option<&'schema ExtendedType> {
-        self.get(schema).ok()
     }
 }
 
@@ -761,22 +591,11 @@ impl Debug for ObjectOrInterfaceFieldDefinitionPosition {
 impl ObjectOrInterfaceFieldDefinitionPosition {
     const EXPECTED: &'static str = "an object/interface field";
 
-    pub(crate) fn type_name(&self) -> &Name {
-        match self {
-            ObjectOrInterfaceFieldDefinitionPosition::Object(field) => &field.type_name,
-            ObjectOrInterfaceFieldDefinitionPosition::Interface(field) => &field.type_name,
-        }
-    }
-
     pub(crate) fn field_name(&self) -> &Name {
         match self {
             ObjectOrInterfaceFieldDefinitionPosition::Object(field) => &field.field_name,
             ObjectOrInterfaceFieldDefinitionPosition::Interface(field) => &field.field_name,
         }
-    }
-
-    pub(crate) fn is_introspection_typename_field(&self) -> bool {
-        *self.field_name() == *INTROSPECTION_TYPENAME_FIELD_NAME
     }
 
     pub(crate) fn parent(&self) -> ObjectOrInterfaceTypeDefinitionPosition {
@@ -890,29 +709,6 @@ impl SchemaDefinitionPosition {
             .make_mut()
             .directives
             .retain(|other_directive| other_directive.name != name);
-        if is_link {
-            schema.links_metadata = links_metadata(&schema.schema)?.map(Box::new);
-        }
-        Ok(())
-    }
-
-    /// Remove a directive application from the schema definition.
-    pub(crate) fn remove_directive(
-        &self,
-        schema: &mut FederationSchema,
-        directive: &Component<Directive>,
-    ) -> Result<(), FederationError> {
-        let is_link = Self::is_link(schema, &directive.name)?;
-        let schema_definition = self.make_mut(&mut schema.schema);
-        if !schema_definition.directives.iter().any(|other_directive| {
-            (other_directive.name == directive.name) && !other_directive.ptr_eq(directive)
-        }) {
-            self.remove_directive_name_references(&mut schema.referencers, &directive.name);
-        }
-        schema_definition
-            .make_mut()
-            .directives
-            .retain(|other_directive| !other_directive.ptr_eq(directive));
         if is_link {
             schema.links_metadata = links_metadata(&schema.schema)?.map(Box::new);
         }
@@ -1079,49 +875,6 @@ impl SchemaRootDefinitionPosition {
         schema: &'schema Schema,
     ) -> Option<&'schema ComponentName> {
         self.get(schema).ok()
-    }
-
-    fn make_mut<'schema>(
-        &self,
-        schema: &'schema mut Schema,
-    ) -> Result<&'schema mut ComponentName, FederationError> {
-        let schema_definition = self.parent().make_mut(schema).make_mut();
-
-        match self.root_kind {
-            SchemaRootDefinitionKind::Query => schema_definition.query.as_mut().ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!("Schema definition has no root {} type", self),
-                }
-                .into()
-            }),
-            SchemaRootDefinitionKind::Mutation => {
-                schema_definition.mutation.as_mut().ok_or_else(|| {
-                    SingleFederationError::Internal {
-                        message: format!("Schema definition has no root {} type", self),
-                    }
-                    .into()
-                })
-            }
-            SchemaRootDefinitionKind::Subscription => {
-                schema_definition.subscription.as_mut().ok_or_else(|| {
-                    SingleFederationError::Internal {
-                        message: format!("Schema definition has no root {} type", self),
-                    }
-                    .into()
-                })
-            }
-        }
-    }
-
-    fn try_make_mut<'schema>(
-        &self,
-        schema: &'schema mut Schema,
-    ) -> Option<&'schema mut ComponentName> {
-        if self.try_get(schema).is_some() {
-            self.make_mut(schema).ok()
-        } else {
-            None
-        }
     }
 
     pub(crate) fn insert(
@@ -1386,35 +1139,6 @@ impl ScalarTypeDefinitionPosition {
         Ok(Some(referencers))
     }
 
-    /// Remove this scalar type from the schema
-    pub(crate) fn remove_recursive(
-        &self,
-        schema: &mut FederationSchema,
-    ) -> Result<(), FederationError> {
-        let Some(referencers) = self.remove_internal(schema)? else {
-            return Ok(());
-        };
-        for field in referencers.object_fields {
-            field.remove_recursive(schema)?;
-        }
-        for argument in referencers.object_field_arguments {
-            argument.remove(schema)?;
-        }
-        for field in referencers.interface_fields {
-            field.remove_recursive(schema)?;
-        }
-        for argument in referencers.interface_field_arguments {
-            argument.remove(schema)?;
-        }
-        for field in referencers.input_object_fields {
-            field.remove_recursive(schema)?;
-        }
-        for argument in referencers.directive_arguments {
-            argument.remove(schema)?;
-        }
-        Ok(())
-    }
-
     fn remove_internal(
         &self,
         schema: &mut FederationSchema,
@@ -1469,26 +1193,6 @@ impl ScalarTypeDefinitionPosition {
             .make_mut()
             .directives
             .retain(|other_directive| other_directive.name != name);
-    }
-
-    /// Remove a directive application.
-    pub(crate) fn remove_directive(
-        &self,
-        schema: &mut FederationSchema,
-        directive: &Component<Directive>,
-    ) {
-        let Some(type_) = self.try_make_mut(&mut schema.schema) else {
-            return;
-        };
-        if !type_.directives.iter().any(|other_directive| {
-            (other_directive.name == directive.name) && !other_directive.ptr_eq(directive)
-        }) {
-            self.remove_directive_name_references(&mut schema.referencers, &directive.name);
-        }
-        type_
-            .make_mut()
-            .directives
-            .retain(|other_directive| !other_directive.ptr_eq(directive));
     }
 
     fn insert_references(
@@ -1816,26 +1520,6 @@ impl ObjectTypeDefinitionPosition {
             .retain(|other_directive| other_directive.name != name);
     }
 
-    /// Remove a directive application.
-    pub(crate) fn remove_directive(
-        &self,
-        schema: &mut FederationSchema,
-        directive: &Component<Directive>,
-    ) {
-        let Some(type_) = self.try_make_mut(&mut schema.schema) else {
-            return;
-        };
-        if !type_.directives.iter().any(|other_directive| {
-            (other_directive.name == directive.name) && !other_directive.ptr_eq(directive)
-        }) {
-            self.remove_directive_name_references(&mut schema.referencers, &directive.name);
-        }
-        type_
-            .make_mut()
-            .directives
-            .retain(|other_directive| !other_directive.ptr_eq(directive));
-    }
-
     pub(crate) fn insert_implements_interface(
         &self,
         schema: &mut FederationSchema,
@@ -2051,10 +1735,6 @@ pub(crate) struct ObjectFieldDefinitionPosition {
 }
 
 impl ObjectFieldDefinitionPosition {
-    pub(crate) fn is_introspection_typename_field(&self) -> bool {
-        self.field_name == *INTROSPECTION_TYPENAME_FIELD_NAME
-    }
-
     pub(crate) fn parent(&self) -> ObjectTypeDefinitionPosition {
         ObjectTypeDefinitionPosition {
             type_name: self.type_name.clone(),
@@ -2475,38 +2155,6 @@ impl ObjectFieldArgumentDefinitionPosition {
         }
     }
 
-    pub(crate) fn insert(
-        &self,
-        schema: &mut FederationSchema,
-        argument: Node<InputValueDefinition>,
-    ) -> Result<(), FederationError> {
-        if self.argument_name != argument.name {
-            return Err(SingleFederationError::Internal {
-                message: format!(
-                    "Object field argument \"{}\" given argument named \"{}\"",
-                    self, argument.name,
-                ),
-            }
-            .into());
-        }
-        if self.try_get(&schema.schema).is_some() {
-            // TODO: Handle old spec edge case of arguments with non-unique names
-            return Err(SingleFederationError::Internal {
-                message: format!(
-                    "Object field argument \"{}\" already exists in schema",
-                    self,
-                ),
-            }
-            .into());
-        }
-        self.parent()
-            .make_mut(&mut schema.schema)?
-            .make_mut()
-            .arguments
-            .push(argument);
-        self.insert_references(self.get(&schema.schema)?, &mut schema.referencers)
-    }
-
     /// Remove this argument from the field.
     ///
     /// This can make the schema invalid if this is an implementing field of an interface.
@@ -2523,30 +2171,6 @@ impl ObjectFieldArgumentDefinitionPosition {
         Ok(())
     }
 
-    pub(crate) fn insert_directive(
-        &self,
-        schema: &mut FederationSchema,
-        directive: Node<Directive>,
-    ) -> Result<(), FederationError> {
-        let argument = self.make_mut(&mut schema.schema)?;
-        if argument
-            .directives
-            .iter()
-            .any(|other_directive| other_directive.ptr_eq(&directive))
-        {
-            return Err(SingleFederationError::Internal {
-                message: format!(
-                    "Directive application \"@{}\" already exists on object field argument \"{}\"",
-                    directive.name, self,
-                ),
-            }
-            .into());
-        }
-        let name = directive.name.clone();
-        argument.make_mut().directives.push(directive);
-        self.insert_directive_name_references(&mut schema.referencers, &name)
-    }
-
     /// Remove a directive application from this position by name.
     pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &str) {
         let Some(argument) = self.try_make_mut(&mut schema.schema) else {
@@ -2557,26 +2181,6 @@ impl ObjectFieldArgumentDefinitionPosition {
             .make_mut()
             .directives
             .retain(|other_directive| other_directive.name != name);
-    }
-
-    /// Remove a directive application.
-    pub(crate) fn remove_directive(
-        &self,
-        schema: &mut FederationSchema,
-        directive: &Node<Directive>,
-    ) {
-        let Some(argument) = self.try_make_mut(&mut schema.schema) else {
-            return;
-        };
-        if !argument.directives.iter().any(|other_directive| {
-            (other_directive.name == directive.name) && !other_directive.ptr_eq(directive)
-        }) {
-            self.remove_directive_name_references(&mut schema.referencers, &directive.name);
-        }
-        argument
-            .make_mut()
-            .directives
-            .retain(|other_directive| !other_directive.ptr_eq(directive));
     }
 
     fn insert_references(
@@ -2736,10 +2340,6 @@ pub(crate) struct InterfaceTypeDefinitionPosition {
 
 impl InterfaceTypeDefinitionPosition {
     const EXPECTED: &'static str = "an interface type";
-
-    pub(crate) fn new(type_name: Name) -> Self {
-        Self { type_name }
-    }
 
     pub(crate) fn field(&self, field_name: Name) -> InterfaceFieldDefinitionPosition {
         InterfaceFieldDefinitionPosition {
@@ -2995,26 +2595,6 @@ impl InterfaceTypeDefinitionPosition {
             .retain(|other_directive| other_directive.name != name);
     }
 
-    /// Remove a directive application.
-    pub(crate) fn remove_directive(
-        &self,
-        schema: &mut FederationSchema,
-        directive: &Component<Directive>,
-    ) {
-        let Some(type_) = self.try_make_mut(&mut schema.schema) else {
-            return;
-        };
-        if !type_.directives.iter().any(|other_directive| {
-            (other_directive.name == directive.name) && !other_directive.ptr_eq(directive)
-        }) {
-            self.remove_directive_name_references(&mut schema.referencers, &directive.name);
-        }
-        type_
-            .make_mut()
-            .directives
-            .retain(|other_directive| !other_directive.ptr_eq(directive));
-    }
-
     pub(crate) fn insert_implements_interface(
         &self,
         schema: &mut FederationSchema,
@@ -3161,10 +2741,6 @@ pub(crate) struct InterfaceFieldDefinitionPosition {
 }
 
 impl InterfaceFieldDefinitionPosition {
-    pub(crate) fn is_introspection_typename_field(&self) -> bool {
-        self.field_name == *INTROSPECTION_TYPENAME_FIELD_NAME
-    }
-
     pub(crate) fn parent(&self) -> InterfaceTypeDefinitionPosition {
         InterfaceTypeDefinitionPosition {
             type_name: self.type_name.clone(),
@@ -3583,38 +3159,6 @@ impl InterfaceFieldArgumentDefinitionPosition {
         }
     }
 
-    pub(crate) fn insert(
-        &self,
-        schema: &mut FederationSchema,
-        argument: Node<InputValueDefinition>,
-    ) -> Result<(), FederationError> {
-        if self.argument_name != argument.name {
-            return Err(SingleFederationError::Internal {
-                message: format!(
-                    "Interface field argument \"{}\" given argument named \"{}\"",
-                    self, argument.name,
-                ),
-            }
-            .into());
-        }
-        if self.try_get(&schema.schema).is_some() {
-            // TODO: Handle old spec edge case of arguments with non-unique names
-            return Err(SingleFederationError::Internal {
-                message: format!(
-                    "Interface field argument \"{}\" already exists in schema",
-                    self,
-                ),
-            }
-            .into());
-        }
-        self.parent()
-            .make_mut(&mut schema.schema)?
-            .make_mut()
-            .arguments
-            .push(argument);
-        self.insert_references(self.get(&schema.schema)?, &mut schema.referencers)
-    }
-
     /// Remove this argument from its field definition.
     ///
     /// This can make the schema invalid if this argument is required and also declared in
@@ -3632,32 +3176,6 @@ impl InterfaceFieldArgumentDefinitionPosition {
         Ok(())
     }
 
-    pub(crate) fn insert_directive(
-        &self,
-        schema: &mut FederationSchema,
-        directive: Node<Directive>,
-    ) -> Result<(), FederationError> {
-        let argument = self.make_mut(&mut schema.schema)?;
-        if argument
-            .directives
-            .iter()
-            .any(|other_directive| other_directive.ptr_eq(&directive))
-        {
-            return Err(
-                SingleFederationError::Internal {
-                    message: format!(
-                        "Directive application \"@{}\" already exists on interface field argument \"{}\"",
-                        directive.name,
-                        self,
-                    )
-                }.into()
-            );
-        }
-        let name = directive.name.clone();
-        argument.make_mut().directives.push(directive);
-        self.insert_directive_name_references(&mut schema.referencers, &name)
-    }
-
     /// Remove a directive application from this position by name.
     pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &str) {
         let Some(argument) = self.try_make_mut(&mut schema.schema) else {
@@ -3668,26 +3186,6 @@ impl InterfaceFieldArgumentDefinitionPosition {
             .make_mut()
             .directives
             .retain(|other_directive| other_directive.name != name);
-    }
-
-    /// Remove a directive application.
-    pub(crate) fn remove_directive(
-        &self,
-        schema: &mut FederationSchema,
-        directive: &Node<Directive>,
-    ) {
-        let Some(argument) = self.try_make_mut(&mut schema.schema) else {
-            return;
-        };
-        if !argument.directives.iter().any(|other_directive| {
-            (other_directive.name == directive.name) && !other_directive.ptr_eq(directive)
-        }) {
-            self.remove_directive_name_references(&mut schema.referencers, &directive.name);
-        }
-        argument
-            .make_mut()
-            .directives
-            .retain(|other_directive| !other_directive.ptr_eq(directive));
     }
 
     fn insert_references(
@@ -3842,10 +3340,6 @@ pub(crate) struct UnionTypeDefinitionPosition {
 
 impl UnionTypeDefinitionPosition {
     const EXPECTED: &'static str = "a union type";
-
-    pub(crate) fn new(type_name: Name) -> Self {
-        Self { type_name }
-    }
 
     pub(crate) fn introspection_typename_field(&self) -> UnionTypenameFieldDefinitionPosition {
         UnionTypenameFieldDefinitionPosition {
@@ -4059,26 +3553,6 @@ impl UnionTypeDefinitionPosition {
             .retain(|other_directive| other_directive.name != name);
     }
 
-    /// Remove a directive application.
-    pub(crate) fn remove_directive(
-        &self,
-        schema: &mut FederationSchema,
-        directive: &Component<Directive>,
-    ) {
-        let Some(type_) = self.try_make_mut(&mut schema.schema) else {
-            return;
-        };
-        if !type_.directives.iter().any(|other_directive| {
-            (other_directive.name == directive.name) && !other_directive.ptr_eq(directive)
-        }) {
-            self.remove_directive_name_references(&mut schema.referencers, &directive.name);
-        }
-        type_
-            .make_mut()
-            .directives
-            .retain(|other_directive| !other_directive.ptr_eq(directive));
-    }
-
     pub(crate) fn insert_member(
         &self,
         schema: &mut FederationSchema,
@@ -4230,13 +3704,6 @@ impl UnionTypenameFieldDefinitionPosition {
                     name!("__typename"),
                 )
             })
-    }
-
-    pub(crate) fn try_get<'schema>(
-        &self,
-        schema: &'schema Schema,
-    ) -> Option<&'schema Component<FieldDefinition>> {
-        self.get(schema).ok()
     }
 
     fn insert_references(&self, referencers: &mut Referencers) -> Result<(), FederationError> {
@@ -4436,35 +3903,6 @@ impl EnumTypeDefinitionPosition {
         Ok(Some(referencers))
     }
 
-    /// Remove this enum from the schema, and recursively remove its references.
-    pub(crate) fn remove_recursive(
-        &self,
-        schema: &mut FederationSchema,
-    ) -> Result<(), FederationError> {
-        let Some(referencers) = self.remove_internal(schema)? else {
-            return Ok(());
-        };
-        for field in referencers.object_fields {
-            field.remove_recursive(schema)?;
-        }
-        for argument in referencers.object_field_arguments {
-            argument.remove(schema)?;
-        }
-        for field in referencers.interface_fields {
-            field.remove_recursive(schema)?;
-        }
-        for argument in referencers.interface_field_arguments {
-            argument.remove(schema)?;
-        }
-        for field in referencers.input_object_fields {
-            field.remove_recursive(schema)?;
-        }
-        for argument in referencers.directive_arguments {
-            argument.remove(schema)?;
-        }
-        Ok(())
-    }
-
     fn remove_internal(
         &self,
         schema: &mut FederationSchema,
@@ -4519,26 +3957,6 @@ impl EnumTypeDefinitionPosition {
             .make_mut()
             .directives
             .retain(|other_directive| other_directive.name != name);
-    }
-
-    /// Remove a directive application.
-    pub(crate) fn remove_directive(
-        &self,
-        schema: &mut FederationSchema,
-        directive: &Component<Directive>,
-    ) {
-        let Some(type_) = self.try_make_mut(&mut schema.schema) else {
-            return;
-        };
-        if !type_.directives.iter().any(|other_directive| {
-            (other_directive.name == directive.name) && !other_directive.ptr_eq(directive)
-        }) {
-            self.remove_directive_name_references(&mut schema.referencers, &directive.name);
-        }
-        type_
-            .make_mut()
-            .directives
-            .retain(|other_directive| !other_directive.ptr_eq(directive));
     }
 
     fn insert_references(
@@ -4706,47 +4124,6 @@ impl EnumValueDefinitionPosition {
         Ok(())
     }
 
-    /// Remove this value from the enum definition. If it is the only value in the enum,
-    /// recursively remove the enum from the schema as well.
-    pub(crate) fn remove_recursive(
-        &self,
-        schema: &mut FederationSchema,
-    ) -> Result<(), FederationError> {
-        self.remove(schema)?;
-        let parent = self.parent();
-        let Some(type_) = parent.try_get(&schema.schema) else {
-            return Ok(());
-        };
-        if type_.values.is_empty() {
-            parent.remove_recursive(schema)?;
-        }
-        Ok(())
-    }
-
-    pub(crate) fn insert_directive(
-        &self,
-        schema: &mut FederationSchema,
-        directive: Node<Directive>,
-    ) -> Result<(), FederationError> {
-        let value = self.make_mut(&mut schema.schema)?;
-        if value
-            .directives
-            .iter()
-            .any(|other_directive| other_directive.ptr_eq(&directive))
-        {
-            return Err(SingleFederationError::Internal {
-                message: format!(
-                    "Directive application \"@{}\" already exists on enum value \"{}\"",
-                    directive.name, self,
-                ),
-            }
-            .into());
-        }
-        let name = directive.name.clone();
-        value.make_mut().directives.push(directive);
-        self.insert_directive_name_references(&mut schema.referencers, &name)
-    }
-
     /// Remove a directive application from this position by name.
     pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &str) {
         let Some(value) = self.try_make_mut(&mut schema.schema) else {
@@ -4759,36 +4136,15 @@ impl EnumValueDefinitionPosition {
             .retain(|other_directive| other_directive.name != name);
     }
 
-    /// Remove a directive application.
-    pub(crate) fn remove_directive(
-        &self,
-        schema: &mut FederationSchema,
-        directive: &Node<Directive>,
-    ) {
-        let Some(value) = self.try_make_mut(&mut schema.schema) else {
-            return;
-        };
-        if !value.directives.iter().any(|other_directive| {
-            (other_directive.name == directive.name) && !other_directive.ptr_eq(directive)
-        }) {
-            self.remove_directive_name_references(&mut schema.referencers, &directive.name);
-        }
-        value
-            .make_mut()
-            .directives
-            .retain(|other_directive| !other_directive.ptr_eq(directive));
-    }
-
     fn insert_references(
         &self,
         value: &Component<EnumValueDefinition>,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         if is_graphql_reserved_name(&self.value_name) {
-            return Err(SingleFederationError::Internal {
-                message: format!("Cannot insert reserved enum value \"{}\"", self),
-            }
-            .into());
+            return Err(FederationError::internal(format!(
+                "Cannot insert reserved enum value \"{self}\""
+            )));
         }
         validate_node_directives(value.directives.deref())?;
         for directive_reference in value.directives.iter() {
@@ -5085,25 +4441,6 @@ impl InputObjectTypeDefinitionPosition {
     }
 
     /// Remove a directive application.
-    pub(crate) fn remove_directive(
-        &self,
-        schema: &mut FederationSchema,
-        directive: &Component<Directive>,
-    ) {
-        let Some(type_) = self.try_make_mut(&mut schema.schema) else {
-            return;
-        };
-        if !type_.directives.iter().any(|other_directive| {
-            (other_directive.name == directive.name) && !other_directive.ptr_eq(directive)
-        }) {
-            self.remove_directive_name_references(&mut schema.referencers, &directive.name);
-        }
-        type_
-            .make_mut()
-            .directives
-            .retain(|other_directive| !other_directive.ptr_eq(directive));
-    }
-
     fn insert_references(
         &self,
         type_: &Node<InputObjectType>,
@@ -5294,30 +4631,6 @@ impl InputObjectFieldDefinitionPosition {
         Ok(())
     }
 
-    pub(crate) fn insert_directive(
-        &self,
-        schema: &mut FederationSchema,
-        directive: Node<Directive>,
-    ) -> Result<(), FederationError> {
-        let field = self.make_mut(&mut schema.schema)?;
-        if field
-            .directives
-            .iter()
-            .any(|other_directive| other_directive.ptr_eq(&directive))
-        {
-            return Err(SingleFederationError::Internal {
-                message: format!(
-                    "Directive application \"@{}\" already exists on input object field \"{}\"",
-                    directive.name, self,
-                ),
-            }
-            .into());
-        }
-        let name = directive.name.clone();
-        field.make_mut().directives.push(directive);
-        self.insert_directive_name_references(&mut schema.referencers, &name)
-    }
-
     /// Remove a directive application from this position by name.
     pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &str) {
         let Some(field) = self.try_make_mut(&mut schema.schema) else {
@@ -5328,26 +4641,6 @@ impl InputObjectFieldDefinitionPosition {
             .make_mut()
             .directives
             .retain(|other_directive| other_directive.name != name);
-    }
-
-    /// Remove a directive application.
-    pub(crate) fn remove_directive(
-        &self,
-        schema: &mut FederationSchema,
-        directive: &Node<Directive>,
-    ) {
-        let Some(field) = self.try_make_mut(&mut schema.schema) else {
-            return;
-        };
-        if !field.directives.iter().any(|other_directive| {
-            (other_directive.name == directive.name) && !other_directive.ptr_eq(directive)
-        }) {
-            self.remove_directive_name_references(&mut schema.referencers, &directive.name);
-        }
-        field
-            .make_mut()
-            .directives
-            .retain(|other_directive| !other_directive.ptr_eq(directive));
     }
 
     fn insert_references(
@@ -5519,17 +4812,6 @@ impl DirectiveDefinitionPosition {
             .directive_definitions
             .get_mut(&self.directive_name)
             .ok_or_else(|| PositionLookupError::DirectiveMissing(self.clone()))
-    }
-
-    fn try_make_mut<'schema>(
-        &self,
-        schema: &'schema mut Schema,
-    ) -> Option<&'schema mut Node<DirectiveDefinition>> {
-        if self.try_get(schema).is_some() {
-            self.make_mut(schema).ok()
-        } else {
-            None
-        }
     }
 
     pub(crate) fn pre_insert(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
@@ -5760,35 +5042,6 @@ impl DirectiveArgumentDefinitionPosition {
         }
     }
 
-    pub(crate) fn insert(
-        &self,
-        schema: &mut FederationSchema,
-        argument: Node<InputValueDefinition>,
-    ) -> Result<(), FederationError> {
-        if self.argument_name != argument.name {
-            return Err(SingleFederationError::Internal {
-                message: format!(
-                    "Directive argument \"{}\" given argument named \"{}\"",
-                    self, argument.name,
-                ),
-            }
-            .into());
-        }
-        if self.try_get(&schema.schema).is_some() {
-            // TODO: Handle old spec edge case of arguments with non-unique names
-            return Err(SingleFederationError::Internal {
-                message: format!("Directive argument \"{}\" already exists in schema", self,),
-            }
-            .into());
-        }
-        self.parent()
-            .make_mut(&mut schema.schema)?
-            .make_mut()
-            .arguments
-            .push(argument);
-        self.insert_references(self.get(&schema.schema)?, &mut schema.referencers)
-    }
-
     /// Remove this argument definition from its directive. Any applications of the directive that
     /// use this argument will become invalid.
     pub(crate) fn remove(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
@@ -5804,30 +5057,6 @@ impl DirectiveArgumentDefinitionPosition {
         Ok(())
     }
 
-    pub(crate) fn insert_directive(
-        &self,
-        schema: &mut FederationSchema,
-        directive: Node<Directive>,
-    ) -> Result<(), FederationError> {
-        let argument = self.make_mut(&mut schema.schema)?;
-        if argument
-            .directives
-            .iter()
-            .any(|other_directive| other_directive.ptr_eq(&directive))
-        {
-            return Err(SingleFederationError::Internal {
-                message: format!(
-                    "Directive application \"@{}\" already exists on directive argument \"{}\"",
-                    directive.name, self,
-                ),
-            }
-            .into());
-        }
-        let name = directive.name.clone();
-        argument.make_mut().directives.push(directive);
-        self.insert_directive_name_references(&mut schema.referencers, &name)
-    }
-
     /// Remove a directive application from this position by name.
     pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &str) {
         let Some(argument) = self.try_make_mut(&mut schema.schema) else {
@@ -5838,26 +5067,6 @@ impl DirectiveArgumentDefinitionPosition {
             .make_mut()
             .directives
             .retain(|other_directive| other_directive.name != name);
-    }
-
-    /// Remove a directive application.
-    pub(crate) fn remove_directive(
-        &self,
-        schema: &mut FederationSchema,
-        directive: &Node<Directive>,
-    ) {
-        let Some(argument) = self.try_make_mut(&mut schema.schema) else {
-            return;
-        };
-        if !argument.directives.iter().any(|other_directive| {
-            (other_directive.name == directive.name) && !other_directive.ptr_eq(directive)
-        }) {
-            self.remove_directive_name_references(&mut schema.referencers, &directive.name);
-        }
-        argument
-            .make_mut()
-            .directives
-            .retain(|other_directive| !other_directive.ptr_eq(directive));
     }
 
     fn insert_references(
@@ -6260,7 +5469,9 @@ mod tests {
         )
         .unwrap();
 
-        let position = InterfaceTypeDefinitionPosition::new(name!("UserProfile"));
+        let position = InterfaceTypeDefinitionPosition {
+            type_name: name!("UserProfile"),
+        };
         position.remove_recursive(&mut schema).unwrap();
 
         insta::assert_snapshot!(schema.schema(), @r#"

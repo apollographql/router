@@ -6,6 +6,12 @@ edition = "2021"
 license = "Elastic-2.0"
 publish = false
 
+[package.metadata.cargo-machete]
+ignored = [
+    # usage not found because the crate name is `inflector` without `str_`
+    "str_inflector",
+]
+
 [dependencies]
 anyhow = "1.0.80"
 clap = { version = "4.5.1", features = ["derive"] }

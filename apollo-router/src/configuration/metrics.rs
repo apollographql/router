@@ -48,6 +48,7 @@ impl Metrics {
         data.populate_license_instrument(license_state);
         data.populate_user_plugins_instrument(configuration);
         data.populate_query_planner_experimental_parallelism(configuration);
+        data.populate_deno_or_rust_mode_instruments(configuration);
         data.into()
     }
 }
@@ -209,6 +210,14 @@ impl InstrumentData {
             "$.subgraph..request",
             opt.subgraph.response,
             "$.subgraph..response"
+        );
+        populate_config_instrument!(
+            apollo.router.config.rhai,
+            "$.rhai",
+            opt.scripts,
+            "$[?(@.scripts)]",
+            opt.main,
+            "$[?(@.main)]"
         );
         populate_config_instrument!(
             apollo.router.config.persisted_queries,
@@ -532,6 +541,36 @@ impl InstrumentData {
             );
         }
     }
+
+    /// Populate metrics on the rollout of experimental Rust replacements of JavaScript code.
+    pub(crate) fn populate_deno_or_rust_mode_instruments(&mut self, configuration: &Configuration) {
+        let experimental_query_planner_mode = match configuration.experimental_query_planner_mode {
+            super::QueryPlannerMode::Legacy => "legacy",
+            super::QueryPlannerMode::Both => "both",
+            super::QueryPlannerMode::BothBestEffort => "both_best_effort",
+            super::QueryPlannerMode::New => "new",
+        };
+        let experimental_introspection_mode = match configuration.experimental_introspection_mode {
+            super::IntrospectionMode::Legacy => "legacy",
+            super::IntrospectionMode::Both => "both",
+            super::IntrospectionMode::New => "new",
+        };
+
+        self.data.insert(
+            "apollo.router.config.experimental_query_planner_mode".to_string(),
+            (
+                1,
+                HashMap::from_iter([("mode".to_string(), experimental_query_planner_mode.into())]),
+            ),
+        );
+        self.data.insert(
+            "apollo.router.config.experimental_introspection_mode".to_string(),
+            (
+                1,
+                HashMap::from_iter([("mode".to_string(), experimental_introspection_mode.into())]),
+            ),
+        );
+    }
 }
 
 impl From<InstrumentData> for Metrics {
@@ -564,6 +603,8 @@ mod test {
 
     use crate::configuration::metrics::InstrumentData;
     use crate::configuration::metrics::Metrics;
+    use crate::configuration::IntrospectionMode;
+    use crate::configuration::QueryPlannerMode;
     use crate::uplink::license_enforcement::LicenseState;
     use crate::Configuration;
 
@@ -635,6 +676,42 @@ mod test {
         configuration.plugins.plugins = Some(custom_plugins);
         let mut data = InstrumentData::default();
         data.populate_user_plugins_instrument(&configuration);
+        let _metrics: Metrics = data.into();
+        assert_non_zero_metrics_snapshot!();
+    }
+
+    #[test]
+    fn test_experimental_mode_metrics() {
+        let mut data = InstrumentData::default();
+        data.populate_deno_or_rust_mode_instruments(&Configuration {
+            experimental_introspection_mode: IntrospectionMode::Legacy,
+            experimental_query_planner_mode: QueryPlannerMode::Both,
+            ..Default::default()
+        });
+        let _metrics: Metrics = data.into();
+        assert_non_zero_metrics_snapshot!();
+    }
+
+    #[test]
+    fn test_experimental_mode_metrics_2() {
+        let mut data = InstrumentData::default();
+        // Default query planner value should still be reported
+        data.populate_deno_or_rust_mode_instruments(&Configuration {
+            experimental_introspection_mode: IntrospectionMode::New,
+            ..Default::default()
+        });
+        let _metrics: Metrics = data.into();
+        assert_non_zero_metrics_snapshot!();
+    }
+
+    #[test]
+    fn test_experimental_mode_metrics_3() {
+        let mut data = InstrumentData::default();
+        data.populate_deno_or_rust_mode_instruments(&Configuration {
+            experimental_introspection_mode: IntrospectionMode::New,
+            experimental_query_planner_mode: QueryPlannerMode::New,
+            ..Default::default()
+        });
         let _metrics: Metrics = data.into();
         assert_non_zero_metrics_snapshot!();
     }

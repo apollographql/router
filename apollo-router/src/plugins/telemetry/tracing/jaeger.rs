@@ -139,7 +139,8 @@ impl TracingConfigurator for Config {
                 Ok(builder.with_span_processor(
                     BatchSpanProcessor::builder(exporter, runtime::Tokio)
                         .with_batch_config(batch_processor.clone().into())
-                        .build(),
+                        .build()
+                        .filtered(),
                 ))
             }
             _ => Ok(builder),

@@ -30,6 +30,10 @@ async fn test_json() -> Result<(), BoxError> {
     router.execute_query(&query).await;
     router.assert_log_contains(r#""static_one":"test""#).await;
     router.execute_query(&query).await;
+    router
+        .assert_log_contains(r#""on_supergraph_response_event":"on_supergraph_event""#)
+        .await;
+    router.execute_query(&query).await;
     router.assert_log_contains(r#""response_status":200"#).await;
     router.graceful_shutdown().await;
 
@@ -160,6 +164,10 @@ async fn test_json_sampler_off() -> Result<(), BoxError> {
     router.execute_query(&query).await;
     router.assert_log_contains(r#""static_one":"test""#).await;
     router.execute_query(&query).await;
+    router
+        .assert_log_contains(r#""on_supergraph_response_event":"on_supergraph_event""#)
+        .await;
+    router.execute_query(&query).await;
     router.assert_log_contains(r#""response_status":200"#).await;
     router.graceful_shutdown().await;
 
@@ -188,6 +196,10 @@ async fn test_text() -> Result<(), BoxError> {
     router.assert_log_contains("trace_id").await;
     router.execute_query(&query).await;
     router.assert_log_contains("span_id").await;
+    router
+        .assert_log_contains(r#"on_supergraph_response_event=on_supergraph_event"#)
+        .await;
+    router.execute_query(&query).await;
     router.execute_query(&query).await;
     router.assert_log_contains("response_status=200").await;
     router.graceful_shutdown().await;

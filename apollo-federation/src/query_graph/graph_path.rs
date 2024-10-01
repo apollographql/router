@@ -279,7 +279,7 @@ impl Deref for OpPath {
     }
 }
 
-impl std::fmt::Display for OpPath {
+impl Display for OpPath {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         for (i, element) in self.0.iter().enumerate() {
             if i > 0 {
@@ -568,7 +568,7 @@ impl std::fmt::Debug for SimultaneousPaths {
     }
 }
 
-impl std::fmt::Display for SimultaneousPaths {
+impl Display for SimultaneousPaths {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         self.fmt_indented(&mut IndentedFormatter::new(f))
     }
@@ -769,14 +769,8 @@ impl Display for Unadvanceable {
 }
 
 #[derive(Debug, Clone, strum_macros::Display, serde::Serialize)]
-enum UnadvanceableReason {
-    UnsatisfiableKeyCondition,
-    UnsatisfiableRequiresCondition,
-    UnresolvableInterfaceObject,
-    NoMatchingTransition,
-    UnreachableType,
-    IgnoredIndirectPath,
-}
+// PORT_NOTE: This is only used by composition, which is not ported to Rust yet.
+enum UnadvanceableReason {}
 
 /// One of the options for a `ClosedBranch` (see the documentation of that struct for details). Note
 /// there is an optimization here, in that if some ending section of the path within the GraphQL
@@ -801,7 +795,7 @@ impl ClosedPath {
     }
 }
 
-impl std::fmt::Display for ClosedPath {
+impl Display for ClosedPath {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         if let Some(ref selection_set) = self.selection_set {
             write!(f, "{} -> {}", self.paths, selection_set)
@@ -1983,12 +1977,6 @@ impl OpGraphPath {
             })
             .collect();
         (new_self, new_others)
-    }
-
-    pub(crate) fn is_overridden_by(&self, other: &Self) -> bool {
-        self.overriding_path_ids
-            .iter()
-            .any(|overriding_id| other.own_path_ids.contains(overriding_id))
     }
 
     pub(crate) fn subgraph_jumps(&self) -> Result<u32, FederationError> {
@@ -3602,7 +3590,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
 
 // PORT_NOTE: JS passes a ConditionResolver here, we do not: see port note for
 // `SimultaneousPathsWithLazyIndirectPaths`
-pub fn create_initial_options(
+pub(crate) fn create_initial_options(
     initial_path: GraphPath<OpGraphPathTrigger, Option<EdgeIndex>>,
     initial_type: &QueryGraphNodeType,
     initial_context: OpGraphPathContext,
@@ -3707,12 +3695,12 @@ impl ClosedBranch {
 }
 
 impl OpPath {
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.0.len()
     }
 
     pub(crate) fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.len() == 0
     }
 
     pub(crate) fn strip_prefix(&self, maybe_prefix: &Self) -> Option<Self> {
