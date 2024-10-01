@@ -772,7 +772,7 @@ impl SubSelection {
                     } else {
                         // This no-Alias, no-SubSelection case should be
                         // forbidden by NamedSelection::parse_path.
-                        unreachable!("PathSelection without Alias or SubSelection");
+                        debug_assert!(false, "PathSelection without Alias or SubSelection");
                     }
                 }
                 _ => {
