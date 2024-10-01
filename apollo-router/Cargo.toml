@@ -212,7 +212,7 @@ thiserror = "1.0.61"
 tokio.workspace = true
 tokio-stream = { version = "0.1.15", features = ["sync", "net"] }
 tokio-util = { version = "0.7.11", features = ["net", "codec", "time"] }
-tonic = { version = "0.9.2", features = [
+tonic = { version = "0.12.0", features = [
     "transport",
     "tls",
     "tls-roots",
