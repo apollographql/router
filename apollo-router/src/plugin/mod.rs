@@ -311,7 +311,6 @@ impl PluginFactory {
         (self.instance_factory)(init).await
     }
 
-    #[cfg(test)]
     pub(crate) async fn create_instance_without_schema(
         &self,
         configuration: &serde_json::Value,
