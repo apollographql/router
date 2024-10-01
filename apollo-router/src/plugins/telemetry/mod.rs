@@ -102,6 +102,7 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::TracingCommon;
+use crate::plugins::telemetry::config_new::connector::http::events::ConnectorHttpEvents;
 use crate::plugins::telemetry::config_new::cost::add_cost_attributes;
 use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
 use crate::plugins::telemetry::config_new::instruments::SupergraphInstruments;
@@ -876,14 +877,22 @@ impl PluginPrivate for Telemetry {
                             .instruments
                             .new_connector_instruments(static_connector_instruments.clone());
                         custom_instruments.on_request(http_request);
-                        (http_request.context.clone(), Some(custom_instruments))
+                        let custom_events = req_fn_config
+                            .instrumentation
+                            .events
+                            .new_connector_http_events();
+                        custom_events.on_request(http_request);
+                        (
+                            http_request.context.clone(),
+                            Some((custom_instruments, custom_events)),
+                        )
                     } else {
                         (http_request.context.clone(), None)
                     }
                 },
-                move |(context, custom_instruments): (
+                move |(context, custom_telemetry): (
                     Context,
-                    Option<ConnectorHttpInstruments>,
+                    Option<(ConnectorHttpInstruments, ConnectorHttpEvents)>,
                 ),
                       f: BoxFuture<
                     'static,
@@ -891,13 +900,15 @@ impl PluginPrivate for Telemetry {
                 >| {
                     async move {
                         let result = f.await;
-                        if let Some(custom_instruments) = custom_instruments {
+                        if let Some((custom_instruments, custom_events)) = custom_telemetry {
                             match &result {
                                 Ok(resp) => {
                                     custom_instruments.on_response(resp);
+                                    custom_events.on_response(resp);
                                 }
                                 Err(err) => {
                                     custom_instruments.on_error(err, &context);
+                                    custom_events.on_error(err, &context);
                                 }
                             }
                         }

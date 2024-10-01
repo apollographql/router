@@ -1,0 +1,12 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/events.rs
+expression: yaml
+---
+- fields:
+    kind: connector.http.response
+  level: WARN
+  message: ""
+- fields:
+    kind: my.response.event
+  level: ERROR
+  message: my response event message
