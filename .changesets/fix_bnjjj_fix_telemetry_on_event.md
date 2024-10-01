@@ -1,6 +1,8 @@
-### Display custom event attributes properly on subscription events ([PR #6033](https://github.com/apollographql/router/pull/6033))
+### Fix displaying custom event attributes on subscription events ([PR #6033](https://github.com/apollographql/router/pull/6033))
 
-Custom event attributes set using selectors at the supergraph level is now displayed properly. Example of configuration:
+The router now properly displays custom event attributes that are set with selectors at the supergraph level. 
+
+An example configuration:
 
 ```yaml title=router.yaml
 telemetry:

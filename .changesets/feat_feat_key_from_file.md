@@ -1,9 +1,9 @@
-### feat: allow users to load apollo key from file ([PR #5917](https://github.com/apollographql/router/pull/5917))
+### Support loading Apollo key from file ([PR #5917](https://github.com/apollographql/router/pull/5917))
 
-Users sometimes would rather not pass sensitive keys to the router through environment variables out of an abundance of caution. To help address this, you can now pass an argument `--apollo-key-path` or env var `APOLLO_KEY_PATH`, that takes a file location as an argument which is read and then used as the Apollo key for use with Uplink and usage reporting.
+You can now specific the location to a file containing the Apollo key that's used by Apollo Uplink and usage reporting. The router now supports both the `--apollo-key-path` CLI argument and the `APOLLO_KEY_PATH` environment variable for passing the file containing your Apollo key.
 
-This addresses a portion of #3264, specifically the APOLLO_KEY.
+Previously, the router supported only the `APOLLO_KEY` environment variable to provide the key. The new CLI argument and environment variable help users who prefer not to pass sensitive keys through environment variables.
 
-Note: This feature is not available on Windows.
+Note: This feature is unavailable for Windows.
 
 By [@lleadbet](https://github.com/lleadbet) in https://github.com/apollographql/router/pull/5917
