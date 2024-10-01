@@ -4,6 +4,76 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.56.0] - 2024-10-01
+
+## 🚀 Features
+
+### Support loading Apollo key from file ([PR #5917](https://github.com/apollographql/router/pull/5917))
+
+You can now specific the location to a file containing the Apollo key that's used by Apollo Uplink and usage reporting. The router now supports both the `--apollo-key-path` CLI argument and the `APOLLO_KEY_PATH` environment variable for passing the file containing your Apollo key.
+
+Previously, the router supported only the `APOLLO_KEY` environment variable to provide the key. The new CLI argument and environment variable help users who prefer not to pass sensitive keys through environment variables.
+
+Note: This feature is unavailable for Windows.
+
+By [@lleadbet](https://github.com/lleadbet) in https://github.com/apollographql/router/pull/5917
+
+## 🐛 Fixes
+
+### Prevent sending internal `apollo_private.*` attributes to Jaeger collector ([PR #6033](https://github.com/apollographql/router/pull/6033))
+
+When using the router's Jaeger collector to send traces, you will no longer receive span attributes with the `apollo_private.` prefix. Those attributes were incorrectly sent, as that prefix is reserved for internal attributes.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/6033
+
+### Fix displaying custom event attributes on subscription events ([PR #6033](https://github.com/apollographql/router/pull/6033))
+
+The router now properly displays custom event attributes that are set with selectors at the supergraph level. 
+
+An example configuration:
+
+```yaml title=router.yaml
+telemetry:
+  instrumentation:
+    events:
+      supergraph:
+        supergraph.event:
+          message: supergraph event
+          on: event_response # on every supergraph event (like subscription event for example)
+          level: info
+          attributes:
+            test:
+              static: foo
+            response.data:
+              response_data: $ # Display all the response data payload
+            response.errors:
+              response_errors: $ # Display all the response errors payload
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/6033
+
+> [!IMPORTANT]
+> If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), this release changes the hashing algorithm used for the cache keys.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new hashing algorithm comes into service.
+
+### Update to Federation v2.9.2 ([PR #6069](https://github.com/apollographql/router/pull/6069))
+
+This release updates to Federation v2.9.2, with a small fix to the internal `__typename` optimization and a fix to prevent argument name collisions in the `@context`/`@fromContext` directives.
+
+By [@dariuszkuc](https://github.com/dariuszkuc) in https://github.com/apollographql/router/pull/6069
+
+## 📃 Configuration
+
+### Add metrics for Rust vs. Deno configuration values ([PR #6056](https://github.com/apollographql/router/pull/6056))
+
+To help track the migration from JavaScript (Deno) to native Rust implementations, the router now reports the values of the following configuration options to Apollo:
+
+- `apollo.router.config.experimental_query_planner_mode`
+- `apollo.router.config.experimental_introspection_mode`
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/6056
+
+
+
 # [1.55.0] - 2024-09-24
 
 > [!IMPORTANT]
