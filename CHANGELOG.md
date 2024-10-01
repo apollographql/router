@@ -17,7 +17,7 @@ The native query planner is now in public preview. You can configure the `experi
 
 - `new`: Enable _only_ the new Rust-native query planner in the hot-path of query execution.
 - `legacy`: Enable _only_ the legacy JavaScript query planner in the hot-path of query execution.
-- `both_best_effort`: Enables _both_ the new and legacy query planners.  They are configured in a comparison-based mode of operation with the legacy planner in the hot-path and the and the new planner in the cold-path.  Comparisions are made between the two plans on a sampled basis and metrics are available to analyze the differences in aggregate.
+- `both_best_effort`: Enables _both_ the new and legacy query planners.  They are configured in a comparison-based mode of operation with the legacy planner in the hot-path and the and the new planner in the cold-path.  Comparisons are made between the two plans on a sampled basis and metrics are available to analyze the differences in aggregate.
 
 ### Support loading Apollo key from file ([PR #5917](https://github.com/apollographql/router/pull/5917))
 
