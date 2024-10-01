@@ -29,7 +29,6 @@ multimap = "0.10.0"
 nom = "7.1.3"
 petgraph = { version = "0.6.4", features = ["serde-1"] }
 serde.workspace = true
-serde_json.workspace = true
 serde_json_bytes.workspace = true
 strum = "0.26.0"
 strum_macros = "0.26.0"

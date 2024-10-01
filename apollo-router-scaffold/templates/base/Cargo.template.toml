@@ -26,7 +26,6 @@ apollo-router = "1.56.0"
 {{/if}}
 {{/if}}
 async-trait = "0.1.52"
-futures = "0.3.21"
 schemars = "0.8.10"
 serde = "1.0.149"
 serde_json = "1.0.79"

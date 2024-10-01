@@ -337,20 +337,6 @@ impl FieldSelection {
         }
     }
 
-    /// Returns a field selection "equivalent" to the one represented by this object, but such that its parent type
-    /// is the one provided as argument.
-    ///
-    /// Obviously, this operation will only succeed if this selection (both the field itself and its subselections)
-    /// make sense from the provided parent type. If this is not the case, this method will throw.
-    pub(crate) fn rebase_on(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        named_fragments: &NamedFragments,
-        schema: &ValidFederationSchema,
-    ) -> Result<FieldSelection, FederationError> {
-        self.rebase_inner(parent_type, named_fragments, schema, Default::default())
-    }
-
     fn can_add_to(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
@@ -660,15 +646,6 @@ impl InlineFragmentSelection {
         }
     }
 
-    pub(crate) fn rebase_on(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        named_fragments: &NamedFragments,
-        schema: &ValidFederationSchema,
-    ) -> Result<Selection, FederationError> {
-        self.rebase_inner(parent_type, named_fragments, schema, Default::default())
-    }
-
     fn can_add_to(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
@@ -690,16 +667,6 @@ impl InlineFragmentSelection {
         } else {
             Ok(true)
         }
-    }
-
-    fn can_rebase_on(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        parent_schema: &ValidFederationSchema,
-    ) -> bool {
-        self.inline_fragment
-            .can_rebase_on(parent_type, parent_schema)
-            .0
     }
 }
 
@@ -780,7 +747,7 @@ impl SelectionSet {
 
     /// Returns true if the selection set would select cleanly from the given type in the given
     /// schema.
-    pub fn can_rebase_on(
+    pub(crate) fn can_rebase_on(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         schema: &ValidFederationSchema,

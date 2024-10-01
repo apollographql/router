@@ -16,7 +16,6 @@ use super::fetch_dependency_graph::FetchIdGenerator;
 use super::ConditionNode;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::operation::normalize_operation;
 use crate::operation::NamedFragments;
 use crate::operation::NormalizedDefer;
@@ -53,7 +52,6 @@ use crate::ApiSchemaOptions;
 use crate::Supergraph;
 
 pub(crate) const CONTEXT_DIRECTIVE: &str = "context";
-pub(crate) const JOIN_FIELD: &str = "join__field";
 
 #[derive(Debug, Clone, Hash)]
 pub struct QueryPlannerConfig {
@@ -226,8 +224,6 @@ pub struct QueryPlanner {
     federated_query_graph: Arc<QueryGraph>,
     supergraph_schema: ValidFederationSchema,
     api_schema: ValidFederationSchema,
-    subgraph_federation_spec_definitions:
-        Arc<IndexMap<Arc<str>, &'static FederationSpecDefinition>>,
     /// A set of the names of interface types for which at least one subgraph use an
     /// @interfaceObject to abstract that interface.
     interface_types_with_interface_objects: IndexSet<InterfaceTypeDefinitionPosition>,
@@ -338,9 +334,6 @@ impl QueryPlanner {
             federated_query_graph: Arc::new(query_graph),
             supergraph_schema,
             api_schema,
-            // TODO(@goto-bus-stop): not sure how this is going to be used,
-            // keeping empty for the moment
-            subgraph_federation_spec_definitions: Default::default(),
             interface_types_with_interface_objects,
             abstract_types_with_inconsistent_runtime_types,
         })
