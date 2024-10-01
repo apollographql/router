@@ -24,7 +24,7 @@ use super::*;
 use crate::plugin::serde::deserialize_option_header_name;
 use crate::plugins::telemetry::metrics;
 use crate::plugins::telemetry::resource::ConfigResource;
-use crate::plugins::telemetry::tracing::datadog::DatadogAgentSampling;
+use crate::plugins::telemetry::tracing::datadog_agent_sampler::DatadogAgentSampling;
 use crate::Configuration;
 
 #[derive(thiserror::Error, Debug)]

@@ -281,7 +281,7 @@ pub(crate) mod propagator {
         }
     }
 
-    #[derive(Default, Debug)]
+    #[derive(Default, Debug, Eq, PartialEq)]
     pub(crate) enum SamplingPriority {
         UserReject = -1,
         #[default]
