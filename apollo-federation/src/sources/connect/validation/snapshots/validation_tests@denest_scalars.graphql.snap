@@ -8,7 +8,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/denest_sc
         code: GroupSelectionRequiredForObject,
         message: "`User.street` is an object, so ``@connect(selection:)` on `Query.me`` must select a group `street{}`.",
         locations: [
-            8:18..17:10,
+            15:9..15:15,
             25:3..25:17,
         ],
     },

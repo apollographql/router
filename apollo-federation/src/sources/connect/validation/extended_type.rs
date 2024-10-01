@@ -155,11 +155,6 @@ fn validate_field(
     schema: &SchemaInfo,
     seen_fields: &mut IndexSet<(Name, Name)>,
 ) -> Vec<Message> {
-    let field_coordinate = FieldCoordinate { object, field };
-    let connect_coordinate = ConnectDirectiveCoordinate {
-        connect_directive_name: schema.connect_directive_name,
-        field_coordinate,
-    };
     let source_map = &schema.sources;
     let mut errors = Vec::new();
     let connect_directives = field
@@ -208,13 +203,14 @@ fn validate_field(
     }
 
     for connect_directive in connect_directives {
-        errors.extend(validate_selection(
-            field,
-            connect_directive,
-            object,
-            schema,
-            seen_fields,
-        ));
+        let field_coordinate = FieldCoordinate { object, field };
+        let connect_coordinate = ConnectDirectiveCoordinate {
+            connect_directive_name: schema.connect_directive_name,
+            directive: connect_directive,
+            field_coordinate,
+        };
+
+        errors.extend(validate_selection(connect_coordinate, schema, seen_fields).err());
 
         errors.extend(validate_entity_arg(
             field,

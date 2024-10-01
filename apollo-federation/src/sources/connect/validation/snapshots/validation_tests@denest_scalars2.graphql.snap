@@ -8,7 +8,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/denest_sc
         code: GroupSelectionIsNotObject,
         message: "`@connect(selection:)` on `Query.me` selects a group `street{}`, but `User.street` is of type `String` which is not an object.",
         locations: [
-            8:18..17:10,
+            15:9..15:31,
             25:3..25:17,
         ],
     },
