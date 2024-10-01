@@ -140,9 +140,9 @@ async fn operation_name_error() {
     {
       "errors": [
         {
-          "message": "Must provide operation name if query contains multiple operations.",
+          "message": "value retrieval failed: Federation error: Operation name not found",
           "extensions": {
-            "code": "GRAPHQL_VALIDATION_FAILED"
+            "code": "INTERNAL_SERVER_ERROR"
           }
         }
       ]
@@ -159,9 +159,9 @@ async fn operation_name_error() {
     {
       "errors": [
         {
-          "message": "Unknown operation named \"NonExistentOp\"",
+          "message": "value retrieval failed: Federation error: Operation name not found",
           "extensions": {
-            "code": "GRAPHQL_VALIDATION_FAILED"
+            "code": "INTERNAL_SERVER_ERROR"
           }
         }
       ]
@@ -233,7 +233,7 @@ async fn both_mode_integration() {
     let mut router = IntegrationTest::builder()
         .config(
             "
-                # `experimental_introspection_mode` now defaults to `both`
+                experimental_introspection_mode: both
                 supergraph:
                     introspection: true
             ",

@@ -1,125 +1,129 @@
 {
-    "enterprise": true,
-    "redis": true,
-    "actions": [
-        {
-            "type": "Start",
-            "schema_path": "./supergraph.graphql",
-            "configuration_path": "./configuration.yaml",
-            "subgraphs": {
-                "accounts": {
-                    "requests": [
-                        {
-                            "request": {
-                                "body": {"query":"query private__accounts__0{me{name}}"}
-                            },
-                            "response": {
-                                "headers": {
-                                    "Cache-Control": "private, max-age=10",
-                                    "Content-Type": "application/json"
-                                },
-                                "body": {"data": { "me": { "name": "test" } } }
-                            }
-                        }
-                    ]
+  "enterprise": true,
+  "redis": true,
+  "actions": [
+    {
+      "type": "Start",
+      "schema_path": "./supergraph.graphql",
+      "configuration_path": "./configuration.yaml",
+      "subgraphs": {
+        "accounts": {
+          "requests": [
+            {
+              "request": {
+                "body": {
+                  "query": "query private__accounts__0 { me { name } }"
                 }
+              },
+              "response": {
+                "headers": {
+                  "Cache-Control": "private, max-age=10",
+                  "Content-Type": "application/json"
+                },
+                "body": { "data": { "me": { "name": "test" } } }
+              }
             }
-        },
-        {
-            "type": "Request",
-            "request": {
-                "query": "query private { me { name } }"
-            },
-            "headers": {
-                "x-user": "1"
-            },
-            "expected_response": {
-                "data":{
-                    "me":{
-                        "name":"test"
-                    }
-                }
-            }
-        },
-        {
-            "type": "ReloadSubgraphs",
-            "subgraphs": {
-                "accounts": {
-                    "requests": [
-                        {
-                            "request": {
-                                "body": {"query":"query private__accounts__0{me{name}}"}
-                            },
-                            "response": {
-                                "headers": {
-                                    "Cache-Control": "private, max-age=10",
-                                    "Content-Type": "application/json"
-                                },
-                                "body": {"data": { "me": { "name": "test2" } } }
-                            }
-                        }
-                    ]
-                }
-            }
-        },
-        {
-            "type": "Request",
-            "request": {
-                "query": "query private { me { name } }"
-            },
-            "headers": {
-                "x-user": "2"
-            },
-            "expected_response": {
-                "data":{
-                    "me":{
-                        "name":"test2"
-                    }
-                }
-            }
-        },
-        {
-            "type": "ReloadSubgraphs",
-            "subgraphs": {
-                "accounts": {
-                    "requests": []
-                }
-            }
-        },
-        {
-            "type": "Request",
-            "request": {
-                "query": "query private { me { name } }"
-            },
-            "headers": {
-                "x-user": "1"
-            },
-            "expected_response": {
-                "data":{
-                    "me":{
-                        "name":"test"
-                    }
-                }
-            }
-        },
-        {
-            "type": "Request",
-            "request": {
-                "query": "query private { me { name } }"
-            },
-            "headers": {
-                "x-user": "2"
-            },
-            "expected_response": {
-                "data":{
-                    "me":{
-                        "name":"test2"
-                    }
-                }
-            }
-        },
-        {
-            "type": "Stop"
+          ]
         }
-    ]
+      }
+    },
+    {
+      "type": "Request",
+      "request": {
+        "query": "query private { me { name } }"
+      },
+      "headers": {
+        "x-user": "1"
+      },
+      "expected_response": {
+        "data": {
+          "me": {
+            "name": "test"
+          }
+        }
+      }
+    },
+    {
+      "type": "ReloadSubgraphs",
+      "subgraphs": {
+        "accounts": {
+          "requests": [
+            {
+              "request": {
+                "body": {
+                  "query": "query private__accounts__0 { me { name } }"
+                }
+              },
+              "response": {
+                "headers": {
+                  "Cache-Control": "private, max-age=10",
+                  "Content-Type": "application/json"
+                },
+                "body": { "data": { "me": { "name": "test2" } } }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "Request",
+      "request": {
+        "query": "query private { me { name } }"
+      },
+      "headers": {
+        "x-user": "2"
+      },
+      "expected_response": {
+        "data": {
+          "me": {
+            "name": "test2"
+          }
+        }
+      }
+    },
+    {
+      "type": "ReloadSubgraphs",
+      "subgraphs": {
+        "accounts": {
+          "requests": []
+        }
+      }
+    },
+    {
+      "type": "Request",
+      "request": {
+        "query": "query private { me { name } }"
+      },
+      "headers": {
+        "x-user": "1"
+      },
+      "expected_response": {
+        "data": {
+          "me": {
+            "name": "test"
+          }
+        }
+      }
+    },
+    {
+      "type": "Request",
+      "request": {
+        "query": "query private { me { name } }"
+      },
+      "headers": {
+        "x-user": "2"
+      },
+      "expected_response": {
+        "data": {
+          "me": {
+            "name": "test2"
+          }
+        }
+      }
+    },
+    {
+      "type": "Stop"
+    }
+  ]
 }

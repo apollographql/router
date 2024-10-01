@@ -163,8 +163,9 @@ async fn context_with_legacy_qp() {
     if !graph_os_enabled() {
         return;
     }
+    let config = format!("{PROMETHEUS_METRICS_CONFIG}\n{LEGACY_QP}");
     let mut router = IntegrationTest::builder()
-        .config(PROMETHEUS_METRICS_CONFIG)
+        .config(config)
         .supergraph("tests/fixtures/set_context/supergraph.graphql")
         .build()
         .await;

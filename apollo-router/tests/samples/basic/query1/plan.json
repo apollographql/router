@@ -1,60 +1,60 @@
 {
-    "actions": [
-        {
-            "type": "Start",
-            "schema_path": "./supergraph.graphql",
-            "configuration_path": "./configuration.yaml",
-            "subgraphs": {
-                "accounts": {
-                    "requests": [
-                        {
-                            "request": {
-                                "body": {"query":"{me{name}}"}
-                            },
-                            "response": {
-                                "body": {"data": { "me": { "name": "test" } } }
-                            }
-                        },
-                        {
-                            "request": {
-                                "body": {"query":"{me{nom:name}}"}
-                            },
-                            "response": {
-                                "body": {"data": { "me": { "nom": "test" } } }
-                            }
-                        }
-                    ]
-                }
-            }
-        },
-        {
-            "type": "Request",
-            "request": {
-                "query": "{ me { name } }"
+  "actions": [
+    {
+      "type": "Start",
+      "schema_path": "./supergraph.graphql",
+      "configuration_path": "./configuration.yaml",
+      "subgraphs": {
+        "accounts": {
+          "requests": [
+            {
+              "request": {
+                "body": { "query": "{ me { name } }" }
+              },
+              "response": {
+                "body": { "data": { "me": { "name": "test" } } }
+              }
             },
-            "expected_response": {
-                "data":{
-                    "me":{
-                        "name":"test"
-                    }
-                }
+            {
+              "request": {
+                "body": { "query": "{ me { nom: name } }" }
+              },
+              "response": {
+                "body": { "data": { "me": { "nom": "test" } } }
+              }
             }
-        },
-        {
-            "type": "Request",
-            "request": {
-                "query": "{ me { nom: name } }"
-            },
-            "expected_response": {
-                "data": {
-                    "me": {
-                        "nom": "test"
-                    }
-                }
-            }
-        },
-        {
-            "type": "Stop"
+          ]
         }
-    ]
+      }
+    },
+    {
+      "type": "Request",
+      "request": {
+        "query": "{ me { name } }"
+      },
+      "expected_response": {
+        "data": {
+          "me": {
+            "name": "test"
+          }
+        }
+      }
+    },
+    {
+      "type": "Request",
+      "request": {
+        "query": "{ me { nom: name } }"
+      },
+      "expected_response": {
+        "data": {
+          "me": {
+            "nom": "test"
+          }
+        }
+      }
+    },
+    {
+      "type": "Stop"
+    }
+  ]
 }

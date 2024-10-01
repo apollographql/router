@@ -35,6 +35,7 @@ macro_rules! snap
 async fn run_single_request(query: &str, mocks: &[(&'static str, &'static str)]) -> Response {
     let harness = setup_from_mocks(
         json! {{
+            "experimental_query_planner_mode": "both_best_effort",
             "experimental_type_conditioned_fetching": true,
             // will make debugging easier
             "plugins": {

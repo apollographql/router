@@ -517,12 +517,9 @@ pub async fn create_test_service_factory_from_yaml(schema: &str, configuration: 
         .await;
     assert_eq!(
         service.map(|_| ()).unwrap_err().to_string().as_str(),
-        r#"couldn't build Query Planner Service: couldn't instantiate query planner; invalid schema: schema validation errors: Unexpected error extracting subgraphs from the supergraph: this is either a bug, or the supergraph has been corrupted.
+        r#"failed to initialize the query planner: An internal error has occurred, please report this bug to Apollo.
 
-Details:
-Error: Cannot find type "Review" in subgraph "products"
-caused by
-"#
+Details: Object field "Product.reviews"'s inner type "Review" does not refer to an existing output type."#
     );
 }
 

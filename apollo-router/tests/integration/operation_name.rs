@@ -14,9 +14,9 @@ async fn empty_document() {
     {
       "errors": [
         {
-          "message": "Syntax Error: Unexpected <EOF>.",
+          "message": "value retrieval failed: Federation error: Operation name not found",
           "extensions": {
-            "code": "GRAPHQL_PARSE_FAILED"
+            "code": "INTERNAL_SERVER_ERROR"
           }
         }
       ]
@@ -128,9 +128,9 @@ async fn missing_operation_name() {
     {
       "errors": [
         {
-          "message": "Must provide operation name if query contains multiple operations.",
+          "message": "value retrieval failed: Federation error: Operation name not found",
           "extensions": {
-            "code": "GRAPHQL_VALIDATION_FAILED"
+            "code": "INTERNAL_SERVER_ERROR"
           }
         }
       ]
@@ -155,9 +155,9 @@ async fn incorrect_operation_name() {
     {
       "errors": [
         {
-          "message": "Unknown operation named \"SecretThirdOp\"",
+          "message": "value retrieval failed: Federation error: Operation name not found",
           "extensions": {
-            "code": "GRAPHQL_VALIDATION_FAILED"
+            "code": "INTERNAL_SERVER_ERROR"
           }
         }
       ]

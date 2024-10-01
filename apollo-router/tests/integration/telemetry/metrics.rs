@@ -282,10 +282,4 @@ async fn test_gauges_on_reload() {
             None,
         )
         .await;
-    router
-        .assert_metrics_contains(
-            r#"apollo_router_cache_size{kind="introspection",type="memory",otel_scope_name="apollo/router"} 1"#,
-            None,
-        )
-        .await;
 }

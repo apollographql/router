@@ -1126,6 +1126,7 @@ mod tests {
     use tower::ServiceExt;
 
     use super::*;
+    use crate::configuration::Supergraph;
     use crate::introspection::default_cache_storage;
     use crate::metrics::FutureMetricsExt as _;
     use crate::services::subgraph;
@@ -1169,11 +1170,14 @@ mod tests {
     async fn federation_versions() {
         async {
             let sdl = include_str!("../testdata/minimal_fed1_supergraph.graphql");
-            let config = Arc::default();
+            let config = Configuration {
+                experimental_query_planner_mode: QueryPlannerMode::Legacy,
+                ..Default::default()
+            };
             let schema = Schema::parse(sdl, &config).unwrap();
             let _planner = BridgeQueryPlanner::new(
                 schema.into(),
-                config,
+                Arc::new(config),
                 None,
                 None,
                 default_cache_storage().await,
@@ -1192,11 +1196,14 @@ mod tests {
 
         async {
             let sdl = include_str!("../testdata/minimal_supergraph.graphql");
-            let config = Arc::default();
+            let config = Configuration {
+                experimental_query_planner_mode: QueryPlannerMode::Legacy,
+                ..Default::default()
+            };
             let schema = Schema::parse(sdl, &config).unwrap();
             let _planner = BridgeQueryPlanner::new(
                 schema.into(),
-                config,
+                Arc::new(config),
                 None,
                 None,
                 default_cache_storage().await,
@@ -1217,11 +1224,15 @@ mod tests {
     #[test(tokio::test)]
     async fn empty_query_plan_should_be_a_planner_error() {
         let schema = Arc::new(Schema::parse(EXAMPLE_SCHEMA, &Default::default()).unwrap());
+        let config = Configuration {
+            experimental_query_planner_mode: QueryPlannerMode::Legacy,
+            ..Default::default()
+        };
         let query = include_str!("testdata/unknown_introspection_query.graphql");
 
         let planner = BridgeQueryPlanner::new(
             schema.clone(),
-            Default::default(),
+            Arc::new(config),
             None,
             None,
             default_cache_storage().await,
@@ -1320,8 +1331,14 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_subselections() {
-        let mut configuration: Configuration = Default::default();
-        configuration.supergraph.introspection = true;
+        let configuration = Configuration {
+            experimental_query_planner_mode: QueryPlannerMode::Legacy,
+            supergraph: Supergraph {
+                introspection: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         let configuration = Arc::new(configuration);
 
         let schema = Schema::parse(EXAMPLE_SCHEMA, &configuration).unwrap();
@@ -1634,8 +1651,14 @@ mod tests {
         operation_name: Option<String>,
         plan_options: PlanOptions,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
-        let mut configuration: Configuration = Default::default();
-        configuration.supergraph.introspection = true;
+        let configuration = Configuration {
+            experimental_query_planner_mode: QueryPlannerMode::Legacy,
+            supergraph: Supergraph {
+                introspection: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         let configuration = Arc::new(configuration);
 
         let schema = Schema::parse(schema, &configuration).unwrap();

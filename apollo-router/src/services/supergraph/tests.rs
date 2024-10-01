@@ -493,15 +493,17 @@ async fn errors_from_primary_on_deferred_responses() {
     let schema = r#"
         schema
           @link(url: "https://specs.apollo.dev/link/v1.0")
-          @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
+          @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
         {
           query: Query
         }
 
+        directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
         directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
         directive @join__graph(name: String!, url: String!) on ENUM_VALUE
         directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
         directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+        directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
         directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
         scalar link__Import
@@ -1246,6 +1248,8 @@ async fn query_reconstruction() {
 
   directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
 
+  directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
   directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 
   directive @join__graph(name: String!, url: String!) on ENUM_VALUE
@@ -1253,6 +1257,8 @@ async fn query_reconstruction() {
   directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
 
   directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+  directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
 
   directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
@@ -1471,10 +1477,12 @@ async fn reconstruct_deferred_query_under_interface() {
             }
 
             directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+            directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
             directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
             directive @join__graph(name: String!, url: String!) on ENUM_VALUE
             directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
             directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+            directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
             directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
             directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
 
@@ -2309,7 +2317,7 @@ async fn errors_on_nullified_paths() {
     let schema = r#"
           schema
             @link(url: "https://specs.apollo.dev/link/v1.0")
-            @link(url: "https://specs.apollo.dev/join/v0.1", for: EXECUTION)
+            @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
           {
             query: Query
           }
@@ -2492,10 +2500,12 @@ async fn no_typename_on_interface() {
                 query: Query
               }
               directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+              directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
               directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
               directive @join__graph(name: String!, url: String!) on ENUM_VALUE
               directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
               directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+              directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
 
               interface Animal @join__type(graph: ANIMAL) {
                 id: String!
@@ -2662,6 +2672,7 @@ async fn aliased_typename_on_fragments() {
                 query: Query
               }
               directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+              directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
               directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
               directive @join__graph(name: String!, url: String!) on ENUM_VALUE
               directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
@@ -2676,7 +2687,7 @@ async fn aliased_typename_on_fragments() {
               }
               scalar join__FieldSet
 
-              interface Animal 
+              interface Animal
                 @join__type(graph: ANIMAL)
               {
                 id: String!
@@ -3003,10 +3014,12 @@ async fn interface_object_typename() {
     query: Query
   }
 
+  directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
   directive @join__graph(name: String!, url: String!) on ENUM_VALUE
   directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
   directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+  directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
   directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
   directive @owner(
@@ -3189,9 +3202,11 @@ async fn fragment_reuse() {
       query: Query
     }
     directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+    directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
     directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
     directive @join__graph(name: String!, url: String!) on ENUM_VALUE
     directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+    directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
     directive @join__implements( graph: join__Graph!  interface: String!) repeatable on OBJECT | INTERFACE
 
     scalar link__Import
@@ -3207,7 +3222,7 @@ async fn fragment_reuse() {
       ORGA @join__graph(name: "orga", url: "http://localhost:4002/graphql")
     }
 
-    type Query 
+    type Query
       @join__type(graph: ORGA)
       @join__type(graph: USER)
     {
@@ -3219,7 +3234,7 @@ async fn fragment_reuse() {
       @join__type(graph: USER, key: "id")
     {
       id: ID!
-      name: String 
+      name: String
       organizations: [Organization] @join__field(graph: ORGA)
     }
     type Organization
@@ -3294,6 +3309,7 @@ async fn abstract_types_in_requires() {
     query: Query
   }
 
+  directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
   directive @join__graph(name: String!, url: String!) on ENUM_VALUE
   directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
@@ -3447,10 +3463,12 @@ const ENUM_SCHEMA: &str = r#"schema
       query: Query
    }
    directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+   directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
    directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
    directive @join__graph(name: String!, url: String!) on ENUM_VALUE
    directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
    directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+   directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
 
    scalar link__Import
 

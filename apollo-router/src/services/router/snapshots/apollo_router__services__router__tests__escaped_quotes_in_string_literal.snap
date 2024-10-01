@@ -35,13 +35,13 @@ expression: "(graphql_response, &subgraph_query_log)"
         (
             "products",
             Some(
-                "query TopProducts__products__0($first:Int){topProducts(first:$first){__typename upc name}}",
+                "query TopProducts__products__0($first: Int) { topProducts(first: $first) { __typename upc name } }",
             ),
         ),
         (
             "reviews",
             Some(
-                "query TopProducts__reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviewsForAuthor(authorID:\"\\\"1\\\"\"){body}}}}",
+                "query TopProducts__reviews__1($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { reviewsForAuthor(authorID: \"\\\"1\\\"\") { body } } } }",
             ),
         ),
     ],
