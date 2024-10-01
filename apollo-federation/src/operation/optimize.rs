@@ -247,7 +247,9 @@ impl Selection {
             (self.selection_set(), other.selection_set())
         {
             let common = self_sub_selection.intersection(other_sub_selection)?;
-            if !common.is_empty() {
+            if common.is_empty() {
+                return Ok(None);
+            } else {
                 return self
                     .with_updated_selections(
                         self_sub_selection.type_position.clone(),
