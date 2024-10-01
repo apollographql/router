@@ -373,6 +373,37 @@ mod tests {
     }
 
     #[test]
+    fn it_iterates_over_paths() {
+        let mut visited = Vec::new();
+        let visitor = TestVisitor::new(&mut visited);
+        let (unmatched, selection) = JSONSelection::parse(
+            "a
+            $.b {
+                c
+                $.d {
+                    e
+                    f: g.h { i }
+                }
+            }
+            j",
+        )
+        .unwrap();
+        assert!(unmatched.is_empty());
+
+        visitor
+            .walk(selection.next_subselection().cloned().unwrap())
+            .unwrap();
+        assert_snapshot!(print_visited(visited), @r###"
+        a
+        c
+        e
+        f
+        |  i
+        j
+        "###);
+    }
+
+    #[test]
     fn it_iterates_over_complex_selection() {
         let mut visited = Vec::new();
         let visitor = TestVisitor::new(&mut visited);
