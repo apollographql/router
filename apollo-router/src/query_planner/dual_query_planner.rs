@@ -153,7 +153,7 @@ impl BothModeComparisonJob {
                 let match_result = opt_plan_node_matches(js_root_node, &rust_root_node);
                 is_matched = match_result.is_ok();
                 match match_result {
-                    Ok(_) => tracing::debug!("JS and Rust query plans match{operation_desc}! 🎉"),
+                    Ok(_) => tracing::trace!("JS and Rust query plans match{operation_desc}! 🎉"),
                     Err(err) => {
                         tracing::debug!("JS v.s. Rust query plan mismatch{operation_desc}");
                         tracing::debug!("{}", err.full_description());
@@ -386,7 +386,7 @@ fn vec_matches_result<T>(
             item_matches(this, other)
                 .map_err(|err| err.add_description(&format!("under item[{}]", index)))
         })?;
-    assert!(vec_matches(this, other, |a, b| item_matches(a, b).is_ok()));
+    assert!(vec_matches(this, other, |a, b| item_matches(a, b).is_ok())); // Note: looks redundant
     Ok(())
 }
 
@@ -402,12 +402,16 @@ fn vec_matches_sorted_by<T: Eq + Clone>(
     this: &[T],
     other: &[T],
     compare: impl Fn(&T, &T) -> std::cmp::Ordering,
-) -> bool {
+    item_matches: impl Fn(&T, &T) -> Result<(), MatchFailure>,
+) -> Result<(), MatchFailure> {
+    check_match_eq!(this.len(), other.len());
     let mut this_sorted = this.to_owned();
     let mut other_sorted = other.to_owned();
     this_sorted.sort_by(&compare);
     other_sorted.sort_by(&compare);
-    vec_matches(&this_sorted, &other_sorted, T::eq)
+    std::iter::zip(&this_sorted, &other_sorted)
+        .try_fold((), |_acc, (this, other)| item_matches(this, other))?;
+    Ok(())
 }
 
 // performs a set comparison, ignoring order
@@ -701,14 +705,61 @@ fn same_ast_operation_definition(
 ) -> Result<(), MatchFailure> {
     // Note: Operation names are ignored, since parallel fetches may have different names.
     check_match_eq!(x.operation_type, y.operation_type);
-    check_match!(vec_matches_sorted_by(&x.variables, &y.variables, |x, y| x
-        .name
-        .cmp(&y.name)));
+    vec_matches_sorted_by(
+        &x.variables,
+        &y.variables,
+        |a, b| a.name.cmp(&b.name),
+        |a, b| same_variable_definition(a, b),
+    )
+    .map_err(|err| err.add_description("under Variable definition"))?;
     check_match_eq!(x.directives, y.directives);
     check_match!(same_ast_selection_set_sorted(
         &x.selection_set,
         &y.selection_set
     ));
+    Ok(())
+}
+
+// Use this function, instead of `VariableDefinition`'s `PartialEq` implementation,
+// due to known differences.
+fn same_variable_definition(
+    x: &ast::VariableDefinition,
+    y: &ast::VariableDefinition,
+) -> Result<(), MatchFailure> {
+    check_match_eq!(x.name, y.name);
+    check_match_eq!(x.ty, y.ty);
+    if x.default_value != y.default_value {
+        if let (Some(x), Some(y)) = (&x.default_value, &y.default_value) {
+            match (x.as_ref(), y.as_ref()) {
+                // Special case 1: JS QP may convert an enum value into string.
+                // - In this case, compare them as strings.
+                (ast::Value::String(ref x), ast::Value::Enum(ref y)) => {
+                    if x == y.as_str() {
+                        return Ok(());
+                    }
+                }
+
+                // Special case 2: Rust QP expands an empty object value by filling in its
+                // default field values.
+                // - If the JS QP value is an empty object, consider any object is a match.
+                // - Assuming the Rust QP object value has only default field values.
+                // - Warning: This is an unsound heuristic.
+                (ast::Value::Object(ref x), ast::Value::Object(_)) => {
+                    if x.is_empty() {
+                        return Ok(());
+                    }
+                }
+
+                _ => {} // otherwise, fall through
+            }
+        }
+
+        return Err(MatchFailure::new(format!(
+            "mismatch between default values:\nleft: {:?}\nright: {:?}",
+            x.default_value, y.default_value
+        )));
+    }
+    check_match_eq!(x.directives, y.directives);
     Ok(())
 }
 
@@ -801,6 +852,28 @@ mod ast_comparison_tests {
     fn test_query_variable_decl_order() {
         let op_x = r#"query($qv2: String!, $qv1: Int!) { x(arg1: $qv1, arg2: $qv2) }"#;
         let op_y = r#"query($qv1: Int!, $qv2: String!) { x(arg1: $qv1, arg2: $qv2) }"#;
+        let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
+        let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
+        assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
+    }
+
+    #[test]
+    fn test_query_variable_decl_enum_value_coercion() {
+        // Note: JS QP converts enum default values into strings.
+        let op_x = r#"query($qv1: E! = "default_value") { x(arg1: $qv1) }"#;
+        let op_y = r#"query($qv1: E! = default_value) { x(arg1: $qv1) }"#;
+        let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
+        let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
+        assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
+    }
+
+    #[test]
+    fn test_query_variable_decl_object_value_coercion() {
+        // Note: Rust QP expands empty object default values by filling in its default field
+        // values.
+        let op_x = r#"query($qv1: T! = {}) { x(arg1: $qv1) }"#;
+        let op_y =
+            r#"query($qv1: T! = { field1: true, field2: "default_value" }) { x(arg1: $qv1) }"#;
         let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
         let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
         assert!(super::same_ast_document(&ast_x, &ast_y).is_ok());
