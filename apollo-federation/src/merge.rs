@@ -50,7 +50,6 @@ use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::inaccessible_spec_definition::InaccessibleSpecDefinition;
 use crate::link::inaccessible_spec_definition::INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC;
-use crate::link::join_spec_definition::JOIN_FIELD_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::join_spec_definition::JOIN_OVERRIDE_LABEL_ARGUMENT_NAME;
 use crate::link::spec::Identity;
 use crate::link::spec::Version;
@@ -300,11 +299,11 @@ impl Merger {
                             field_def.directives = field_def
                                 .directives
                                 .iter()
-                                .filter(|d| d.name != JOIN_FIELD_DIRECTIVE_NAME_IN_SPEC)
+                                .filter(|d| d.name != name!("join__field"))
                                 .cloned()
                                 .collect();
                             field_def.directives.push(Node::new(Directive {
-                                name: JOIN_FIELD_DIRECTIVE_NAME_IN_SPEC,
+                                name: name!("join__field"),
                                 arguments: vec![],
                             }));
 
