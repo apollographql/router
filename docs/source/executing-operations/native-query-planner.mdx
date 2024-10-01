@@ -10,9 +10,9 @@ Learn to run the GraphOS Router with the Rust-native query planner and improve y
 
 ## Background about query planner implementations
 
-In v1.49.0 the router introduced a [query planner](/graphos/routing/about-router#query-planning) implemented natively in Rust. This native query planner improves the overall performance and resource utilization of query planning. It exists alongside the legacy Javascript implementation. and it will eventually replace the legacy implementation.
+In v1.49.0 the router introduced a [query planner](/graphos/routing/about-router#query-planning) implemented natively in Rust. This native query planner improves the overall performance and resource utilization of query planning. It exists alongside the legacy Javascript implementation, and it will eventually replace the legacy implementation.
 
-As part of the effort to ensure correctness and stability of the new query planner, starting in v1.53.0 the router can enable both the new and legacy planners and run them in parallel to compare their results. After their comparison, the router discards the native query planner's results and uses only the legacy planner to execute requests.
+As part of the effort to ensure correctness and stability of the new query planner, starting in v1.53.0 the router enables both the new and legacy planners and runs them in parallel to compare their results by default. After their comparison, the router discards the native query planner's results and uses only the legacy planner to execute requests.
 
 The native query planner uses a single thread in the cold path of the router. It has a bounded queue of ten queries. If the queue is full, the router simply does not run the comparison to avoid excessive resource consumption.
 
