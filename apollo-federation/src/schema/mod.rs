@@ -275,13 +275,12 @@ impl ValidFederationSchema {
             return Ok(name);
         }
 
-        // TODO: this otherwise needs to check for a type name in schema based
+        // TODO for composition: this otherwise needs to check for a type name in schema based
         // on the latest federation version.
-        // FED-311
-        Err(SingleFederationError::Internal {
-            message: String::from("typename should have been looked in a federation feature"),
-        }
-        .into())
+        // This code path is not hit during planning.
+        Err(FederationError::internal(
+            "typename should have been looked in a federation feature",
+        ))
     }
 
     pub(crate) fn is_interface_object_type(
